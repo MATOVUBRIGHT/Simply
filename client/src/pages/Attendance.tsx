@@ -54,6 +54,19 @@ export default function Attendance() {
   }, [selectedDate, selectedClass, user?.id]);
 
   useEffect(() => {
+    const handleAttendanceUpdated = () => loadData();
+    const handleDataRefresh = () => loadData();
+    
+    window.addEventListener('attendanceUpdated', handleAttendanceUpdated);
+    window.addEventListener('dataRefresh', handleDataRefresh);
+    
+    return () => {
+      window.removeEventListener('attendanceUpdated', handleAttendanceUpdated);
+      window.removeEventListener('dataRefresh', handleDataRefresh);
+    };
+  }, []);
+
+  useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
         setShowExportMenu(false);

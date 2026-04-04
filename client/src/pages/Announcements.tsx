@@ -69,6 +69,19 @@ export default function Announcements() {
     if (user?.id) loadAnnouncements();
   }, [user?.id]);
 
+  useEffect(() => {
+    const handleAnnouncementsUpdated = () => loadAnnouncements();
+    const handleDataRefresh = () => loadAnnouncements();
+    
+    window.addEventListener('announcementsUpdated', handleAnnouncementsUpdated);
+    window.addEventListener('dataRefresh', handleDataRefresh);
+    
+    return () => {
+      window.removeEventListener('announcementsUpdated', handleAnnouncementsUpdated);
+      window.removeEventListener('dataRefresh', handleDataRefresh);
+    };
+  }, []);
+
   async function loadAnnouncements() {
     if (!user?.id) return;
     try {

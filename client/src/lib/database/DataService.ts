@@ -19,6 +19,14 @@ interface SyncResult {
   error?: string;
 }
 
+type BroadcastChange = (table: string, type: 'INSERT' | 'UPDATE' | 'DELETE', record: any, userId: string) => void;
+
+declare global {
+  interface Window {
+    broadcastSchofyChange?: BroadcastChange;
+  }
+}
+
 class DataService {
   private deviceId: string;
 
@@ -28,6 +36,16 @@ class DataService {
 
   private isOnline(): boolean {
     return navigator.onLine;
+  }
+
+  private broadcastChange(table: string, type: 'INSERT' | 'UPDATE' | 'DELETE', record: any, userId: string) {
+    if (window.broadcastSchofyChange) {
+      try {
+        window.broadcastSchofyChange(table, type, record, userId);
+      } catch (err) {
+        console.error('Broadcast error:', err);
+      }
+    }
   }
 
   private mapLocalToSupabase(local: any, tableName: string): any {
@@ -195,6 +213,7 @@ class DataService {
         localRecord.syncStatus = 'synced';
         await userDBManager.add(userId, tableName, localRecord);
         
+        this.broadcastChange(tableName, 'INSERT', localRecord, userId);
         console.log(`✅ Created ${tableName} in Supabase and locally`);
         
         return {
@@ -208,6 +227,8 @@ class DataService {
         await userDBManager.add(userId, tableName, { ...localRecord, id: localId });
         await this.queueForSync(userId, tableName, localId, 'create', localRecord);
         
+        this.broadcastChange(tableName, 'INSERT', { ...localRecord, id: localId }, userId);
+        
         return {
           success: true,
           syncedRemotely: false,
@@ -220,6 +241,8 @@ class DataService {
     // Offline - save locally and queue
     await userDBManager.add(userId, tableName, { ...localRecord, id: localId });
     await this.queueForSync(userId, tableName, localId, 'create', localRecord);
+    
+    this.broadcastChange(tableName, 'INSERT', { ...localRecord, id: localId }, userId);
     
     return {
       success: true,
@@ -274,7 +297,9 @@ class DataService {
         // Success - update locally
         const existing = await userDBManager.get(userId, tableName, id);
         if (existing) {
-          await userDBManager.put(userId, tableName, { ...existing, ...localRecord, syncStatus: 'synced', id });
+          const updatedRecord = { ...existing, ...localRecord, syncStatus: 'synced', id };
+          await userDBManager.put(userId, tableName, updatedRecord);
+          this.broadcastChange(tableName, 'UPDATE', updatedRecord, userId);
         }
         
         console.log(`✅ Updated ${tableName}/${id} in Supabase and locally`);
@@ -288,8 +313,10 @@ class DataService {
         console.error(`Update error for ${tableName}:`, err);
         const existing = await userDBManager.get(userId, tableName, id);
         if (existing) {
-          await userDBManager.put(userId, tableName, { ...existing, ...localRecord, id });
-          await this.queueForSync(userId, tableName, id, 'update', { ...existing, ...localRecord });
+          const updatedRecord = { ...existing, ...localRecord, id };
+          await userDBManager.put(userId, tableName, updatedRecord);
+          await this.queueForSync(userId, tableName, id, 'update', updatedRecord);
+          this.broadcastChange(tableName, 'UPDATE', updatedRecord, userId);
         }
         
         return {
@@ -304,8 +331,10 @@ class DataService {
     // Offline - update locally and queue
     const existing = await userDBManager.get(userId, tableName, id);
     if (existing) {
-      await userDBManager.put(userId, tableName, { ...existing, ...localRecord, id });
-      await this.queueForSync(userId, tableName, id, 'update', { ...existing, ...localRecord });
+      const updatedRecord = { ...existing, ...localRecord, id };
+      await userDBManager.put(userId, tableName, updatedRecord);
+      await this.queueForSync(userId, tableName, id, 'update', updatedRecord);
+      this.broadcastChange(tableName, 'UPDATE', updatedRecord, userId);
     }
     
     return {
@@ -345,6 +374,7 @@ class DataService {
         // Success - delete locally
         await userDBManager.delete(userId, tableName, id);
         
+        this.broadcastChange(tableName, 'DELETE', { id }, userId);
         console.log(`✅ Deleted ${tableName}/${id} from Supabase and locally`);
         
         return {
@@ -356,6 +386,7 @@ class DataService {
         console.error(`Delete error for ${tableName}:`, err);
         await userDBManager.delete(userId, tableName, id);
         await this.queueForSync(userId, tableName, id, 'delete', { id });
+        this.broadcastChange(tableName, 'DELETE', { id }, userId);
         
         return {
           success: true,
@@ -369,6 +400,7 @@ class DataService {
     // Offline - delete locally and queue
     await userDBManager.delete(userId, tableName, id);
     await this.queueForSync(userId, tableName, id, 'delete', { id });
+    this.broadcastChange(tableName, 'DELETE', { id }, userId);
     
     return {
       success: true,

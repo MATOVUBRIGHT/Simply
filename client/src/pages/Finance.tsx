@@ -43,6 +43,22 @@ export default function Finance() {
     }
   }, [user?.id]);
 
+  useEffect(() => {
+    const handleFeesUpdated = () => loadFees();
+    const handlePaymentsUpdated = () => loadPayments();
+    const handleDataRefresh = () => { loadFees(); loadPayments(); };
+    
+    window.addEventListener('feesUpdated', handleFeesUpdated);
+    window.addEventListener('paymentsUpdated', handlePaymentsUpdated);
+    window.addEventListener('dataRefresh', handleDataRefresh);
+    
+    return () => {
+      window.removeEventListener('feesUpdated', handleFeesUpdated);
+      window.removeEventListener('paymentsUpdated', handlePaymentsUpdated);
+      window.removeEventListener('dataRefresh', handleDataRefresh);
+    };
+  }, []);
+
   async function loadFees() {
     if (!user?.id) return;
     try {

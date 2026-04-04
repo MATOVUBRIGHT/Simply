@@ -68,38 +68,46 @@ class SyncService {
     ];
 
     tables.forEach(table => {
-      const channel = this.supabase!
-        .channel(`${table}:${userId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: table,
-            filter: `user_id=eq.${userId}`
-          },
-          async (payload) => {
-            console.log(`📡 Real-time update for ${table}:`, payload);
-            
-            // Handle INSERT and UPDATE events
-            if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-              await this.applyRemoteChange(userId, table, payload.new);
+      try {
+        const channel = this.supabase!
+          .channel(`${table}:${userId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: table,
+              filter: `user_id=eq.${userId}`
+            },
+            async (payload: any) => {
+              console.log(`📡 Real-time update for ${table}:`, payload);
+              
+              try {
+                // Handle INSERT and UPDATE events
+                if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+                  await this.applyRemoteChange(userId, table, payload.new);
+                }
+                // Handle DELETE events (soft delete)
+                else if (payload.eventType === 'DELETE') {
+                  await this.applyRemoteChange(userId, table, payload.old);
+                }
+              } catch (error) {
+                console.error(`Failed to apply realtime change for ${table}:`, error);
+              }
             }
-            // Handle DELETE events (soft delete)
-            else if (payload.eventType === 'DELETE') {
-              await this.applyRemoteChange(userId, table, payload.old);
+          )
+          .subscribe((status: any) => {
+            if (status === 'SUBSCRIBED') {
+              console.log(`✅ Real-time subscribed to ${table}`);
+            } else if (status === 'CHANNEL_ERROR') {
+              console.error(`❌ Real-time error on ${table}`);
             }
-          }
-        )
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            console.log(`✅ Real-time subscribed to ${table}`);
-          } else if (status === 'CHANNEL_ERROR') {
-            console.error(`❌ Real-time error on ${table}`);
-          }
-        });
+          });
 
-      this.realtimeChannels.set(table, channel);
+        this.realtimeChannels.set(table, channel);
+      } catch (error) {
+        console.error(`Failed to subscribe to ${table}:`, error);
+      }
     });
   }
 
@@ -142,7 +150,11 @@ class SyncService {
     if (!this.syncEnabled || this.syncInterval) return;
 
     // Subscribe to real-time changes
-    this.subscribeToRealtime();
+    try {
+      this.subscribeToRealtime();
+    } catch (error) {
+      console.error('Failed to subscribe to realtime:', error);
+    }
 
     // Also do periodic sync as fallback (every 60 seconds)
     this.syncInterval = setInterval(() => {
@@ -153,7 +165,11 @@ class SyncService {
 
     // Do initial sync
     if (this.currentUserId && navigator.onLine) {
-      this.syncIncremental();
+      try {
+        this.syncIncremental();
+      } catch (error) {
+        console.error('Initial sync failed:', error);
+      }
     }
   }
 

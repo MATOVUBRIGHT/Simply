@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { StudentsProvider } from './contexts/StudentsContext';
+import { RealtimeSyncProvider } from './realtime/RealtimeSync';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -88,7 +89,8 @@ function MainApp() {
 
   return (
     <StudentsProvider>
-      <Layout>
+      <RealtimeSyncProvider>
+        <Layout>
         <div className="page-shell page-shell-enter">
           <Routes location={location}>
             <Route path="/" element={<Dashboard />} />
@@ -119,6 +121,7 @@ function MainApp() {
           </Routes>
         </div>
       </Layout>
+      </RealtimeSyncProvider>
     </StudentsProvider>
   );
 }

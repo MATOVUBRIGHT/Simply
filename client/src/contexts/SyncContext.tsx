@@ -185,23 +185,39 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   }, [user, addToast]);
 
   const enableSync = useCallback(async () => {
-    if (!isSupabaseConfigured || !supabase) {
-      addToast('Cloud sync is not configured', 'error');
-      return;
+    try {
+      if (!isSupabaseConfigured || !supabase) {
+        addToast('Cloud sync is not configured', 'error');
+        return;
+      }
+      
+      if (!user) {
+        addToast('Please login to enable cloud sync', 'error');
+        return;
+      }
+      
+      localStorage.setItem('schofy_sync_enabled', 'true');
+      setSyncEnabled(true);
+      syncService.configure({ supabaseClient: supabase });
+      syncService.setUserId(user.id);
+      
+      try {
+        syncService.startBackgroundSync();
+      } catch (syncError) {
+        console.error('Background sync error:', syncError);
+      }
+      
+      try {
+        await syncNow();
+      } catch (syncError) {
+        console.error('Initial sync error:', syncError);
+      }
+      
+      addToast('Cloud sync enabled', 'success');
+    } catch (error) {
+      console.error('Enable sync error:', error);
+      addToast('Failed to enable cloud sync', 'error');
     }
-    
-    if (!user) {
-      addToast('Please login to enable cloud sync', 'error');
-      return;
-    }
-    
-    localStorage.setItem('schofy_sync_enabled', 'true');
-    setSyncEnabled(true);
-    syncService.configure({ supabaseClient: supabase });
-    syncService.setUserId(user.id);
-    syncService.startBackgroundSync();
-    await syncNow();
-    addToast('Cloud sync enabled', 'success');
   }, [addToast, user, syncNow]);
 
   const disableSync = useCallback(() => {

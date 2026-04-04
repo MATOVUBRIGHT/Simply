@@ -39,6 +39,31 @@ export default function Dashboard() {
     }
   }, [user]);
 
+  useEffect(() => {
+    const handleDataRefresh = () => {
+      loadAnnouncements();
+      loadOtherData();
+    };
+    
+    window.addEventListener('studentsUpdated', handleDataRefresh);
+    window.addEventListener('staffUpdated', handleDataRefresh);
+    window.addEventListener('paymentsUpdated', handleDataRefresh);
+    window.addEventListener('feesUpdated', handleDataRefresh);
+    window.addEventListener('attendanceUpdated', handleDataRefresh);
+    window.addEventListener('announcementsUpdated', handleDataRefresh);
+    window.addEventListener('dataRefresh', handleDataRefresh);
+    
+    return () => {
+      window.removeEventListener('studentsUpdated', handleDataRefresh);
+      window.removeEventListener('staffUpdated', handleDataRefresh);
+      window.removeEventListener('paymentsUpdated', handleDataRefresh);
+      window.removeEventListener('feesUpdated', handleDataRefresh);
+      window.removeEventListener('attendanceUpdated', handleDataRefresh);
+      window.removeEventListener('announcementsUpdated', handleDataRefresh);
+      window.removeEventListener('dataRefresh', handleDataRefresh);
+    };
+  }, []);
+
   async function loadAnnouncements() {
     if (!user?.id) return;
     try {

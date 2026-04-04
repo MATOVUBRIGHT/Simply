@@ -62,6 +62,19 @@ export default function Staff() {
     }
   }, [user?.id]);
 
+  useEffect(() => {
+    const handleStaffUpdated = () => loadStaff();
+    const handleDataRefresh = () => loadStaff();
+    
+    window.addEventListener('staffUpdated', handleStaffUpdated);
+    window.addEventListener('dataRefresh', handleDataRefresh);
+    
+    return () => {
+      window.removeEventListener('staffUpdated', handleStaffUpdated);
+      window.removeEventListener('dataRefresh', handleDataRefresh);
+    };
+  }, []);
+
   async function loadStaff() {
     if (!user?.id) return;
     try {
