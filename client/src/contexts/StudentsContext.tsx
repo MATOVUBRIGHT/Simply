@@ -1,13 +1,16 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { Student } from '@schofy/shared';
-import { userDBManager } from '../lib/database/UserDatabaseManager';
+import { dataService } from '../lib/database/DataService';
 import { useAuth } from './AuthContext';
 
 interface StudentsContextType {
   students: Student[];
+  totalCount: number;
   loading: boolean;
   error: string | null;
   refresh: () => void;
+  loadPage: (page: number, pageSize: number, filter?: (item: any) => boolean) => Promise<{ items: Student[]; total: number }>;
+  searchStudents: (query: string) => Promise<Student[]>;
 }
 
 const StudentsContext = createContext<StudentsContextType | undefined>(undefined);
@@ -16,13 +19,14 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [allStudents, setAllStudents] = useState<Student[]>([]);
+  const [studentsSubset, setStudentsSubset] = useState<Student[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
     if (authLoading) {
       setIsInitialized(false);
-      setAllStudents([]);
+      setStudentsSubset([]);
       return;
     }
 
@@ -30,33 +34,28 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
       setIsInitialized(true);
     } else {
       setIsInitialized(false);
-      setAllStudents([]);
+      setStudentsSubset([]);
     }
   }, [user, authLoading]);
 
-  useEffect(() => {
-    if (!user?.id || !isInitialized) {
-      setAllStudents([]);
-      return;
+  const loadInitialData = useCallback(async () => {
+    if (!user?.id || !isInitialized) return;
+    
+    try {
+      // Load first page as initial subset for quick access
+      const { items, total } = await dataService.getPage(user.id, 'students', 1, 50);
+      setStudentsSubset(items);
+      setTotalCount(total);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to load students:', err);
+      setError('Failed to load students');
     }
+  }, [user, isInitialized]);
 
-    const loadStudents = async () => {
-      try {
-        const data = await userDBManager.getAll(user.id, 'students');
-        setAllStudents(data);
-        setError(null);
-      } catch (err) {
-        console.error('Failed to load students:', err);
-        setError('Failed to load students');
-        setAllStudents([]);
-      }
-    };
-
-    loadStudents();
-
-    const interval = setInterval(loadStudents, 3000);
-    return () => clearInterval(interval);
-  }, [user, isInitialized, refreshKey]);
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData, refreshKey]);
 
   useEffect(() => {
     const handleStudentsUpdated = () => {
@@ -79,18 +78,28 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
     setRefreshKey(k => k + 1);
   }, []);
 
+  const loadPage = useCallback(async (page: number, pageSize: number, filter?: (item: any) => boolean) => {
+    if (!user?.id) return { items: [], total: 0 };
+    return await dataService.getPage(user.id, 'students', page, pageSize, filter);
+  }, [user]);
+
+  const searchStudents = useCallback(async (query: string) => {
+    if (!user?.id) return [];
+    return await dataService.search(user.id, 'students', query, ['firstName', 'lastName', 'admissionNo', 'studentId']);
+  }, [user]);
+
   const loading = authLoading || !isInitialized;
 
-  const sortedStudents = useMemo(() => {
-    return [...allStudents].sort((a, b) => {
-      const dateA = new Date(a.createdAt).getTime();
-      const dateB = new Date(b.createdAt).getTime();
-      return dateB - dateA;
-    });
-  }, [allStudents]);
-
   return (
-    <StudentsContext.Provider value={{ students: sortedStudents, loading, error, refresh }}>
+    <StudentsContext.Provider value={{ 
+      students: studentsSubset, 
+      totalCount,
+      loading, 
+      error, 
+      refresh, 
+      loadPage,
+      searchStudents
+    }}>
       {children}
     </StudentsContext.Provider>
   );

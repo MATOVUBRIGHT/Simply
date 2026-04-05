@@ -184,71 +184,31 @@ class DataService {
       schoolId: data.schoolId || userId,
     };
 
-    // If online and Supabase configured, save to cloud first
-    if (this.isOnline() && isSupabaseConfigured && supabase) {
-      try {
-        const supabaseData = this.mapLocalToSupabase({ ...localRecord }, tableName);
-        
-        const { error } = await supabase
-          .from(tableName)
-          .insert(supabaseData)
-          .select()
-          .single();
-
-        if (error) {
-          console.error(`Supabase create error for ${tableName}:`, error);
-          // Save locally and queue for sync
-          await userDBManager.add(userId, tableName, { ...localRecord, id: localId });
-          await this.queueForSync(userId, tableName, localId, 'create', localRecord);
-          
-          return {
-            success: true,
-            syncedRemotely: false,
-            savedLocally: true,
-            error: error.message,
-          };
-        }
-
-        // Success - save locally with synced status
-        localRecord.syncStatus = 'synced';
-        await userDBManager.add(userId, tableName, localRecord);
-        
-        this.broadcastChange(tableName, 'INSERT', localRecord, userId);
-        console.log(`✅ Created ${tableName} in Supabase and locally`);
-        
-        return {
-          success: true,
-          syncedRemotely: true,
-          savedLocally: true,
-        };
-      } catch (err: any) {
-        console.error(`Create error for ${tableName}:`, err);
-        // Save locally as fallback
-        await userDBManager.add(userId, tableName, { ...localRecord, id: localId });
-        await this.queueForSync(userId, tableName, localId, 'create', localRecord);
-        
-        this.broadcastChange(tableName, 'INSERT', { ...localRecord, id: localId }, userId);
-        
-        return {
-          success: true,
-          syncedRemotely: false,
-          savedLocally: true,
-          error: err.message,
-        };
+    // OPTIMISTIC: Save locally first
+    try {
+      await userDBManager.add(userId, tableName, localRecord);
+      await this.queueForSync(userId, tableName, localId, 'create', localRecord);
+      this.broadcastChange(tableName, 'INSERT', localRecord, userId);
+      
+      // Try to sync in background if online, but don't wait for it
+      if (this.isOnline() && isSupabaseConfigured && supabase) {
+        this.processSyncQueue(userId).catch(err => console.error('Background sync failed:', err));
       }
-    }
 
-    // Offline - save locally and queue
-    await userDBManager.add(userId, tableName, { ...localRecord, id: localId });
-    await this.queueForSync(userId, tableName, localId, 'create', localRecord);
-    
-    this.broadcastChange(tableName, 'INSERT', { ...localRecord, id: localId }, userId);
-    
-    return {
-      success: true,
-      syncedRemotely: false,
-      savedLocally: true,
-    };
+      return {
+        success: true,
+        syncedRemotely: false,
+        savedLocally: true,
+      };
+    } catch (err: any) {
+      console.error(`Local create error for ${tableName}:`, err);
+      return {
+        success: false,
+        syncedRemotely: false,
+        savedLocally: false,
+        error: err.message,
+      };
+    }
   }
 
   async update<T extends SyncableRecord>(
@@ -260,88 +220,44 @@ class DataService {
     const now = new Date().toISOString();
     
     // Prepare local record
-    const localRecord: any = {
+    const localUpdate: any = {
       ...data,
       updatedAt: now,
       syncStatus: 'pending' as SyncStatus,
       deviceId: this.deviceId,
     };
 
-    // If online and Supabase configured, update cloud first
-    if (this.isOnline() && isSupabaseConfigured && supabase) {
-      try {
-        const supabaseData = this.mapLocalToSupabase({ ...localRecord }, tableName);
-        
-        const { error } = await supabase
-          .from(tableName)
-          .update(supabaseData)
-          .eq('id', id);
-
-        if (error) {
-          console.error(`Supabase update error for ${tableName}:`, error);
-          // Update locally and queue
-          const existing = await userDBManager.get(userId, tableName, id);
-          if (existing) {
-            await userDBManager.put(userId, tableName, { ...existing, ...localRecord, id });
-            await this.queueForSync(userId, tableName, id, 'update', { ...existing, ...localRecord });
-          }
-          
-          return {
-            success: true,
-            syncedRemotely: false,
-            savedLocally: true,
-            error: error.message,
-          };
-        }
-
-        // Success - update locally
-        const existing = await userDBManager.get(userId, tableName, id);
-        if (existing) {
-          const updatedRecord = { ...existing, ...localRecord, syncStatus: 'synced', id };
-          await userDBManager.put(userId, tableName, updatedRecord);
-          this.broadcastChange(tableName, 'UPDATE', updatedRecord, userId);
-        }
-        
-        console.log(`✅ Updated ${tableName}/${id} in Supabase and locally`);
-        
-        return {
-          success: true,
-          syncedRemotely: true,
-          savedLocally: true,
-        };
-      } catch (err: any) {
-        console.error(`Update error for ${tableName}:`, err);
-        const existing = await userDBManager.get(userId, tableName, id);
-        if (existing) {
-          const updatedRecord = { ...existing, ...localRecord, id };
-          await userDBManager.put(userId, tableName, updatedRecord);
-          await this.queueForSync(userId, tableName, id, 'update', updatedRecord);
-          this.broadcastChange(tableName, 'UPDATE', updatedRecord, userId);
-        }
-        
-        return {
-          success: true,
-          syncedRemotely: false,
-          savedLocally: true,
-          error: err.message,
-        };
+    // OPTIMISTIC: Update locally first
+    try {
+      const existing = await userDBManager.get(userId, tableName, id);
+      if (!existing) {
+        throw new Error(`Record ${id} not found in ${tableName}`);
       }
-    }
 
-    // Offline - update locally and queue
-    const existing = await userDBManager.get(userId, tableName, id);
-    if (existing) {
-      const updatedRecord = { ...existing, ...localRecord, id };
+      const updatedRecord = { ...existing, ...localUpdate, id };
       await userDBManager.put(userId, tableName, updatedRecord);
       await this.queueForSync(userId, tableName, id, 'update', updatedRecord);
       this.broadcastChange(tableName, 'UPDATE', updatedRecord, userId);
+
+      // Try to sync in background if online
+      if (this.isOnline() && isSupabaseConfigured && supabase) {
+        this.processSyncQueue(userId).catch(err => console.error('Background sync failed:', err));
+      }
+
+      return {
+        success: true,
+        syncedRemotely: false,
+        savedLocally: true,
+      };
+    } catch (err: any) {
+      console.error(`Local update error for ${tableName}:`, err);
+      return {
+        success: false,
+        syncedRemotely: false,
+        savedLocally: false,
+        error: err.message,
+      };
     }
-    
-    return {
-      success: true,
-      syncedRemotely: false,
-      savedLocally: true,
-    };
   }
 
   async delete(
@@ -349,102 +265,133 @@ class DataService {
     tableName: string,
     id: string
   ): Promise<SyncResult> {
-    // If online and Supabase configured, delete from cloud first
-    if (this.isOnline() && isSupabaseConfigured && supabase) {
-      try {
-        const { error } = await supabase
-          .from(tableName)
-          .delete()
-          .eq('id', id);
+    // OPTIMISTIC: Delete locally first
+    try {
+      await userDBManager.delete(userId, tableName, id);
+      await this.queueForSync(userId, tableName, id, 'delete', { id });
+      this.broadcastChange(tableName, 'DELETE', { id }, userId);
 
-        if (error) {
-          console.error(`Supabase delete error for ${tableName}:`, error);
-          // Delete locally and queue
-          await userDBManager.delete(userId, tableName, id);
-          await this.queueForSync(userId, tableName, id, 'delete', { id });
-          
-          return {
-            success: true,
-            syncedRemotely: false,
-            savedLocally: true,
-            error: error.message,
-          };
-        }
-
-        // Success - delete locally
-        await userDBManager.delete(userId, tableName, id);
-        
-        this.broadcastChange(tableName, 'DELETE', { id }, userId);
-        console.log(`✅ Deleted ${tableName}/${id} from Supabase and locally`);
-        
-        return {
-          success: true,
-          syncedRemotely: true,
-          savedLocally: true,
-        };
-      } catch (err: any) {
-        console.error(`Delete error for ${tableName}:`, err);
-        await userDBManager.delete(userId, tableName, id);
-        await this.queueForSync(userId, tableName, id, 'delete', { id });
-        this.broadcastChange(tableName, 'DELETE', { id }, userId);
-        
-        return {
-          success: true,
-          syncedRemotely: false,
-          savedLocally: true,
-          error: err.message,
-        };
+      // Try to sync in background if online
+      if (this.isOnline() && isSupabaseConfigured && supabase) {
+        this.processSyncQueue(userId).catch(err => console.error('Background sync failed:', err));
       }
-    }
 
-    // Offline - delete locally and queue
-    await userDBManager.delete(userId, tableName, id);
-    await this.queueForSync(userId, tableName, id, 'delete', { id });
-    this.broadcastChange(tableName, 'DELETE', { id }, userId);
-    
-    return {
-      success: true,
-      syncedRemotely: false,
-      savedLocally: true,
-    };
+      return {
+        success: true,
+        syncedRemotely: false,
+        savedLocally: true,
+      };
+    } catch (err: any) {
+      console.error(`Local delete error for ${tableName}:`, err);
+      return {
+        success: false,
+        syncedRemotely: false,
+        savedLocally: false,
+        error: err.message,
+      };
+    }
   }
 
   async getAll(userId: string, tableName: string): Promise<any[]> {
-    // If online, try to fetch from cloud
+    // ALWAYS return local data first for speed
+    const localData = await userDBManager.getAll(userId, tableName);
+    
+    // In background, if online, pull changes from cloud (Delta Sync)
     if (this.isOnline() && isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase
-          .from(tableName)
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) {
-          console.error(`Supabase fetch error for ${tableName}:`, error);
-          // Fall back to local
-          return await userDBManager.getAll(userId, tableName);
-        }
-
-        // Got data from cloud - update local cache
-        if (data && data.length > 0) {
-          const mappedData = data.map(item => this.mapSupabaseToLocal(item, tableName));
-          
-          // Clear and repopulate local
-          await userDBManager.clear(userId, tableName);
-          for (const item of mappedData) {
-            await userDBManager.put(userId, tableName, item);
-          }
-        }
-        
-        console.log(`📥 Loaded ${data?.length || 0} records from cloud for ${tableName}`);
-        return data?.map(item => this.mapSupabaseToLocal(item, tableName)) || [];
-      } catch (err) {
-        console.error(`Fetch error for ${tableName}:`, err);
-        return await userDBManager.getAll(userId, tableName);
-      }
+      this.pullDelta(userId, tableName).catch(err => console.error(`Delta pull failed for ${tableName}:`, err));
     }
 
-    // Offline - use local data
-    return await userDBManager.getAll(userId, tableName);
+    return localData;
+  }
+
+  async getPage(
+    userId: string,
+    tableName: string,
+    page: number,
+    pageSize: number,
+    filter?: (item: any) => boolean,
+    sortField: string = 'createdAt',
+    sortDir: 'next' | 'prev' = 'prev'
+  ): Promise<{ items: any[]; total: number }> {
+    // Get from local DB (efficient with cursor)
+    const result = await userDBManager.getPage(userId, tableName, page, pageSize, filter, sortField, sortDir);
+    
+    // Background delta sync
+    if (this.isOnline() && isSupabaseConfigured && supabase) {
+      this.pullDelta(userId, tableName).catch(err => console.error(`Delta pull failed for ${tableName}:`, err));
+    }
+
+    return result;
+  }
+
+  async search(
+    userId: string,
+    tableName: string,
+    query: string,
+    fields: string[]
+  ): Promise<any[]> {
+    if (!query) return [];
+    return await userDBManager.search(userId, tableName, query, fields);
+  }
+
+  async batchDelete(userId: string, tableName: string, ids: string[]): Promise<SyncResult> {
+    try {
+      await userDBManager.batchDelete(userId, tableName, ids);
+      this.broadcastChange(tableName, 'DELETE', { ids }, userId);
+
+      if (this.isOnline() && isSupabaseConfigured && supabase) {
+        this.processSyncQueue(userId).catch(err => console.error('Background sync failed:', err));
+      }
+
+      return {
+        success: true,
+        syncedRemotely: false,
+        savedLocally: true,
+      };
+    } catch (err: any) {
+      console.error(`Batch delete error for ${tableName}:`, err);
+      return {
+        success: false,
+        syncedRemotely: false,
+        savedLocally: false,
+        error: err.message,
+      };
+    }
+  }
+
+  private async pullDelta(userId: string, tableName: string): Promise<void> {
+    if (!this.isOnline() || !isSupabaseConfigured || !supabase) return;
+
+    try {
+      // Get last updated timestamp from local data
+      const localRecords = await userDBManager.getAll(userId, tableName);
+      const lastUpdated = localRecords.reduce((max, r) => {
+        const current = r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
+        return current > max ? current : max;
+      }, 0);
+
+      const lastSyncTime = lastUpdated > 0 
+        ? new Date(lastUpdated).toISOString() 
+        : '1970-01-01T00:00:00Z';
+
+      const { data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .eq('school_id', userId)
+        .gt('updated_at', lastSyncTime);
+
+      if (!error && data && data.length > 0) {
+        console.log(`📥 Delta pull: found ${data.length} new/updated records for ${tableName}`);
+        for (const item of data) {
+          const mapped = this.mapSupabaseToLocal(item, tableName);
+          await userDBManager.put(userId, tableName, mapped);
+        }
+        // Notify UI that data has changed
+        window.dispatchEvent(new Event('dataRefresh'));
+      }
+    } catch (err) {
+      console.error(`Delta pull error for ${tableName}:`, err);
+    }
   }
 
   async get(userId: string, tableName: string, id: string): Promise<any | null> {

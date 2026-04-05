@@ -1,5 +1,5 @@
 const DB_NAME_PREFIX = 'schofy_user_db_';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface SyncMeta {
   id: string;
@@ -199,85 +199,105 @@ class UserDatabaseManager {
             { name: 'admissionNo', keyPath: 'admissionNo' },
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'classId', keyPath: 'classId' },
-            { name: 'status', keyPath: 'status' }
+            { name: 'status', keyPath: 'status' },
+            { name: 'updatedAt', keyPath: 'updatedAt' },
+            { name: 'syncStatus', keyPath: 'syncStatus' }
           ]},
           { name: 'staff', indexes: [
             { name: 'employeeId', keyPath: 'employeeId' },
             { name: 'schoolId', keyPath: 'schoolId' },
-            { name: 'status', keyPath: 'status' }
+            { name: 'status', keyPath: 'status' },
+            { name: 'updatedAt', keyPath: 'updatedAt' },
+            { name: 'syncStatus', keyPath: 'syncStatus' }
           ]},
           { name: 'classes', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
-            { name: 'level', keyPath: 'level' }
+            { name: 'level', keyPath: 'level' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'subjects', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
-            { name: 'classId', keyPath: 'classId' }
+            { name: 'classId', keyPath: 'classId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'attendance', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'date', keyPath: 'date' },
-            { name: 'entityId', keyPath: 'entityId' }
+            { name: 'entityId', keyPath: 'entityId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'fees', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'studentId', keyPath: 'studentId' },
             { name: 'term', keyPath: 'term' },
-            { name: 'year', keyPath: 'year' }
+            { name: 'year', keyPath: 'year' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'feeStructures', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
-            { name: 'classId', keyPath: 'classId' }
+            { name: 'classId', keyPath: 'classId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'bursaries', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
-            { name: 'studentId', keyPath: 'studentId' }
+            { name: 'studentId', keyPath: 'studentId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'discounts', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
-            { name: 'classId', keyPath: 'classId' }
+            { name: 'classId', keyPath: 'classId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'payments', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'feeId', keyPath: 'feeId' },
             { name: 'studentId', keyPath: 'studentId' },
-            { name: 'date', keyPath: 'date' }
+            { name: 'date', keyPath: 'date' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'announcements', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'priority', keyPath: 'priority' },
-            { name: 'createdAt', keyPath: 'createdAt' }
+            { name: 'createdAt', keyPath: 'createdAt' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'notifications', indexes: [
             { name: 'read', keyPath: 'read' },
-            { name: 'createdAt', keyPath: 'createdAt' }
+            { name: 'createdAt', keyPath: 'createdAt' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'exams', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'classId', keyPath: 'classId' },
-            { name: 'term', keyPath: 'term' }
+            { name: 'term', keyPath: 'term' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'examResults', indexes: [
             { name: 'examId', keyPath: 'examId' },
-            { name: 'studentId', keyPath: 'studentId' }
+            { name: 'studentId', keyPath: 'studentId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'timetable', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'classId', keyPath: 'classId' },
-            { name: 'dayOfWeek', keyPath: 'dayOfWeek' }
+            { name: 'dayOfWeek', keyPath: 'dayOfWeek' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'transportRoutes', indexes: [
-            { name: 'schoolId', keyPath: 'schoolId' }
+            { name: 'schoolId', keyPath: 'schoolId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'transportAssignments', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'studentId', keyPath: 'studentId' },
-            { name: 'routeId', keyPath: 'routeId' }
+            { name: 'routeId', keyPath: 'routeId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'salaryPayments', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'staffId', keyPath: 'staffId' },
-            { name: 'month', keyPath: 'month' }
+            { name: 'month', keyPath: 'month' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'settings', indexes: [{ name: 'key', keyPath: 'key', unique: true }] },
           { name: 'syncQueue', indexes: [
@@ -437,6 +457,129 @@ class UserDatabaseManager {
       const request = store.count();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getPage(
+    userId: string,
+    storeName: string,
+    page: number,
+    pageSize: number,
+    filter?: (item: any) => boolean,
+    sortField: string = 'createdAt',
+    sortDir: 'next' | 'prev' = 'prev'
+  ): Promise<{ items: any[]; total: number }> {
+    await this.ensureDatabaseOpen(userId);
+    const skip = (page - 1) * pageSize;
+    let items: any[] = [];
+    let total = 0;
+
+    return new Promise((resolve, reject) => {
+      const store = this.getStore(userId, storeName);
+      
+      // If there is an index for sorting, use it
+      let cursorRequest;
+      try {
+        const index = store.index(sortField);
+        cursorRequest = index.openCursor(null, sortDir);
+      } catch {
+        cursorRequest = store.openCursor(null, sortDir);
+      }
+
+      let count = 0;
+      let skipped = 0;
+
+      cursorRequest.onsuccess = (event: any) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          const item = cursor.value;
+          if (!filter || filter(item)) {
+            total++;
+            if (skipped < skip) {
+              skipped++;
+            } else if (count < pageSize) {
+              items.push(item);
+              count++;
+            }
+          }
+          cursor.continue();
+        } else {
+          resolve({ items, total });
+        }
+      };
+      cursorRequest.onerror = () => reject(cursorRequest.error);
+    });
+  }
+
+  async search(
+    userId: string,
+    storeName: string,
+    query: string,
+    fields: string[]
+  ): Promise<any[]> {
+    await this.ensureDatabaseOpen(userId);
+    const lowercaseQuery = query.toLowerCase();
+    const results: any[] = [];
+
+    return new Promise((resolve, reject) => {
+      const store = this.getStore(userId, storeName);
+      const request = store.openCursor();
+
+      request.onsuccess = (event: any) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          const item = cursor.value;
+          const matches = fields.some(field => {
+            const value = item[field];
+            return value && String(value).toLowerCase().includes(lowercaseQuery);
+          });
+
+          if (matches) {
+            results.push(item);
+          }
+
+          if (results.length < 50) { // Cap search results for performance
+            cursor.continue();
+          } else {
+            resolve(results);
+          }
+        } else {
+          resolve(results);
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async batchDelete(userId: string, storeName: string, ids: string[]): Promise<void> {
+    await this.ensureDatabaseOpen(userId);
+    return new Promise((resolve, reject) => {
+      const db = this.databases.get(userId);
+      if (!db) return reject(new Error('Database not open'));
+      
+      const transaction = db.transaction([storeName, 'syncQueue'], 'readwrite');
+      const store = transaction.objectStore(storeName);
+      const queueStore = transaction.objectStore('syncQueue');
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+
+      for (const id of ids) {
+        store.delete(id);
+        
+        // Add delete operation to sync queue within the same transaction
+        const syncItem = {
+          id: crypto.randomUUID(),
+          table: storeName,
+          recordId: id,
+          operation: 'delete' as const,
+          data: { id },
+          timestamp: new Date().toISOString(),
+          synced: 0,
+          retryCount: 0,
+        };
+        queueStore.add(syncItem);
+      }
     });
   }
 

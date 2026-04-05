@@ -48,12 +48,17 @@ function generateStudentId(firstName: string, lastName: string): string {
 
 export default function Students() {
   const { user } = useAuth();
-  const { students: contextStudents, loading } = useStudents();
+  const { loadPage, searchStudents, refresh: refreshContext } = useStudents();
+  const [students, setStudents] = useState<Student[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedClass, setSelectedClass] = useState('');
   const itemsPerPage = 10;
   const { addToast } = useToast();
+  // ... rest of state stays same
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -82,26 +87,48 @@ export default function Students() {
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
 
   useEffect(() => {
-    if (user?.id) {
-      loadClasses();
-    }
-  }, [user?.id]);
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
-  async function loadClasses() {
+  const loadData = useCallback(async () => {
     if (!user?.id) return;
+    setLoading(true);
     try {
-      const classData = await dataService.getAll(user.id, 'classes');
-      setClasses(classData);
-    } catch (error) {
-      console.error('Failed to load classes:', error);
+      if (debouncedSearch) {
+        const results = await searchStudents(debouncedSearch);
+        // Apply class and view filters to search results
+        const filtered = results.filter(student => {
+          const matchesClass = !selectedClass || student.classId === selectedClass;
+          const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
+          return matchesClass && matchesView;
+        });
+        setStudents(filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
+        setTotalCount(filtered.length);
+      } else {
+        const filter = (student: Student) => {
+          const matchesClass = !selectedClass || student.classId === selectedClass;
+          const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
+          return matchesClass && matchesView;
+        };
+        const { items, total } = await loadPage(currentPage, itemsPerPage, filter);
+        setStudents(items);
+        setTotalCount(total);
+      }
+    } catch (err) {
+      console.error('Failed to load students:', err);
+      addToast('Failed to load students', 'error');
+    } finally {
+      setLoading(false);
     }
-  }
+  }, [user?.id, currentPage, debouncedSearch, selectedClass, viewFilter, itemsPerPage, loadPage, searchStudents, addToast]);
 
-  const students = [...contextStudents].sort((a, b) => {
-    const dateA = new Date(a.createdAt).getTime();
-    const dateB = new Date(b.createdAt).getTime();
-    return dateB - dateA;
-  });
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const availableClassIds = Array.from(new Set([
     ...classes.map((classItem) => classItem.id),
@@ -161,84 +188,39 @@ export default function Students() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectMode]);
 
-  const filteredStudents = students.filter((student) => {
-    if (student.status === 'completed') return false;
-    const matchesSearch =
-      student.firstName.toLowerCase().includes(search.toLowerCase()) ||
-      student.lastName.toLowerCase().includes(search.toLowerCase()) ||
-      (student.studentId || student.admissionNo).toLowerCase().includes(search.toLowerCase());
-    const matchesClass = !selectedClass || student.classId === selectedClass;
-    const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
-    return matchesSearch && matchesClass && matchesView;
-  });
-
-  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
-  const paginatedStudents = filteredStudents.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
+  const paginatedStudents = students;
 
   async function cleanupOrphanedRecords() {
     if (!user?.id) return;
     try {
-      const students = await dataService.getAll(user.id, 'students');
-      const studentIds = new Set(students.map((s: any) => s.id));
+      addToast('Cleaning up orphaned records...', 'info');
+      const allStudents = await dataService.getAll(user.id, 'students');
+      const studentIds = new Set(allStudents.map((s: any) => s.id));
       let cleanedCount = 0;
       
-      const fees = await dataService.getAll(user.id, 'fees');
-      for (const fee of fees) {
-        if (fee.studentId && !studentIds.has(fee.studentId)) {
-          await dataService.delete(user.id, 'fees', fee.id);
-          cleanedCount++;
-        }
-      }
+      const tablesToCheck = ['fees', 'payments', 'invoices', 'bursaries', 'transportAssignments', 'examResults'];
       
-      const payments = await dataService.getAll(user.id, 'payments');
-      for (const payment of payments) {
-        if (payment.studentId && !studentIds.has(payment.studentId)) {
-          await dataService.delete(user.id, 'payments', payment.id);
-          cleanedCount++;
-        }
-      }
-      
-      const invoices = await dataService.getAll(user.id, 'invoices');
-      for (const invoice of invoices) {
-        if (invoice.studentId && !studentIds.has(invoice.studentId)) {
-          await dataService.delete(user.id, 'invoices', invoice.id);
-          cleanedCount++;
-        }
-      }
-      
-      const bursaries = await dataService.getAll(user.id, 'bursaries');
-      for (const bursary of bursaries) {
-        if (bursary.studentId && !studentIds.has(bursary.studentId)) {
-          await dataService.delete(user.id, 'bursaries', bursary.id);
-          cleanedCount++;
-        }
-      }
-      
-      const transportAssignments = await dataService.getAll(user.id, 'transportAssignments');
-      for (const assignment of transportAssignments) {
-        if (assignment.studentId && !studentIds.has(assignment.studentId)) {
-          await dataService.delete(user.id, 'transportAssignments', assignment.id);
-          cleanedCount++;
-        }
-      }
-      
-      const examResults = await dataService.getAll(user.id, 'examResults');
-      for (const result of examResults) {
-        if (result.studentId && !studentIds.has(result.studentId)) {
-          await dataService.delete(user.id, 'examResults', result.id);
-          cleanedCount++;
+      for (const table of tablesToCheck) {
+        const records = await dataService.getAll(user.id, table);
+        const orphanedIds = records
+          .filter(r => r.studentId && !studentIds.has(r.studentId))
+          .map(r => r.id);
+        
+        if (orphanedIds.length > 0) {
+          await dataService.batchDelete(user.id, table, orphanedIds);
+          cleanedCount += orphanedIds.length;
         }
       }
       
       const attendanceRecords = await dataService.getAll(user.id, 'attendance');
-      for (const record of attendanceRecords) {
-        if (record.entityType === 'student' && record.entityId && !studentIds.has(record.entityId)) {
-          await dataService.delete(user.id, 'attendance', record.id);
-          cleanedCount++;
-        }
+      const orphanedAttendanceIds = attendanceRecords
+        .filter(r => r.entityType === 'student' && r.entityId && !studentIds.has(r.entityId))
+        .map(r => r.id);
+      
+      if (orphanedAttendanceIds.length > 0) {
+        await dataService.batchDelete(user.id, 'attendance', orphanedAttendanceIds);
+        cleanedCount += orphanedAttendanceIds.length;
       }
       
       if (cleanedCount > 0) {
@@ -247,6 +229,7 @@ export default function Students() {
         addToast('No orphaned records found', 'info');
       }
     } catch (error) {
+      console.error('Cleanup error:', error);
       addToast('Failed to cleanup records', 'error');
     }
   }
@@ -257,59 +240,30 @@ export default function Students() {
       try {
         const student = students.find(s => s.id === id);
         
-        // Delete all related records using dataService
-        const fees = await dataService.getAll(user.id, 'fees');
-        for (const fee of fees) {
-          if (fee.studentId === id) {
-            await dataService.delete(user.id, 'fees', fee.id);
-          }
-        }
-        
-        const payments = await dataService.getAll(user.id, 'payments');
-        for (const payment of payments) {
-          if (payment.studentId === id) {
-            await dataService.delete(user.id, 'payments', payment.id);
-          }
-        }
-        
-        const invoices = await dataService.getAll(user.id, 'invoices');
-        for (const invoice of invoices) {
-          if (invoice.studentId === id) {
-            await dataService.delete(user.id, 'invoices', invoice.id);
-          }
-        }
-        
-        const bursaries = await dataService.getAll(user.id, 'bursaries');
-        for (const bursary of bursaries) {
-          if (bursary.studentId === id) {
-            await dataService.delete(user.id, 'bursaries', bursary.id);
-          }
-        }
-        
-        const transportAssignments = await dataService.getAll(user.id, 'transportAssignments');
-        for (const assignment of transportAssignments) {
-          if (assignment.studentId === id) {
-            await dataService.delete(user.id, 'transportAssignments', assignment.id);
-          }
-        }
-        
-        const examResults = await dataService.getAll(user.id, 'examResults');
-        for (const result of examResults) {
-          if (result.studentId === id) {
-            await dataService.delete(user.id, 'examResults', result.id);
+        // Use batchDelete for related records
+        const tables = ['fees', 'payments', 'invoices', 'bursaries', 'transportAssignments', 'examResults'];
+        for (const table of tables) {
+          const records = await dataService.getAll(user.id, table);
+          const relatedIds = records.filter(r => r.studentId === id).map(r => r.id);
+          if (relatedIds.length > 0) {
+            await dataService.batchDelete(user.id, table, relatedIds);
           }
         }
         
         const attendanceRecords = await dataService.getAll(user.id, 'attendance');
-        for (const record of attendanceRecords) {
-          if (record.entityType === 'student' && record.entityId === id) {
-            await dataService.delete(user.id, 'attendance', record.id);
-          }
+        const relatedAttendanceIds = attendanceRecords
+          .filter(r => r.entityType === 'student' && r.entityId === id)
+          .map(r => r.id);
+        if (relatedAttendanceIds.length > 0) {
+          await dataService.batchDelete(user.id, 'attendance', relatedAttendanceIds);
         }
         
         // Delete the student
         await dataService.delete(user.id, 'students', id);
-        window.dispatchEvent(new Event('studentsUpdated'));
+        
+        // Update local state instead of re-fetching everything
+        setStudents(prev => prev.filter(s => s.id !== id));
+        setTotalCount(prev => prev - 1);
         
         if (student) {
           const recycleItem = {
@@ -326,6 +280,7 @@ export default function Students() {
         
         addToast('Student and all associated records deleted', 'success');
       } catch (error) {
+        console.error('Delete error:', error);
         addToast('Failed to delete student', 'error');
       }
     }
