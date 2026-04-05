@@ -583,7 +583,7 @@ export default function Layout({ children }: LayoutProps) {
       )}
 
       {showRenewPopup && subscriptionState && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+        <div className="fixed inset-x-0 top-0 bg-black/60 backdrop-blur-sm z-[60] flex items-start justify-center p-4 pt-8 overflow-y-auto">
           <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden">
             <div className={`px-5 py-4 flex items-center gap-3 ${
               subscriptionState.status === 'expired' ? 'bg-red-600' : 'bg-amber-500'

@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-
 import { useAuth } from './contexts/AuthContext';
 import { StudentsProvider } from './contexts/StudentsContext';
 import { RealtimeSyncProvider } from './realtime/RealtimeSync';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -28,7 +29,7 @@ import Plans from './pages/Plans';
 import Subscription from './pages/Subscription';
 import RecycleBin from './pages/RecycleBin';
 import { useEffect, useState } from 'react';
-import { getCurrentPlanId } from './utils/plans';
+import { getSubscriptionAccessState } from './utils/plans';
 
 function FullScreenLoader({ label = 'Loading Schofy...' }: { label?: string }) {
   return (
@@ -48,18 +49,19 @@ function MainApp() {
   const { user, loading } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [hasPlan, setHasPlan] = useState<boolean | null>(null);
+  const [hasValidPlan, setHasValidPlan] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (loading || !user) return;
 
     async function checkPlan() {
       try {
-        const planId = await getCurrentPlanId(user!.id);
-        setHasPlan(!!planId);
+        const state = await getSubscriptionAccessState(user!.id);
+        const isValid = state.selectedPlanId !== null && state.status !== 'expired';
+        setHasValidPlan(isValid);
       } catch (error) {
         console.error('Plan check error:', error);
-        setHasPlan(true);
+        setHasValidPlan(true);
       }
     }
 
@@ -67,19 +69,19 @@ function MainApp() {
   }, [user, loading]);
 
   useEffect(() => {
-    if (hasPlan === null) return;
+    if (hasValidPlan === null) return;
     
-    if (!hasPlan && location.pathname !== '/subscribe') {
+    if (!hasValidPlan && location.pathname !== '/subscribe') {
       navigate('/subscribe', { replace: true });
-    } else if (hasPlan && location.pathname === '/subscribe') {
+    } else if (hasValidPlan && location.pathname === '/subscribe') {
       navigate('/', { replace: true });
     }
-  }, [hasPlan, location.pathname, navigate]);
+  }, [hasValidPlan, location.pathname, navigate]);
 
   useEffect(() => {
     const fullPath = `${location.pathname}${location.search}${location.hash}`;
     if (location.pathname !== '/login' && location.pathname !== '/subscribe') {
-      sessionStorage.setItem('lastRoute', fullPath);
+      window.sessionStorage.setItem('lastRoute', fullPath);
     }
   }, [location.pathname, location.search, location.hash]);
 
@@ -88,41 +90,43 @@ function MainApp() {
   }
 
   return (
-    <StudentsProvider>
-      <RealtimeSyncProvider>
-        <Layout>
-        <div className="page-shell page-shell-enter">
-          <Routes location={location}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/dashboard" element={<Navigate to="/" replace />} />
-            <Route path="/students" element={<Students />} />
-            <Route path="/students/new" element={<StudentForm />} />
-            <Route path="/admission" element={<Admission />} />
-            <Route path="/students/:id" element={<StudentProfile />} />
-            <Route path="/students/:id/edit" element={<StudentForm />} />
-            <Route path="/staff" element={<Staff />} />
-            <Route path="/staff/new" element={<StaffForm />} />
-            <Route path="/staff/:id/edit" element={<StaffForm />} />
-            <Route path="/classes" element={<Classes />} />
-            <Route path="/subjects" element={<Subjects />} />
-            <Route path="/attendance" element={<Attendance />} />
-            <Route path="/finance" element={<Finance />} />
-            <Route path="/invoices" element={<Invoices />} />
-            <Route path="/grades" element={<Grades />} />
-            <Route path="/transport" element={<Transport />} />
-            <Route path="/announcements" element={<Announcements />} />
-            <Route path="/notifications" element={<Notifications />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/plans" element={<Plans />} />
-            <Route path="/recycle-bin" element={<RecycleBin />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/about" element={<About />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </div>
-      </Layout>
-      </RealtimeSyncProvider>
-    </StudentsProvider>
+    <ErrorBoundary>
+      <StudentsProvider>
+        <RealtimeSyncProvider>
+          <Layout>
+          <div className="page-shell page-shell-enter">
+            <Routes location={location}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Navigate to="/" replace />} />
+              <Route path="/students" element={<Students />} />
+              <Route path="/students/new" element={<StudentForm />} />
+              <Route path="/admission" element={<Admission />} />
+              <Route path="/students/:id" element={<StudentProfile />} />
+              <Route path="/students/:id/edit" element={<StudentForm />} />
+              <Route path="/staff" element={<Staff />} />
+              <Route path="/staff/new" element={<StaffForm />} />
+              <Route path="/staff/:id/edit" element={<StaffForm />} />
+              <Route path="/classes" element={<Classes />} />
+              <Route path="/subjects" element={<Subjects />} />
+              <Route path="/attendance" element={<Attendance />} />
+              <Route path="/finance" element={<Finance />} />
+              <Route path="/invoices" element={<Invoices />} />
+              <Route path="/grades" element={<Grades />} />
+              <Route path="/transport" element={<Transport />} />
+              <Route path="/announcements" element={<Announcements />} />
+              <Route path="/notifications" element={<Notifications />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/plans" element={<Plans />} />
+              <Route path="/recycle-bin" element={<RecycleBin />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/about" element={<About />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </div>
+        </Layout>
+        </RealtimeSyncProvider>
+      </StudentsProvider>
+    </ErrorBoundary>
   );
 }
 

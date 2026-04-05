@@ -543,7 +543,7 @@ export default function Transport() {
       </div>
 
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-backdrop-in" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">

@@ -67,21 +67,30 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     };
   }, [isOnline, syncEnabled, user, schoolId]);
 
-  // Load pending count periodically
+  // Load pending count periodically - only when sync is enabled and online
   const loadPendingCount = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id || !syncEnabled) {
+      setPendingChanges(0);
+      return;
+    }
     try {
       const items = await userDBManager.getPendingSyncItems(user.id);
       setPendingChanges(items.length);
     } catch (error) {
       console.error('Failed to load pending count:', error);
+      setPendingChanges(0);
     }
-  }, [user]);
+  }, [user, syncEnabled]);
 
   useEffect(() => {
-    const interval = setInterval(loadPendingCount, 5000);
+    if (!syncEnabled) {
+      setPendingChanges(0);
+      return;
+    }
+    loadPendingCount();
+    const interval = setInterval(loadPendingCount, 10000);
     return () => clearInterval(interval);
-  }, [loadPendingCount]);
+  }, [syncEnabled, loadPendingCount]);
 
   const syncNow = useCallback(async () => {
     if (!isOnline || isSyncing || !syncEnabled || !user) {

@@ -53,6 +53,10 @@ export default function Grades() {
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<Partial<ExamResult>[]>([]);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [invoiceAmount, setInvoiceAmount] = useState('');
+  const [invoiceDescription, setInvoiceDescription] = useState('Examination Fee');
+  const [invoiceTerm, setInvoiceTerm] = useState('1');
 
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [subjects, setSubjects] = useState<any[]>([]);
@@ -159,6 +163,52 @@ export default function Grades() {
       addToast('Grade deleted successfully', 'success');
     } catch (error) {
       addToast('Failed to delete grade', 'error');
+    }
+  }
+
+  // Get unique students who have grades
+  const studentsWithGrades = useMemo(() => {
+    const studentIds = new Set(grades.map(g => g.studentId));
+    return students.filter(s => studentIds.has(s.id));
+  }, [grades, students]);
+
+  async function handleCreateExamFeeInvoice() {
+    if (!user?.id) return;
+    const amount = parseFloat(invoiceAmount);
+    if (isNaN(amount) || amount <= 0) {
+      addToast('Please enter a valid amount', 'error');
+      return;
+    }
+    if (studentsWithGrades.length === 0) {
+      addToast('No students with grades to invoice', 'error');
+      return;
+    }
+    try {
+      const now = new Date().toISOString();
+      const year = new Date().getFullYear().toString();
+      let count = 0;
+      for (const student of studentsWithGrades) {
+        const newFee = {
+          id: uuidv4(),
+          studentId: student.id,
+          description: invoiceDescription,
+          amount: amount,
+          term: invoiceTerm,
+          year: year,
+          createdAt: now,
+        };
+        await dataService.create(user.id, 'fees', newFee as any);
+        count++;
+      }
+      // Broadcast change to update other pages
+      window.dispatchEvent(new CustomEvent('feesUpdated'));
+      addToast(`Created exam fee invoices for ${count} students`, 'success');
+      setShowInvoiceModal(false);
+      setInvoiceAmount('');
+      setInvoiceDescription('Examination Fee');
+    } catch (error) {
+      console.error('Failed to create exam fee invoices:', error);
+      addToast('Failed to create exam fee invoices', 'error');
     }
   }
 
@@ -412,6 +462,20 @@ export default function Grades() {
             accept=".csv"
             className="hidden"
           />
+          <button 
+            onClick={() => {
+              if (studentsWithGrades.length === 0) {
+                addToast('No students with grades to invoice', 'warning');
+                return;
+              }
+              setShowInvoiceModal(true);
+            }} 
+            className="btn btn-secondary text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+            title="Invoice Exam Fees"
+          >
+            <FileText size={16} />
+            <span className="hidden sm:inline">Invoice ({studentsWithGrades.length})</span>
+          </button>
           <button onClick={() => setShowForm(true)} className="btn btn-primary shadow-lg shadow-primary-500/25">
             <Plus size={16} /> Add Grade
           </button>
@@ -678,7 +742,7 @@ export default function Grades() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-backdrop-in">
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-lg w-full animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
               <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -763,8 +827,71 @@ export default function Grades() {
         </div>
       )}
 
+      {showInvoiceModal && (
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) setShowInvoiceModal(false); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <FileText size={18} className="text-white" />
+                <h2 className="font-bold text-white">Invoice Exam Fees</h2>
+              </div>
+              <button onClick={() => setShowInvoiceModal(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3">
+                <p className="text-sm text-emerald-700 dark:text-emerald-300">
+                  Creating exam fee invoices for <strong>{studentsWithGrades.length}</strong> students
+                </p>
+              </div>
+              <div>
+                <label className="form-label">Description</label>
+                <input
+                  type="text"
+                  value={invoiceDescription}
+                  onChange={(e) => setInvoiceDescription(e.target.value)}
+                  className="form-input"
+                  placeholder="e.g., Examination Fee"
+                />
+              </div>
+              <div>
+                <label className="form-label">Amount per Student</label>
+                <input
+                  type="number"
+                  value={invoiceAmount}
+                  onChange={(e) => setInvoiceAmount(e.target.value)}
+                  className="form-input"
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              <div>
+                <label className="form-label">Term</label>
+                <select
+                  value={invoiceTerm}
+                  onChange={(e) => setInvoiceTerm(e.target.value)}
+                  className="form-input"
+                >
+                  <option value="1">Term 1</option>
+                  <option value="2">Term 2</option>
+                  <option value="3">Term 3</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button onClick={() => setShowInvoiceModal(false)} className="btn btn-secondary">Cancel</button>
+                <button onClick={handleCreateExamFeeInvoice} className="btn btn-primary">
+                  Create Invoices
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-backdrop-in" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
@@ -908,8 +1035,8 @@ export default function Grades() {
               )}
             </div>
           </div>
-        </div>
-      )}
+          </div>
+        )}
     </div>
   );
 }

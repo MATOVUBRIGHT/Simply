@@ -517,6 +517,22 @@ class UserDatabaseManager {
     });
   }
 
+  async clearSyncQueue(userId: string): Promise<void> {
+    await this.ensureDatabaseOpen(userId);
+    return new Promise((resolve, reject) => {
+      const db = this.databases.get(userId);
+      if (!db) {
+        reject(new Error('Database not open'));
+        return;
+      }
+      const transaction = db.transaction(['syncQueue'], 'readwrite');
+      const store = transaction.objectStore('syncQueue');
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   async deleteDatabase(userId: string): Promise<void> {
     await this.closeDatabase(userId);
     

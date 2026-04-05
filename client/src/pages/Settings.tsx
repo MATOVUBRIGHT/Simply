@@ -347,7 +347,14 @@ export default function Settings() {
               {isSyncEnabled ? (
                 <>
                   <button
-                    onClick={syncNow}
+                    onClick={async () => {
+                      try {
+                        await syncNow();
+                      } catch (err) {
+                        console.error('Sync error:', err);
+                        addToast('Sync failed. Check console for details.', 'error');
+                      }
+                    }}
                     disabled={!isOnline || isSyncing}
                     className="btn btn-primary flex items-center gap-2"
                   >
@@ -361,10 +368,37 @@ export default function Settings() {
                     <CloudOff size={16} />
                     Disable Sync
                   </button>
+                  {pendingChanges > 0 && (
+                    <button
+                      onClick={async () => {
+                        if (confirm(`Clear ${pendingChanges} pending items? This cannot be undone.`)) {
+                          try {
+                            const { userDBManager } = await import('../lib/database/UserDatabaseManager');
+                            await userDBManager.clearSyncQueue(user?.id || '');
+                            addToast('Pending items cleared', 'success');
+                          } catch (err) {
+                            console.error('Clear sync queue error:', err);
+                            addToast('Failed to clear pending items', 'error');
+                          }
+                        }
+                      }}
+                      className="btn btn-secondary flex items-center gap-2 text-amber-600 hover:text-amber-700"
+                    >
+                      <Trash2 size={16} />
+                      Clear {pendingChanges} Stuck Items
+                    </button>
+                  )}
                 </>
               ) : (
                 <button
-                  onClick={() => enableSync()}
+                  onClick={async () => {
+                    try {
+                      await enableSync();
+                    } catch (err) {
+                      console.error('Enable sync error:', err);
+                      addToast('Failed to enable sync. Check console for details.', 'error');
+                    }
+                  }}
                   className="btn btn-primary flex items-center gap-2"
                 >
                   <Cloud size={16} />

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, DollarSign, Receipt, FileText, CreditCard, TrendingUp, AlertCircle, Download, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Check, Search, Filter } from 'lucide-react';
+import { Plus, DollarSign, Receipt, FileText, CreditCard, TrendingUp, AlertCircle, Download, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Check, Search, Filter, Users } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -11,7 +11,7 @@ import { dataService } from '../lib/database/DataService';
 
 export default function Finance() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'invoices' | 'payments' | 'fees'>('invoices');
+  const [activeTab, setActiveTab] = useState<'students' | 'invoices' | 'payments' | 'fees'>('students');
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ studentId: '', description: '', amount: 0, term: '1', year: new Date().getFullYear().toString() });
   const { addToast } = useToast();
@@ -381,6 +381,7 @@ export default function Finance() {
   const totalPending = totalInvoiced - totalCollected;
 
   const tabs = [
+    { id: 'students', label: 'Students', icon: Users },
     { id: 'invoices', label: 'Invoices', icon: FileText },
     { id: 'payments', label: 'Payments', icon: Receipt },
     { id: 'fees', label: 'Fee Structure', icon: DollarSign },
@@ -402,6 +403,43 @@ export default function Finance() {
     return !searchTerm || 
       (student ? `${student.firstName} ${student.lastName}`.toLowerCase().includes(search) : false) ||
       payment.method.toLowerCase().includes(search);
+  });
+
+  // Student finance summary
+  const studentFinanceSummary = students.map(student => {
+    const studentFees = (fees || []).filter(f => f.studentId === student.id);
+    const totalInvoiced = studentFees.reduce((sum, f) => sum + f.amount, 0);
+    const studentPayments = (payments || []).filter(p => {
+      if (p.feeId && studentFees.some(f => f.id === p.feeId)) return true;
+      if (!p.feeId && p.studentId === student.id) return true;
+      return false;
+    });
+    const totalPaid = studentPayments.reduce((sum, p) => sum + p.amount, 0);
+    const balance = totalInvoiced - totalPaid;
+    const invoiceCount = studentFees.length;
+    const paymentCount = studentPayments.length;
+    const isCleared = invoiceCount > 0 && balance <= 0;
+    const hasPayments = paymentCount > 0;
+    
+    return {
+      id: student.id,
+      studentName: `${student.firstName} ${student.lastName}`,
+      admissionNo: student.admissionNo,
+      classId: student.classId,
+      totalInvoiced,
+      totalPaid,
+      balance,
+      invoiceCount,
+      paymentCount,
+      isCleared,
+      hasPayments,
+    };
+  }).filter(s => s.invoiceCount > 0 || filterTerm === 'all');
+
+  const filteredStudentFinance = studentFinanceSummary.filter(s => {
+    const search = searchTerm.toLowerCase();
+    if (search && !s.studentName.toLowerCase().includes(search)) return false;
+    return true;
   });
 
   return (
@@ -708,6 +746,7 @@ export default function Finance() {
           <table>
             <thead>
               <tr>
+                {activeTab === 'students' && <><th>Student</th><th>Admission No</th><th>Invoices</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></>}
                 {activeTab === 'invoices' && <><th>Student</th><th>Description</th><th>Amount</th><th>Term</th><th>Status</th><th>Actions</th></>}
                 {activeTab === 'payments' && <><th>Date</th><th>Student</th><th>Amount</th><th>Method</th></>}
                 {activeTab === 'fees' && <><th>Description</th><th>Amount</th><th>Term</th></>}
@@ -716,10 +755,22 @@ export default function Finance() {
             <tbody>
               {!fees || !payments ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12">
+                  <td colSpan={7} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                       <p className="text-sm">Loading...</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : activeTab === 'students' && filteredStudentFinance.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-12">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                        <Users size={24} className="text-violet-400" />
+                      </div>
+                      <p className="text-slate-500 font-medium">No invoiced students</p>
+                      <p className="text-slate-400 text-sm">Create invoices to see student summaries</p>
                     </div>
                   </td>
                 </tr>
@@ -763,6 +814,27 @@ export default function Finance() {
                 </tr>
               ) : (
                 <>
+                  {activeTab === 'students' && filteredStudentFinance.map(student => (
+                    <tr key={student.id}>
+                      <td className="font-medium">{student.studentName}</td>
+                      <td className="text-slate-500">{student.admissionNo}</td>
+                      <td><span className="badge badge-info">{student.invoiceCount}</span></td>
+                      <td className="font-semibold">{formatMoney(student.totalInvoiced)}</td>
+                      <td className="text-emerald-600 font-semibold">{formatMoney(student.totalPaid)}</td>
+                      <td className={student.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>
+                        {formatMoney(student.balance)}
+                      </td>
+                      <td>
+                        {student.isCleared ? (
+                          <span className="badge badge-success">Cleared</span>
+                        ) : student.balance > 0 ? (
+                          <span className="badge badge-danger">Balance: {formatMoney(student.balance)}</span>
+                        ) : (
+                          <span className="badge badge-warning">No Invoice</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
                   {activeTab === 'invoices' && filteredFees.map(fee => {
                     const student = students.find(s => s.id === fee.studentId);
                     const studentPayments = payments.filter(p => p.feeId === fee.id);
@@ -823,7 +895,7 @@ export default function Finance() {
       </div>
 
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-backdrop-in" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">

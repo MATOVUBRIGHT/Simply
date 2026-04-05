@@ -540,14 +540,13 @@ export default function Classes() {
           const colors = getClassColor(index);
           const isSelected = selectedClasses.has(c.id);
           const enrolled = classEnrollmentCounts[c.id] || 0;
-          const cardRef = useRef<HTMLDivElement>(null);
           return (
             <div 
               key={c.id} 
-              ref={cardRef}
+              id={`class-card-${c.id}`}
               className={`card ${colors.card} cursor-pointer transition-all ${isSelected ? 'ring-2 ring-indigo-500 dark:ring-indigo-400' : ''}`}
               onClick={() => handleRowClick(c.id)}
-              onDoubleClick={() => { cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); handleEdit(c); }}
+              onDoubleClick={() => { document.getElementById(`class-card-${c.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); handleEdit(c); }}
             >
               <div className="p-5">
                 <div className="flex justify-between items-start gap-3">
@@ -578,7 +577,7 @@ export default function Classes() {
                   </div>
                   {!selectMode && (
                     <div className="flex gap-1">
-                      <button onClick={(e) => { e.stopPropagation(); cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => handleEdit(c), 300); }} className="p-2 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 rounded-lg transition-colors">
+                      <button onClick={(e) => { e.stopPropagation(); document.getElementById(`class-card-${c.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => handleEdit(c), 300); }} className="p-2 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 rounded-lg transition-colors">
                         <Edit size={16} />
                       </button>
                       <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors">

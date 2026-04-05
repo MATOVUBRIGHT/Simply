@@ -69,6 +69,7 @@ export default function Invoices() {
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [viewMode, setViewMode] = useState<'invoices' | 'students'>('invoices');
   
   const [showStructureModal, setShowStructureModal] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -93,6 +94,46 @@ export default function Invoices() {
 
   const students = useActiveStudents();
   const { students: allStudents } = useStudents();
+
+  // Computed: student invoice summary
+  const studentInvoiceSummary = useMemo(() => {
+    if (!allStudents || !fees || !payments) return [];
+    
+    return allStudents.map(student => {
+      const studentFees = fees.filter(f => f.studentId === student.id);
+      const totalInvoiced = studentFees.reduce((sum, f) => sum + f.amount, 0);
+      const totalPaid = studentFees.reduce((sum, f) => {
+        const feePayments = payments.filter(p => p.feeId === f.id);
+        return sum + feePayments.reduce((s, p) => s + p.amount, 0);
+      }, 0);
+      const balance = totalInvoiced - totalPaid;
+      const isInvoiced = studentFees.length > 0;
+      const status = !isInvoiced ? 'not_invoiced' : balance <= 0 ? 'paid' : 'pending';
+      
+      return {
+        id: student.id,
+        studentName: `${student.firstName} ${student.lastName}`,
+        admissionNo: student.admissionNo,
+        classId: student.classId,
+        totalInvoiced,
+        totalPaid,
+        balance,
+        invoiceCount: studentFees.length,
+        isInvoiced,
+        status,
+      };
+    });
+  }, [allStudents, fees, payments]);
+
+  const filteredStudentSummary = studentInvoiceSummary.filter(s => {
+    const search = searchTerm.toLowerCase();
+    if (search && !s.studentName.toLowerCase().includes(search)) return false;
+    if (filterStatus === 'invoiced' && !s.isInvoiced) return false;
+    if (filterStatus === 'not_invoiced' && s.isInvoiced) return false;
+    if (filterStatus === 'paid' && s.status !== 'paid') return false;
+    if (filterStatus === 'pending' && s.balance <= 0) return false;
+    return true;
+  });
 
   useEffect(() => {
     if (user?.id) {
@@ -705,13 +746,33 @@ export default function Invoices() {
       <div className="card">
         <div className="card-header">
           <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="relative flex-1 w-full">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setViewMode('invoices'); setFilterStatus('all'); }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  viewMode === 'invoices' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                }`}
+              >
+                <FileText size={16} />
+                Invoice List
+              </button>
+              <button
+                onClick={() => { setViewMode('students'); setFilterStatus('all'); }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  viewMode === 'students' ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                }`}
+              >
+                <Users size={16} />
+                Student View
+              </button>
+            </div>
+            <div className="relative flex-1 w-full sm:max-w-xs">
               <Search size={18} className="search-input-icon" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                placeholder="Search invoices by student or description..."
+                placeholder={viewMode === 'students' ? "Search students..." : "Search invoices..."}
                 className="search-input"
               />
             </div>
@@ -722,59 +783,118 @@ export default function Invoices() {
               >
                 <Filter size={16} />
                 <span className="hidden sm:inline">
-                  {filterStatus === 'all' ? 'All Status' :
-                   filterStatus === 'paid' ? 'Paid' :
-                   filterStatus === 'partial' ? 'Partial' : 'Pending'}
+                  {viewMode === 'students' 
+                    ? (filterStatus === 'all' ? 'All' : filterStatus === 'invoiced' ? 'Invoiced' : filterStatus === 'not_invoiced' ? 'Not Invoiced' : filterStatus === 'paid' ? 'Paid' : 'Pending')
+                    : (filterStatus === 'all' ? 'All Status' : filterStatus === 'paid' ? 'Paid' : filterStatus === 'partial' ? 'Partial' : 'Pending')
+                  }
                 </span>
                 <ChevronDown size={14} />
               </button>
               <DropdownModal
                 isOpen={showStatusFilter}
                 onClose={() => setShowStatusFilter(false)}
-                title="Filter by Status"
+                title={viewMode === 'students' ? "Filter Students" : "Filter by Status"}
                 icon={<Filter size={20} />}
               >
                 <div className="p-2 space-y-1">
-                  <button
-                    onClick={() => { setFilterStatus('all'); setShowStatusFilter(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      filterStatus === 'all' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <CheckCircle size={18} />
-                    <span className="font-medium">All Status</span>
-                    {filterStatus === 'all' && <CheckIcon size={16} className="ml-auto" />}
-                  </button>
-                  <button
-                    onClick={() => { setFilterStatus('paid'); setShowStatusFilter(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      filterStatus === 'paid' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <CheckCircle size={18} className="text-emerald-500" />
-                    <span className="font-medium">Paid</span>
-                    {filterStatus === 'paid' && <CheckIcon size={16} className="ml-auto" />}
-                  </button>
-                  <button
-                    onClick={() => { setFilterStatus('partial'); setShowStatusFilter(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      filterStatus === 'partial' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <Clock size={18} className="text-amber-500" />
-                    <span className="font-medium">Partial</span>
-                    {filterStatus === 'partial' && <CheckIcon size={16} className="ml-auto" />}
-                  </button>
-                  <button
-                    onClick={() => { setFilterStatus('pending'); setShowStatusFilter(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      filterStatus === 'pending' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <XCircle size={18} className="text-red-500" />
-                    <span className="font-medium">Pending</span>
-                    {filterStatus === 'pending' && <CheckIcon size={16} className="ml-auto" />}
-                  </button>
+                  {viewMode === 'students' && (
+                    <>
+                      <button
+                        onClick={() => { setFilterStatus('all'); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                          filterStatus === 'all' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <CheckCircle size={18} />
+                        <span className="font-medium">All Students</span>
+                        {filterStatus === 'all' && <CheckIcon size={16} className="ml-auto" />}
+                      </button>
+                      <button
+                        onClick={() => { setFilterStatus('invoiced'); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                          filterStatus === 'invoiced' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <CheckCircle size={18} className="text-emerald-500" />
+                        <span className="font-medium">Invoiced</span>
+                        {filterStatus === 'invoiced' && <CheckIcon size={16} className="ml-auto" />}
+                      </button>
+                      <button
+                        onClick={() => { setFilterStatus('not_invoiced'); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                          filterStatus === 'not_invoiced' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <XCircle size={18} className="text-orange-500" />
+                        <span className="font-medium">Not Invoiced</span>
+                        {filterStatus === 'not_invoiced' && <CheckIcon size={16} className="ml-auto" />}
+                      </button>
+                      <button
+                        onClick={() => { setFilterStatus('paid'); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                          filterStatus === 'paid' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <CheckCircle size={18} className="text-green-500" />
+                        <span className="font-medium">Cleared (Paid)</span>
+                        {filterStatus === 'paid' && <CheckIcon size={16} className="ml-auto" />}
+                      </button>
+                      <button
+                        onClick={() => { setFilterStatus('pending'); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                          filterStatus === 'pending' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <Clock size={18} className="text-amber-500" />
+                        <span className="font-medium">With Balance</span>
+                        {filterStatus === 'pending' && <CheckIcon size={16} className="ml-auto" />}
+                      </button>
+                    </>
+                  )}
+                  {viewMode === 'invoices' && (
+                    <>
+                      <button
+                        onClick={() => { setFilterStatus('all'); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                          filterStatus === 'all' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <CheckCircle size={18} />
+                        <span className="font-medium">All Status</span>
+                        {filterStatus === 'all' && <CheckIcon size={16} className="ml-auto" />}
+                      </button>
+                      <button
+                        onClick={() => { setFilterStatus('paid'); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                          filterStatus === 'paid' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <CheckCircle size={18} className="text-emerald-500" />
+                        <span className="font-medium">Paid</span>
+                        {filterStatus === 'paid' && <CheckIcon size={16} className="ml-auto" />}
+                      </button>
+                      <button
+                        onClick={() => { setFilterStatus('partial'); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                          filterStatus === 'partial' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <Clock size={18} className="text-amber-500" />
+                        <span className="font-medium">Partial</span>
+                        {filterStatus === 'partial' && <CheckIcon size={16} className="ml-auto" />}
+                      </button>
+                      <button
+                        onClick={() => { setFilterStatus('pending'); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                          filterStatus === 'pending' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <XCircle size={18} className="text-red-500" />
+                        <span className="font-medium">Pending</span>
+                        {filterStatus === 'pending' && <CheckIcon size={16} className="ml-auto" />}
+                      </button>
+                    </>
+                  )}
                 </div>
               </DropdownModal>
 
@@ -837,78 +957,162 @@ export default function Invoices() {
           </div>
         </div>
         <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Description</th>
-                <th>Amount</th>
-                <th>Paid</th>
-                <th>Balance</th>
-                <th>Status</th>
-                <th>Term</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!fees || !payments || !allStudents ? (
+          {viewMode === 'students' ? (
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan={8} className="text-center py-12">
-                    <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-200 border-t-primary-500 mx-auto"></div>
-                  </td>
+                  <th>Student</th>
+                  <th>Admission No</th>
+                  <th>Invoices</th>
+                  <th>Total Invoiced</th>
+                  <th>Total Paid</th>
+                  <th>Balance</th>
+                  <th>Status</th>
+                  <th>Actions</th>
                 </tr>
-              ) : filteredInvoices.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="text-center py-12">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-                        <FileText size={32} className="text-violet-400" />
+              </thead>
+              <tbody>
+                {!studentInvoiceSummary || studentInvoiceSummary.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                          <Users size={32} className="text-violet-400" />
+                        </div>
+                        <p className="text-slate-500 font-medium">No students found</p>
                       </div>
-                      <p className="text-slate-500 font-medium">No invoices found</p>
-                      <button onClick={() => setShowCreateModal(true)} className="text-primary-500 hover:text-primary-600 text-sm">
-                        Create bulk invoice
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ) : filteredInvoices.map(invoice => {
-                const StatusIcon = statusConfig[invoice.status].icon;
-                return (
-                  <tr key={invoice.id}>
-                    <td className="font-medium">{invoice.studentName}</td>
-                    <td>{invoice.description}</td>
-                    <td className="font-semibold">{formatMoney(invoice.amount)}</td>
-                    <td className="text-emerald-600 font-semibold">{formatMoney(invoice.paidAmount)}</td>
-                    <td className={invoice.amount - invoice.paidAmount > 0 ? 'text-red-600 font-semibold' : ''}>
-                      {formatMoney(invoice.amount - invoice.paidAmount)}
-                    </td>
-                    <td>
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${statusConfig[invoice.status].bg} ${statusConfig[invoice.status].color}`}>
-                        <StatusIcon size={12} />
-                        {invoice.status}
-                      </span>
-                    </td>
-                    <td><span className="badge badge-info">Term {invoice.term}</span></td>
-                    <td>
-                      {invoice.status !== 'paid' && (
-                        <button
-                          onClick={() => markAsPaid(invoice.id)}
-                          className="btn btn-secondary text-sm py-1.5"
-                        >
-                          <DollarSign size={14} /> Record
-                        </button>
-                      )}
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ) : filteredStudentSummary.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                          <Search size={32} className="text-violet-400" />
+                        </div>
+                        <p className="text-slate-500 font-medium">No students match your filter</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredStudentSummary.map(student => (
+                  <tr key={student.id}>
+                    <td className="font-medium">{student.studentName}</td>
+                    <td className="text-slate-500">{student.admissionNo}</td>
+                    <td>
+                      <span className="badge badge-info">{student.invoiceCount}</span>
+                    </td>
+                    <td className="font-semibold">{formatMoney(student.totalInvoiced)}</td>
+                    <td className="text-emerald-600 font-semibold">{formatMoney(student.totalPaid)}</td>
+                    <td className={student.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>
+                      {formatMoney(student.balance)}
+                    </td>
+                    <td>
+                      {student.status === 'not_invoiced' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+                          <XCircle size={12} />
+                          Not Invoiced
+                        </span>
+                      ) : student.status === 'paid' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                          <CheckCircle size={12} />
+                          Cleared
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                          <Clock size={12} />
+                          Balance
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => {
+                          setSelectedStudents([student.id]);
+                          setShowCreateModal(true);
+                        }}
+                        className="btn btn-secondary text-sm py-1.5"
+                      >
+                        <Plus size={14} /> Invoice
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Description</th>
+                  <th>Amount</th>
+                  <th>Paid</th>
+                  <th>Balance</th>
+                  <th>Status</th>
+                  <th>Term</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!fees || !payments || !allStudents ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12">
+                      <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-200 border-t-primary-500 mx-auto"></div>
+                    </td>
+                  </tr>
+                ) : filteredInvoices.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                          <FileText size={32} className="text-violet-400" />
+                        </div>
+                        <p className="text-slate-500 font-medium">No invoices found</p>
+                        <button onClick={() => setShowCreateModal(true)} className="text-primary-500 hover:text-primary-600 text-sm">
+                          Create bulk invoice
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredInvoices.map(invoice => {
+                  const StatusIcon = statusConfig[invoice.status].icon;
+                  return (
+                    <tr key={invoice.id}>
+                      <td className="font-medium">{invoice.studentName}</td>
+                      <td>{invoice.description}</td>
+                      <td className="font-semibold">{formatMoney(invoice.amount)}</td>
+                      <td className="text-emerald-600 font-semibold">{formatMoney(invoice.paidAmount)}</td>
+                      <td className={invoice.amount - invoice.paidAmount > 0 ? 'text-red-600 font-semibold' : ''}>
+                        {formatMoney(invoice.amount - invoice.paidAmount)}
+                      </td>
+                      <td>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${statusConfig[invoice.status].bg} ${statusConfig[invoice.status].color}`}>
+                          <StatusIcon size={12} />
+                          {invoice.status}
+                        </span>
+                      </td>
+                      <td><span className="badge badge-info">Term {invoice.term}</span></td>
+                      <td>
+                        {invoice.status !== 'paid' && (
+                          <button
+                            onClick={() => markAsPaid(invoice.id)}
+                            className="btn btn-secondary text-sm py-1.5"
+                          >
+                            <DollarSign size={14} /> Record
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-backdrop-in">
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
               <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -1018,7 +1222,7 @@ export default function Invoices() {
       )}
 
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-backdrop-in" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
@@ -1163,7 +1367,7 @@ export default function Invoices() {
       )}
 
       {showStructureModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
@@ -1389,7 +1593,7 @@ export default function Invoices() {
       )}
 
       {showBursaryModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
@@ -1546,7 +1750,7 @@ export default function Invoices() {
       )}
 
       {showDiscountModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
