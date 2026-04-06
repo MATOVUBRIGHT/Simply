@@ -753,20 +753,20 @@ textarea.form-input {
   min-width: 0;
 }
 
-/* Universal text overflow for all card text elements */
-.card *,
-.card-solid-indigo *,
-.card-solid-emerald *,
-.card-solid-rose *,
-.card-solid-violet *,
-.card-solid-cyan *,
-.card-solid-purple *,
-.card-solid-red *,
-.card-solid-teal *,
-.card-solid-yellow *,
-.card-solid-slate *,
-.card-solid-amber *,
-.card-gradient * {
+/* Universal text overflow for all card text elements (except lists) */
+.card > *,
+.card-solid-indigo > *,
+.card-solid-emerald > *,
+.card-solid-rose > *,
+.card-solid-violet > *,
+.card-solid-cyan > *,
+.card-solid-purple > *,
+.card-solid-red > *,
+.card-solid-teal > *,
+.card-solid-yellow > *,
+.card-solid-slate > *,
+.card-solid-amber > *,
+.card-gradient > * {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -774,9 +774,9 @@ textarea.form-input {
 }
 
 /* Allow multiline text to wrap but still constrain */
-.card p,
-.card span,
-.card label {
+.card > p,
+.card > span,
+.card > label {
   white-space: normal;
   word-break: break-word;
 }
