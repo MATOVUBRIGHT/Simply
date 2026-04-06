@@ -1,13 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, DollarSign, Receipt, FileText, CreditCard, TrendingUp, AlertCircle, Download, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Check, Search, Filter, Users } from 'lucide-react';
+import { Plus, DollarSign, Receipt, FileText, CreditCard, TrendingUp, AlertCircle, Download, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Check, Search, Filter, Users, Layers, Trash2, Wand2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
-import { Fee, Payment, PaymentMethod } from '@schofy/shared';
+import { Fee, Payment, PaymentMethod, FeeStructure, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrency } from '../hooks/useCurrency';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/DataService';
+import { userDBManager } from '../lib/database/UserDatabaseManager';
 
 export default function Finance() {
   const { user } = useAuth();
@@ -35,18 +36,28 @@ export default function Finance() {
 
   const [fees, setFees] = useState<Fee[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [feeStructures, setFeeStructures] = useState<FeeStructure[]>([]);
+  const [classes, setClasses] = useState<any[]>([]);
+  const [showStructureForm, setShowStructureForm] = useState(false);
+  const [structureFormData, setStructureFormData] = useState({
+    classId: '', name: '', category: FeeCategory.TUITION, amount: 0, term: '1', year: new Date().getFullYear().toString()
+  });
+  const [selectedClassForStructure, setSelectedClassForStructure] = useState<string>('');
+  const [structureFilterTerm, setStructureFilterTerm] = useState<string>(new Date().getFullYear().toString());
 
   useEffect(() => {
     if (user?.id) {
       loadFees();
       loadPayments();
+      loadClasses();
+      loadFeeStructures();
     }
   }, [user?.id]);
 
   useEffect(() => {
     const handleFeesUpdated = () => loadFees();
     const handlePaymentsUpdated = () => loadPayments();
-    const handleDataRefresh = () => { loadFees(); loadPayments(); };
+    const handleDataRefresh = () => { loadFees(); loadPayments(); loadFeeStructures(); };
     
     window.addEventListener('feesUpdated', handleFeesUpdated);
     window.addEventListener('paymentsUpdated', handlePaymentsUpdated);
@@ -77,6 +88,172 @@ export default function Finance() {
     } catch (error) {
       console.error(error);
     }
+  }
+
+  async function loadClasses() {
+    if (!user?.id) return;
+    try {
+      const data = await dataService.getAll(user.id, 'classes');
+      setClasses(data);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function loadFeeStructures() {
+    if (!user?.id) return;
+    try {
+      const data = await userDBManager.getAll(user.id, 'feeStructures');
+      setFeeStructures(data);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function handleCreateFeeStructure(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user?.id) return;
+    try {
+      const newStructure: FeeStructure = {
+        id: uuidv4(),
+        classId: structureFormData.classId,
+        name: structureFormData.name,
+        category: structureFormData.category,
+        amount: structureFormData.amount,
+        isRequired: true,
+        term: structureFormData.term,
+        year: structureFormData.year,
+        createdAt: new Date().toISOString(),
+      };
+      await userDBManager.add(user.id, 'feeStructures', newStructure);
+      setShowStructureForm(false);
+      setStructureFormData({ classId: '', name: '', category: FeeCategory.TUITION, amount: 0, term: '1', year: new Date().getFullYear().toString() });
+      loadFeeStructures();
+      addToast('Fee structure created successfully', 'success');
+    } catch (error) {
+      addToast('Failed to create fee structure', 'error');
+    }
+  }
+
+  async function handleDeleteFeeStructure(id: string) {
+    if (!user?.id) return;
+    if (!confirm('Delete this fee structure?')) return;
+    try {
+      await userDBManager.delete(user.id, 'feeStructures', id);
+      loadFeeStructures();
+      addToast('Fee structure deleted', 'success');
+    } catch (error) {
+      addToast('Failed to delete fee structure', 'error');
+    }
+  }
+
+  async function handleGenerateInvoicesForClass(classId: string, term: string, year: string) {
+    if (!user?.id) return;
+    try {
+      const structures = feeStructures.filter(s => s.classId === classId && s.term === term && s.year === year);
+      if (structures.length === 0) {
+        addToast('No fee structures found for this class/term', 'warning');
+        return;
+      }
+      const classStudents = students.filter(s => s.classId === classId);
+      const activeStudents = classStudents.filter((s: any) => s.status !== 'completed' && s.status !== 'graduated');
+      
+      let invoicesCreated = 0;
+      for (const student of activeStudents) {
+        for (const structure of structures) {
+          const existingFee = fees.find(f => f.studentId === student.id && f.description === structure.name && f.term === term && f.year === year);
+          if (!existingFee) {
+            const newFee: Fee = {
+              id: uuidv4(),
+              studentId: student.id,
+              description: structure.name,
+              amount: structure.amount,
+              term,
+              year,
+              createdAt: new Date().toISOString(),
+            };
+            await dataService.create(user.id, 'fees', newFee as any);
+            invoicesCreated++;
+          }
+        }
+      }
+      
+      loadFees();
+      addToast(`Created ${invoicesCreated} invoices for ${activeStudents.length} students`, 'success');
+    } catch (error) {
+      addToast('Failed to generate invoices', 'error');
+    }
+  }
+
+  async function handleGenerateInvoicesForAllClasses(term: string, year: string) {
+    if (!user?.id) return;
+    try {
+      let totalInvoices = 0;
+      let classesWithStructures = 0;
+      
+      for (const cls of classes) {
+        const structures = feeStructures.filter(s => s.classId === cls.id && s.term === term && s.year === year);
+        if (structures.length === 0) continue;
+        
+        classesWithStructures++;
+        const classStudents = students.filter(s => s.classId === cls.id);
+        const activeStudents = classStudents.filter((s: any) => s.status !== 'completed' && s.status !== 'graduated');
+        
+        for (const student of activeStudents) {
+          for (const structure of structures) {
+            const existingFee = fees.find(f => f.studentId === student.id && f.description === structure.name && f.term === term && f.year === year);
+            if (!existingFee) {
+              const newFee: Fee = {
+                id: uuidv4(),
+                studentId: student.id,
+                description: structure.name,
+                amount: structure.amount,
+                term,
+                year,
+                createdAt: new Date().toISOString(),
+              };
+              await dataService.create(user.id, 'fees', newFee as any);
+              totalInvoices++;
+            }
+          }
+        }
+      }
+      
+      loadFees();
+      addToast(`Created ${totalInvoices} invoices across ${classesWithStructures} classes`, 'success');
+    } catch (error) {
+      addToast('Failed to generate invoices', 'error');
+    }
+  }
+
+  function getCategoryLabel(category: FeeCategory): string {
+    const labels: Record<string, string> = {
+      [FeeCategory.TUITION]: 'Tuition',
+      [FeeCategory.BOARDING]: 'Boarding',
+      [FeeCategory.EXAM]: 'Examination',
+      [FeeCategory.REGISTRATION]: 'Registration',
+      [FeeCategory.UNIFORM]: 'Uniform',
+      [FeeCategory.BOOKS]: 'Books',
+      [FeeCategory.TRANSPORT]: 'Transport',
+      [FeeCategory.ACTIVITY]: 'Activity',
+      [FeeCategory.OTHER]: 'Other',
+    };
+    return labels[category] || 'Other';
+  }
+
+  function getCategoryColor(category: FeeCategory): string {
+    const colors: Record<string, string> = {
+      [FeeCategory.TUITION]: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+      [FeeCategory.BOARDING]: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+      [FeeCategory.EXAM]: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+      [FeeCategory.REGISTRATION]: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+      [FeeCategory.UNIFORM]: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300',
+      [FeeCategory.BOOKS]: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
+      [FeeCategory.TRANSPORT]: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300',
+      [FeeCategory.ACTIVITY]: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+      [FeeCategory.OTHER]: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
+    };
+    return colors[category] || colors[FeeCategory.OTHER];
   }
 
   const invoiceExpectedFields = [
@@ -673,71 +850,102 @@ export default function Finance() {
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <div className="relative" ref={termFilterRef}>
-                <button
-                  onClick={() => setShowTermFilter(!showTermFilter)}
-                  className={`btn btn-secondary flex items-center gap-2 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
-                >
-                  <Filter size={16} />
-                  <span className="hidden sm:inline">
-                    {filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}
-                  </span>
-                  <span className="sm:hidden">Terms</span>
-                  <ChevronDown size={14} className={`transition-transform duration-300 ${showTermFilter ? 'rotate-180' : ''}`} />
-                </button>
-                {showTermFilter && (
-                  <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden animate-dropdown-in">
-                    <div className="py-1">
-                      <button
-                        onClick={() => { setFilterTerm('all'); setShowTermFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterTerm === 'all' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        All Terms
-                        {filterTerm === 'all' && <Check size={14} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterTerm('1'); setShowTermFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterTerm === '1' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        Term 1
-                        {filterTerm === '1' && <Check size={14} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterTerm('2'); setShowTermFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterTerm === '2' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        Term 2
-                        {filterTerm === '2' && <Check size={14} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterTerm('3'); setShowTermFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterTerm === '3' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        Term 3
-                        {filterTerm === '3' && <Check size={14} className="ml-auto" />}
-                      </button>
-                    </div>
+              {activeTab === 'fees' && (
+                <>
+                  <select
+                    value={structureFilterTerm}
+                    onChange={e => setStructureFilterTerm(e.target.value)}
+                    className="form-input py-1.5 text-sm w-28"
+                  >
+                    <option value="1">Term 1</option>
+                    <option value="2">Term 2</option>
+                    <option value="3">Term 3</option>
+                  </select>
+                  <button
+                    onClick={() => handleGenerateInvoicesForAllClasses(structureFilterTerm, new Date().getFullYear().toString())}
+                    className="btn btn-primary py-1.5 text-sm"
+                  >
+                    <Wand2 size={14} />
+                    <span className="hidden sm:inline">Generate All</span>
+                  </button>
+                  <button
+                    onClick={() => { setStructureFormData(prev => ({ ...prev, term: structureFilterTerm, year: new Date().getFullYear().toString() })); setShowStructureForm(true); }}
+                    className="btn btn-secondary py-1.5 text-sm"
+                  >
+                    <Plus size={14} />
+                    <span className="hidden sm:inline">Add Fee</span>
+                  </button>
+                </>
+              )}
+              {activeTab !== 'fees' && (
+                <>
+                  <div className="relative" ref={termFilterRef}>
+                    <button
+                      onClick={() => setShowTermFilter(!showTermFilter)}
+                      className={`btn btn-secondary flex items-center gap-2 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
+                    >
+                      <Filter size={16} />
+                      <span className="hidden sm:inline">
+                        {filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}
+                      </span>
+                      <span className="sm:hidden">Terms</span>
+                      <ChevronDown size={14} className={`transition-transform duration-300 ${showTermFilter ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showTermFilter && (
+                      <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden animate-dropdown-in">
+                        <div className="py-1">
+                          <button
+                            onClick={() => { setFilterTerm('all'); setShowTermFilter(false); }}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                              filterTerm === 'all' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            All Terms
+                            {filterTerm === 'all' && <Check size={14} className="ml-auto" />}
+                          </button>
+                          <button
+                            onClick={() => { setFilterTerm('1'); setShowTermFilter(false); }}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                              filterTerm === '1' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            Term 1
+                            {filterTerm === '1' && <Check size={14} className="ml-auto" />}
+                          </button>
+                          <button
+                            onClick={() => { setFilterTerm('2'); setShowTermFilter(false); }}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                              filterTerm === '2' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            Term 2
+                            {filterTerm === '2' && <Check size={14} className="ml-auto" />}
+                          </button>
+                          <button
+                            onClick={() => { setFilterTerm('3'); setShowTermFilter(false); }}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                              filterTerm === '3' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            Term 3
+                            {filterTerm === '3' && <Check size={14} className="ml-auto" />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              <div className="relative">
-                <Search size={18} className="search-input-icon" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                  placeholder="Search..."
-                  className="search-input w-48"
-                />
-              </div>
+                  <div className="relative">
+                    <Search size={18} className="search-input-icon" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      placeholder="Search..."
+                      className="search-input w-48"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -749,7 +957,7 @@ export default function Finance() {
                 {activeTab === 'students' && <><th>Student</th><th>Admission No</th><th>Invoices</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></>}
                 {activeTab === 'invoices' && <><th>Student</th><th>Description</th><th>Amount</th><th>Term</th><th>Status</th><th>Actions</th></>}
                 {activeTab === 'payments' && <><th>Date</th><th>Student</th><th>Amount</th><th>Method</th></>}
-                {activeTab === 'fees' && <><th>Description</th><th>Amount</th><th>Term</th></>}
+                {activeTab === 'fees' && <><th>Class</th><th>Fee Items</th><th>Total Per Student</th><th>Students</th><th>Actions</th></>}
               </tr>
             </thead>
             <tbody>
@@ -875,18 +1083,71 @@ export default function Finance() {
                       </tr>
                     );
                   })}
-                  {activeTab === 'fees' && [...new Set(filteredFees.map(f => f.description))].map(desc => {
-                    const fee = filteredFees.find(f => f.description === desc);
-                    const relatedFees = filteredFees.filter(f => f.description === desc);
-                    const totalAmount = relatedFees.reduce((sum, f) => sum + f.amount, 0);
-                    return (
-                      <tr key={desc}>
-                        <td className="font-medium">{desc}</td>
-                        <td>{formatMoney(totalAmount)}</td>
-                        <td><span className="badge badge-info">Term {fee?.term}</span></td>
-                      </tr>
-                    );
-                  })}
+                  {activeTab === 'fees' && (
+                    <>
+                      {classes.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="text-center py-12">
+                            <div className="flex flex-col items-center gap-2">
+                              <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                                <Layers size={24} className="text-amber-400" />
+                              </div>
+                              <p className="text-slate-500 font-medium">No classes found</p>
+                              <p className="text-slate-400 text-sm">Create classes first to set up fee structures</p>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        classes.map(cls => {
+                          const classStructures = feeStructures.filter(s => s.classId === cls.id && s.term === structureFilterTerm);
+                          const classStudents = students.filter(s => s.classId === cls.id);
+                          const activeStudents = classStudents.filter((s: any) => s.status !== 'completed' && s.status !== 'graduated');
+                          const totalPerClass = classStructures.reduce((sum, s) => sum + s.amount, 0);
+                          
+                          return (
+                            <tr key={cls.id}>
+                              <td className="font-medium">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
+                                    {cls.name?.charAt(0)?.toUpperCase() || '?'}
+                                  </span>
+                                  <div>
+                                    <p className="font-semibold">{cls.name}</p>
+                                    <p className="text-xs text-slate-400">{cls.level || ''} {cls.section || ''}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>
+                                <span className="badge badge-info">{classStructures.length} items</span>
+                              </td>
+                              <td className="font-semibold">{formatMoney(totalPerClass)}</td>
+                              <td>
+                                <span className="text-sm text-slate-500">{activeStudents.length} students</span>
+                              </td>
+                              <td>
+                                <div className="flex items-center gap-1">
+                                  <button 
+                                    onClick={() => handleGenerateInvoicesForClass(cls.id, structureFilterTerm, new Date().getFullYear().toString())}
+                                    className="btn btn-secondary text-xs py-1.5 px-2"
+                                    title="Generate invoices for this class"
+                                  >
+                                    <Wand2 size={12} /> Generate
+                                  </button>
+                                  <button 
+                                    onClick={() => { setSelectedClassForStructure(cls.id); setShowStructureForm(true); }}
+                                    className="btn btn-ghost text-xs py-1.5 px-2"
+                                    title="Add fee item"
+                                  >
+                                    <Plus size={12} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </>
+                  )}
                 </>
               )}
             </tbody>
@@ -1034,6 +1295,187 @@ export default function Finance() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStructureForm && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowStructureForm(false); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <DollarSign size={18} className="text-white" />
+                <h2 className="font-bold text-white">Add Fee Structure</h2>
+              </div>
+              <button onClick={() => setShowStructureForm(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateFeeStructure} className="p-5 space-y-4">
+              <div className="space-y-1.5">
+                <label className="form-label">Class</label>
+                <select 
+                  value={structureFormData.classId} 
+                  onChange={e => setStructureFormData(prev => ({ ...prev, classId: e.target.value }))} 
+                  className="form-input" 
+                  required
+                >
+                  <option value="">Select Class</option>
+                  {classes.map(cls => (
+                    <option key={cls.id} value={cls.id}>{cls.name} {cls.level || ''}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="space-y-1.5">
+                <label className="form-label">Fee Name</label>
+                <input 
+                  value={structureFormData.name} 
+                  onChange={e => setStructureFormData(prev => ({ ...prev, name: e.target.value }))} 
+                  className="form-input" 
+                  required 
+                  placeholder="e.g., Term 1 Tuition" 
+                />
+              </div>
+              
+              <div className="space-y-1.5">
+                <label className="form-label">Category</label>
+                <select 
+                  value={structureFormData.category} 
+                  onChange={e => setStructureFormData(prev => ({ ...prev, category: e.target.value as FeeCategory }))} 
+                  className="form-input"
+                >
+                  <option value={FeeCategory.TUITION}>Tuition</option>
+                  <option value={FeeCategory.BOARDING}>Boarding</option>
+                  <option value={FeeCategory.EXAM}>Examination</option>
+                  <option value={FeeCategory.REGISTRATION}>Registration</option>
+                  <option value={FeeCategory.UNIFORM}>Uniform</option>
+                  <option value={FeeCategory.BOOKS}>Books & Materials</option>
+                  <option value={FeeCategory.TRANSPORT}>Transport</option>
+                  <option value={FeeCategory.ACTIVITY}>Activity Fee</option>
+                  <option value={FeeCategory.OTHER}>Other</option>
+                </select>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="form-label">Amount ({currency.symbol})</label>
+                  <input 
+                    type="number" 
+                    value={structureFormData.amount} 
+                    onChange={e => setStructureFormData(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))} 
+                    className="form-input" 
+                    required 
+                    min="0" 
+                    step="0.01"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="form-label">Term</label>
+                  <select 
+                    value={structureFormData.term} 
+                    onChange={e => setStructureFormData(prev => ({ ...prev, term: e.target.value }))} 
+                    className="form-input"
+                  >
+                    <option value="1">Term 1</option>
+                    <option value="2">Term 2</option>
+                    <option value="3">Term 3</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowStructureForm(false)} className="btn btn-secondary">Cancel</button>
+                <button type="submit" className="btn btn-primary flex items-center gap-2">
+                  <Plus size={16} /> Add Fee Structure
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {selectedClassForStructure && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setSelectedClassForStructure(''); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <Layers size={18} className="text-white" />
+                <h2 className="font-bold text-white">
+                  Fee Structure - {classes.find(c => c.id === selectedClassForStructure)?.name}
+                </h2>
+              </div>
+              <button onClick={() => setSelectedClassForStructure('')} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1">
+              {feeStructures.filter(s => s.classId === selectedClassForStructure).length === 0 ? (
+                <div className="text-center py-8">
+                  <DollarSign size={40} className="mx-auto text-slate-300 mb-3" />
+                  <p className="text-slate-500">No fee items for this class</p>
+                  <button 
+                    onClick={() => { setStructureFormData(prev => ({ ...prev, classId: selectedClassForStructure })); setShowStructureForm(true); }}
+                    className="btn btn-primary mt-3"
+                  >
+                    <Plus size={16} /> Add Fee Item
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {feeStructures.filter(s => s.classId === selectedClassForStructure).map(structure => (
+                    <div key={structure.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <span className={`px-2 py-1 rounded-md text-xs font-medium ${getCategoryColor(structure.category)}`}>
+                          {getCategoryLabel(structure.category)}
+                        </span>
+                        <div>
+                          <p className="font-medium">{structure.name}</p>
+                          <p className="text-sm text-slate-500">Term {structure.term}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold">{formatMoney(structure.amount)}</span>
+                        <button 
+                          onClick={() => handleDeleteFeeStructure(structure.id)}
+                          className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center pt-3 border-t border-slate-200 dark:border-slate-700">
+                    <span className="font-semibold text-slate-600 dark:text-slate-300">Total per Student:</span>
+                    <span className="text-xl font-bold" style={{ color: 'var(--primary-color)' }}>
+                      {formatMoney(feeStructures.filter(s => s.classId === selectedClassForStructure).reduce((sum, s) => sum + s.amount, 0))}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
+              <div className="flex justify-between">
+                <button 
+                  onClick={() => { setStructureFormData(prev => ({ ...prev, classId: selectedClassForStructure })); setShowStructureForm(true); }}
+                  className="btn btn-secondary"
+                >
+                  <Plus size={16} /> Add Fee Item
+                </button>
+                <button 
+                  onClick={() => {
+                    handleGenerateInvoicesForClass(selectedClassForStructure, structureFilterTerm, new Date().getFullYear().toString());
+                    setSelectedClassForStructure('');
+                  }}
+                  className="btn btn-primary"
+                >
+                  <Wand2 size={16} /> Generate Invoices
+                </button>
+              </div>
             </div>
           </div>
         </div>
