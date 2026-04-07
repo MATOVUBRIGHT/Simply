@@ -29,6 +29,15 @@ declare global {
 
 class DataService {
   private deviceId: string;
+  private attemptedFullSync: Set<string> = new Set();
+  
+  // Only sync tables that actually exist in Supabase
+  private readonly SUPABASE_TABLES = new Set([
+    'schools', 'students', 'staff', 'classes', 'subjects',
+    'attendance', 'fees', 'fee_structures', 'bursaries', 'discounts',
+    'payments', 'exams', 'exam_results', 'timetable',
+    'transport_routes', 'transport_assignments', 'announcements', 'users'
+  ]);
 
   constructor() {
     this.deviceId = userDBManager.getDeviceId();
@@ -36,6 +45,12 @@ class DataService {
 
   private isOnline(): boolean {
     return navigator.onLine;
+  }
+
+  private shouldSyncTable(tableName: string): boolean {
+    // Convert camelCase to snake_case for comparison
+    const snakeCase = tableName.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    return this.SUPABASE_TABLES.has(snakeCase) || this.SUPABASE_TABLES.has(tableName);
   }
 
   private broadcastChange(table: string, type: 'INSERT' | 'UPDATE' | 'DELETE', record: any, userId: string) {
@@ -296,15 +311,27 @@ class DataService {
     // ALWAYS return local data first for speed
     const localData = await userDBManager.getAll(userId, tableName);
     
-    // If local data is empty (new device), do a full pull
-    if (localData.length === 0 && this.isOnline() && isSupabaseConfigured && supabase) {
+    // If local data is empty and this is a syncable table, do a full pull (but only once)
+    const syncKey = `${userId}-${tableName}`;
+    if (
+      localData.length === 0 && 
+      this.shouldSyncTable(tableName) &&
+      !this.attemptedFullSync.has(syncKey) &&
+      this.isOnline() && 
+      isSupabaseConfigured && 
+      supabase
+    ) {
+      this.attemptedFullSync.add(syncKey);
       console.log(`📥 Full sync for ${tableName} (new device detected)`);
-      await this.pullFull(userId, tableName);
+      await this.pullFull(userId, tableName).catch(err => {
+        // Log error but don't break the app
+        console.error(`Full sync failed for ${tableName}:`, err);
+      });
       return await userDBManager.getAll(userId, tableName);
     }
     
     // In background, if online, pull changes from cloud (Delta Sync)
-    if (this.isOnline() && isSupabaseConfigured && supabase) {
+    if (this.isOnline() && this.shouldSyncTable(tableName) && isSupabaseConfigured && supabase) {
       this.pullDelta(userId, tableName).catch(err => console.error(`Delta pull failed for ${tableName}:`, err));
     }
 
@@ -318,7 +345,7 @@ class DataService {
       const { data, error } = await supabase
         .from(tableName)
         .select('*')
-        .eq('user_id', userId)
+        .eq('school_id', userId)
         .is('deleted_at', null);
 
       if (!error && data && data.length > 0) {
@@ -408,7 +435,7 @@ class DataService {
       const { data, error } = await supabase
         .from(tableName)
         .select('*')
-        .eq('user_id', userId)
+        .eq('school_id', userId)
         .gt('updated_at', lastSyncTime);
 
       if (!error && data && data.length > 0) {
@@ -555,6 +582,8 @@ class DataService {
         try {
           const { table, recordId, operation, data } = item;
           const supabaseData = this.mapLocalToSupabase(data, table);
+          // Add school_id to data for Supabase (migrations use school_id, not user_id)
+          supabaseData.school_id = userId;
 
           let error;
           

@@ -1,6 +1,7 @@
--- SQLite Optimizations for Schofy
--- Run these SQL statements to optimize local SQLite database performance
--- These indexes target frequently queried fields and common query patterns
+-- =====================================================
+-- Migration: 017_database_optimizations
+-- Description: Create comprehensive indexes for query performance
+-- =====================================================
 
 -- =====================================================
 -- CREATE INDEXES FOR FREQUENTLY QUERIED FIELDS
@@ -8,7 +9,6 @@
 
 -- Student indexes
 CREATE INDEX IF NOT EXISTS idx_students_class_id ON students(class_id);
-CREATE INDEX IF NOT EXISTS idx_students_status ON students(status);
 CREATE INDEX IF NOT EXISTS idx_students_admission_no ON students(admission_no);
 CREATE INDEX IF NOT EXISTS idx_students_created_at ON students(created_at DESC);
 
@@ -68,37 +68,7 @@ CREATE INDEX IF NOT EXISTS idx_fees_student_term_year ON fees(student_id, term, 
 CREATE INDEX IF NOT EXISTS idx_students_class_status ON students(class_id, status);
 
 -- =====================================================
--- ENABLE AUTOINCREMENT FOR SYNC QUEUE
+-- ANALYZE TABLE FOR QUERY OPTIMIZER
 -- =====================================================
-
--- Analyze table for query optimizer
-ANALYZE;
-
--- =====================================================
--- PERFORMANCE TUNING FOR POSTGRESQL
--- =====================================================
-
--- PostgreSQL automatically handles many optimizations
--- The indexes above will significantly improve query performance
--- For PostgreSQL-specific tuning, adjust these settings in postgresql.conf:
--- - shared_buffers: 25% of system RAM
--- - effective_cache_size: 50% of system RAM
--- - work_mem: RAM / (max_connections * 2)
--- - maintenance_work_mem: RAM / 16
-
--- =====================================================
--- ARCHIVING OLD DATA (Optional - run monthly)
--- =====================================================
-
--- Archive old attendance records (older than 1 year)
--- INSERT INTO attendance_archive 
--- SELECT * FROM attendance WHERE date < date('now', '-1 year');
--- DELETE FROM attendance WHERE date < date('now', '-1 year');
-
--- Archive old payments (older than 2 years)
--- INSERT INTO payments_archive
--- SELECT * FROM payments WHERE date < date('now', '-2 years');
--- DELETE FROM payments WHERE date < date('now', '-2 years');
-
--- Vacuum to reclaim space after deletion
--- VACUUM;
+-- PostgreSQL will automatically maintain statistics
+-- The above indexes will significantly improve query performance

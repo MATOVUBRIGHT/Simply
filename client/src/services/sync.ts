@@ -3,12 +3,23 @@ import { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 
 class SyncService {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
-  private readonly SYNC_INTERVAL = 60000;
+  private readonly SYNC_INTERVAL = 120000; // Increased to 2 minutes
+  private readonly MIN_SYNC_INTERVAL = 10000; // Minimum 10s between syncs
+  private lastSyncTime = 0;
   private supabase: SupabaseClient | null = null;
   private currentUserId: string | null = null;
   private syncEnabled = false;
+  private isSyncing = false;
   private realtimeChannels: Map<string, RealtimeChannel> = new Map();
-  private realtimeUnsubscribers: Function[] = [];
+  private lastSyncChanges = 0;
+
+  // Only tables that actually exist in Supabase
+  private readonly SYNCABLE_TABLES = [
+    'schools', 'students', 'staff', 'classes', 'subjects',
+    'attendance', 'fees', 'fee_structures', 'bursaries', 'discounts',
+    'payments', 'exams', 'exam_results', 'timetable',
+    'transport_routes', 'transport_assignments', 'announcements', 'users'
+  ];
 
   configure(options: { supabaseClient?: SupabaseClient }) {
     if (options.supabaseClient) {
@@ -16,160 +27,51 @@ class SyncService {
     }
   }
 
+  setUserId(userId: string) {
+    this.currentUserId = userId;
+    localStorage.setItem('schofy_current_user_id', userId);
+    if (this.syncEnabled) {
+      this.restartSync();
+    }
+  }
+
+  getUserId(): string | null {
+    return this.currentUserId || localStorage.getItem('schofy_current_user_id');
+  }
+
   enableSync() {
     this.syncEnabled = true;
-    this.subscribeToRealtime();
+    this.startBackgroundSync();
   }
 
   disableSync() {
     this.syncEnabled = false;
     this.stopBackgroundSync();
-    this.unsubscribeFromRealtime();
   }
 
-  isSyncEnabled(): boolean {
-    return this.syncEnabled;
-  }
-
-  setUserId(userId: string) {
-    this.currentUserId = userId;
-    localStorage.setItem('schofy_current_user_id', userId);
-    
-    // Re-subscribe to realtime when user changes
-    if (this.syncEnabled) {
-      this.unsubscribeFromRealtime();
-      this.subscribeToRealtime();
-    }
-  }
-
-  getUserId(): string | null {
-    if (this.currentUserId) return this.currentUserId;
-    return localStorage.getItem('schofy_current_user_id');
-  }
-
-  /**
-   * Subscribe to real-time changes from Supabase
-   * When any device updates data, all devices get instant notifications
-   */
-  private subscribeToRealtime() {
-    if (!this.supabase || !this.syncEnabled) return;
-
-    const userId = this.getUserId();
-    if (!userId) return;
-
-    console.log('🔄 Subscribing to real-time updates for user:', userId);
-
-    // Watch all relevant tables for changes
-    const tables = [
-      'students', 'staff', 'classes', 'subjects',
-      'attendance', 'fees', 'fee_structures', 'payments',
-      'announcements', 'exams', 'exam_results', 'timetable',
-      'transport_routes', 'transport_assignments'
-    ];
-
-    tables.forEach(table => {
-      try {
-        const channel = this.supabase!
-          .channel(`${table}:${userId}`)
-          .on(
-            'postgres_changes',
-            {
-              event: '*',
-              schema: 'public',
-              table: table,
-              filter: `user_id=eq.${userId}`
-            },
-            async (payload: any) => {
-              console.log(`📡 Real-time update for ${table}:`, payload);
-              
-              try {
-                // Handle INSERT and UPDATE events
-                if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-                  await this.applyRemoteChange(userId, table, payload.new);
-                }
-                // Handle DELETE events (soft delete)
-                else if (payload.eventType === 'DELETE') {
-                  await this.applyRemoteChange(userId, table, payload.old);
-                }
-              } catch (error) {
-                console.error(`Failed to apply realtime change for ${table}:`, error);
-              }
-            }
-          )
-          .subscribe((status: any) => {
-            if (status === 'SUBSCRIBED') {
-              console.log(`✅ Real-time subscribed to ${table}`);
-            } else if (status === 'CHANNEL_ERROR') {
-              console.error(`❌ Real-time error on ${table}`);
-            }
-          });
-
-        this.realtimeChannels.set(table, channel);
-      } catch (error) {
-        console.error(`Failed to subscribe to ${table}:`, error);
-      }
-    });
-  }
-
-  /**
-   * Unsubscribe from all real-time channels
-   */
-  private unsubscribeFromRealtime() {
-    if (!this.supabase) return;
-
-    console.log('🔌 Unsubscribing from real-time updates');
-    
-    this.realtimeChannels.forEach((channel) => {
-      this.supabase!.removeChannel(channel);
-    });
-    
-    this.realtimeChannels.clear();
-    this.realtimeUnsubscribers.forEach(unsub => unsub?.());
-    this.realtimeUnsubscribers = [];
-  }
-
-  /**
-   * Apply a real-time change to local database
-   */
-  private async applyRemoteChange(userId: string, tableName: string, record: any): Promise<void> {
-    try {
-      const camelTable = this.snakeToCamel(tableName);
-      const formattedRecord = this.formatRecordForLocal(record);
-      formattedRecord.userId = userId;
-      formattedRecord.syncStatus = 'synced';
-      formattedRecord.deviceId = userDBManager.getDeviceId();
-      
-      await userDBManager.put(userId, camelTable, formattedRecord);
-      console.log(`✨ Applied real-time change to ${camelTable}`);
-    } catch (error) {
-      console.error(`Failed to apply real-time change for ${tableName}:`, error);
-    }
+  private restartSync() {
+    this.stopBackgroundSync();
+    this.startBackgroundSync();
   }
 
   startBackgroundSync() {
     if (!this.syncEnabled || this.syncInterval) return;
 
-    // Subscribe to real-time changes
-    try {
-      this.subscribeToRealtime();
-    } catch (error) {
-      console.error('Failed to subscribe to realtime:', error);
-    }
+    this.subscribeToRealtime();
 
-    // Also do periodic sync as fallback (every 60 seconds)
-    this.syncInterval = setInterval(() => {
-      if (navigator.onLine && this.currentUserId) {
-        this.syncIncremental();
-      }
+    this.syncInterval = setInterval(async () => {
+      if (!navigator.onLine || !this.getUserId() || this.isSyncing) return;
+      
+      const now = Date.now();
+      // Skip if minimum interval hasn't passed
+      if (now - this.lastSyncTime < this.MIN_SYNC_INTERVAL) return;
+      
+      this.runFullSyncCycle();
     }, this.SYNC_INTERVAL);
 
-    // Do initial sync
-    if (this.currentUserId && navigator.onLine) {
-      try {
-        this.syncIncremental();
-      } catch (error) {
-        console.error('Initial sync failed:', error);
-      }
+    // Initial sync
+    if (this.getUserId() && navigator.onLine) {
+      this.runFullSyncCycle();
     }
   }
 
@@ -181,117 +83,264 @@ class SyncService {
     this.unsubscribeFromRealtime();
   }
 
-  async syncIncremental(): Promise<void> {
-    if (!this.syncEnabled) return;
+  async runFullSyncCycle(): Promise<void> {
+    if (this.isSyncing || !this.syncEnabled) return;
     
     const userId = this.getUserId();
     if (!userId || !this.supabase) return;
 
+    this.isSyncing = true;
+    this.lastSyncTime = Date.now();
+    console.log('🔄 Starting full sync cycle...');
+
     try {
-      await this.pushPendingChanges(userId);
-      await this.pullRemoteChanges(userId);
-      localStorage.setItem('lastSyncTime', new Date().toISOString());
-      console.log('✅ Sync completed successfully');
+      // 1. Upload Phase (Local -> Supabase)
+      await this.uploadPendingChanges(userId);
+
+      // 2. Download Phase (Supabase -> Local)
+      await this.downloadRemoteChanges(userId);
+
+      // 3. Verification Phase
+      await this.verifyConsistency(userId);
+
+      localStorage.setItem(`last_sync_${userId}`, new Date().toISOString());
+      console.log('✅ Sync cycle completed');
     } catch (error) {
-      console.error('Sync failed:', error);
+      console.error('❌ Sync cycle failed:', error);
+    } finally {
+      this.isSyncing = false;
     }
   }
 
-  async pushPendingChanges(userId: string): Promise<void> {
-    if (!this.supabase || !this.syncEnabled) return;
+  /**
+   * UPLOAD PHASE: Push all pending local changes to Supabase
+   */
+  private async uploadPendingChanges(userId: string): Promise<void> {
+    const pendingRecords = await userDBManager.getAllPendingRecords(userId);
+    if (pendingRecords.length === 0) return;
 
-    const pendingItems = await userDBManager.getPendingSyncItems(userId);
-    
-    if (pendingItems.length === 0) return;
-    
-    console.log(`📤 Pushing ${pendingItems.length} pending changes...`);
+    console.log(`📤 Uploading ${pendingRecords.length} pending records...`);
 
-    for (const item of pendingItems) {
-      try {
-        const tableName = this.camelToSnake(item.table);
-        const dataWithUser = {
-          ...item.data,
-          user_id: userId,
-        };
+    // Group by table for batching
+    const tableGroups = pendingRecords.reduce((acc, item) => {
+      if (!acc[item.table]) acc[item.table] = [];
+      acc[item.table].push(item.record);
+      return acc;
+    }, {} as Record<string, any[]>);
 
-        if (item.operation === 'delete') {
-          await this.supabase
-            .from(tableName)
-            .update({ deleted_at: new Date().toISOString() })
-            .eq('id', item.recordId)
-            .eq('user_id', userId);
-        } else {
-          await this.supabase
-            .from(tableName)
-            .upsert(dataWithUser);
-        }
-
-        await userDBManager.markSynced(userId, item.id);
-        console.log(`✅ Synced ${item.table} - ${item.operation}`);
-      } catch (error) {
-        console.error('Failed to push item:', item, error);
-      }
-    }
-  }
-
-  async pullRemoteChanges(userId: string): Promise<void> {
-    if (!this.supabase || !this.syncEnabled) return;
-
-    const lastSync = localStorage.getItem('lastSyncTime') || '1970-01-01T00:00:00Z';
-
-    const tables = [
-      'students', 'staff', 'classes', 'subjects',
-      'attendance', 'fees', 'fee_structures', 'payments',
-      'announcements', 'exams', 'exam_results', 'timetable',
-      'transport_routes', 'transport_assignments'
-    ];
-
-    for (const table of tables) {
-      try {
-        const { data, error } = await this.supabase
-          .from(table)
-          .select('*')
-          .eq('user_id', userId)
-          .eq('deleted_at', null)
-          .gt('updated_at', lastSync);
-
-        if (!error && data && data.length > 0) {
-          await this.applyRemoteChanges(userId, table, data);
-          console.log(`📥 Pulled ${data.length} changes from ${table}`);
-        }
-      } catch (error) {
-        console.error(`Failed to pull ${table}:`, error);
-      }
-    }
-  }
-
-  private async applyRemoteChanges(userId: string, tableName: string, records: any[]): Promise<void> {
-    const camelTable = this.snakeToCamel(tableName);
-
-    for (const record of records) {
-      const formattedRecord = this.formatRecordForLocal(record);
-      formattedRecord.userId = userId;
-      formattedRecord.syncStatus = 'synced';
-      formattedRecord.deviceId = userDBManager.getDeviceId();
+    for (const [localTable, records] of Object.entries(tableGroups)) {
+      const remoteTable = this.camelToSnake(localTable);
       
-      await userDBManager.put(userId, camelTable, formattedRecord);
+      // Convert to remote format (snake_case)
+      const remoteRecords = records.map(r => this.formatForRemote(r, userId));
+
+      try {
+        const { error } = await this.supabase!
+          .from(remoteTable)
+          .upsert(remoteRecords, { onConflict: 'id' });
+
+        if (error) throw error;
+
+        // Mark as synced locally
+        for (const record of records) {
+          await userDBManager.setSyncStatus(userId, localTable, record.id, 'synced');
+        }
+        console.log(`✅ Uploaded ${records.length} records to ${remoteTable}`);
+      } catch (error) {
+        console.error(`❌ Failed to upload ${localTable}:`, error);
+        for (const record of records) {
+          await userDBManager.setSyncStatus(userId, localTable, record.id, 'failed');
+        }
+      }
     }
   }
 
-  private formatRecordForLocal(record: any): any {
-    const formatted: any = {};
-    for (const [key, value] of Object.entries(record)) {
-      formatted[this.snakeToCamel(key)] = value;
+  /**
+   * DOWNLOAD PHASE: Fetch remote changes and merge locally
+   */
+  private async downloadRemoteChanges(userId: string): Promise<void> {
+    const lastSync = localStorage.getItem(`last_sync_${userId}`) || '1970-01-01T00:00:00Z';
+    
+    for (const remoteTable of this.SYNCABLE_TABLES) {
+      try {
+        let query = this.supabase!
+          .from(remoteTable)
+          .select('*');
+
+        // Schools table uses 'id' instead of 'school_id'
+        if (remoteTable === 'schools') {
+          query = query.eq('id', userId);
+        } else {
+          query = query.eq('school_id', userId);
+        }
+        
+        query = query.gt('updated_at', lastSync);
+        const { data, error } = await query;
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          console.log(`📥 Downloaded ${data.length} records from ${remoteTable}`);
+          await this.mergeRemoteRecords(userId, remoteTable, data);
+        }
+      } catch (error) {
+        console.error(`❌ Failed to download ${remoteTable}:`, error);
+      }
     }
-    return formatted;
   }
 
+  /**
+   * MERGE LOGIC: Resolve conflicts using updated_at (Latest Update Wins)
+   */
+  private async mergeRemoteRecords(userId: string, remoteTable: string, remoteRecords: any[]): Promise<void> {
+    const localTable = this.snakeToCamel(remoteTable);
+
+    for (const remoteRecord of remoteRecords) {
+      const localRecord = await userDBManager.get(userId, localTable, remoteRecord.id);
+      const formattedRemote = this.formatForLocal(remoteRecord);
+
+      if (!localRecord) {
+        // New record from remote
+        formattedRemote.syncStatus = 'synced';
+        await userDBManager.put(userId, localTable, formattedRemote);
+      } else {
+        // Conflict check
+        const remoteUpdatedAt = new Date(remoteRecord.updated_at).getTime();
+        const localUpdatedAt = new Date(localRecord.updatedAt).getTime();
+
+        if (remoteUpdatedAt > localUpdatedAt) {
+          // Remote is newer, overwrite local
+          formattedRemote.syncStatus = 'synced';
+          await userDBManager.put(userId, localTable, formattedRemote);
+          console.log(`🔄 Conflict resolved: Remote won for ${localTable}:${remoteRecord.id}`);
+        } else if (localRecord.syncStatus === 'synced') {
+          // Local is same as remote but marked as synced, no action needed
+        } else {
+          // Local is newer and pending, will be uploaded in next cycle
+          console.log(`⏳ Conflict: Local is newer for ${localTable}:${remoteRecord.id}, waiting for upload`);
+        }
+      }
+    }
+  }
+
+  /**
+   * VERIFICATION: Compare counts and trigger repair if needed
+   */
+  private async verifyConsistency(userId: string): Promise<void> {
+    for (const remoteTable of this.SYNCABLE_TABLES) {
+      try {
+        let query = this.supabase!
+          .from(remoteTable)
+          .select('*', { count: 'exact', head: true });
+
+        // Schools table uses 'id' instead of 'school_id'
+        if (remoteTable === 'schools') {
+          query = query.eq('id', userId);
+        } else {
+          query = query.eq('school_id', userId);
+        }
+        
+        query = query.is('deleted_at', null);
+        const { count, error } = await query;
+
+        if (error) continue;
+
+        const localTable = this.snakeToCamel(remoteTable);
+        const localAll = await userDBManager.getAll(userId, localTable);
+        const localCount = localAll.filter(r => !r.deletedAt).length;
+
+        if (count !== localCount) {
+          console.warn(`⚠️ Inconsistency detected in ${remoteTable}: Remote=${count}, Local=${localCount}. Triggering repair...`);
+          
+          // REPAIR: Pull all active records for this table regardless of updated_at
+          let repairQuery = this.supabase!
+            .from(remoteTable)
+            .select('*');
+
+          if (remoteTable === 'schools') {
+            repairQuery = repairQuery.eq('id', userId);
+          } else {
+            repairQuery = repairQuery.eq('school_id', userId);
+          }
+          
+          repairQuery = repairQuery.is('deleted_at', null);
+          const { data: remoteData, error: pullError } = await repairQuery;
+
+          if (!pullError && remoteData) {
+            await this.mergeRemoteRecords(userId, remoteTable, remoteData);
+            console.log(`✨ Auto-repaired ${remoteTable}: ${remoteData.length} records synced.`);
+          }
+        }
+      } catch (err) {
+        console.error(`Verification failed for ${remoteTable}:`, err);
+      }
+    }
+  }
+
+  /**
+   * REAL-TIME: Listen for changes from other devices
+   */
+  private subscribeToRealtime() {
+    if (!this.supabase || !this.syncEnabled) return;
+
+    const userId = this.getUserId();
+    if (!userId) return;
+
+    this.SYNCABLE_TABLES.forEach(table => {
+      // Schools table uses 'id' instead of 'school_id'
+      const filterField = table === 'schools' ? 'id' : 'school_id';
+      const channel = this.supabase!
+        .channel(`sync:${table}:${userId}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: table, filter: `${filterField}=eq.${userId}` },
+          async (payload: any) => {
+            const schoolField = table === 'schools' ? 'id' : 'school_id';
+            if (payload.new && payload.new[schoolField] === userId) {
+              console.log(`📡 Real-time change in ${table}`);
+              await this.mergeRemoteRecords(userId, table, [payload.new]);
+            }
+          }
+        )
+        .subscribe();
+      
+      this.realtimeChannels.set(table, channel);
+    });
+  }
+
+  private unsubscribeFromRealtime() {
+    this.realtimeChannels.forEach(c => c.unsubscribe());
+    this.realtimeChannels.clear();
+  }
+
+  // Helper: CamelCase -> snake_case
   private camelToSnake(str: string): string {
     return str.replace(/[A-Z]/g, (letter: string) => `_${letter.toLowerCase()}`);
   }
 
+  // Helper: snake_case -> CamelCase
   private snakeToCamel(str: string): string {
     return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+  }
+
+  private formatForRemote(record: any, userId: string): any {
+    const formatted: any = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (['syncStatus', 'deviceId'].includes(key)) continue;
+      const remoteKey = key === 'schoolId' ? 'school_id' : this.camelToSnake(key);
+      formatted[remoteKey] = value;
+    }
+    formatted.school_id = userId;
+    return formatted;
+  }
+
+  private formatForLocal(record: any): any {
+    const formatted: any = {};
+    for (const [key, value] of Object.entries(record)) {
+      const localKey = key === 'school_id' ? 'schoolId' : this.snakeToCamel(key);
+      formatted[localKey] = value;
+    }
+    return formatted;
   }
 }
 

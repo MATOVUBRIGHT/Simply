@@ -43,228 +43,117 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     localStorage.getItem('schofy_sync_enabled') === 'true'
   );
   const channelRef = useRef<any>(null);
+  const lastManualSyncRef = useRef<number>(0);
+  const syncInProgressRef = useRef(false);
 
   // Configure sync service with Supabase
   useEffect(() => {
-    syncService.disableSync();
-    
     if (isSupabaseConfigured && supabase) {
       syncService.configure({ supabaseClient: supabase });
-      console.log('✅ Sync service configured with Supabase');
-    } else {
-      console.warn('⚠️ Supabase not configured - sync disabled');
+      if (syncEnabled) {
+        syncService.enableSync();
+      }
     }
-  }, []);
+  }, [syncEnabled]);
 
-  // Set user ID when schoolId changes and start sync
+  // Set user ID when schoolId changes
   useEffect(() => {
     if (schoolId) {
       syncService.setUserId(schoolId);
-      console.log('👤 Sync user ID set to:', schoolId);
-      
-      // Start sync if enabled
       if (syncEnabled && isOnline) {
-        syncService.enableSync();
         syncService.startBackgroundSync();
       }
     }
   }, [schoolId, syncEnabled, isOnline]);
 
-  // Subscribe to Supabase Realtime for all tables
-  useEffect(() => {
-    if (!user?.id || !supabase || !isSupabaseConfigured || !syncEnabled) return;
-
-    console.log('🔔 Setting up Supabase Realtime subscription...');
-
-    // Create a single channel for all tables
-    channelRef.current = supabase.channel(`schofy-sync-${user.id}`);
-
-    // Subscribe to all tables
-    SYNCED_TABLES.forEach(table => {
-      channelRef.current.on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: table,
-          filter: `user_id=eq.${user.id}`
-        },
-        async (payload: any) => {
-          console.log(`📡 Realtime: ${table} - ${payload.eventType}`);
-          
-          try {
-            if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-              await applyRemoteChange(user.id, table, payload.new);
-            } else if (payload.eventType === 'DELETE') {
-              await applyRemoteChange(user.id, table, payload.old);
-            }
-            
-            // Notify UI to refresh
-            window.dispatchEvent(new CustomEvent('schofyDataRefresh', { 
-              detail: { table, action: payload.eventType } 
-            }));
-          } catch (e) {
-            console.error(`Realtime apply error for ${table}:`, e);
-          }
-        }
-      );
-    });
-
-    channelRef.current.subscribe((status: string) => {
-      if (status === 'SUBSCRIBED') {
-        console.log('✅ Realtime subscription active');
-      } else if (status === 'CHANNEL_ERROR') {
-        console.error('❌ Realtime channel error');
-      }
-    });
-
-    return () => {
-      if (channelRef.current && supabase) {
-        supabase.removeChannel(channelRef.current);
-      }
-    };
-  }, [user?.id, syncEnabled]);
-
-  // Convert snake_case to camelCase
-  const toCamel = (str: string) => str.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-
-  // Apply remote change to local DB
-  const applyRemoteChange = async (userId: string, tableName: string, record: any) => {
-    try {
-      const camelTable = toCamel(tableName);
-      const formatted: any = {};
-      
-      for (const [key, value] of Object.entries(record)) {
-        formatted[toCamel(key)] = value;
-      }
-      
-      formatted.userId = userId;
-      formatted.syncStatus = 'synced';
-      formatted.deviceId = userDBManager.getDeviceId();
-      
-      await userDBManager.put(userId, camelTable, formatted);
-      console.log(`📱 Applied remote change: ${camelTable}`);
-    } catch (e) {
-      console.error(`Failed to apply remote change for ${tableName}:`, e);
-    }
-  };
-
-  // Pull ALL data from cloud (for new devices or full sync)
-  const forceFullSync = useCallback(async () => {
-    if (!user?.id || !supabase || !isSupabaseConfigured) {
-      addToast('Cloud sync not configured', 'error');
-      return;
-    }
-
-    setIsSyncing(true);
-    addToast('Starting full sync...', 'info');
-
-    try {
-      console.log('📥 Starting FULL pull from cloud...');
-      
-      for (const table of SYNCED_TABLES) {
-        try {
-          const { data, error } = await supabase
-            .from(table)
-            .select('*')
-            .eq('user_id', user.id)
-            .is('deleted_at', null);
-
-          if (error) {
-            console.error(`Error pulling ${table}:`, error);
-            continue;
-          }
-
-          if (data && data.length > 0) {
-            for (const record of data) {
-              await applyRemoteChange(user.id, table, record);
-            }
-            console.log(`📥 Pulled ${data.length} records from ${table}`);
-          }
-        } catch (e) {
-          console.error(`Failed to pull ${table}:`, e);
-        }
-      }
-
-      const now = new Date().toISOString();
-      localStorage.setItem('schofy_last_sync', now);
-      setLastSyncTime(new Date(now));
-
-      // Dispatch full refresh
-      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { type: 'full_sync' } }));
-      
-      addToast('Full sync completed', 'success');
-    } catch (e: any) {
-      console.error('Full sync failed:', e);
-      addToast('Full sync failed: ' + e.message, 'error');
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [user?.id, addToast]);
-
   // Load pending count periodically
   const loadPendingCount = useCallback(async () => {
-    if (!user?.id || !syncEnabled) {
+    if (!schoolId || !syncEnabled) {
       setPendingChanges(0);
       return;
     }
     try {
-      const items = await userDBManager.getPendingSyncItems(user.id);
-      setPendingChanges(items.length);
+      const pending = await userDBManager.getAllPendingRecords(schoolId);
+      setPendingChanges(pending.length);
     } catch (error) {
       console.error('Failed to load pending count:', error);
       setPendingChanges(0);
     }
-  }, [user, syncEnabled]);
+  }, [schoolId, syncEnabled]);
 
   useEffect(() => {
-    if (!syncEnabled) {
-      setPendingChanges(0);
-      return;
-    }
     loadPendingCount();
     const interval = setInterval(loadPendingCount, 5000);
     return () => clearInterval(interval);
-  }, [syncEnabled, loadPendingCount]);
+  }, [loadPendingCount]);
 
-  const syncNow = useCallback(async () => {
-    if (!isOnline || isSyncing || !syncEnabled || !user) {
-      console.log('⚠️ Sync skipped - offline:', !isOnline, 'syncing:', isSyncing, 'enabled:', syncEnabled);
-      if (!syncEnabled) {
+  const syncNow = useCallback(async (showNotifications = true) => {
+    // Prevent multiple concurrent syncs
+    if (syncInProgressRef.current || !isOnline || !syncEnabled || !schoolId) {
+      if (!syncEnabled && showNotifications) {
         addToast('Enable cloud sync first', 'warning');
       }
       return;
     }
 
+    // Debounce manual syncs - prevent spamming sync button
+    const now = Date.now();
+    if (showNotifications && now - lastManualSyncRef.current < 3000) {
+      return;
+    }
+    if (showNotifications) {
+      lastManualSyncRef.current = now;
+    }
+
+    syncInProgressRef.current = true;
     setIsSyncing(true);
-    console.log('📤 Manual sync initiated...');
-    
     try {
-      await syncService.syncIncremental();
-      const now = new Date();
-      setLastSyncTime(now);
-      localStorage.setItem('schofy_last_sync', now.toISOString());
+      const pendingBefore = pendingChanges;
+      await syncService.runFullSyncCycle();
       await loadPendingCount();
+      setLastSyncTime(new Date());
       
-      // Notify all components to refresh
-      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { type: 'manual_sync' } }));
-      
-      addToast('Data synced successfully', 'success');
+      // Only show success toast if user manually triggered sync or if there were pending changes
+      if (showNotifications && (pendingBefore > 0 || pendingChanges > 0)) {
+        addToast('✅ Data synced', 'success');
+      }
     } catch (error) {
       console.error('Sync failed:', error);
-      addToast('Sync failed - will retry automatically', 'error');
+      if (showNotifications) {
+        addToast('Sync failed - will retry automatically', 'error');
+      }
+    } finally {
+      syncInProgressRef.current = false;
+      setIsSyncing(false);
+    }
+  }, [isOnline, syncEnabled, schoolId, addToast, loadPendingCount, pendingChanges]);
+
+  // Auto-sync only when coming back online (not on every dependency change)
+  const wasOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    if (isOnline && !wasOnlineRef.current && syncEnabled && schoolId) {
+      // Just came back online
+      syncNow(false);
+    }
+    wasOnlineRef.current = isOnline;
+  }, [isOnline, schoolId, syncEnabled, syncNow]);
+
+  const forceFullSync = useCallback(async () => {
+    if (!schoolId) return;
+    setIsSyncing(true);
+    try {
+      // For full sync, we reset the last sync time to 1970
+      localStorage.removeItem(`last_sync_${schoolId}`);
+      await syncService.runFullSyncCycle();
+      setLastSyncTime(new Date());
+      await loadPendingCount();
+      addToast('✅ Full sync completed', 'success');
+    } catch (error) {
+      addToast('Full sync failed', 'error');
     } finally {
       setIsSyncing(false);
     }
-  }, [isOnline, syncEnabled, user, loadPendingCount, isSyncing, addToast]);
-
-  // Auto-sync when coming back online
-  useEffect(() => {
-    if (isOnline && syncEnabled && user) {
-      console.log('🔄 Back online - triggering sync');
-      syncNow();
-    }
-  }, [isOnline]);
+  }, [schoolId, addToast, loadPendingCount]);
 
   const exportBackup = useCallback(async () => {
     if (!user?.id) return;
@@ -304,7 +193,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      addToast('Backup exported successfully', 'success');
+      addToast('📦 Backup exported', 'success');
     } catch (error) {
       console.error('Backup export failed:', error);
       addToast('Failed to export backup', 'error');
@@ -337,7 +226,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       }
 
       window.dispatchEvent(new Event('schofyDataRefresh'));
-      addToast('Backup imported successfully', 'success');
+      addToast('📦 Backup imported', 'success');
       return true;
     } catch (error) {
       console.error('Backup import failed:', error);
@@ -365,10 +254,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       syncService.enableSync();
       syncService.startBackgroundSync();
       
-      // Do initial sync
-      await syncNow();
-      
-      addToast('Cloud sync enabled', 'success');
+      // Do initial sync (no notifications on startup)
+      await syncNow(false);
+      addToast('☁️ Cloud sync enabled', 'success');
     } catch (error) {
       console.error('Enable sync error:', error);
       addToast('Failed to enable cloud sync', 'error');
@@ -379,7 +267,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('schofy_sync_enabled', 'false');
     setSyncEnabled(false);
     syncService.stopBackgroundSync();
-    addToast('Cloud sync disabled', 'info');
+    addToast('☁️ Cloud sync disabled', 'info');
   }, [addToast]);
 
   return (
