@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2 } from 'lucide-react';
+import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, UploadCloud } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCurrency } from '../hooks/useCurrency';
@@ -390,7 +390,40 @@ export default function Settings() {
                     title="Pull all data from cloud to this device"
                   >
                     <Download size={16} />
-                    Force Full Sync
+                    Pull from Cloud
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!schoolId) return;
+                      try {
+                        const { userDBManager } = await import('../lib/database/UserDatabaseManager');
+                        const tables = ['classes', 'subjects', 'staff', 'fees', 'payments'];
+                        let pushedCount = 0;
+                        for (const table of tables) {
+                          const records = await userDBManager.getAll(schoolId, table);
+                          for (const record of records) {
+                            if (isSupabaseConfigured && supabase) {
+                              await supabase.from(table).upsert({
+                                ...record,
+                                school_id: schoolId,
+                                updated_at: new Date().toISOString(),
+                              }, { onConflict: 'id' });
+                              pushedCount++;
+                            }
+                          }
+                        }
+                        addToast(`Pushed ${pushedCount} records to cloud`, 'success');
+                      } catch (err) {
+                        console.error('Push error:', err);
+                        addToast('Failed to push to cloud', 'error');
+                      }
+                    }}
+                    disabled={!isOnline || !isSupabaseConfigured}
+                    className="btn btn-primary flex items-center gap-2"
+                    title="Push all local data to cloud"
+                  >
+                    <UploadCloud size={16} />
+                    Push to Cloud
                   </button>
                   <button
                     onClick={disableSync}
