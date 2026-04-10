@@ -277,7 +277,7 @@ class DataService {
       if (remoteTable === 'schools') {
         query = query.eq('id', userId);
       } else {
-        query = query.eq('user_id', userId);
+        query = query.eq('school_id', userId);
       }
 
       const { data, error } = await query.is('deleted_at', null);
@@ -380,7 +380,7 @@ class DataService {
       if (remoteTable === 'schools') {
         query = query.eq('id', userId);
       } else {
-        query = query.eq('user_id', userId);
+        query = query.eq('school_id', userId);
       }
 
       const { data, error } = await query.gt('updated_at', lastSyncTime);
