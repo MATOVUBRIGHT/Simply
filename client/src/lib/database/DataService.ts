@@ -114,7 +114,50 @@ class DataService {
     const now = new Date().toISOString();
     const localId = generateUUID();
     
-    // Prepare local record
+    // CLOUD-FIRST: Try Supabase first when online
+    if (this.isOnline() && isSupabaseConfigured && supabase && this.shouldSyncTable(tableName)) {
+      try {
+        const remoteTable = this.getSupabaseTable(tableName);
+        const formatted = this.mapLocalToSupabase({
+          ...data,
+          id: localId,
+          school_id: userId,
+          created_at: now,
+          updated_at: now,
+        });
+        
+        const { data: remoteResult, error } = await supabase
+          .from(remoteTable)
+          .insert(formatted)
+          .select()
+          .single();
+
+        if (!error && remoteResult) {
+          // Success in cloud, save locally with synced status
+          const localRecord: any = {
+            ...data,
+            id: localId,
+            createdAt: now,
+            updatedAt: now,
+            syncStatus: 'synced' as SyncStatus,
+            deviceId: this.deviceId,
+            schoolId: data.schoolId || userId,
+          };
+          await userDBManager.add(userId, tableName, localRecord);
+          this.broadcastChange(tableName, 'INSERT', localRecord, userId);
+          
+          return {
+            success: true,
+            syncedRemotely: true,
+            savedLocally: true,
+          };
+        }
+      } catch (cloudError) {
+        console.error(`Cloud create error for ${tableName}:`, cloudError);
+      }
+    }
+
+    // OFFLINE FALLBACK: Save locally and queue for sync
     const localRecord: any = {
       ...data,
       id: localId,
@@ -125,16 +168,10 @@ class DataService {
       schoolId: data.schoolId || userId,
     };
 
-    // OPTIMISTIC: Save locally first
     try {
       await userDBManager.add(userId, tableName, localRecord);
       await this.queueForSync(userId, tableName, localId, 'create', localRecord);
       this.broadcastChange(tableName, 'INSERT', localRecord, userId);
-      
-      // Try to sync in background if online, but don't wait for it
-      if (this.isOnline() && isSupabaseConfigured && supabase) {
-        this.processSyncQueue(userId).catch(err => console.error('Background sync failed:', err));
-      }
 
       return {
         success: true,
