@@ -70,7 +70,7 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout, isOnline } = useAuth();
-  const { isSyncing, pendingChanges, syncNow } = useSync();
+  const { isSyncing, syncNow } = useSync();
   const headerRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -135,6 +135,7 @@ export default function Layout({ children }: LayoutProps) {
   async function loadSchoolName() {
     if (!user?.id) return;
     try {
+      // Load from local first
       const stored = await userDBManager.getAll(user.id, 'settings');
       const schoolNameSetting = stored.find((s: any) => s.key === 'schoolName');
       if (schoolNameSetting?.value) {
@@ -144,6 +145,21 @@ export default function Layout({ children }: LayoutProps) {
       console.error('Failed to load school name:', error);
     }
   }
+
+  useEffect(() => {
+    const handleSettingsUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail?.schoolName) {
+        setSchoolName(customEvent.detail.schoolName);
+      }
+    };
+    window.addEventListener('settingsUpdated', handleSettingsUpdate);
+    window.addEventListener('dataRefresh', loadSchoolName);
+    return () => {
+      window.removeEventListener('settingsUpdated', handleSettingsUpdate);
+      window.removeEventListener('dataRefresh', loadSchoolName);
+    };
+  }, []);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -380,9 +396,6 @@ export default function Layout({ children }: LayoutProps) {
                   </span>
                   <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-white/30'}`} />
                 </div>
-                {pendingChanges > 0 && (
-                  <p className="text-[10px] text-white/60 mt-0.5">{pendingChanges} pending</p>
-                )}
               </div>
 
               <button
