@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, Trash2, AlertTriangle } from 'lucide-react';
+import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCurrency } from '../hooks/useCurrency';
@@ -68,6 +68,13 @@ export default function Settings() {
     e.preventDefault();
     const id = schoolId || user?.id;
     if (!id) return;
+
+    // Validate required fields
+    if (!settings.schoolName || settings.schoolName.trim() === '' || settings.schoolName === 'My School') {
+      addToast('Please enter your school name', 'error');
+      return;
+    }
+
     try {
       for (const [key, value] of Object.entries(settings)) {
         const settingRecord = { id: key, key, value, updatedAt: new Date().toISOString() };
@@ -187,8 +194,8 @@ export default function Settings() {
           </div>
           <div className="card-body grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="form-label">School Name</label>
-              <input name="schoolName" value={settings.schoolName} onChange={handleChange} className="form-input" />
+              <label className="form-label">School Name <span className="text-red-500">*</span></label>
+              <input name="schoolName" value={settings.schoolName} onChange={handleChange} className="form-input" required placeholder="Enter school name" />
             </div>
             <div>
               <label className="form-label">Phone Number</label>
@@ -342,19 +349,11 @@ export default function Settings() {
 
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
                 <div className="flex items-center gap-2 mb-2">
-                  <Database size={16} className="text-slate-400" />
-                  <span className="text-sm font-medium">Pending Changes</span>
-                </div>
-                <p className="text-2xl font-bold text-slate-800 dark:text-white">{pendingChanges}</p>
-              </div>
-
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-                <div className="flex items-center gap-2 mb-2">
                   <CheckCircle size={16} className="text-slate-400" />
                   <span className="text-sm font-medium">Last Sync</span>
                 </div>
                 <p className="text-lg font-bold text-slate-800 dark:text-white">
-                  {lastSyncTime ? new Date(lastSyncTime).toLocaleTimeString() : 'Never'}
+                  {lastSyncTime ? new Date(lastSyncTime).toLocaleString() : 'Never'}
                 </p>
               </div>
             </div>
@@ -400,28 +399,6 @@ export default function Settings() {
                     <CloudOff size={16} />
                     Disable Sync
                   </button>
-                  {pendingChanges > 0 && (
-                    <button
-                      onClick={async () => {
-                        const id = schoolId || user?.id;
-                        if (!id) return;
-                        if (confirm(`Clear ${pendingChanges} pending items? This cannot be undone.`)) {
-                          try {
-                            const { userDBManager } = await import('../lib/database/UserDatabaseManager');
-                            await userDBManager.clearSyncQueue(id);
-                            addToast('Pending items cleared', 'success');
-                          } catch (err) {
-                            console.error('Clear sync queue error:', err);
-                            addToast('Failed to clear pending items', 'error');
-                          }
-                        }
-                      }}
-                      className="btn btn-secondary flex items-center gap-2 text-amber-600 hover:text-amber-700"
-                    >
-                      <Trash2 size={16} />
-                      Clear {pendingChanges} Stuck Items
-                    </button>
-                  )}
                 </>
               ) : (
                 <button
