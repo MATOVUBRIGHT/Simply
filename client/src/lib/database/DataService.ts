@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { userDBManager } from './UserDatabaseManager';
+import { generateUUID } from '../../utils/uuid';
 
 export type SyncStatus = 'synced' | 'pending' | 'failed';
 
@@ -63,121 +64,46 @@ class DataService {
     }
   }
 
-  private mapLocalToSupabase(local: any, tableName: string): any {
-    const mapped: any = { ...local };
-    
-    // Remove local-only fields
-    delete mapped.syncStatus;
-    delete mapped.deviceId;
-    
-    // Map common field names
-    if (mapped.createdAt) {
-      mapped.created_at = mapped.createdAt;
-      delete mapped.createdAt;
-    }
-    if (mapped.updatedAt) {
-      mapped.updated_at = mapped.updatedAt;
-      delete mapped.updatedAt;
-    }
-    if (mapped.schoolId) {
-      mapped.school_id = mapped.schoolId;
-      delete mapped.schoolId;
-    }
-    
-    // Table-specific mappings
-    switch (tableName) {
-      case 'students':
-        if (mapped.firstName) { mapped.first_name = mapped.firstName; delete mapped.firstName; }
-        if (mapped.lastName) { mapped.last_name = mapped.lastName; delete mapped.lastName; }
-        if (mapped.guardianName) { mapped.guardian_name = mapped.guardianName; delete mapped.guardianName; }
-        if (mapped.guardianPhone) { mapped.guardian_phone = mapped.guardianPhone; delete mapped.guardianPhone; }
-        if (mapped.guardianEmail) { mapped.guardian_email = mapped.guardianEmail; delete mapped.guardianEmail; }
-        if (mapped.admissionNo) { mapped.admission_no = mapped.admissionNo; delete mapped.admissionNo; }
-        break;
-        
-      case 'staff':
-        if (mapped.firstName) { mapped.first_name = mapped.firstName; delete mapped.firstName; }
-        if (mapped.lastName) { mapped.last_name = mapped.lastName; delete mapped.lastName; }
-        if (mapped.employeeId) { mapped.employee_id = mapped.employeeId; delete mapped.employeeId; }
-        break;
-        
-      case 'classes':
-        if (mapped.className) { mapped.class_name = mapped.className; delete mapped.className; }
-        break;
-        
-      case 'attendance':
-        if (mapped.entityType) { mapped.entity_type = mapped.entityType; delete mapped.entityType; }
-        if (mapped.entityId) { mapped.entity_id = mapped.entityId; delete mapped.entityId; }
-        break;
-        
-      case 'fees':
-        if (mapped.paidAmount) { mapped.paid_amount = mapped.paidAmount; delete mapped.paidAmount; }
-        if (mapped.dueDate) { mapped.due_date = mapped.dueDate; delete mapped.dueDate; }
-        break;
-        
-      case 'payments':
-        if (mapped.feeId) { mapped.fee_id = mapped.feeId; delete mapped.feeId; }
-        break;
-    }
-    
-    return mapped;
+  private camelToSnake(str: string): string {
+    return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
   }
 
-  private mapSupabaseToLocal(supabase: any, tableName: string): any {
-    const mapped: any = { ...supabase };
+  private getSupabaseTable(localTable: string): string {
+    const snake = this.camelToSnake(localTable);
+    if (this.SUPABASE_TABLES.has(snake)) return snake;
+    if (this.SUPABASE_TABLES.has(localTable)) return localTable;
+    return snake;
+  }
+
+  private mapLocalToSupabase(local: any): any {
+    const formatted: any = { ...local };
+    // Remove client-only fields
+    delete formatted.syncStatus;
+    delete formatted.deviceId;
     
-    // Map common field names back
-    if (mapped.created_at) {
-      mapped.createdAt = mapped.created_at;
-      delete mapped.created_at;
-    }
-    if (mapped.updated_at) {
-      mapped.updatedAt = mapped.updated_at;
-      delete mapped.updated_at;
-    }
-    if (mapped.school_id) {
-      mapped.schoolId = mapped.school_id;
-      delete mapped.school_id;
-    }
-    
-    // Table-specific mappings
-    switch (tableName) {
-      case 'students':
-        if (mapped.first_name) { mapped.firstName = mapped.first_name; delete mapped.first_name; }
-        if (mapped.last_name) { mapped.lastName = mapped.last_name; delete mapped.last_name; }
-        if (mapped.guardian_name) { mapped.guardianName = mapped.guardian_name; delete mapped.guardian_name; }
-        if (mapped.guardian_phone) { mapped.guardianPhone = mapped.guardian_phone; delete mapped.guardian_phone; }
-        if (mapped.guardian_email) { mapped.guardianEmail = mapped.guardian_email; delete mapped.guardian_email; }
-        if (mapped.admission_no) { mapped.admissionNo = mapped.admission_no; delete mapped.admission_no; }
-        break;
-        
-      case 'staff':
-        if (mapped.first_name) { mapped.firstName = mapped.first_name; delete mapped.first_name; }
-        if (mapped.last_name) { mapped.lastName = mapped.last_name; delete mapped.last_name; }
-        if (mapped.employee_id) { mapped.employeeId = mapped.employee_id; delete mapped.employee_id; }
-        break;
-        
-      case 'classes':
-        if (mapped.class_name) { mapped.className = mapped.class_name; delete mapped.class_name; }
-        break;
-        
-      case 'attendance':
-        if (mapped.entity_type) { mapped.entityType = mapped.entity_type; delete mapped.entity_type; }
-        if (mapped.entity_id) { mapped.entityId = mapped.entity_id; delete mapped.entity_id; }
-        break;
-        
-      case 'fees':
-        if (mapped.paid_amount) { mapped.paidAmount = mapped.paid_amount; delete mapped.paid_amount; }
-        if (mapped.due_date) { mapped.dueDate = mapped.due_date; delete mapped.due_date; }
-        break;
-        
-      case 'payments':
-        if (mapped.fee_id) { mapped.feeId = mapped.fee_id; delete mapped.fee_id; }
-        break;
+    // Convert field names to snake_case
+    const result: any = {};
+    for (const [key, value] of Object.entries(formatted)) {
+      const snakeKey = key === 'schoolId' ? 'school_id' : this.camelToSnake(key);
+      result[snakeKey] = value;
     }
     
-    mapped.syncStatus = 'synced';
-    return mapped;
+    return result;
+  }
+
+  private mapSupabaseToLocal(remote: any): any {
+    const formatted: any = {};
+    for (const [key, value] of Object.entries(remote)) {
+      const localKey = key === 'school_id' ? 'schoolId' : this.snakeToCamel(key);
+      formatted[localKey] = value;
+    }
+    
+    formatted.syncStatus = 'synced';
+    return formatted;
+  }
+
+  private snakeToCamel(str: string): string {
+    return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
   }
 
   async create<T extends SyncableRecord>(
@@ -186,7 +112,7 @@ class DataService {
     data: Omit<T, 'id' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'deviceId'>
   ): Promise<SyncResult> {
     const now = new Date().toISOString();
-    const localId = crypto.randomUUID();
+    const localId = generateUUID();
     
     // Prepare local record
     const localRecord: any = {
@@ -342,23 +268,38 @@ class DataService {
     if (!this.isOnline() || !isSupabaseConfigured || !supabase) return;
 
     try {
-      const { data, error } = await supabase
-        .from(tableName)
-        .select('*')
-        .eq('school_id', userId)
-        .is('deleted_at', null);
+      const remoteTable = this.getSupabaseTable(tableName);
+      console.log(`📥 PullFull for ${tableName} (mapped to ${remoteTable}) for user ${userId}`);
+      
+      let query = supabase.from(remoteTable).select('*');
+      
+      // Handle tables where ID is the school identifier
+      if (remoteTable === 'schools') {
+        query = query.eq('id', userId);
+      } else {
+        query = query.eq('user_id', userId);
+      }
 
-      if (!error && data && data.length > 0) {
-        console.log(`📥 Full pull: importing ${data.length} records for ${tableName}`);
+      const { data, error } = await query.is('deleted_at', null);
+
+      if (error) {
+        console.error(`❌ PullFull error for ${tableName}:`, error.message);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        console.log(`📥 Full pull: found ${data.length} records for ${tableName}`);
         for (const item of data) {
-          const mapped = this.mapSupabaseToLocal(item, tableName);
+          const mapped = this.mapSupabaseToLocal(item);
           mapped.syncStatus = 'synced';
           await userDBManager.put(userId, tableName, mapped);
         }
         window.dispatchEvent(new Event('dataRefresh'));
+      } else {
+        console.log(`✓ Full pull: No records found for ${tableName} in Supabase.`);
       }
     } catch (err) {
-      console.error(`Full pull error for ${tableName}:`, err);
+      console.error(`Full pull exception for ${tableName}:`, err);
     }
   }
 
@@ -421,6 +362,7 @@ class DataService {
     if (!this.isOnline() || !isSupabaseConfigured || !supabase) return;
 
     try {
+      const remoteTable = this.getSupabaseTable(tableName);
       // Get last updated timestamp from local data
       const localRecords = await userDBManager.getAll(userId, tableName);
       const lastUpdated = localRecords.reduce((max, r) => {
@@ -432,19 +374,29 @@ class DataService {
         ? new Date(lastUpdated).toISOString() 
         : '1970-01-01T00:00:00Z';
 
-      const { data, error } = await supabase
-        .from(tableName)
-        .select('*')
-        .eq('school_id', userId)
-        .gt('updated_at', lastSyncTime);
+      let query = supabase.from(remoteTable).select('*');
+      
+      // Handle tables where ID is the school identifier
+      if (remoteTable === 'schools') {
+        query = query.eq('id', userId);
+      } else {
+        query = query.eq('user_id', userId);
+      }
 
-      if (!error && data && data.length > 0) {
-        console.log(`📥 Delta pull: found ${data.length} new/updated records for ${tableName}`);
+      const { data, error } = await query.gt('updated_at', lastSyncTime);
+
+      if (error) {
+        console.error(`❌ Delta pull error for ${tableName}:`, error.message);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        console.log(`📥 Delta pull: found ${data.length} records for ${tableName}`);
         for (const item of data) {
-          const mapped = this.mapSupabaseToLocal(item, tableName);
+          const mapped = this.mapSupabaseToLocal(item);
+          mapped.syncStatus = 'synced';
           await userDBManager.put(userId, tableName, mapped);
         }
-        // Notify UI that data has changed
         window.dispatchEvent(new Event('dataRefresh'));
       }
     } catch (err) {
@@ -474,7 +426,7 @@ class DataService {
         }
 
         // Cache locally
-        const mapped = this.mapSupabaseToLocal(data, tableName);
+        const mapped = this.mapSupabaseToLocal(data);
         await userDBManager.put(userId, tableName, mapped);
         
         return mapped;
@@ -506,7 +458,7 @@ class DataService {
         }
 
         if (data && data.length > 0) {
-          const mappedData = data.map(item => this.mapSupabaseToLocal(item, tableName));
+          const mappedData = data.map(item => this.mapSupabaseToLocal(item));
           return mappedData;
         }
         
@@ -568,59 +520,58 @@ class DataService {
     }
   }
 
-  async processSyncQueue(userId: string): Promise<{ processed: number; failed: number }> {
-    if (!this.isOnline() || !isSupabaseConfigured || !supabase) {
-      return { processed: 0, failed: 0 };
-    }
+  private async processSyncQueue(userId: string): Promise<void> {
+    if (!this.isOnline() || !isSupabaseConfigured || !supabase) return;
 
     try {
       const pendingItems = await userDBManager.getPendingSyncItems(userId);
-      let processed = 0;
-      let failed = 0;
+      if (pendingItems.length === 0) return;
+
+      console.log(`📤 Processing sync queue: ${pendingItems.length} items to upload...`);
 
       for (const item of pendingItems) {
         try {
           const { table, recordId, operation, data } = item;
-          const supabaseData = this.mapLocalToSupabase(data, table);
-          // Add school_id to data for Supabase (migrations use school_id, not user_id)
-          supabaseData.school_id = userId;
+          const remoteTable = this.getSupabaseTable(table);
+          const supabaseData = this.mapLocalToSupabase(data);
+          
+          // Add school_id to data for Supabase if the table supports it
+          if (remoteTable !== 'schools' && remoteTable !== 'users') {
+            supabaseData.school_id = userId;
+          }
+
+          console.log(`📤 Syncing ${operation} on ${table}/${recordId} (remote: ${remoteTable})`);
 
           let error;
-          
-          switch (operation) {
-            case 'create':
-              const createResult = await supabase.from(table).upsert(supabaseData);
-              error = createResult.error;
-              break;
-            case 'update':
-              const updateResult = await supabase.from(table).update(supabaseData).eq('id', recordId);
-              error = updateResult.error;
-              break;
-            case 'delete':
-              const deleteResult = await supabase.from(table).delete().eq('id', recordId);
-              error = deleteResult.error;
-              break;
+          if (operation === 'delete') {
+            let deleteQuery = supabase.from(remoteTable).update({ deleted_at: new Date().toISOString() }).eq('id', recordId);
+            
+            if (remoteTable !== 'schools') {
+              deleteQuery = deleteQuery.eq('school_id', userId);
+            }
+            
+            const { error: err } = await deleteQuery;
+            error = err;
+          } else {
+            const { error: err } = await supabase
+              .from(remoteTable)
+              .upsert(supabaseData);
+            error = err;
           }
 
           if (error) {
-            console.error(`Sync failed for ${table}/${recordId}:`, error);
-            failed++;
+            console.error(`❌ Sync failed for ${table}/${recordId}:`, error.message);
+            // Don't mark as synced, so it stays in queue
           } else {
+            console.log(`✅ Synced ${table}/${recordId}`);
             await userDBManager.markSynced(userId, item.id);
-            processed++;
-            console.log(`✅ Synced ${operation} for ${table}/${recordId}`);
           }
-        } catch (err) {
-          console.error(`Sync error for item ${item.id}:`, err);
-          failed++;
+        } catch (itemErr) {
+          console.error(`❌ Sync exception for item:`, itemErr);
         }
       }
-
-      console.log(`📤 Sync queue processed: ${processed} succeeded, ${failed} failed`);
-      return { processed, failed };
     } catch (err) {
-      console.error('Error processing sync queue:', err);
-      return { processed: 0, failed: 0 };
+      console.error('❌ Sync queue processing failed:', err);
     }
   }
 }
