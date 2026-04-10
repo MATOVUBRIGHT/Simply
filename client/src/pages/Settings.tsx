@@ -396,46 +396,62 @@ export default function Settings() {
                     onClick={async () => {
                       const id = user?.id || schoolId;
                       addToast('Starting push...', 'info');
-                      console.log('Push: id=', id, 'isSupabaseConfigured=', isSupabaseConfigured);
+                      console.log('Push: id=', id);
                       if (!id) {
                         addToast('No user ID', 'error');
                         return;
                       }
                       try {
                         const { userDBManager } = await import('../lib/database/UserDatabaseManager');
-                        const tables = ['classes', 'subjects', 'staff', 'fees', 'payments', 'students', 'attendance', 'announcements'];
+                        const tables = ['students', 'staff', 'classes', 'subjects', 'announcements', 'fees', 'payments'];
                         let pushedCount = 0;
                         for (const table of tables) {
                           const records = await userDBManager.getAll(id, table);
-                          console.log(`Push: ${table} has ${records.length} records`);
+                          console.log(`Push: ${table} has ${records.length} locally`);
                           for (const record of records) {
                             if (record.id) {
                               try {
-                                const payload: any = {
-                                  ...record,
-                                  school_id: id,
-                                  updated_at: record.updatedAt || new Date().toISOString(),
-                                };
+                                const payload: any = { id: record.id };
+                                
+                                // Map app fields to Supabase fields
+                                if (record.firstName) payload.first_name = record.firstName;
+                                if (record.lastName) payload.last_name = record.lastName;
+                                if (record.name) payload.name = record.name;
+                                if (record.level) payload.level = record.level;
+                                if (record.admissionNo) payload.admission_no = record.admissionNo;
+                                if (record.gender) payload.gender = record.gender;
+                                if (record.dob) payload.dob = record.dob;
+                                if (record.classId) payload.class_id = record.classId;
+                                if (record.studentId) payload.student_id = record.studentId;
+                                if (record.description) payload.description = record.description;
+                                if (record.amount) payload.amount = record.amount;
+                                if (record.term) payload.term = record.term;
+                                if (record.year) payload.year = record.year;
+                                if (record.method) payload.method = record.method;
+                                if (record.date) payload.date = record.date;
+                                if (record.studentId) payload.student_id = record.studentId;
+                                
+                                payload.school_id = id;
+                                payload.updated_at = record.updatedAt || new Date().toISOString();
                                 if (record.createdAt) payload.created_at = record.createdAt;
-                                delete payload.syncStatus;
-                                delete payload.deviceId;
-                                const { error } = await supabase.from(table).upsert(payload, { onConflict: 'id' });
+                                
+                                const { error } = await supabase.from(table).insert(payload);
                                 if (error) {
-                                  console.error(`Push error ${table}:`, error);
+                                  console.error(`${table} insert error:`, error.message);
                                 } else {
                                   pushedCount++;
                                 }
-                              } catch (e) {
-                                console.warn(`Push fail ${table}:`, e);
+                              } catch (e: any) {
+                                console.warn(`${table} fail:`, e.message || e);
                               }
                             }
                           }
                         }
                         console.log('Total pushed:', pushedCount);
-                        addToast(`Pushed ${pushedCount} records`, 'success');
-                      } catch (err) {
+                        addToast(`Pushed ${pushedCount} records to cloud`, 'success');
+                      } catch (err: any) {
                         console.error('Push error:', err);
-                        addToast('Failed to push: ' + err.message, 'error');
+                        addToast('Failed: ' + (err.message || err), 'error');
                       }
                     }}
                     disabled={!isOnline || !isSupabaseConfigured}
