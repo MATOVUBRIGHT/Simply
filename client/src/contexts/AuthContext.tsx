@@ -4,6 +4,7 @@ import { userDBManager } from '../lib/database/UserDatabaseManager';
 
 export interface LocalUser {
   id: string;
+  schoolId: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -80,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('Supabase not configured');
       if (savedUser) {
         setUser(savedUser);
-        setSchoolId(savedUser.id);
+        setSchoolId(savedUser.schoolId);
       }
       setLoading(false);
       return;
@@ -102,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else if (data) {
           const userData: LocalUser = {
             id: data.id,
+            schoolId: data.school_id,
             email: data.email,
             firstName: data.first_name,
             lastName: data.last_name,
@@ -109,23 +111,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             createdAt: data.created_at,
           };
           setUser(userData);
-          setSchoolId(userData.id);
+          setSchoolId(userData.schoolId);
           saveSession(userData);
           
-          await userDBManager.openDatabase(userData.id);
+          await userDBManager.openDatabase(userData.schoolId);
+          
+          // Initialize sync service for restored session
+          try {
+            const { syncService } = await import('../services/sync');
+            if (supabase) {
+              syncService.configure({ supabaseClient: supabase });
+              syncService.setUserId(userData.id);
+              syncService.setSchoolId(userData.schoolId);
+              
+              // Enable sync automatically for restored sessions
+              localStorage.setItem('schofy_sync_enabled', 'true');
+              if (navigator.onLine) {
+                syncService.enableSync();
+                console.log('🔄 Auto-sync enabled for restored session:', userData.email);
+              }
+            }
+          } catch (syncError) {
+            console.warn('Failed to initialize sync service during session restore:', syncError);
+          }
+          
           console.log('Session restored from cloud');
         }
       } catch (err) {
         console.error('Failed to verify session with cloud:', err);
         setUser(savedUser);
-        setSchoolId(savedUser.id);
+        setSchoolId(savedUser.schoolId);
       }
     } else if (savedUser && !isOnline) {
       console.log('Offline - using cached session');
       setUser(savedUser);
-      setSchoolId(savedUser.id);
+      setSchoolId(savedUser.schoolId);
       
-      await userDBManager.openDatabase(savedUser.id).catch(() => {});
+      await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
     } else {
       setLoading(false);
     }
@@ -142,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const savedUser = getSession();
       if (savedUser && savedUser.email === email) {
         setUser(savedUser);
-        setSchoolId(savedUser.id);
+        setSchoolId(savedUser.schoolId);
         return { success: true };
       }
       return { success: false, error: 'You are offline. Please connect to login for the first time.' };
@@ -168,6 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const userData: LocalUser = {
         id: data.id,
+        schoolId: data.school_id,
         email: data.email,
         firstName: data.first_name,
         lastName: data.last_name,
@@ -176,10 +199,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
 
       setUser(userData);
-      setSchoolId(userData.id);
+      setSchoolId(userData.schoolId);
       saveSession(userData);
 
-      await userDBManager.openDatabase(userData.id);
+      await userDBManager.openDatabase(userData.schoolId);
+
+      // Initialize sync service for this user
+      try {
+        const { syncService } = await import('../services/sync');
+        if (supabase) {
+          syncService.configure({ supabaseClient: supabase });
+          syncService.setUserId(userData.id);
+          syncService.setSchoolId(userData.schoolId);
+          
+          // Enable sync automatically for logged in users
+          localStorage.setItem('schofy_sync_enabled', 'true');
+          if (navigator.onLine) {
+            syncService.enableSync();
+            console.log('🔄 Auto-sync enabled for user:', userData.email);
+          }
+        }
+      } catch (syncError) {
+        console.warn('Failed to initialize sync service:', syncError);
+      }
 
       return { success: true };
     } catch (error: any) {
@@ -233,6 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const userData: LocalUser = {
         id: data.id,
+        schoolId: data.school_id,
         email: data.email,
         firstName: data.first_name,
         lastName: data.last_name,
@@ -241,10 +284,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
 
       setUser(userData);
-      setSchoolId(userData.id);
+      setSchoolId(userData.schoolId);
       saveSession(userData);
 
-      await userDBManager.openDatabase(userData.id);
+      await userDBManager.openDatabase(userData.schoolId);
+
+      // Initialize sync service for this user
+      try {
+        const { syncService } = await import('../services/sync');
+        if (supabase) {
+          syncService.configure({ supabaseClient: supabase });
+          syncService.setUserId(userData.id);
+          syncService.setSchoolId(userData.schoolId);
+          
+          // Enable sync by default for new users
+          localStorage.setItem('schofy_sync_enabled', 'true');
+          if (navigator.onLine) {
+            syncService.enableSync();
+            console.log('🔄 Auto-sync enabled for new user:', userData.email);
+          }
+        }
+      } catch (syncError) {
+        console.warn('Failed to initialize sync service:', syncError);
+      }
 
       return { success: true, user: { id: userData.id } };
     } catch (error: any) {

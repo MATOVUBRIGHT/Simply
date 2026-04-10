@@ -16,7 +16,7 @@ interface StudentsContextType {
 const StudentsContext = createContext<StudentsContextType | undefined>(undefined);
 
 export function StudentsProvider({ children }: { children: React.ReactNode }) {
-  const { user, loading: authLoading } = useAuth();
+  const { user, schoolId, loading: authLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [studentsSubset, setStudentsSubset] = useState<Student[]>([]);
@@ -30,20 +30,21 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (user?.id) {
+    if (user?.id || schoolId) {
       setIsInitialized(true);
     } else {
       setIsInitialized(false);
       setStudentsSubset([]);
     }
-  }, [user, authLoading]);
+  }, [user, schoolId, authLoading]);
 
   const loadInitialData = useCallback(async () => {
-    if (!user?.id || !isInitialized) return;
+    const id = schoolId || user?.id;
+    if (!id || !isInitialized) return;
     
     try {
       // Load first page as initial subset for quick access
-      const { items, total } = await dataService.getPage(user.id, 'students', 1, 50);
+      const { items, total } = await dataService.getPage(id, 'students', 1, 50);
       setStudentsSubset(items);
       setTotalCount(total);
       setError(null);
@@ -58,19 +59,36 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
   }, [loadInitialData, refreshKey]);
 
   useEffect(() => {
-    const handleStudentsUpdated = () => {
+    const handleStudentsUpdated = (event?: CustomEvent) => {
+      if (event) {
+        console.log('🔄 StudentsContext: Real-time update received', event.detail);
+      }
       setRefreshKey(k => k + 1);
     };
-    const handleDataRefresh = () => {
+    const handleDataRefresh = (event?: CustomEvent) => {
+      if (event) {
+        console.log('🔄 StudentsContext: General data refresh', event.detail);
+      }
+      setRefreshKey(k => k + 1);
+    };
+    const handleStudentsDataChanged = (event: CustomEvent) => {
+      console.log('🔄 StudentsContext: Specific students data changed', event.detail);
       setRefreshKey(k => k + 1);
     };
     
-    window.addEventListener('studentsUpdated', handleStudentsUpdated);
-    window.addEventListener('dataRefresh', handleDataRefresh);
+    // Listen for all types of real-time events
+    window.addEventListener('studentsUpdated', handleStudentsUpdated as EventListener);
+    window.addEventListener('StudentsUpdated', handleStudentsUpdated as EventListener);
+    window.addEventListener('dataRefresh', handleDataRefresh as EventListener);
+    window.addEventListener('schofyDataRefresh', handleDataRefresh as EventListener);
+    window.addEventListener('studentsDataChanged', handleStudentsDataChanged as EventListener);
     
     return () => {
-      window.removeEventListener('studentsUpdated', handleStudentsUpdated);
-      window.removeEventListener('dataRefresh', handleDataRefresh);
+      window.removeEventListener('studentsUpdated', handleStudentsUpdated as EventListener);
+      window.removeEventListener('StudentsUpdated', handleStudentsUpdated as EventListener);
+      window.removeEventListener('dataRefresh', handleDataRefresh as EventListener);
+      window.removeEventListener('schofyDataRefresh', handleDataRefresh as EventListener);
+      window.removeEventListener('studentsDataChanged', handleStudentsDataChanged as EventListener);
     };
   }, []);
 
@@ -79,14 +97,16 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loadPage = useCallback(async (page: number, pageSize: number, filter?: (item: any) => boolean) => {
-    if (!user?.id) return { items: [], total: 0 };
-    return await dataService.getPage(user.id, 'students', page, pageSize, filter);
-  }, [user]);
+    const id = schoolId || user?.id;
+    if (!id) return { items: [], total: 0 };
+    return await dataService.getPage(id, 'students', page, pageSize, filter);
+  }, [user, schoolId]);
 
   const searchStudents = useCallback(async (query: string) => {
-    if (!user?.id) return [];
-    return await dataService.search(user.id, 'students', query, ['firstName', 'lastName', 'admissionNo', 'studentId']);
-  }, [user]);
+    const id = schoolId || user?.id;
+    if (!id) return [];
+    return await dataService.search(id, 'students', query, ['firstName', 'lastName', 'admissionNo', 'studentId']);
+  }, [user, schoolId]);
 
   const loading = authLoading || !isInitialized;
 

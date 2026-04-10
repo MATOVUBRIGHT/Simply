@@ -1,6 +1,8 @@
 const DB_NAME = 'schofy_user_index';
 const DB_VERSION = 1;
 
+import { generateUUID } from '../utils/uuid';
+
 export interface UserAccount {
   id: string;
   email: string;
@@ -74,7 +76,7 @@ class UserIndexDB {
     const now = new Date().toISOString();
     const newUser: UserAccount = {
       ...user,
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       lastLogin: null,
       createdAt: now,
       updatedAt: now,

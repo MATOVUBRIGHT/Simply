@@ -51,7 +51,7 @@ const priorityConfig: Record<string, {
 };
 
 export default function Announcements() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -67,8 +67,8 @@ export default function Announcements() {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    if (user?.id) loadAnnouncements();
-  }, [user?.id]);
+    if (user?.id || schoolId) loadAnnouncements();
+  }, [user?.id, schoolId]);
 
   useEffect(() => {
     const handleAnnouncementsUpdated = () => loadAnnouncements();
@@ -84,9 +84,10 @@ export default function Announcements() {
   }, []);
 
   async function loadAnnouncements() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const data = await dataService.getAll(user.id, 'announcements');
+      const data = await dataService.getAll(id, 'announcements');
       const sorted = data.sort((a: any, b: any) => {
         const dateA = new Date(a.createdAt || 0).getTime();
         const dateB = new Date(b.createdAt || 0).getTime();
@@ -118,7 +119,8 @@ export default function Announcements() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       if (editingId) {
         const updated: Announcement = {
@@ -130,7 +132,7 @@ export default function Announcements() {
           createdAt: announcements.find(a => a.id === editingId)?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        await dataService.update(user.id, 'announcements', editingId, updated as any);
+        await dataService.update(id, 'announcements', editingId, updated as any);
         setAnnouncements(prev => prev.map(a => a.id === editingId ? updated : a));
         addToast('Announcement updated successfully', 'success');
       } else {
@@ -140,7 +142,7 @@ export default function Announcements() {
           createdBy: 'admin',
           createdAt: new Date().toISOString(),
         };
-        await dataService.create(user.id, 'announcements', newAnnouncement as any);
+        await dataService.create(id, 'announcements', newAnnouncement as any);
         setAnnouncements(prev => [newAnnouncement, ...prev]);
         addToast('Announcement published successfully', 'success');
       }
@@ -150,15 +152,16 @@ export default function Announcements() {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(idAnnouncement: string) {
+    const id = schoolId || user?.id;
     if (confirm('Delete this announcement?')) {
-      if (!user?.id) return;
+      if (!id) return;
       try {
-        const announcement = announcements.find(a => a.id === id);
-        await dataService.delete(user.id, 'announcements', id);
+        const announcement = announcements.find(a => a.id === idAnnouncement);
+        await dataService.delete(id, 'announcements', idAnnouncement);
         
         if (announcement) {
-          addToRecycleBin(user.id, {
+          addToRecycleBin(id, {
             id: `announcement-${Date.now()}`,
             type: 'announcement',
             name: announcement.title,
@@ -167,7 +170,7 @@ export default function Announcements() {
           });
         }
         
-        setAnnouncements(prev => prev.filter(a => a.id !== id));
+        setAnnouncements(prev => prev.filter(a => a.id !== idAnnouncement));
         addToast('Announcement moved to recycle bin', 'success');
       } catch (error) {
         addToast('Failed to delete', 'error');
@@ -218,18 +221,19 @@ export default function Announcements() {
   }
 
   async function handleBulkDelete() {
+    const id = schoolId || user?.id;
     if (selectedAnnouncements.size === 0) return;
     if (!confirm(`Are you sure you want to delete ${selectedAnnouncements.size} announcement(s)?`)) return;
-    if (!user?.id) return;
+    if (!id) return;
     
     try {
       const now = new Date().toISOString();
       
-      for (const id of selectedAnnouncements) {
-        const announcement = announcements.find(a => a.id === id);
+      for (const idAnnouncement of selectedAnnouncements) {
+        const announcement = announcements.find(a => a.id === idAnnouncement);
         if (announcement) {
-          await dataService.delete(user.id, 'announcements', id);
-          addToRecycleBin(user.id, {
+          await dataService.delete(id, 'announcements', idAnnouncement);
+          addToRecycleBin(id, {
             id: `announcement-${Date.now()}-${Math.random()}`,
             type: 'announcement',
             name: announcement.title,

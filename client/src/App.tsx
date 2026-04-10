@@ -12,6 +12,7 @@ import Admission from './pages/Admission';
 import StudentProfile from './pages/StudentProfile';
 import Staff from './pages/Staff';
 import StaffForm from './pages/StaffForm';
+import Payroll from './pages/Payroll';
 import Classes from './pages/Classes';
 import Subjects from './pages/Subjects';
 import Attendance from './pages/Attendance';
@@ -29,7 +30,6 @@ import Plans from './pages/Plans';
 import Subscription from './pages/Subscription';
 import RecycleBin from './pages/RecycleBin';
 import { useEffect, useState } from 'react';
-import { getSubscriptionAccessState } from './utils/plans';
 
 function FullScreenLoader({ label = 'Loading Schofy...' }: { label?: string }) {
   return (
@@ -54,28 +54,23 @@ function MainApp() {
   useEffect(() => {
     if (loading || !user) return;
 
-    async function checkPlan() {
-      try {
-        const state = await getSubscriptionAccessState(user!.id);
-        const isValid = state.selectedPlanId !== null && state.status !== 'expired';
-        setHasValidPlan(isValid);
-      } catch (error) {
-        console.error('Plan check error:', error);
-        setHasValidPlan(true);
-      }
-    }
-
-    checkPlan();
+    // Bypass plan check for now
+    setHasValidPlan(true);
   }, [user, loading]);
 
   useEffect(() => {
     if (hasValidPlan === null) return;
     
+    // Only redirect to subscribe if user has no plan at all
+    // Users with expired or expiring plans can still access the app
+    // Users with existing plans can access /plans to see their plan and upgrade options
     if (!hasValidPlan && location.pathname !== '/subscribe') {
       navigate('/subscribe', { replace: true });
     } else if (hasValidPlan && location.pathname === '/subscribe') {
+      // Only redirect away from subscribe page if user has an active plan
       navigate('/', { replace: true });
     }
+    // Allow users with existing plans to access /plans to see their current plan and upgrade options
   }, [hasValidPlan, location.pathname, navigate]);
 
   useEffect(() => {
@@ -106,6 +101,7 @@ function MainApp() {
               <Route path="/staff" element={<Staff />} />
               <Route path="/staff/new" element={<StaffForm />} />
               <Route path="/staff/:id/edit" element={<StaffForm />} />
+              <Route path="/payroll" element={<Payroll />} />
               <Route path="/classes" element={<Classes />} />
               <Route path="/subjects" element={<Subjects />} />
               <Route path="/attendance" element={<Attendance />} />

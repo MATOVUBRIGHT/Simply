@@ -48,7 +48,7 @@ interface Discount {
 }
 
 export default function Invoices() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -136,17 +136,18 @@ export default function Invoices() {
   });
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadFeesAndPayments();
     }
-  }, [user, refreshKey]);
+  }, [user, schoolId, refreshKey]);
 
   async function loadFeesAndPayments() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const [feesData, paymentsData] = await Promise.all([
-        dataService.getAll(user.id, 'fees'),
-        dataService.getAll(user.id, 'payments'),
+        dataService.getAll(id, 'fees'),
+        dataService.getAll(id, 'payments'),
       ]);
       setFees(feesData);
       setPayments(paymentsData);
@@ -208,11 +209,11 @@ export default function Invoices() {
   }, []);
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadClasses();
       loadBursariesAndDiscounts();
     }
-  }, [user]);
+  }, [user, schoolId]);
 
   useEffect(() => {
     if (selectedClassId && user?.id) {
@@ -221,11 +222,12 @@ export default function Invoices() {
   }, [selectedClassId, selectedTerm, selectedYear, user]);
 
   async function loadBursariesAndDiscounts() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const [bursaryData, discountData] = await Promise.all([
-        dataService.getAll(user.id, 'bursaries'),
-        dataService.getAll(user.id, 'discounts'),
+        dataService.getAll(id, 'bursaries'),
+        dataService.getAll(id, 'discounts'),
       ]);
       setBursaries(bursaryData);
       setDiscounts(discountData);
@@ -235,10 +237,11 @@ export default function Invoices() {
   }
 
   async function loadClasses() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const { getStudentClassOptions } = await import('../utils/classroom');
-      const options = await getStudentClassOptions(user.id);
+      const options = await getStudentClassOptions(id);
       setClasses(options);
       if (options.length > 0 && !selectedClassId) {
         setSelectedClassId(options[0].id);
@@ -249,9 +252,10 @@ export default function Invoices() {
   }
 
   async function loadFeeStructures() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const structures = await getFeeStructuresByClass(user.id, selectedClassId, selectedTerm, selectedYear);
+      const structures = await getFeeStructuresByClass(id, selectedClassId, selectedTerm, selectedYear);
       setFeeStructures(structures);
       setSelectedStructureIds(structures.filter(s => s.isRequired).map(s => s.id));
     } catch (error) {
@@ -260,13 +264,14 @@ export default function Invoices() {
   }
 
   async function handleCreateStructure() {
-    if (!newStructure.name || newStructure.amount <= 0 || !user?.id) {
+    const id = schoolId || user?.id;
+    if (!newStructure.name || newStructure.amount <= 0 || !id) {
       addToast('Please enter a name and amount', 'error');
       return;
     }
     try {
       const structure = await createFeeStructure(
-        user.id,
+        id,
         selectedClassId,
         newStructure.name,
         newStructure.category,
@@ -288,10 +293,11 @@ export default function Invoices() {
     }
   }
 
-  async function handleDeleteStructure(id: string) {
-    if (!user?.id) return;
+  async function handleDeleteStructure(idStructure: string) {
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      await deleteFeeStructure(user.id, id);
+      await deleteFeeStructure(id, idStructure);
       setFeeStructures(feeStructures.filter(s => s.id !== id));
       setSelectedStructureIds(selectedStructureIds.filter(sid => sid !== id));
       addToast('Fee structure deleted', 'success');
@@ -338,8 +344,9 @@ export default function Invoices() {
           }
         }
         
-        if (invoiceAmount > 0) {
-          await dataService.create(user!.id, 'fees', {
+        const id = schoolId || user?.id;
+        if (invoiceAmount > 0 && id) {
+          await dataService.create(id, 'fees', {
             id: uuidv4(),
             studentId: student.id,
             classId: selectedClassId,
@@ -365,7 +372,8 @@ export default function Invoices() {
   }
 
   async function handleBulkInvoiceWithData(description: string, amount: number, term: string) {
-    if (selectedStudents.length === 0 || !user?.id) {
+    const id = schoolId || user?.id;
+    if (selectedStudents.length === 0 || !id) {
       addToast('Please select at least one student', 'error');
       return;
     }
@@ -389,7 +397,7 @@ export default function Invoices() {
       }
 
       for (const newFee of newFees) {
-        await dataService.create(user!.id, 'fees', newFee as any);
+        await dataService.create(id, 'fees', newFee as any);
       }
       addToast(`Created ${newFees.length} invoices`, 'success');
       setShowCreateModal(false);
@@ -401,7 +409,8 @@ export default function Invoices() {
   }
 
   async function markAsPaid(invoiceId: string) {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     const invoice = invoices.find(i => i.id === invoiceId);
     if (!invoice) return;
 
@@ -410,7 +419,7 @@ export default function Invoices() {
     if (!paymentAmount || isNaN(parseFloat(paymentAmount))) return;
 
     try {
-      await dataService.create(user.id, 'payments', {
+      await dataService.create(id, 'payments', {
         id: uuidv4(),
         feeId: invoiceId,
         studentId: invoice.studentId,
@@ -553,6 +562,8 @@ export default function Invoices() {
       for (const data of importPreview) {
         const student = students.find(s => `${s.firstName} ${s.lastName}` === data.studentName);
         if (!student) continue;
+        const id = schoolId || user?.id;
+        if (!id) continue;
         const fee: Fee = {
           id: uuidv4(),
           studentId: student.id,
@@ -562,7 +573,7 @@ export default function Invoices() {
           year,
           createdAt: now,
         };
-        await dataService.create(user!.id, 'fees', fee as any);
+        await dataService.create(id, 'fees', fee as any);
         successCount++;
       }
       addToast(`Successfully imported ${successCount} invoices`, 'success');

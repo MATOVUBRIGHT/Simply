@@ -11,7 +11,7 @@ import { dataService } from '../lib/database/DataService';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
 
 export default function Finance() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [activeTab, setActiveTab] = useState<'students' | 'invoices' | 'payments' | 'fees'>('students');
   const { addToast } = useToast();
   const { formatMoney, currency } = useCurrency();
@@ -43,13 +43,13 @@ export default function Finance() {
   const [structureFilterTerm, setStructureFilterTerm] = useState<string>(new Date().getFullYear().toString());
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadFees();
       loadPayments();
       loadClasses();
       loadFeeStructures();
     }
-  }, [user?.id]);
+  }, [user?.id, schoolId]);
 
   useEffect(() => {
     const handleFeesUpdated = () => loadFees();
@@ -68,9 +68,10 @@ export default function Finance() {
   }, []);
 
   async function loadFees() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const data = await dataService.getAll(user.id, 'fees');
+      const data = await dataService.getAll(id, 'fees');
       setFees(data);
     } catch (error) {
       console.error(error);
@@ -78,9 +79,10 @@ export default function Finance() {
   }
 
   async function loadPayments() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const data = await dataService.getAll(user.id, 'payments');
+      const data = await dataService.getAll(id, 'payments');
       setPayments(data);
     } catch (error) {
       console.error(error);
@@ -88,9 +90,10 @@ export default function Finance() {
   }
 
   async function loadClasses() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const data = await dataService.getAll(user.id, 'classes');
+      const data = await dataService.getAll(id, 'classes');
       setClasses(data);
     } catch (error) {
       console.error(error);
@@ -98,9 +101,10 @@ export default function Finance() {
   }
 
   async function loadFeeStructures() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const data = await userDBManager.getAll(user.id, 'feeStructures');
+      const data = await userDBManager.getAll(id, 'feeStructures');
       setFeeStructures(data);
     } catch (error) {
       console.error(error);
@@ -109,7 +113,8 @@ export default function Finance() {
 
   async function handleCreateFeeStructure(e: React.FormEvent) {
     e.preventDefault();
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const newStructure: FeeStructure = {
         id: uuidv4(),
@@ -122,7 +127,7 @@ export default function Finance() {
         year: structureFormData.year,
         createdAt: new Date().toISOString(),
       };
-      await userDBManager.add(user.id, 'feeStructures', newStructure);
+      await userDBManager.add(id, 'feeStructures', newStructure);
       setShowStructureForm(false);
       setStructureFormData({ classId: '', name: '', category: FeeCategory.TUITION, amount: 0, term: '1', year: new Date().getFullYear().toString() });
       loadFeeStructures();
@@ -133,10 +138,11 @@ export default function Finance() {
   }
 
   async function handleDeleteFeeStructure(id: string) {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     if (!confirm('Delete this fee structure?')) return;
     try {
-      await userDBManager.delete(user.id, 'feeStructures', id);
+      await userDBManager.delete(authId, 'feeStructures', id);
       loadFeeStructures();
       addToast('Fee structure deleted', 'success');
     } catch (error) {
@@ -145,7 +151,8 @@ export default function Finance() {
   }
 
   async function handleGenerateInvoicesForClass(classId: string, term: string, year: string) {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const structures = feeStructures.filter(s => s.classId === classId && s.term === term && s.year === year);
       if (structures.length === 0) {
@@ -169,7 +176,7 @@ export default function Finance() {
               year,
               createdAt: new Date().toISOString(),
             };
-            await dataService.create(user.id, 'fees', newFee as any);
+            await dataService.create(id, 'fees', newFee as any);
             invoicesCreated++;
           }
         }
@@ -183,7 +190,8 @@ export default function Finance() {
   }
 
   async function handleGenerateInvoicesForAllClasses(term: string, year: string) {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       let totalInvoices = 0;
       let classesWithStructures = 0;
@@ -209,7 +217,7 @@ export default function Finance() {
                 year,
                 createdAt: new Date().toISOString(),
               };
-              await dataService.create(user.id, 'fees', newFee as any);
+              await dataService.create(id, 'fees', newFee as any);
               totalInvoices++;
             }
           }
@@ -274,7 +282,8 @@ export default function Finance() {
   }, []);
 
   async function handleRecordPayment(feeId: string, studentId: string, _amount: number) {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     const paymentAmount = prompt('Enter payment amount:');
     if (!paymentAmount || isNaN(parseFloat(paymentAmount))) return;
     
@@ -288,7 +297,7 @@ export default function Finance() {
         date: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       };
-      await dataService.create(user.id, 'payments', newPayment as any);
+      await dataService.create(id, 'payments', newPayment as any);
       addToast('Payment recorded successfully', 'success');
     } catch (error) {
       addToast('Failed to record payment', 'error');
@@ -483,7 +492,8 @@ export default function Finance() {
   }
 
   async function executeImport() {
-    if (importPreview.length === 0 || !user?.id) { addToast('No valid records to import', 'error'); return; }
+    const id = schoolId || user?.id;
+    if (importPreview.length === 0 || !id) { addToast('No valid records to import', 'error'); return; }
     try {
       const now = new Date().toISOString();
       let successCount = 0;
@@ -500,7 +510,7 @@ export default function Finance() {
           date: data.date || now,
           createdAt: now,
         };
-        await dataService.create(user.id, 'payments', payment as any);
+        await dataService.create(id, 'payments', payment as any);
         successCount++;
       }
       addToast(`Successfully imported ${successCount} payments`, 'success');

@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class } from '@schofy/shared';
-import { v4 as uuidv4 } from 'uuid';
+import { generateUUID } from '../utils/uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/DataService';
@@ -26,7 +26,7 @@ function getClassColor(index: number) {
 }
 
 export default function Classes() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [classes, setClasses] = useState<Class[]>([]);
   const [classEnrollmentCounts, setClassEnrollmentCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -55,24 +55,13 @@ export default function Classes() {
     { key: 'capacity', label: 'Capacity', required: false },
   ];
 
-  useEffect(() => { 
-    if (user?.id) loadClasses(); 
-  }, [user?.id]);
-
-  useEffect(() => {
-    function handleStudentsUpdated() {
-      loadClasses();
-    }
-    window.addEventListener('studentsUpdated', handleStudentsUpdated);
-    return () => window.removeEventListener('studentsUpdated', handleStudentsUpdated);
-  }, []);
-
-  async function loadClasses() {
-    if (!user?.id) return;
+  const loadClasses = useCallback(async () => {
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const [data, students] = await Promise.all([
-        dataService.getAll(user.id, 'classes'),
-        dataService.getAll(user.id, 'students'),
+        dataService.getAll(id, 'classes'),
+        dataService.getAll(id, 'students'),
       ]);
       const sorted = data.sort((a: any, b: any) => a.level - b.level);
       setClasses(sorted);
@@ -89,7 +78,23 @@ export default function Classes() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [user?.id, schoolId]);
+
+  useEffect(() => { 
+    if (user?.id || schoolId) loadClasses(); 
+  }, [user?.id, schoolId, loadClasses]);
+
+  useEffect(() => {
+    function handleStudentsUpdated() {
+      loadClasses();
+    }
+    window.addEventListener('studentsUpdated', handleStudentsUpdated);
+    window.addEventListener('dataRefresh', loadClasses);
+    return () => {
+      window.removeEventListener('studentsUpdated', handleStudentsUpdated);
+      window.removeEventListener('dataRefresh', loadClasses);
+    };
+  }, [loadClasses]);
 
   function handleRowClick(classId: string) {
     if (clickTimeoutRef.current) {
@@ -136,16 +141,18 @@ export default function Classes() {
   async function handleBulkDelete() {
     if (selectedClasses.size === 0) return;
     if (!confirm(`Are you sure you want to delete ${selectedClasses.size} class(es)?`)) return;
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     
     try {
       const now = new Date().toISOString();
+      const idsToDelete = Array.from(selectedClasses);
       
-      for (const id of selectedClasses) {
-        const classItem = classes.find(c => c.id === id);
+      for (const classId of idsToDelete) {
+        const classItem = classes.find(c => c.id === classId);
         if (classItem) {
-          await dataService.delete(user.id, 'classes', id);
-          addToRecycleBin(user.id, {
+          await dataService.delete(id, 'classes', classId);
+          addToRecycleBin(id, {
             id: `class-${Date.now()}-${Math.random()}`,
             type: 'class',
             name: classItem.name,
@@ -160,6 +167,7 @@ export default function Classes() {
       setSelectMode(false);
       addToast(`${selectedClasses.size} classes moved to recycle bin`, 'success');
     } catch (error) {
+      console.error('Bulk delete error:', error);
       addToast('Failed to delete classes', 'error');
     }
   }
@@ -172,16 +180,17 @@ export default function Classes() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const now = new Date().toISOString();
       if (editingClass) {
-        await dataService.update(user.id, 'classes', editingClass.id, { ...editingClass, ...formData, updatedAt: now });
+        await dataService.update(id, 'classes', editingClass.id, { ...editingClass, ...formData, updatedAt: now });
         setClasses(prev => prev.map(c => c.id === editingClass.id ? { ...c, ...formData } : c));
         addToast('Class updated successfully', 'success');
       } else {
-        const newClass: Class = { id: uuidv4(), schoolId: user.id, name: formData.name, level: formData.level, stream: formData.stream, capacity: formData.capacity, createdAt: now };
-        await dataService.create(user.id, 'classes', newClass);
+        const newClass: Class = { id: generateUUID(), schoolId: id, name: formData.name, level: formData.level, stream: formData.stream, capacity: formData.capacity, createdAt: now };
+        await dataService.create(id, 'classes', newClass);
         setClasses(prev => [...prev, newClass]);
         addToast('Class added successfully', 'success');
       }
@@ -195,13 +204,14 @@ export default function Classes() {
 
   async function handleDelete(id: string) {
     if (confirm('Delete this class?')) {
-      if (!user?.id) return;
+      const authId = schoolId || user?.id;
+      if (!authId) return;
       try {
         const classItem = classes.find(c => c.id === id);
-        await dataService.delete(user.id, 'classes', id);
+        await dataService.delete(authId, 'classes', id);
         
         if (classItem) {
-          addToRecycleBin(user.id, {
+          addToRecycleBin(authId, {
             id: `class-${Date.now()}`,
             type: 'class',
             name: classItem.name,
@@ -345,21 +355,22 @@ export default function Classes() {
   }
 
   async function executeImport() {
-    if (importPreview.length === 0 || !user?.id) { addToast('No valid classes to import', 'error'); return; }
+    const id = schoolId || user?.id;
+    if (importPreview.length === 0 || !id) { addToast('No valid classes to import', 'error'); return; }
     try {
       const now = new Date().toISOString();
       let successCount = 0;
       for (const data of importPreview) {
         const classItem: Class = {
           id: crypto.randomUUID(),
-          schoolId: user.id,
+          schoolId: id,
           name: (data.name as string) || 'Unknown',
           level: (data.level as number) || 1,
           stream: (data.stream as string) || '',
           capacity: (data.capacity as number) || 40,
           createdAt: now,
         };
-        await dataService.create(user.id, 'classes', classItem);
+        await dataService.create(id, 'classes', classItem);
         successCount++;
       }
       await loadClasses();

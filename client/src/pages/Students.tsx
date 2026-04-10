@@ -8,10 +8,10 @@ import { Gender } from '@schofy/shared';
 import ImageModal from '../components/ImageModal';
 import { useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
-import { countsTowardPlan, getPlanUsage } from '../utils/plans';
 import { dataService } from '../lib/database/DataService';
-import { getClassDisplayName } from '../utils/classroom';
+import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments } from '../utils/classroom';
 import { addToRecycleBin } from '../utils/recycleBin';
+import { generateUUID } from '../utils/uuid';
 
 const avatarColors = [
   'bg-rose-500',
@@ -48,10 +48,11 @@ function generateStudentId(firstName: string, lastName: string): string {
 }
 
 export default function Students() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const { loadPage, searchStudents } = useStudents();
   const [students, setStudents] = useState<Student[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -79,7 +80,6 @@ export default function Students() {
   const [showClassFilter, setShowClassFilter] = useState(false);
   const [completedYearFilter, setCompletedYearFilter] = useState<string>('');
   const [planLimitMessage, setPlanLimitMessage] = useState<string | null>(null);
-  const [classes] = useState<Class[]>([]);
   const navigate = useNavigate();
   const statusFilterRef = useRef<HTMLDivElement>(null);
   const classFilterRef = useRef<HTMLDivElement>(null);
@@ -95,10 +95,25 @@ export default function Students() {
     return () => clearTimeout(timer);
   }, [search]);
 
+  const loadClasses = useCallback(async () => {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    try {
+      const classesData = await dataService.getAll(id, 'classes');
+      setClasses(classesData);
+    } catch (error) {
+      console.error('Failed to load classes:', error);
+    }
+  }, [user?.id]);
+
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     setLoading(true);
     try {
+      // Load classes first
+      await loadClasses();
+      
       if (debouncedSearch) {
         const results = await searchStudents(debouncedSearch);
         // Apply class and view filters to search results
@@ -119,13 +134,12 @@ export default function Students() {
         setStudents(items);
         setTotalCount(total);
       }
-    } catch (err) {
-      console.error('Failed to load students:', err);
-      addToast('Failed to load students', 'error');
+    } catch (error) {
+      console.error('Failed to load students:', error);
     } finally {
       setLoading(false);
     }
-  }, [user?.id, currentPage, debouncedSearch, selectedClass, viewFilter, itemsPerPage, loadPage, searchStudents, addToast]);
+  }, [user?.id, schoolId, debouncedSearch, selectedClass, viewFilter, currentPage, loadPage, searchStudents, loadClasses]);
 
   useEffect(() => {
     loadData();
@@ -189,38 +203,68 @@ export default function Students() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectMode]);
 
+  // Real-time updates for classes
+  useEffect(() => {
+    const handleClassesUpdated = () => {
+      console.log('🔄 Classes updated, reloading...');
+      loadClasses();
+    };
+    const handleClassesDataChanged = () => {
+      console.log('🔄 Classes data changed, reloading students...');
+      loadClasses();
+      loadData(); // Reload students to refresh class names
+    };
+    const handleDataRefresh = () => {
+      console.log('🔄 General data refresh, reloading classes...');
+      loadClasses();
+    };
+    
+    window.addEventListener('classesUpdated', handleClassesUpdated);
+    window.addEventListener('ClassesUpdated', handleClassesUpdated);
+    window.addEventListener('classesDataChanged', handleClassesDataChanged);
+    window.addEventListener('schofyDataRefresh', handleDataRefresh);
+    
+    return () => {
+      window.removeEventListener('classesUpdated', handleClassesUpdated);
+      window.removeEventListener('ClassesUpdated', handleClassesUpdated);
+      window.removeEventListener('classesDataChanged', handleClassesDataChanged);
+      window.removeEventListener('schofyDataRefresh', handleDataRefresh);
+    };
+  }, [loadClasses, loadData]);
+
   const totalPages = Math.ceil(totalCount / itemsPerPage);
   const paginatedStudents = students;
 
   async function cleanupOrphanedRecords() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       addToast('Cleaning up orphaned records...', 'info');
-      const allStudents = await dataService.getAll(user.id, 'students');
+      const allStudents = await dataService.getAll(id, 'students');
       const studentIds = new Set(allStudents.map((s: any) => s.id));
       let cleanedCount = 0;
       
       const tablesToCheck = ['fees', 'payments', 'invoices', 'bursaries', 'transportAssignments', 'examResults'];
       
       for (const table of tablesToCheck) {
-        const records = await dataService.getAll(user.id, table);
+        const records = await dataService.getAll(id, table);
         const orphanedIds = records
           .filter(r => r.studentId && !studentIds.has(r.studentId))
           .map(r => r.id);
         
         if (orphanedIds.length > 0) {
-          await dataService.batchDelete(user.id, table, orphanedIds);
+          await dataService.batchDelete(id, table, orphanedIds);
           cleanedCount += orphanedIds.length;
         }
       }
       
-      const attendanceRecords = await dataService.getAll(user.id, 'attendance');
+      const attendanceRecords = await dataService.getAll(id, 'attendance');
       const orphanedAttendanceIds = attendanceRecords
         .filter(r => r.entityType === 'student' && r.entityId && !studentIds.has(r.entityId))
         .map(r => r.id);
       
       if (orphanedAttendanceIds.length > 0) {
-        await dataService.batchDelete(user.id, 'attendance', orphanedAttendanceIds);
+        await dataService.batchDelete(id, 'attendance', orphanedAttendanceIds);
         cleanedCount += orphanedAttendanceIds.length;
       }
       
@@ -235,8 +279,37 @@ export default function Students() {
     }
   }
 
+  async function checkClassAssignments() {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    try {
+      addToast('Checking class assignments...', 'info');
+      const validation = await validateStudentClassAssignments(id);
+      
+      if (validation.invalidAssignments > 0) {
+        const confirmFix = confirm(
+          `Found ${validation.invalidAssignments} students with invalid class assignments.\n\n` +
+          `These students are assigned to classes that don't exist.\n` +
+          `Would you like to mark them as "Not assigned"?`
+        );
+        
+        if (confirmFix) {
+          const result = await fixInvalidClassAssignments(id);
+          addToast(result.message, result.fixed > 0 ? 'success' : 'info');
+          await loadData(); // Reload to show updated class names
+        }
+      } else {
+        addToast('All class assignments are valid', 'success');
+      }
+    } catch (error) {
+      console.error('Class assignment check error:', error);
+      addToast('Failed to check class assignments', 'error');
+    }
+  }
+
   async function handleDelete(id: string) {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     if (!confirm('Are you sure you want to delete this student? This action cannot be undone.')) {
       return;
     }
@@ -245,7 +318,7 @@ export default function Students() {
       const student = students.find(s => s.id === id);
       
       // Delete the student directly - related records will be handled by sync
-      const result = await dataService.delete(user.id, 'students', id);
+      const result = await dataService.delete(authId, 'students', id);
       
       if (!result.success) {
         throw new Error(result.error || 'Failed to delete');
@@ -265,7 +338,7 @@ export default function Students() {
             data: student,
             deletedAt: new Date().toISOString()
           };
-          addToRecycleBin(user.id, recycleItem);
+          addToRecycleBin(authId, recycleItem);
         } catch (e) {
           console.error('Recycle bin error:', e);
         }
@@ -279,10 +352,11 @@ export default function Students() {
   }
 
   async function handleToggleStatus(student: Student) {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     const newStatus = student.status === 'active' ? 'inactive' : 'active';
     try {
-      await dataService.update(user.id, 'students', student.id, { status: newStatus } as any);
+      await dataService.update(id, 'students', student.id, { status: newStatus } as any);
       addToast(`Student ${newStatus === 'active' ? 'activated' : 'deactivated'}`, 'success');
     } catch (error) {
       addToast('Failed to update status', 'error');
@@ -319,7 +393,8 @@ export default function Students() {
   }
 
   async function handleMarkCompleted(studentId: string) {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const completedData = {
         status: 'completed' as const,
@@ -327,7 +402,7 @@ export default function Students() {
         completedYear: new Date().getFullYear(),
         completedTerm: 'Final'
       };
-      await dataService.update(user.id, 'students', studentId, completedData as any);
+      await dataService.update(id, 'students', studentId, completedData as any);
       addToast('Student marked as completed', 'success');
     } catch (error) {
       addToast('Failed to update status', 'error');
@@ -335,9 +410,10 @@ export default function Students() {
   }
 
   async function handleMarkActive(studentId: string) {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      await dataService.update(user.id, 'students', studentId, { status: 'active' } as any);
+      await dataService.update(id, 'students', studentId, { status: 'active' } as any);
       addToast('Student reactivated', 'success');
     } catch (error) {
       addToast('Failed to update status', 'error');
@@ -362,7 +438,8 @@ export default function Students() {
   }
 
   async function handleBulkDelete() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (selectedStudents.size === 0) return;
     if (!confirm(`Are you sure you want to delete ${selectedStudents.size} student(s)? This action cannot be undone.`)) return;
     
@@ -370,13 +447,13 @@ export default function Students() {
       const now = new Date().toISOString();
       let deletedCount = 0;
       
-      for (const id of selectedStudents) {
-        const student = students.find(s => s.id === id);
-        const result = await dataService.delete(user.id, 'students', id);
+      for (const studentId of selectedStudents) {
+        const student = students.find(s => s.id === studentId);
+        const result = await dataService.delete(id, 'students', studentId);
         
         if (result.success && student) {
           deletedCount++;
-          addToRecycleBin(user.id, {
+          addToRecycleBin(id, {
             id: `student-${Date.now()}-${Math.random()}`,
             type: 'student',
             name: `${student.firstName} ${student.lastName}`,
@@ -400,7 +477,8 @@ export default function Students() {
   }
 
   async function handleBulkMarkCompleted() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (selectedStudents.size === 0) return;
     
     try {
@@ -412,8 +490,8 @@ export default function Students() {
         completedTerm: 'Final'
       };
       
-      for (const id of selectedStudents) {
-        await dataService.update(user.id, 'students', id, completedData as any);
+      for (const studentId of selectedStudents) {
+        await dataService.update(id, 'students', studentId, completedData as any);
       }
       
       setSelectedStudents(new Set());
@@ -425,14 +503,15 @@ export default function Students() {
   }
 
   async function handleBulkDeactivate() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (selectedStudents.size === 0) return;
     
     try {
       const now = new Date().toISOString();
       
-      for (const id of selectedStudents) {
-        await dataService.update(user.id, 'students', id, { status: 'inactive', updatedAt: now } as any);
+      for (const studentId of selectedStudents) {
+        await dataService.update(id, 'students', studentId, { status: 'inactive', updatedAt: now } as any);
       }
       
       setSelectedStudents(new Set());
@@ -444,14 +523,15 @@ export default function Students() {
   }
 
   async function handleBulkMarkActive() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (selectedStudents.size === 0) return;
     
     try {
       const now = new Date().toISOString();
       
-      for (const id of selectedStudents) {
-        await dataService.update(user.id, 'students', id, { status: 'active', updatedAt: now } as any);
+      for (const studentId of selectedStudents) {
+        await dataService.update(id, 'students', studentId, { status: 'active', updatedAt: now } as any);
       }
       
       setSelectedStudents(new Set());
@@ -729,7 +809,8 @@ export default function Students() {
   }
 
   async function executeImport() {
-    if (importPreview.length === 0 || !user?.id) {
+    const id = schoolId || user?.id;
+    if (importPreview.length === 0 || !id) {
       addToast('No valid students to import', 'error');
       return;
     }
@@ -750,28 +831,6 @@ export default function Students() {
       };
 
       const importStatus = getImportStatus();
-      const importCountsTowardPlan = importStatus !== 'completed';
-
-      if (importCountsTowardPlan) {
-        const projectedAdds = importPreview.reduce((total, _data, index) => {
-          const flagged = flaggedItems[index];
-          if (!flagged || flagged.action === 'duplicate') {
-            return total + 1;
-          }
-          if (flagged.action === 'replace') {
-            return total + (countsTowardPlan(flagged.existingStudent || {}) ? 0 : 1);
-          }
-          return total;
-        }, 0);
-
-        const usage = await getPlanUsage(user?.id);
-        if (projectedAdds > usage.remaining) {
-          const message = `This import adds ${projectedAdds} enrolled students, but your ${usage.plan?.name || 'selected'} plan only has ${usage.remaining} seat${usage.remaining === 1 ? '' : 's'} left. Upgrade or reduce the import.`;
-          setPlanLimitMessage(message);
-          addToast(message, 'error');
-          return;
-        }
-      }
 
       for (let i = 0; i < importPreview.length; i++) {
         const data = importPreview[i];
@@ -797,7 +856,7 @@ export default function Students() {
             
             const student: Student = {
               id: newId,
-              schoolId: user?.id || '',
+              schoolId: id,
               studentId: newId,
               admissionNo: newId,
               firstName: ((data as any).firstName as string) || 'Unknown',
@@ -816,13 +875,13 @@ export default function Students() {
               updatedAt: now,
             };
             
-            await dataService.create(user!.id, 'students', student);
+            await dataService.create(id, 'students', student);
             successCount++;
           } else if (flagged.action === 'replace' && flagged.existingId) {
             const genderValue = ((data as any).gender as string)?.toLowerCase();
             const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
             
-            await dataService.update(user!.id, 'students', flagged.existingId, {
+            await dataService.update(id, 'students', flagged.existingId, {
               firstName: ((data as any).firstName as string) || 'Unknown',
               lastName: ((data as any).lastName as string) || 'Unknown',
               dob: ((data as any).dob as string) || '2000-01-01',
@@ -840,23 +899,26 @@ export default function Students() {
             replacedCount++;
           }
         } else {
+          // Regular new student
           const genderValue = ((data as any).gender as string)?.toLowerCase();
           const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-          
+
+          const studentIdLocal = (data as any).id || generateUUID();
+
           const student: Student = {
-            id: studentId,
-            schoolId: user?.id || '',
-            studentId: studentId,
-            admissionNo: studentId,
-            firstName: ((data as any).firstName as string) || 'Unknown',
-            lastName: ((data as any).lastName as string) || 'Unknown',
-            dob: ((data as any).dob as string) || '2000-01-01',
+            id: studentIdLocal,
+            schoolId: id,
+            studentId: (data as any).studentId || generateStudentId((data.firstName as string) || '', (data.lastName as string) || ''),
+            admissionNo: (data as any).admissionNo || studentIdLocal,
+            firstName: (data.firstName as string) || 'Unknown',
+            lastName: (data.lastName as string) || 'Unknown',
             gender: validGender,
-            classId: ((data as any).classId as string) || 'primary-1',
-            address: ((data as any).address as string) || '',
-            guardianName: ((data as any).guardianName as string) || '',
-            guardianPhone: ((data as any).guardianPhone as string) || '',
-            guardianEmail: (data as any).guardianEmail as string | undefined,
+            dob: (data.dob as string) || '2000-01-01',
+            classId: (data.classId as string) || 'primary-1',
+            address: (data.address as string) || '',
+            guardianName: (data.guardianName as string) || '',
+            guardianPhone: (data.guardianPhone as string) || '',
+            guardianEmail: data.guardianEmail as string | undefined,
             status: importStatus as any,
             completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
             completedTerm: importStatus === 'completed' ? 'Final' : undefined,
@@ -864,7 +926,7 @@ export default function Students() {
             updatedAt: now,
           };
           
-          await dataService.create(user!.id, 'students', student);
+          await dataService.create(id, 'students', student as any);
           successCount++;
         }
       }
@@ -947,6 +1009,10 @@ export default function Students() {
           <button onClick={() => setShowImportModal(true)} className="btn btn-secondary" title="Import">
             <Upload size={16} />
             <span className="hidden sm:inline">Import {viewFilter === 'all' ? '' : `(${viewFilter === 'completed' ? 'Records' : viewFilter})`}</span>
+          </button>
+          <button onClick={checkClassAssignments} className="btn btn-secondary text-blue-600 hover:text-blue-700 dark:text-blue-400" title="Check class assignments">
+            <Users size={16} />
+            <span className="hidden lg:inline">Check Classes</span>
           </button>
           <button onClick={cleanupOrphanedRecords} className="btn btn-secondary text-amber-600 hover:text-amber-700 dark:text-amber-400" title="Clean orphaned records">
             <Filter size={16} />

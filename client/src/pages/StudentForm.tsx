@@ -8,7 +8,6 @@ import ImageUpload from '../components/ImageUpload';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/DataService';
-import { getPlanUsage } from '../utils/plans';
 import { ClassOption, getClassCapacityState, getClassDisplayName, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, extractFormatFromId, IdFormat } from '../utils/idFormat';
 
@@ -69,7 +68,7 @@ interface ValidationError {
 }
 
 export default function StudentForm() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
   const { id } = useParams<{ id?: string }>();
@@ -95,16 +94,17 @@ export default function StudentForm() {
   const isEditing = !!id;
 
   useEffect(() => {
-    if (id && user?.id) {
+    const idAuth = schoolId || user?.id;
+    if (id && idAuth) {
       loadStudent();
     } else {
       setTempId(uuidv4());
       hydrateStudentId();
     }
-    if (user?.id) {
+    if (idAuth) {
       loadClasses();
     }
-  }, [id, user]);
+  }, [id, user, schoolId]);
 
   useEffect(() => {
     if (showValidationPopup) {
@@ -125,9 +125,10 @@ export default function StudentForm() {
   }, [formData.firstName, formData.lastName]);
 
   async function loadStudent() {
-    if (!user?.id) return;
+    const idAuth = schoolId || user?.id;
+    if (!idAuth) return;
     try {
-      const student = await dataService.get(user.id, 'students', id!);
+      const student = await dataService.get(idAuth, 'students', id!);
       if (student) {
         setFormData({
           ...student,
@@ -146,9 +147,10 @@ export default function StudentForm() {
   }
 
   async function loadClasses() {
-    if (!user?.id) return;
+    const idAuth = schoolId || user?.id;
+    if (!idAuth) return;
     try {
-      const options = await getStudentClassOptions(user.id, id);
+      const options = await getStudentClassOptions(idAuth, id);
       setClasses(options);
     } catch (error) {
       console.error('Failed to load classes:', error);
@@ -156,9 +158,10 @@ export default function StudentForm() {
   }
 
   async function hydrateStudentId() {
-    if (!user?.id) return;
+    const idAuth = schoolId || user?.id;
+    if (!idAuth) return;
     try {
-      const students = await dataService.getAll(user.id, 'students');
+      const students = await dataService.getAll(idAuth, 'students');
       const existingValues = students
         .filter(s => s.id !== id)
         .flatMap(s => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
@@ -175,9 +178,10 @@ export default function StudentForm() {
   }
 
   async function regenerateStudentId() {
-    if (!user?.id) return;
+    const idAuth = schoolId || user?.id;
+    if (!idAuth) return;
     try {
-      const students = await dataService.getAll(user.id, 'students');
+      const students = await dataService.getAll(idAuth, 'students');
       const existingValues = students
         .filter(s => s.id !== id)
         .flatMap(s => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
@@ -274,16 +278,17 @@ export default function StudentForm() {
   }
 
   async function autoSave() {
-    if (!user?.id) return;
+    const idAuth = schoolId || user?.id;
+    if (!idAuth) return;
     try {
       const now = new Date().toISOString();
       
       if (isEditing) {
-        await dataService.update(user.id, 'students', id!, { ...formData, updatedAt: now } as any);
+        await dataService.update(idAuth, 'students', id!, { ...formData, updatedAt: now } as any);
       } else {
-        const existing = await dataService.get(user.id, 'students', tempId);
+        const existing = await dataService.get(idAuth, 'students', tempId);
         if (existing) {
-          await dataService.update(user.id, 'students', tempId, { ...formData, updatedAt: now } as any);
+          await dataService.update(idAuth, 'students', tempId, { ...formData, updatedAt: now } as any);
         }
       }
     } catch (error) {
@@ -360,46 +365,41 @@ export default function StudentForm() {
 
     setLoading(true);
 
+    const idAuth = schoolId || user?.id;
     try {
       const now = new Date().toISOString();
 
       if (isEditing) {
-        if (!user?.id) return;
-        const classCapacity = formData.classId && user?.id ? await getClassCapacityState(user.id, formData.classId, id) : null;
+        if (!idAuth) return;
+        const classCapacity = formData.classId ? await getClassCapacityState(idAuth, formData.classId, id) : null;
         if (classCapacity?.isFull) {
           addToast(`${classCapacity.name} is full (${classCapacity.enrolled}/${classCapacity.capacity}). Choose another class.`, 'error');
           setCurrentStep(1);
           return;
         }
 
-        const students = await dataService.getAll(user.id, 'students');
+        const students = await dataService.getAll(idAuth, 'students');
         const existingValues = students.flatMap((s: any) => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
         const finalStudentId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', existingValues);
-        await dataService.update(user.id, 'students', id!, { ...formData, admissionNo: finalStudentId, studentId: finalStudentId, updatedAt: now } as any);
+        await dataService.update(idAuth, 'students', id!, { ...formData, admissionNo: finalStudentId, studentId: finalStudentId, updatedAt: now } as any);
         addToast('Student updated successfully', 'success');
       } else {
-        if (!user?.id) return;
-        const usage = await getPlanUsage(user.id);
-        if (usage.remaining < 1) {
-          addToast(`Your ${usage.plan?.name || 'selected'} plan is full. Upgrade before adding more students.`, 'error');
-          navigate('/plans');
-          return;
-        }
+        if (!idAuth) return;
 
-        const classCapacity = formData.classId && user?.id ? await getClassCapacityState(user.id, formData.classId) : null;
+        const classCapacity = formData.classId ? await getClassCapacityState(idAuth, formData.classId) : null;
         if (classCapacity?.isFull) {
           addToast(`${classCapacity.name} is full (${classCapacity.enrolled}/${classCapacity.capacity}). Choose another class.`, 'error');
           setCurrentStep(1);
           return;
         }
 
-        const existingVals = await dataService.getAll(user.id, 'students');
+        const existingVals = await dataService.getAll(idAuth, 'students');
         const existingStudentValues = existingVals.flatMap(s => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
         const finalStudentId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', existingStudentValues);
         const newStudent: Student = {
           id: tempId,
-          userId: user.id,
-          schoolId: user.id,
+          userId: user!.id,
+          schoolId: idAuth,
           admissionNo: finalStudentId,
           studentId: finalStudentId,
           firstName: formData.firstName || '',
@@ -422,7 +422,7 @@ export default function StudentForm() {
           createdAt: now,
           updatedAt: now,
         };
-        await dataService.create(user.id, 'students', newStudent as any);
+        await dataService.create(idAuth, 'students', newStudent as any);
         addToast('Student admitted successfully', 'success');
         window.dispatchEvent(new Event('studentsUpdated'));
       }
@@ -438,15 +438,16 @@ export default function StudentForm() {
   }
 
   async function handleDone() {
-    if (!user?.id) return;
+    const idAuth = schoolId || user?.id;
+    if (!idAuth) return;
     setLoading(true);
 
     try {
       const now = new Date().toISOString();
-      const allStudents = await dataService.getAll(user.id, 'students');
+      const allStudents = await dataService.getAll(idAuth, 'students');
       const existingVals = allStudents.flatMap((s: any) => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
       const finalStudentId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', existingVals);
-      await dataService.update(user.id, 'students', id!, { ...formData, admissionNo: finalStudentId, studentId: finalStudentId, updatedAt: now } as any);
+      await dataService.update(idAuth, 'students', id!, { ...formData, admissionNo: finalStudentId, studentId: finalStudentId, updatedAt: now } as any);
       addToast('Student updated successfully', 'success');
       window.dispatchEvent(new Event('studentsUpdated'));
       navigate('/students');

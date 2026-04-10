@@ -7,7 +7,6 @@ import { v4 as uuidv4 } from 'uuid';
 import ImageUpload from '../components/ImageUpload';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/DataService';
-import { getPlanUsage } from '../utils/plans';
 import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, extractFormatFromId, IdFormat } from '../utils/idFormat';
 
@@ -80,7 +79,7 @@ const steps = [
 ];
 
 export default function Admission() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const navigate = useNavigate();
   const { addToast } = useToast();
   const [currentStep, setCurrentStep] = useState(1);
@@ -95,22 +94,27 @@ export default function Admission() {
   const [pendingCustomId, setPendingCustomId] = useState<string>('');
 
   useEffect(() => {
-    loadClasses();
-    hydrateAdmissionNo();
-  }, []);
+    if (user?.id || schoolId) {
+      loadClasses();
+      hydrateAdmissionNo();
+    }
+  }, [user?.id, schoolId]);
 
   async function loadClasses() {
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      setClasses(await getStudentClassOptions(user!.id));
+      setClasses(await getStudentClassOptions(id));
     } catch (error) {
       console.error('Failed to load classes:', error);
     }
   }
 
   async function hydrateAdmissionNo() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const students = await dataService.getAll(user.id, 'students');
+      const students = await dataService.getAll(id, 'students');
       const existingValues = students.flatMap(s => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
       
       const admissionNo = generateStudentId(
@@ -125,9 +129,10 @@ export default function Admission() {
   }
 
   async function regenerateAdmissionNo() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const students = await dataService.getAll(user.id, 'students');
+      const students = await dataService.getAll(id, 'students');
       const existingValues = students.flatMap(s => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
       
       const admissionNo = generateStudentId(
@@ -237,17 +242,11 @@ export default function Admission() {
   }
 
   async function handleSubmit() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     setLoading(true);
     try {
-      const usage = await getPlanUsage(user.id);
-      if (usage.remaining < 1) {
-        addToast(`Your ${usage.plan?.name || 'selected'} plan is full. Upgrade before admitting more students.`, 'error');
-        navigate('/plans');
-        return;
-      }
-
-      const selectedClass = await getClassCapacityState(user.id, formData.classId);
+      const selectedClass = await getClassCapacityState(id, formData.classId);
       if (selectedClass?.isFull) {
         addToast(`${selectedClass.name} is full (${selectedClass.enrolled}/${selectedClass.capacity}). Choose another class.`, 'error');
         setCurrentStep(1);
@@ -255,14 +254,14 @@ export default function Admission() {
       }
 
       const now = new Date().toISOString();
-      const students = await dataService.getAll(user!.id, 'students');
+      const students = await dataService.getAll(id, 'students');
       const existingValues = students.flatMap((s: any) => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
       const admissionNo = formData.admissionNo.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', existingValues);
 
       const newStudent: Student = {
         id: uuidv4(),
         userId: user!.id,
-        schoolId: user!.id,
+        schoolId: id,
         admissionNo,
         studentId: admissionNo,
         firstName: formData.firstName,
@@ -284,7 +283,7 @@ export default function Admission() {
         updatedAt: now,
       };
 
-      await dataService.create(user!.id, 'students', newStudent as any);
+      await dataService.create(id, 'students', newStudent as any);
       addToast(`Student ${formData.firstName} admitted successfully! Admission No: ${admissionNo}`, 'success');
       await loadClasses();
       navigate('/students');

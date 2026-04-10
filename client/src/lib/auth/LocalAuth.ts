@@ -1,6 +1,7 @@
 import { userIndexDB, UserAccount } from '../database/UserIndexDB';
 import { userDBManager } from '../database/UserDatabaseManager';
 import { supabase, isSupabaseConfigured } from '../supabase';
+import { generateUUID } from '../../utils/uuid';
 
 const PBKDF2_ITERATIONS = 100000;
 const HASH_LENGTH = 32;
@@ -206,7 +207,7 @@ export async function registerLocal(
       passwordHash,
       firstName,
       lastName,
-      databasePath: `schofy_user_db_${crypto.randomUUID()}`,
+      databasePath: `schofy_user_db_${generateUUID()}`,
       isActive: true,
     });
     console.log('User created in IndexedDB:', user.id);

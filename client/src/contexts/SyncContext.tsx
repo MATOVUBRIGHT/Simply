@@ -32,9 +32,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       : null
   );
   const [pendingChanges, setPendingChanges] = useState(0);
-  const [syncEnabled, setSyncEnabled] = useState(
-    localStorage.getItem('schofy_sync_enabled') === 'true'
-  );
+  const [syncEnabled, setSyncEnabled] = useState(true); // Always enable sync by default
+
+  // Set default sync enabled in localStorage
+  useEffect(() => {
+    localStorage.setItem('schofy_sync_enabled', 'true');
+  }, []);
   const lastManualSyncRef = useRef<number>(0);
   const syncInProgressRef = useRef(false);
 

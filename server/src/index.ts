@@ -16,7 +16,7 @@ import settingsRoutes from './routes/settings.js';
 import syncRoutes from './routes/sync.js';
 
 const app = express();
-const PORT = process.env.PORT || 3333;
+const PORT = process.env.PORT || 3334;
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:4201,http://127.0.0.1:4201')
   .split(',')
   .map(origin => origin.trim())
@@ -24,7 +24,8 @@ const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:4201,http:
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // In development, allow all origins for local network testing
+    if (!origin || process.env.NODE_ENV === 'development' || allowedOrigins.includes(origin)) {
       callback(null, true);
       return;
     }

@@ -11,10 +11,12 @@ export default defineConfig({
     }
   },
   server: {
+    host: true, // Allow connections from any IP address
     port: 4201,
+    strictPort: false, // Use alternative port if 4201 is taken
     proxy: {
       '/api': {
-        target: 'http://localhost:3333',
+        target: 'http://localhost:3334',
         changeOrigin: true
       }
     }

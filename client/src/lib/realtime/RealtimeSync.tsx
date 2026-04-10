@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { userDBManager } from '../database/UserDatabaseManager';
+import { generateUUID } from '../../utils/uuid';
 
 export interface RealtimeChange {
   type: 'INSERT' | 'UPDATE' | 'DELETE';
@@ -26,10 +27,10 @@ const CHANNEL_NAME = 'schofy-sync';
 function getDeviceId(): string {
   let deviceId = localStorage.getItem(DEVICE_ID_KEY);
   if (!deviceId) {
-    deviceId = crypto.randomUUID();
+    deviceId = generateUUID();
     localStorage.setItem(DEVICE_ID_KEY, deviceId);
   }
-  return deviceId;
+  return deviceId || generateUUID(); // Fallback in case of null
 }
 
 export function RealtimeSyncProvider({ children }: { children: ReactNode }) {

@@ -11,7 +11,7 @@ const faqs = [
 ];
 
 export default function Plans() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'term' | 'yearly'>('term');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanDefinition | null>(null);
@@ -30,8 +30,8 @@ export default function Plans() {
   const [modalCenterY, setModalCenterY] = useState<number | null>(null);
 
   useEffect(() => {
-    if (user?.id) loadPlanState();
-  }, [user]);
+    if (user?.id || schoolId) loadPlanState();
+  }, [user?.id, schoolId]);
 
   useEffect(() => {
     const anyModalOpen = showPaymentModal || showFAQModal || showUpgradeModal || showIntroModal || showContinueModal;
@@ -56,13 +56,14 @@ export default function Plans() {
   }, [showPaymentModal, showFAQModal, showUpgradeModal, showIntroModal, showContinueModal]);
 
   async function loadPlanState() {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     try {
-      const [savedBillingCycle, usage, receipt, introSeen] = await Promise.all([
-        getCurrentBillingCycle(user.id),
-        getSubscriptionAccessState(user.id),
-        getLatestReceipt(user.id),
-        hasSeenPlanIntro(user.id),
+      const [savedBillingCycle, usage, receipt] = await Promise.all([
+        getCurrentBillingCycle(authId),
+        getSubscriptionAccessState(authId),
+        getLatestReceipt(authId),
+        hasSeenPlanIntro(authId),
       ]);
 
       setBillingCycle(savedBillingCycle);
@@ -70,10 +71,6 @@ export default function Plans() {
       setStudentCount(usage.used);
       setAccessState(usage);
       setLatestReceipt(receipt);
-
-      if (!usage.selectedPlanId && !introSeen) {
-        setShowIntroModal(true);
-      }
     } catch (error) {
       console.error('Failed to load plan state:', error);
     }
@@ -125,32 +122,23 @@ Powered by Schofy`;
 
   return (
     <div className="relative space-y-4 text-slate-900 dark:text-white">
-      {accessState && (
-        <div className={`rounded-xl border p-4 ${
-          accessState.status === 'expired' || !accessState.eligible
-            ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-            : accessState.status === 'expiring'
-              ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
-              : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
-        }`}>
-          <p className="text-sm font-semibold text-slate-900 dark:text-white">
-            {accessState.status === 'incomplete' && 'No plan is selected yet. Choose monthly, per term, or yearly to continue.'}
-            {accessState.status === 'expired' && 'Your plan has expired. Renew now to restore access.'}
-            {accessState.status === 'expiring' && `Your plan expires in ${accessState.daysRemaining} day${accessState.daysRemaining === 1 ? '' : 's'}. Renew now to avoid interruption.`}
-            {accessState.status === 'active' && accessState.eligible && accessState.expiryDate && accessState.plan && `Your ${accessState.plan.name} plan is active until ${new Date(accessState.expiryDate).toLocaleDateString()}.`}
-          </p>
-          {!accessState.eligible && (
-            <p className="text-sm text-red-700 dark:text-red-300 mt-2">
-              Your enrolled students exceed the selected plan limit. Upgrade before using the rest of the app.
-            </p>
-          )}
-        </div>
-      )}
+      <div className="rounded-xl border p-4 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800">
+        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+          🎉 Your account is now fully unlocked! Schofy is now free to use with no student limits and real-time cloud sync across all your devices.
+        </p>
+      </div>
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Plans & Subscription</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Choose the perfect plan for your school</p>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">
+            {currentPlanId ? 'Manage Your Subscription' : 'Plans & Subscription'}
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {currentPlanId 
+              ? 'View your current plan or upgrade when needed' 
+              : 'Choose the perfect plan for your school'
+            }
+          </p>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-700 dark:bg-slate-800/90">
           {(['monthly', 'term', 'yearly'] as const).map((cycle) => (
@@ -169,10 +157,57 @@ Powered by Schofy`;
         </div>
       </div>
 
+      {/* Current Plan Status */}
+      {currentPlanId && accessState && (
+        <div className="rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/50 flex items-center justify-center flex-shrink-0">
+              <Check className="text-green-600 dark:text-green-400" size={20} />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-green-900 dark:text-green-100">
+                Your Current Plan: {PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.name || 'Unknown'}
+              </h3>
+              <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+                {accessState.status === 'active' ? 'Active' : 
+                 accessState.status === 'expiring' ? `Expires in ${accessState.daysRemaining} days` :
+                 accessState.status === 'expired' ? 'Expired' : 'Unknown'} • 
+                {currentCycle === 'monthly' ? ' Monthly' : 
+                 currentCycle === 'yearly' ? ' Yearly' : ' Term'} billing
+              </p>
+              <div className="flex items-center gap-4 mt-2 text-xs text-green-600 dark:text-green-400">
+                <span>Students: {studentCount}/{PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.studentLimit || 0}</span>
+                {accessState.expiryDate && (
+                  <span>Expires: {new Date(accessState.expiryDate).toLocaleDateString()}</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {accessState.status === 'expiring' && (
+                <button
+                  onClick={() => setShowUpgradeModal(true)}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium rounded-lg flex items-center gap-1"
+                >
+                  <AlertTriangle size={12} /> Extend
+                </button>
+              )}
+              {accessState.status === 'expired' && (
+                <button
+                  onClick={() => setShowUpgradeModal(true)}
+                  className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-medium rounded-lg flex items-center gap-1"
+                >
+                  <AlertTriangle size={12} /> Renew
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
         {PLAN_DEFINITIONS.map((plan) => {
           const isAtLimit = !checkPlanLimit(plan.id);
-          const isCurrentPlan = plan.id === currentPlanId && currentCycle === billingCycle;
+          const isCurrentPlan = plan.id === currentPlanId;
           return (
             <div
               key={plan.id}
@@ -238,7 +273,14 @@ Powered by Schofy`;
                 </div>
 
                 <div className="mt-auto pt-4">
-                  {isAtLimit && !isCurrentPlan ? (
+                  {isCurrentPlan ? (
+                    <button
+                      disabled
+                      className="w-full py-3 rounded-xl text-sm font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 cursor-default flex items-center justify-center gap-2"
+                    >
+                      <Check size={16} /> Current Plan
+                    </button>
+                  ) : isAtLimit ? (
                     <button
                       onClick={() => { setUpgradeToPlan(plan); setShowUpgradeModal(true); }}
                       className="w-full py-3 rounded-xl text-sm font-medium bg-red-500 hover:bg-red-600 text-white flex items-center justify-center gap-2"
@@ -248,15 +290,13 @@ Powered by Schofy`;
                   ) : (
                     <button
                       onClick={() => handleSubscribe(plan.id)}
-                      disabled={isCurrentPlan}
                       className={`w-full py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-2 ${
-                        isCurrentPlan ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 cursor-default' :
                         billingCycle === 'yearly' ? 'bg-amber-500 hover:bg-amber-600 text-white' :
                         plan.popular ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' :
                         'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-900 dark:text-white'
                       }`}
                     >
-                      {isCurrentPlan ? <><Check size={16} /> Current Plan</> : billingCycle === 'yearly' ? <><MessageCircle size={16} /> Contact Us</> : <><CreditCard size={16} /> Subscribe</>}
+                      {billingCycle === 'yearly' ? <><MessageCircle size={16} /> Contact Us</> : <><CreditCard size={16} /> Subscribe</>}
                     </button>
                   )}
                 </div>
@@ -370,13 +410,14 @@ Powered by Schofy`;
                         alert('Enter Transaction ID');
                         return;
                       }
-                      if (!user?.id) return;
+                      const authId = schoolId || user?.id;
+                      if (!authId) return;
 
-                      const usage = await saveCurrentPlan(user.id, selectedPlan.id, billingCycle);
+                      const usage = await saveCurrentPlan(authId, selectedPlan.id, billingCycle);
                       setCurrentPlanId(usage.selectedPlanId);
                       setStudentCount(usage.used);
                       setAccessState(usage);
-                      setLatestReceipt(await getLatestReceipt(user.id));
+                      setLatestReceipt(await getLatestReceipt(authId));
                       setPaymentSubmitted(true);
                     }}
                     className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1"
@@ -472,7 +513,8 @@ Powered by Schofy`;
               <div className="p-5 pt-0 flex justify-end">
                 <button
                   onClick={async () => {
-                    if (user?.id) await markPlanIntroSeen(user.id);
+                    const authId = schoolId || user?.id;
+                    if (authId) await markPlanIntroSeen(authId);
                     setShowIntroModal(false);
                   }}
                   className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium"

@@ -44,14 +44,35 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
       },
     });
 
-    channel.on('broadcast', { event: SYNC_EVENT }, (payload) => {
+    channel.on('broadcast', { event: SYNC_EVENT }, async (payload) => {
       const change = payload.payload as RealtimeChange;
       if (change && change.table) {
         lastChangeRef.current = change;
         
+        try {
+          const { userDBManager } = await import('../lib/database/UserDatabaseManager');
+          const { queryCache } = await import('../lib/cache/QueryCache');
+          
+          if (change.type === 'DELETE') {
+            await userDBManager.delete(change.userId, change.table, change.record.id);
+          } else if (change.type === 'INSERT' || change.type === 'UPDATE') {
+            const existing = await userDBManager.get(change.userId, change.table, change.record.id);
+            if (change.type === 'UPDATE' && existing) {
+              await userDBManager.put(change.userId, change.table, { ...existing, ...change.record, syncStatus: 'synced' });
+            } else {
+              await userDBManager.put(change.userId, change.table, { ...change.record, syncStatus: 'synced' });
+            }
+          }
+          
+          // Clear cache so the UI doesn't render stale data!
+          queryCache.invalidatePattern(`${change.table}:*`);
+        } catch (err) {
+          console.error('Failed to merge realtime change:', err);
+        }
+
         const eventName = `${change.table}Updated`;
         window.dispatchEvent(new CustomEvent(eventName, { detail: change }));
-        
+        window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: change }));
         window.dispatchEvent(new CustomEvent('dataRefresh'));
         
         console.log(`📡 Realtime: ${change.type} on ${change.table}`, change.record?.id);

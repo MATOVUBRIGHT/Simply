@@ -10,7 +10,7 @@ import { dataService } from '../lib/database/DataService';
 
 export default function StudentProfile() {
   const { id } = useParams();
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const { addToast } = useToast();
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20,16 +20,17 @@ export default function StudentProfile() {
   const [updatingClass, setUpdatingClass] = useState(false);
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadStudent();
       loadClasses();
     }
-  }, [id, user]);
+  }, [id, user?.id, schoolId]);
 
   async function loadStudent() {
-    if (!user?.id || !id) return;
+    const authId = schoolId || user?.id;
+    if (!authId || !id) return;
     try {
-      const data = await dataService.get(user.id, 'students', id);
+      const data = await dataService.get(authId, 'students', id);
       setStudent(data || null);
     } catch (error) {
       console.error('Failed to load student:', error);
@@ -39,9 +40,10 @@ export default function StudentProfile() {
   }
 
   async function loadClasses() {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     try {
-      const data = await dataService.getAll(user.id, 'classes');
+      const data = await dataService.getAll(authId, 'classes');
       setClasses(data);
     } catch (error) {
       console.error('Failed to load classes:', error);
@@ -49,7 +51,8 @@ export default function StudentProfile() {
   }
 
   async function handleClassChange(newClassId: string) {
-    if (!user?.id || !student || student.classId === newClassId) {
+    const authId = schoolId || user?.id;
+    if (!authId || !student || student.classId === newClassId) {
       setShowClassDropdown(false);
       return;
     }
@@ -57,7 +60,7 @@ export default function StudentProfile() {
     setUpdatingClass(true);
     try {
       const now = new Date().toISOString();
-      await dataService.update(user.id, 'students', student.id, { classId: newClassId, updatedAt: now } as any);
+      await dataService.update(authId, 'students', student.id, { classId: newClassId, updatedAt: now } as any);
       setStudent({ ...student, classId: newClassId, updatedAt: now });
       window.dispatchEvent(new Event('studentsUpdated'));
       addToast('Class updated successfully', 'success');

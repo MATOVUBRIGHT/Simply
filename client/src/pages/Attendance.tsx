@@ -30,7 +30,7 @@ export default function Attendance() {
   const [allAttendance, setAllAttendance] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const { addToast } = useToast();
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -48,10 +48,10 @@ export default function Attendance() {
   ];
 
   useEffect(() => { 
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadData(); 
     }
-  }, [selectedDate, selectedClass, user?.id]);
+  }, [selectedDate, selectedClass, user?.id, schoolId]);
 
   useEffect(() => {
     const handleAttendanceUpdated = () => loadData();
@@ -77,12 +77,13 @@ export default function Attendance() {
   }, []);
 
   async function loadData() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     setLoading(true);
     try {
-      const classStudents = await dataService.where(user.id, 'students', 'classId', selectedClass);
-      const records = await dataService.where(user.id, 'attendance', 'date', selectedDate);
-      const allRecords = await dataService.getAll(user.id, 'attendance');
+      const classStudents = await dataService.where(id, 'students', 'classId', selectedClass);
+      const records = await dataService.where(id, 'attendance', 'date', selectedDate);
+      const allRecords = await dataService.getAll(id, 'attendance');
       
       setStudents(classStudents);
       setAllAttendance(allRecords);
@@ -104,15 +105,16 @@ export default function Attendance() {
   }
 
   async function handleSave() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     setLoading(true);
     try {
       const now = new Date().toISOString();
       
-      const existingRecords = await dataService.where(user.id, 'attendance', 'date', selectedDate);
+      const existingRecords = await dataService.where(id, 'attendance', 'date', selectedDate);
       for (const record of existingRecords) {
         if (record.entityType === EntityType.STUDENT && students.some(s => s.id === record.entityId)) {
-          await dataService.delete(user.id, 'attendance', record.id);
+          await dataService.delete(id, 'attendance', record.id);
         }
       }
       
@@ -126,7 +128,7 @@ export default function Attendance() {
       }));
       
       for (const record of records) {
-        await dataService.create(user.id, 'attendance', record as any);
+        await dataService.create(id, 'attendance', record as any);
       }
       addToast('Attendance saved successfully', 'success');
       loadData();
@@ -286,7 +288,8 @@ export default function Attendance() {
   }
 
   async function executeImport() {
-    if (!user?.id || importPreview.length === 0) { addToast('No valid records to import', 'error'); return; }
+    const id = schoolId || user?.id;
+    if (!id || importPreview.length === 0) { addToast('No valid records to import', 'error'); return; }
     try {
       const now = new Date().toISOString();
       let successCount = 0;
@@ -295,11 +298,11 @@ export default function Attendance() {
         const student = students.find(s => s.admissionNo === data.admissionNo);
         if (!student) continue;
 
-        const existing = await dataService.where(user.id, 'attendance', 'date', data.date);
+        const existing = await dataService.where(id, 'attendance', 'date', data.date);
         const existingRecord = existing.find((a: any) => a.entityId === student.id);
 
         if (existingRecord) {
-          await dataService.update(user.id, 'attendance', existingRecord.id, { status: data.status as AttendanceStatus } as any);
+          await dataService.update(id, 'attendance', existingRecord.id, { status: data.status as AttendanceStatus } as any);
         } else {
           const newRecord: AttendanceRecord = {
             id: uuidv4(),
@@ -309,7 +312,7 @@ export default function Attendance() {
             status: data.status as AttendanceStatus,
             createdAt: now,
           };
-          await dataService.create(user.id, 'attendance', newRecord as any);
+          await dataService.create(id, 'attendance', newRecord as any);
         }
         successCount++;
       }

@@ -34,7 +34,7 @@ function getGrade(score: number): { grade: string; remark: string; points: numbe
 }
 
 export default function Grades() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('all');
@@ -66,17 +66,18 @@ export default function Grades() {
   const { students: allStudents } = useStudents();
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadData();
     }
-  }, [user?.id]);
+  }, [user?.id, schoolId]);
 
   async function loadData() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const [results, subs] = await Promise.all([
-        dataService.getAll(user.id, 'examResults'),
-        dataService.getAll(user.id, 'subjects'),
+        dataService.getAll(id, 'examResults'),
+        dataService.getAll(id, 'subjects'),
       ]);
       setExamResults(results);
       setSubjects(subs);
@@ -125,7 +126,8 @@ export default function Grades() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const newGrade: ExamResult = {
         id: uuidv4(),
@@ -136,7 +138,7 @@ export default function Grades() {
         maxScore: parseFloat(formData.maxScore),
         createdAt: new Date().toISOString(),
       };
-      await dataService.create(user.id, 'examResults', newGrade as any);
+      await dataService.create(id, 'examResults', newGrade as any);
       addToast('Grade added successfully', 'success');
       setShowForm(false);
       setFormData({
@@ -154,11 +156,12 @@ export default function Grades() {
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!user?.id) return;
+  async function handleDelete(idResult: string) {
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (!confirm('Delete this grade?')) return;
     try {
-      await dataService.delete(user.id, 'examResults', id);
+      await dataService.delete(id, 'examResults', idResult);
       loadData();
       addToast('Grade deleted successfully', 'success');
     } catch (error) {
@@ -173,7 +176,8 @@ export default function Grades() {
   }, [grades, students]);
 
   async function handleCreateExamFeeInvoice() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     const amount = parseFloat(invoiceAmount);
     if (isNaN(amount) || amount <= 0) {
       addToast('Please enter a valid amount', 'error');
@@ -197,7 +201,7 @@ export default function Grades() {
           year: year,
           createdAt: now,
         };
-        await dataService.create(user.id, 'fees', newFee as any);
+        await dataService.create(id, 'fees', newFee as any);
         count++;
       }
       // Broadcast change to update other pages
@@ -354,8 +358,9 @@ export default function Grades() {
   }
 
   async function executeImport() {
+    const id = schoolId || user?.id;
     if (importPreview.length === 0) { addToast('No valid grades to import', 'error'); return; }
-    if (!user?.id) return;
+    if (!id) return;
     try {
       const now = new Date().toISOString();
       let successCount = 0;
@@ -369,7 +374,7 @@ export default function Grades() {
           maxScore: (data.maxScore as number) || 100,
           createdAt: now,
         };
-        await dataService.create(user.id, 'examResults', grade as any);
+        await dataService.create(id, 'examResults', grade as any);
         successCount++;
       }
       addToast(`Successfully imported ${successCount} grades`, 'success');

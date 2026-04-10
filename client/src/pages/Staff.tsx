@@ -1,14 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Calendar, Settings } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
+import { PaymentMethod, StaffRole } from '@schofy/shared';
 import type { Staff, SalaryPayment } from '@schofy/shared';
-import { PaymentMethod } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import ImageModal from '../components/ImageModal';
 import DropdownModal from '../components/DropdownModal';
 import { useCurrency } from '../hooks/useCurrency';
-import { v4 as uuidv4 } from 'uuid';
+import { generateUUID } from '../utils/uuid';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/DataService';
 import { addToRecycleBin } from '../utils/recycleBin';
@@ -28,8 +28,8 @@ function getAvatarColor(name: string) {
   return avatarColors[index];
 }
 
-export default function Staff() {
-  const { user } = useAuth();
+export default function StaffPage() {
+  const { user, schoolId } = useAuth();
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -58,10 +58,10 @@ export default function Staff() {
   const [paymentNotes, setPaymentNotes] = useState('');
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadStaff();
     }
-  }, [user?.id]);
+  }, [user?.id, schoolId]);
 
   useEffect(() => {
     const handleStaffUpdated = () => loadStaff();
@@ -77,11 +77,12 @@ export default function Staff() {
   }, []);
 
   async function loadStaff() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const [data, payments] = await Promise.all([
-        dataService.getAll(user.id, 'staff'),
-        dataService.getAll(user.id, 'salaryPayments')
+        dataService.getAll(id, 'staff'),
+        dataService.getAll(id, 'salaryPayments')
       ]);
       const sorted = data.sort((a: any, b: any) => {
         const dateA = new Date(a.createdAt).getTime();
@@ -107,7 +108,8 @@ export default function Staff() {
   };
 
   async function handleGeneratePayroll() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const [month, year] = payrollMonth.split('-');
       const activeStaff = staff.filter(s => s.status === 'active' && s.salary && s.salary > 0);
@@ -120,7 +122,7 @@ export default function Staff() {
         );
         if (!existing) {
           const payment: SalaryPayment = {
-            id: uuidv4(),
+            id: generateUUID(),
             staffId: member.id,
             staffName: `${member.firstName} ${member.lastName}`,
             amount: member.salary || 0,
@@ -129,7 +131,7 @@ export default function Staff() {
             status: 'pending',
             createdAt: now,
           };
-          await dataService.create(user.id, 'salaryPayments', payment as any);
+          await dataService.create(id, 'salaryPayments', payment as any);
           count++;
         }
       }
@@ -144,9 +146,10 @@ export default function Staff() {
   }
 
   async function handleMarkAsPaid(payment: SalaryPayment) {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      await dataService.update(user.id, 'salaryPayments', payment.id, { status: 'paid', paidAt: new Date().toISOString(), paymentMethod: PaymentMethod.BANK_TRANSFER, notes: paymentNotes || undefined } as any);
+      await dataService.update(id, 'salaryPayments', payment.id, { status: 'paid', paidAt: new Date().toISOString(), paymentMethod: PaymentMethod.BANK_TRANSFER, notes: paymentNotes || undefined } as any);
       await loadStaff();
       setShowPayModal(false);
       setSelectedPayment(null);
@@ -159,10 +162,11 @@ export default function Staff() {
   }
 
   async function handleDeletePayment(paymentId: string) {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (!confirm('Delete this payment record?')) return;
     try {
-      await dataService.delete(user.id, 'salaryPayments', paymentId);
+      await dataService.delete(id, 'salaryPayments', paymentId);
       await loadStaff();
       addToast('Payment record deleted', 'success');
     } catch (error) {
@@ -224,18 +228,19 @@ export default function Staff() {
   }
 
   async function handleBulkDelete() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (selectedStaff.size === 0) return;
     if (!confirm(`Are you sure you want to delete ${selectedStaff.size} staff member(s)?`)) return;
     
     try {
       const now = new Date().toISOString();
       
-      for (const id of selectedStaff) {
-        const staffMember = staff.find(s => s.id === id);
+      for (const staffId of selectedStaff) {
+        const staffMember = staff.find(s => s.id === staffId);
         if (staffMember) {
-          await dataService.delete(user.id, 'staff', id);
-          addToRecycleBin(user.id, {
+          await dataService.delete(id, 'staff', staffId);
+          addToRecycleBin(id, {
             id: `staff-${Date.now()}-${Math.random()}`,
             type: 'staff',
             name: `${staffMember.firstName} ${staffMember.lastName}`,
@@ -255,7 +260,8 @@ export default function Staff() {
   }
 
   async function handleBulkToggleStatus() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (selectedStaff.size === 0) return;
     
     try {
@@ -263,11 +269,11 @@ export default function Staff() {
       let activated = 0;
       let deactivated = 0;
       
-      for (const id of selectedStaff) {
-        const staffMember = staff.find(s => s.id === id);
+      for (const staffId of selectedStaff) {
+        const staffMember = staff.find(s => s.id === staffId);
         if (staffMember) {
           const newStatus = staffMember.status === 'active' ? 'inactive' : 'active';
-          await dataService.update(user.id, 'staff', id, { status: newStatus, updatedAt: now } as any);
+          await dataService.update(id, 'staff', staffId, { status: newStatus, updatedAt: now } as any);
           if (newStatus === 'active') activated++;
           else deactivated++;
         }
@@ -293,14 +299,15 @@ export default function Staff() {
   );
 
   async function handleDelete(id: string) {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     if (confirm('Are you sure you want to delete this staff member?')) {
       try {
         const staffMember = staff.find(s => s.id === id);
-        await dataService.delete(user.id, 'staff', id);
+        await dataService.delete(authId, 'staff', id);
         
         if (staffMember) {
-          addToRecycleBin(user.id, {
+          addToRecycleBin(authId, {
             id: `staff-${Date.now()}`,
             type: 'staff',
             name: `${staffMember.firstName} ${staffMember.lastName}`,
@@ -498,7 +505,8 @@ export default function Staff() {
   }
 
   async function executeImport() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (importPreview.length === 0) {
       addToast('No valid staff to import', 'error');
       return;
@@ -509,7 +517,7 @@ export default function Staff() {
       for (const data of importPreview) {
         const staffMember: Staff = {
           id: crypto.randomUUID(),
-          schoolId: user.id,
+          schoolId: id,
           employeeId: (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           firstName: (data.firstName as string) || 'Unknown',
           lastName: (data.lastName as string) || 'Unknown',
@@ -522,7 +530,7 @@ export default function Staff() {
           createdAt: now,
           updatedAt: now,
         };
-        await dataService.create(user.id, 'staff', staffMember as any);
+        await dataService.create(id, 'staff', staffMember as any);
         successCount++;
       }
       await loadStaff();
@@ -578,7 +586,7 @@ export default function Staff() {
       </div>
 
       {/* Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card-solid-purple p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
@@ -612,81 +620,100 @@ export default function Staff() {
             </div>
           </div>
         </div>
+        <div className="card-solid-amber p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all cursor-pointer" onClick={() => navigate('/payroll')}>
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <DollarSign size={24} className="text-white" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-white/80">Payroll</p>
+              <p className="text-2xl font-bold text-white">{payrollStats.pending.length}</p>
+              <p className="text-xs text-white/70">Pending</p>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Payroll Card */}
+      {/* Teachers Card */}
       <div className="card">
         <div className="card-header flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg">
-              <DollarSign size={20} className="text-white" />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg">
+              <Briefcase size={20} className="text-white" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-800 dark:text-white">Payroll</h3>
-              <p className="text-xs text-slate-500">Staff salary management</p>
+              <h3 className="font-bold text-slate-800 dark:text-white">Teachers</h3>
+              <p className="text-xs text-slate-500">Teaching staff overview</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button 
-              onClick={() => setShowHistoryModal(true)}
+              onClick={() => navigate('/payroll')}
               className="btn btn-secondary text-sm"
             >
-              <Clock size={16} />
-              History
+              <DollarSign size={16} />
+              Payroll
             </button>
             <button 
-              onClick={() => setShowPayrollModal(true)}
+              onClick={() => navigate('/staff/new')}
               className="btn btn-primary text-sm"
             >
-              <Settings size={16} />
-              Generate Payroll
+              <Plus size={16} />
+              Add Teacher
             </button>
           </div>
         </div>
         <div className="card-body">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <button 
-              onClick={() => setShowHistoryModal(true)}
-              className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 hover:border-amber-300 dark:hover:border-amber-700 transition-colors text-left group"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center">
-                  <Clock size={20} className="text-amber-600 dark:text-amber-400" />
+          {filteredStaff.filter(s => s.role === StaffRole.TEACHER).length === 0 ? (
+            <div className="text-center py-8">
+              <Briefcase size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+              <p className="text-slate-500 font-medium">No teachers found</p>
+              <p className="text-sm text-slate-400 mt-1">Add teaching staff to get started</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredStaff
+                .filter(s => s.role === StaffRole.TEACHER)
+                .slice(0, 5)
+                .map((teacher) => (
+                  <div key={teacher.id} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg ${getAvatarColor(teacher.firstName)} flex items-center justify-center`}>
+                        <span className="text-xs font-bold text-white">
+                          {teacher.firstName?.charAt(0)}{teacher.lastName?.charAt(0)}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-slate-800 dark:text-white text-sm">
+                          {teacher.firstName} {teacher.lastName}
+                        </p>
+                        <p className="text-xs text-slate-500">{teacher.email || 'No email'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`badge ${teacher.status === 'active' ? 'badge-success' : 'badge-gray'} text-xs`}>
+                        {teacher.status}
+                      </span>
+                      {teacher.salary && (
+                        <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                          {formatMoney(teacher.salary)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              {filteredStaff.filter(s => s.role === StaffRole.TEACHER).length > 5 && (
+                <div className="text-center pt-2">
+                  <button 
+                    onClick={() => setSearch('')}
+                    className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-medium"
+                  >
+                    View all {filteredStaff.filter(s => s.role === StaffRole.TEACHER).length} teachers →
+                  </button>
                 </div>
-                <span className="text-2xl font-bold text-amber-600 dark:text-amber-400">{payrollStats.pending.length}</span>
-              </div>
-              <p className="font-semibold text-amber-800 dark:text-amber-200">Pending</p>
-              <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">{formatMoney(payrollStats.pendingTotal)}</p>
-            </button>
-            
-            <button 
-              onClick={() => setShowHistoryModal(true)}
-              className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-800 hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors text-left group"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center">
-                  <CheckCircle size={20} className="text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{payrollStats.paid.length}</span>
-              </div>
-              <p className="font-semibold text-emerald-800 dark:text-emerald-200">Paid This Month</p>
-              <p className="text-sm text-emerald-600 dark:text-emerald-400 mt-1">{formatMoney(payrollStats.paidTotal)}</p>
-            </button>
-            
-            <button 
-              onClick={() => setShowHistoryModal(true)}
-              className="p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 hover:border-blue-300 dark:hover:border-blue-700 transition-colors text-left group"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
-                  <Calendar size={20} className="text-blue-600 dark:text-blue-400" />
-                </div>
-                <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">{payrollStats.upcoming.length}</span>
-              </div>
-              <p className="font-semibold text-blue-800 dark:text-blue-200">Upcoming</p>
-              <p className="text-sm text-blue-600 dark:text-blue-400 mt-1">{formatMoney(payrollStats.upcomingTotal)}</p>
-            </button>
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

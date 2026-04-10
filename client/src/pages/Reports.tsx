@@ -10,7 +10,7 @@ import { userDBManager } from '../lib/database/UserDatabaseManager';
 type ReportType = 'students' | 'fees' | 'attendance' | 'staff' | 'classes';
 
 export default function Reports() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [selectedReport, setSelectedReport] = useState<ReportType>('students');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -40,7 +40,8 @@ export default function Reports() {
   ];
 
   async function handleExport() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     const { jsPDF } = await import('jspdf');
     const doc = new jsPDF();
 
@@ -83,7 +84,7 @@ export default function Reports() {
     }
 
     if (selectedReport === 'staff') {
-      const staff = await userDBManager.getAll(user.id, 'staff');
+      const staff = await userDBManager.getAll(id, 'staff');
       
       doc.setFontSize(12);
       doc.text('Staff Directory', 14, 55);
@@ -111,7 +112,7 @@ export default function Reports() {
     }
 
     if (selectedReport === 'fees') {
-      const [payments, fees] = await Promise.all([userDBManager.getAll(user.id, 'payments'), userDBManager.getAll(user.id, 'fees')]);
+      const [payments, fees] = await Promise.all([userDBManager.getAll(id, 'payments'), userDBManager.getAll(id, 'fees')]);
       const studentList = students;
       const totalCollected = payments.reduce((sum, p) => sum + p.amount, 0);
       const totalInvoiced = fees.reduce((sum, f) => sum + f.amount, 0);
@@ -145,7 +146,7 @@ export default function Reports() {
     }
 
     if (selectedReport === 'attendance') {
-      const attendance = await userDBManager.getAll(user.id, 'attendance');
+      const attendance = await userDBManager.getAll(id, 'attendance');
       const studentList = students;
       
       doc.setFontSize(12);
@@ -181,7 +182,7 @@ export default function Reports() {
     }
 
     if (selectedReport === 'classes') {
-      const [classes, studentList] = await Promise.all([userDBManager.getAll(user.id, 'classes'), Promise.resolve(students)]);
+      const [classes, studentList] = await Promise.all([userDBManager.getAll(id, 'classes'), Promise.resolve(students)]);
       
       doc.setFontSize(12);
       doc.text('Class Summary Report', 14, 55);
@@ -216,7 +217,8 @@ export default function Reports() {
   }
 
   async function handleExportCSV() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     const { format } = await import('date-fns');
 
     if (selectedReport === 'students') {
@@ -237,7 +239,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'staff') {
-      const staff = await userDBManager.getAll(user.id, 'staff');
+      const staff = await userDBManager.getAll(id, 'staff');
       const data = staff.map(s => ({
         employeeId: s.employeeId,
         firstName: s.firstName,
@@ -255,7 +257,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'fees') {
-      const payments = await userDBManager.getAll(user.id, 'payments');
+      const payments = await userDBManager.getAll(id, 'payments');
       const data = payments.map(p => {
         const student = students.find(s => s.id === p.studentId);
         return {
@@ -272,7 +274,7 @@ export default function Reports() {
         { key: 'method', label: 'Method' },
       ]);
     } else if (selectedReport === 'attendance') {
-      const attendance = await userDBManager.getAll(user.id, 'attendance');
+      const attendance = await userDBManager.getAll(id, 'attendance');
       const data = attendance.map(a => {
         const student = students.find(s => s.id === a.entityId);
         return {
@@ -287,7 +289,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'classes') {
-      const classes = await userDBManager.getAll(user.id, 'classes');
+      const classes = await userDBManager.getAll(id, 'classes');
       const data = classes.map(c => ({
         name: c.name,
         level: c.level,
@@ -308,7 +310,8 @@ export default function Reports() {
   }
 
   async function handleExportExcel() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     const { format } = await import('date-fns');
 
     if (selectedReport === 'students') {
@@ -329,7 +332,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'staff') {
-      const staff = await userDBManager.getAll(user.id, 'staff');
+      const staff = await userDBManager.getAll(id, 'staff');
       const data = staff.map(s => ({
         employeeId: s.employeeId,
         firstName: s.firstName,
@@ -347,7 +350,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'fees') {
-      const payments = await userDBManager.getAll(user.id, 'payments');
+      const payments = await userDBManager.getAll(id, 'payments');
       const data = payments.map(p => {
         const student = students.find(s => s.id === p.studentId);
         return {
@@ -364,7 +367,7 @@ export default function Reports() {
         { key: 'method', label: 'Method' },
       ]);
     } else if (selectedReport === 'attendance') {
-      const attendance = await userDBManager.getAll(user.id, 'attendance');
+      const attendance = await userDBManager.getAll(id, 'attendance');
       const data = attendance.map(a => {
         const student = students.find(s => s.id === a.entityId);
         return {
@@ -379,7 +382,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'classes') {
-      const classes = await userDBManager.getAll(user.id, 'classes');
+      const classes = await userDBManager.getAll(id, 'classes');
       const data = classes.map(c => ({
         name: c.name,
         level: c.level,

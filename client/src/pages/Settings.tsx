@@ -18,7 +18,7 @@ export default function Settings() {
   const { addToast } = useToast();
   const { setCurrency } = useCurrency();
   const { isOnline, isSyncing, pendingChanges, lastSyncTime, syncNow, forceFullSync, exportBackup, importBackup, isSyncEnabled, enableSync, disableSync, isSupabaseConfigured } = useSync();
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
@@ -45,15 +45,16 @@ export default function Settings() {
   const currentCurrency = currencies.find(c => c.code === settings.currency) || currencies[0];
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadSettings();
     }
-  }, [user?.id]);
+  }, [user?.id, schoolId]);
 
   async function loadSettings() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const stored = await dataService.getAll(user.id, 'settings');
+      const stored = await dataService.getAll(id, 'settings');
       const settingsObj: Record<string, any> = {};
       stored.forEach(s => { settingsObj[s.key] = s.value; });
       setSettings(prev => ({ ...prev, ...settingsObj }));
@@ -64,10 +65,11 @@ export default function Settings() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       for (const [key, value] of Object.entries(settings)) {
-        await dataService.update(user.id, 'settings', key, { value } as any);
+        await dataService.update(id, 'settings', key, { value } as any);
       }
       addToast('Settings saved', 'success');
     } catch (error) {
@@ -85,7 +87,8 @@ export default function Settings() {
   }
 
   async function handleDeleteAllData() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (!deletePassword) {
       setDeleteError('Please enter your password');
       return;
@@ -123,7 +126,7 @@ export default function Settings() {
 
       for (const table of tables) {
         try {
-          await dataService.clear(user.id, table);
+          await dataService.clear(id, table);
         } catch {
           // Table might not exist
         }
@@ -387,10 +390,12 @@ export default function Settings() {
                   {pendingChanges > 0 && (
                     <button
                       onClick={async () => {
+                        const id = schoolId || user?.id;
+                        if (!id) return;
                         if (confirm(`Clear ${pendingChanges} pending items? This cannot be undone.`)) {
                           try {
                             const { userDBManager } = await import('../lib/database/UserDatabaseManager');
-                            await userDBManager.clearSyncQueue(user?.id || '');
+                            await userDBManager.clearSyncQueue(id);
                             addToast('Pending items cleared', 'success');
                           } catch (err) {
                             console.error('Clear sync queue error:', err);

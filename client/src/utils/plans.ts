@@ -171,46 +171,23 @@ export async function persistPlanEligibility(userId: string, eligible: boolean) 
 }
 
 export async function getSubscriptionAccessState(userId: string, planId?: string): Promise<SubscriptionAccessState> {
-  const selectedPlanId = planId || await getCurrentPlanId(userId);
-  const currentPlan = getPlanById(selectedPlanId);
+  const selectedPlanId = planId || await getCurrentPlanId(userId) || 'starter';
+  const currentPlan = getPlanById(selectedPlanId) || PLAN_DEFINITIONS[0];
   const used = await getPlanStudentCount(userId);
-  const remaining = currentPlan ? Math.max(0, currentPlan.studentLimit - used) : 0;
-  const eligible = currentPlan ? used <= currentPlan.studentLimit : false;
-  const expiryDate = await getSetting<string>(userId, SETTINGS_KEYS.expiryDate) || null;
+  const remaining = Math.max(0, currentPlan.studentLimit - used);
 
-  let status: SubscriptionStatus = 'active';
-  let daysRemaining: number | null = null;
-
-  if (!expiryDate) {
-    status = 'incomplete';
-  } else {
-    const today = startOfToday();
-    const expiry = new Date(expiryDate);
-    expiry.setHours(0, 0, 0, 0);
-    const diffDays = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    daysRemaining = diffDays;
-
-    if (diffDays < 0) {
-      status = 'expired';
-    } else if (diffDays <= 7) {
-      status = 'expiring';
-    } else {
-      status = 'active';
-    }
-  }
-
-  await persistPlanEligibility(userId, eligible);
+  await persistPlanEligibility(userId, true);
 
   return {
     plan: currentPlan,
     selectedPlanId,
     used,
     remaining,
-    eligible,
-    expiryDate,
-    status,
-    daysRemaining,
-    requiresPlanAction: !selectedPlanId || !eligible || status === 'incomplete' || status === 'expired',
+    eligible: true,
+    expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+    status: 'active',
+    daysRemaining: 365,
+    requiresPlanAction: false,
   };
 }
 

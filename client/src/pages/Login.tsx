@@ -89,7 +89,7 @@ export default function Login() {
           localStorage.setItem('remember_me', 'true');
         }
         
-        navigate('/subscribe');
+        navigate('/');
       } else {
         if (!isSupabaseConfigured) {
           setError('Cloud authentication is not available. Please check your configuration.');
@@ -112,8 +112,8 @@ export default function Login() {
           localStorage.removeItem('remember_me');
         }
         
-        // Navigate to subscribe page to select a plan
-        navigate('/subscribe');
+        // Navigate to dashboard
+        navigate('/');
       }
     } catch (err: any) {
       setError(err.message || (isRegister ? 'Registration failed' : 'Login failed'));

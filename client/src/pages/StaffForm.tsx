@@ -25,7 +25,7 @@ const initialFormData: Partial<Staff> = {
 };
 
 export default function StaffForm() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const { addToast } = useToast();
@@ -39,13 +39,14 @@ export default function StaffForm() {
   useEffect(() => {
     if (id) loadStaff();
     else hydrateEmployeeId();
-    if (user?.id) loadSubjects();
-  }, [id, user?.id]);
+    if (user?.id || schoolId) loadSubjects();
+  }, [id, user?.id, schoolId]);
 
   async function loadStaff() {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     try {
-      const staff = await dataService.get(user.id, 'staff', id!);
+      const staff = await dataService.get(authId, 'staff', id!);
       if (staff) {
         setFormData(staff);
         setEmployeeId(staff.employeeId);
@@ -58,9 +59,10 @@ export default function StaffForm() {
   }
 
   async function loadSubjects() {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     try {
-      const data = await dataService.getAll(user.id, 'subjects');
+      const data = await dataService.getAll(authId, 'subjects');
       setSubjects(data);
     } catch (error) {
       console.error('Failed to load subjects:', error);
@@ -97,18 +99,19 @@ export default function StaffForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     setLoading(true);
     try {
       const now = new Date().toISOString();
       if (isEditing) {
         const finalEmployeeId = employeeId.trim() || await generateEmployeeId();
-        await dataService.update(user.id, 'staff', id!, { ...formData, employeeId: finalEmployeeId, updatedAt: now } as any);
+        await dataService.update(authId, 'staff', id!, { ...formData, employeeId: finalEmployeeId, updatedAt: now } as any);
         addToast('Staff updated', 'success');
       } else {
         const finalEmployeeId = employeeId.trim() || await generateEmployeeId();
-        const newStaff: Staff = { id: uuidv4(), employeeId: finalEmployeeId, ...formData, createdAt: now, updatedAt: now } as Staff;
-        await dataService.create(user.id, 'staff', newStaff as any);
+        const newStaff: Staff = { id: uuidv4(), schoolId: authId, employeeId: finalEmployeeId, ...formData, createdAt: now, updatedAt: now } as Staff;
+        await dataService.create(authId, 'staff', newStaff as any);
         addToast('Staff added', 'success');
       }
       navigate('/staff');

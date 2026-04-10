@@ -12,18 +12,19 @@ const typeConfig: Record<string, { bg: string; text: string; icon: any }> = {
 };
 
 export default function Notifications() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { 
-    if (user?.id) loadNotifications(); 
-  }, [user]);
+    if (user?.id || schoolId) loadNotifications(); 
+  }, [user?.id, schoolId]);
 
   async function loadNotifications() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const data = await dataService.getAll(user.id, 'notifications');
+      const data = await dataService.getAll(id, 'notifications');
       const sorted = data.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setNotifications(sorted);
     } catch (error) {
@@ -34,11 +35,12 @@ export default function Notifications() {
   }
 
   async function markAllAsRead() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const unread = notifications.filter(n => !n.read);
       for (const notif of unread) {
-        await dataService.update(user.id, 'notifications', notif.id, { read: true } as any);
+        await dataService.update(id, 'notifications', notif.id, { read: true } as any);
       }
       await loadNotifications();
     } catch (error) {
@@ -46,20 +48,22 @@ export default function Notifications() {
     }
   }
 
-  async function markAsRead(id: string) {
-    if (!user?.id) return;
+  async function markAsRead(notificationId: string) {
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      await dataService.update(user.id, 'notifications', id, { read: true } as any);
+      await dataService.update(id, 'notifications', notificationId, { read: true } as any);
       await loadNotifications();
     } catch (error) {
       console.error('Failed to mark as read:', error);
     }
   }
 
-  async function deleteNotification(id: string) {
-    if (!user?.id) return;
+  async function deleteNotification(notificationId: string) {
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      await dataService.delete(user.id, 'notifications', id);
+      await dataService.delete(id, 'notifications', notificationId);
       await loadNotifications();
     } catch (error) {
       console.error('Failed to delete notification:', error);
@@ -67,12 +71,13 @@ export default function Notifications() {
   }
 
   async function clearAll() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (confirm('Are you sure you want to delete all notifications?')) {
       try {
-        const all = await dataService.getAll(user.id, 'notifications');
+        const all = await dataService.getAll(id, 'notifications');
         for (const notif of all) {
-          await dataService.delete(user.id, 'notifications', notif.id);
+          await dataService.delete(id, 'notifications', notif.id);
         }
         await loadNotifications();
       } catch (error) {

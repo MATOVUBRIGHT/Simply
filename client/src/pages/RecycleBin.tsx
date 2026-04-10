@@ -21,7 +21,7 @@ function getStoreName(type: string): string | null {
 }
 
 export default function RecycleBin() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const navigate = useNavigate();
   const { addToast } = useToast();
   const [deletedItems, setDeletedItems] = useState<DeletedItem[]>([]);
@@ -30,30 +30,33 @@ export default function RecycleBin() {
   const [filterType, setFilterType] = useState<string>('');
 
   useEffect(() => {
-    if (user?.id) {
-      const items = getRecycleBin(user.id);
+    const id = schoolId || user?.id;
+    if (id) {
+      const items = getRecycleBin(id);
       setDeletedItems(items);
     }
-  }, [user?.id]);
+  }, [user?.id, schoolId]);
 
   const loadDeletedItems = () => {
-    if (user?.id) {
-      const items = getRecycleBin(user.id);
+    const id = schoolId || user?.id;
+    if (id) {
+      const items = getRecycleBin(id);
       setDeletedItems(items);
     }
   };
 
   async function restoreItem(id: string) {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     const item = deletedItems.find(i => i.id === id);
     if (!item) return;
 
     try {
       const storeName = getStoreName(item.type);
       if (storeName) {
-        await dataService.create(user.id, storeName, item.data as any);
+        await dataService.create(authId, storeName, item.data as any);
       }
-      removeFromRecycleBin(user.id, id);
+      removeFromRecycleBin(authId, id);
       loadDeletedItems();
       setSelectedItems(prev => {
         const newSet = new Set(prev);
@@ -67,11 +70,12 @@ export default function RecycleBin() {
   }
 
   function permanentlyDeleteItem(id: string) {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     const item = deletedItems.find(i => i.id === id);
     if (!item) return;
 
-    removeFromRecycleBin(user.id, id);
+    removeFromRecycleBin(authId, id);
     loadDeletedItems();
     setSelectedItems(prev => {
       const newSet = new Set(prev);
@@ -86,16 +90,18 @@ export default function RecycleBin() {
   }
 
   function deleteSelected() {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     if (confirm(`Are you sure you want to permanently delete ${selectedItems.size} item(s)?`)) {
       selectedItems.forEach(id => permanentlyDeleteItem(id));
     }
   }
 
   function emptyBin() {
-    if (!user?.id) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
     if (confirm('Are you sure you want to permanently delete all items in the recycle bin? This action cannot be undone.')) {
-      clearRecycleBin(user.id);
+      clearRecycleBin(authId);
       setDeletedItems([]);
       setSelectedItems(new Set());
       addToast('Recycle bin emptied', 'success');

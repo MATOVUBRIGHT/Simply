@@ -159,10 +159,24 @@ class UserDatabaseManager {
   private getOrCreateDeviceId(): string {
     let deviceId = localStorage.getItem('schofy_device_id');
     if (!deviceId) {
-      deviceId = crypto.randomUUID();
+      deviceId = this.generateUUID();
       localStorage.setItem('schofy_device_id', deviceId);
     }
     return deviceId;
+  }
+
+  private generateUUID(): string {
+    // Fallback UUID generation for browsers that don't support crypto.randomUUID
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    
+    // Simple UUID v4 fallback
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
   }
 
   getDeviceId(): string {
@@ -348,7 +362,7 @@ class UserDatabaseManager {
     }
   }
 
-  async add<T extends { id?: string; createdAt?: string; syncStatus?: 'pending' | 'synced' }>(
+  async add<T extends { id?: string; createdAt?: string; updatedAt?: string; syncStatus?: 'pending' | 'synced' }>(
     userId: string,
     storeName: string,
     data: T
@@ -357,10 +371,10 @@ class UserDatabaseManager {
     const now = new Date().toISOString();
     const record: any = {
       ...data,
-      id: data.id || crypto.randomUUID(),
+      id: data.id || this.generateUUID(),
       createdAt: data.createdAt || now,
-      updatedAt: now,
-      syncStatus: 'pending',
+      updatedAt: data.updatedAt || now,
+      syncStatus: data.syncStatus || 'pending',
       deviceId: this.deviceId,
     };
 
@@ -372,7 +386,7 @@ class UserDatabaseManager {
     });
   }
 
-  async put<T extends { id: string; syncStatus?: 'pending' | 'synced' }>(
+  async put<T extends { id: string; updatedAt?: string; syncStatus?: 'pending' | 'synced' }>(
     userId: string,
     storeName: string,
     data: T
@@ -381,8 +395,8 @@ class UserDatabaseManager {
     const now = new Date().toISOString();
     const record = {
       ...data,
-      updatedAt: now,
-      syncStatus: 'pending' as const,
+      updatedAt: data.updatedAt || now,
+      syncStatus: data.syncStatus || 'pending',
       deviceId: this.deviceId,
     };
 
@@ -569,7 +583,7 @@ class UserDatabaseManager {
         
         // Add delete operation to sync queue within the same transaction
         const syncItem = {
-          id: crypto.randomUUID(),
+          id: this.generateUUID(),
           table: storeName,
           recordId: id,
           operation: 'delete' as const,
@@ -636,7 +650,7 @@ class UserDatabaseManager {
   ): Promise<void> {
     await this.ensureDatabaseOpen(userId);
     const item = {
-      id: crypto.randomUUID(),
+      id: this.generateUUID(),
       table,
       recordId,
       operation,

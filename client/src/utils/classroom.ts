@@ -29,11 +29,6 @@ function countsTowardCapacity(student: Pick<Student, 'status'>) {
   return student.status !== 'completed';
 }
 
-function formatFallbackClassName(classId: string) {
-  return classId
-    .replace(/-/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
 
 export function getClassDisplayName(
   classId: string | null | undefined,
@@ -50,7 +45,8 @@ export function getClassDisplayName(
       : matchingClass.name;
   }
 
-  return formatFallbackClassName(classId);
+  // Return "Not assigned" for non-existing classes instead of fallback formatting
+  return 'Not assigned';
 }
 
 export async function getStudentClassOptions(userId: string, excludeStudentId?: string): Promise<ClassOption[]> {
@@ -102,4 +98,57 @@ export async function getStudentClassOptions(userId: string, excludeStudentId?: 
 export async function getClassCapacityState(userId: string, classId: string, excludeStudentId?: string) {
   const options = await getStudentClassOptions(userId, excludeStudentId);
   return options.find((option) => option.id === classId) || null;
+}
+
+/**
+ * Validates student class assignments and returns statistics
+ */
+export async function validateStudentClassAssignments(userId: string) {
+  const [classes, students] = await Promise.all([
+    userDBManager.getAll(userId, 'classes'),
+    userDBManager.getAll(userId, 'students'),
+  ]);
+
+  const classIds = new Set(classes.map(c => c.id));
+  const validAssignments = students.filter(s => !s.classId || classIds.has(s.classId));
+  const invalidAssignments = students.filter(s => s.classId && !classIds.has(s.classId));
+
+  return {
+    totalStudents: students.length,
+    validAssignments: validAssignments.length,
+    invalidAssignments: invalidAssignments.length,
+    invalidStudents: invalidAssignments,
+    availableClasses: classes,
+  };
+}
+
+/**
+ * Fixes invalid class assignments by setting them to null
+ */
+export async function fixInvalidClassAssignments(userId: string) {
+  const validation = await validateStudentClassAssignments(userId);
+  
+  if (validation.invalidAssignments === 0) {
+    return { fixed: 0, message: 'All class assignments are valid' };
+  }
+
+  let fixed = 0;
+  for (const student of validation.invalidStudents) {
+    try {
+      // Use put method to update the student with classId set to null
+      const updatedStudent = {
+        ...student,
+        classId: null,
+      };
+      await userDBManager.put(userId, 'students', updatedStudent);
+      fixed++;
+    } catch (error) {
+      console.error(`Failed to fix class assignment for student ${student.id}:`, error);
+    }
+  }
+
+  return { 
+    fixed, 
+    message: `Fixed ${fixed} invalid class assignments` 
+  };
 }

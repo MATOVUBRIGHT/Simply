@@ -1,3 +1,5 @@
+import { generateUUID } from './uuid';
+
 export function clsx(...args: any[]): string {
   return args.filter(Boolean).join(' ');
 }
@@ -28,7 +30,8 @@ export function formatDateTime(date: string | Date): string {
 }
 
 export function generateId(): string {
-  return crypto.randomUUID();
+  // Use the UUID utility with fallback for browser compatibility
+  return generateUUID();
 }
 
 export function debounce<T extends (...args: any[]) => any>(

@@ -43,13 +43,8 @@ export default function Subscription() {
       setCurrentPlanId(usage.selectedPlanId);
       setLatestReceipt(receipt);
 
-      if (usage.selectedPlanId && !introSeen) {
-        await markPlanIntroSeen(user.id);
-      }
-
-      if (usage.selectedPlanId) {
-        navigate('/', { replace: true });
-      }
+      // Bypass subscription page
+      navigate('/', { replace: true });
     } catch (error) {
       console.error('Failed to load plan state:', error);
     } finally {

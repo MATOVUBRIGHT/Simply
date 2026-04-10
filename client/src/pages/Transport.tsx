@@ -11,7 +11,7 @@ import { useStudents } from '../contexts/StudentsContext';
 import { addToRecycleBin } from '../utils/recycleBin';
 
 export default function Transport() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [routes, setRoutes] = useState<TransportRoute[]>([]);
   const [assignments, setAssignments] = useState<TransportAssignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,14 +38,15 @@ export default function Transport() {
     { key: 'fee', label: 'Monthly Fee', required: true },
   ];
 
-  useEffect(() => { if (user?.id) loadData(); }, [user?.id]);
+  useEffect(() => { if (user?.id || schoolId) loadData(); }, [user?.id, schoolId]);
 
   async function loadData() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const [routesData, assignmentsData] = await Promise.all([
-        dataService.getAll(user.id, 'transportRoutes'),
-        dataService.getAll(user.id, 'transportAssignments'),
+        dataService.getAll(id, 'transportRoutes'),
+        dataService.getAll(id, 'transportAssignments'),
       ]);
       setRoutes(routesData);
       setAssignments(assignmentsData);
@@ -58,10 +59,11 @@ export default function Transport() {
 
   async function handleAddRoute(e: React.FormEvent) {
     e.preventDefault();
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const newRoute: TransportRoute = { id: uuidv4(), ...formData, createdAt: new Date().toISOString() };
-      await dataService.create(user.id, 'transportRoutes', newRoute as any);
+      await dataService.create(id, 'transportRoutes', newRoute as any);
       setRoutes(prev => [...prev, newRoute]);
       setShowForm(false);
       setFormData({ name: '', description: '', fee: 0 });
@@ -71,21 +73,22 @@ export default function Transport() {
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!user?.id) return;
+  async function handleDelete(idRoute: string) {
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (confirm('Delete this route? Students will be unassigned.')) {
       try {
-        const route = routes.find(r => r.id === id);
-        const relatedAssignments = assignments.filter(a => a.routeId === id);
+        const route = routes.find(r => r.id === idRoute);
+        const relatedAssignments = assignments.filter(a => a.routeId === idRoute);
         
-        await dataService.delete(user.id, 'transportRoutes', id);
+        await dataService.delete(id, 'transportRoutes', idRoute);
         const routeAssignments = relatedAssignments.map(a => a.id);
         for (const assignId of routeAssignments) {
-          await dataService.delete(user.id, 'transportAssignments', assignId);
+          await dataService.delete(id, 'transportAssignments', assignId);
         }
         
         if (route) {
-          addToRecycleBin(user.id, {
+          addToRecycleBin(id, {
             id: `transport-${Date.now()}`,
             type: 'transport',
             name: route.name,
@@ -94,9 +97,9 @@ export default function Transport() {
           });
         }
         
-        setRoutes(prev => prev.filter(r => r.id !== id));
-        setAssignments(prev => prev.filter(a => a.routeId !== id));
-        if (selectedRoute === id) setSelectedRoute('');
+        setRoutes(prev => prev.filter(r => r.id !== idRoute));
+        setAssignments(prev => prev.filter(a => a.routeId !== idRoute));
+        if (selectedRoute === idRoute) setSelectedRoute('');
         addToast('Route moved to recycle bin', 'success');
       } catch (error) {
         addToast('Failed to delete', 'error');
@@ -238,8 +241,9 @@ export default function Transport() {
   }
 
   async function executeImport() {
+    const id = schoolId || user?.id;
     if (importPreview.length === 0) { addToast('No valid routes to import', 'error'); return; }
-    if (!user?.id) return;
+    if (!id) return;
     try {
       const now = new Date().toISOString();
       let successCount = 0;
@@ -251,7 +255,7 @@ export default function Transport() {
           fee: (data.fee as number) || 0,
           createdAt: now,
         };
-        await dataService.create(user.id, 'transportRoutes', route as any);
+        await dataService.create(id, 'transportRoutes', route as any);
         successCount++;
       }
       await loadData();

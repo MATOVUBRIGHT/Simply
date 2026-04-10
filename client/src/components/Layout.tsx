@@ -31,8 +31,9 @@ import { UserRole, Notification as NotificationType } from '@schofy/shared';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
 import GlobalSearch from './GlobalSearch';
 import InstallPWA from './InstallPWA';
-import { ensurePlanRenewalNotifications, markRenewalPopupShown, shouldShowRenewalPopup, SubscriptionAccessState } from '../utils/plans';
+import { getSubscriptionAccessState, SubscriptionAccessState } from '../utils/plans';
 import { getRecycleBin } from '../utils/recycleBin';
+import RealtimeStatus from './RealtimeStatus';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -108,6 +109,29 @@ export default function Layout({ children }: LayoutProps) {
     return () => window.removeEventListener('recycleBinUpdated', loadDeletedItemsCount);
   }, []);
 
+  useEffect(() => {
+    if (!user?.id) {
+      setSubscriptionState(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const state = await getSubscriptionAccessState(user.id);
+        if (!cancelled) {
+          setSubscriptionState(state);
+        }
+      } catch (error) {
+        console.error('Failed to load subscription state:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   async function loadSchoolName() {
     if (!user?.id) return;
     try {
@@ -151,21 +175,8 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   async function checkSubscriptionStatus() {
-    if (!user?.id) return;
-    try {
-      const state = await ensurePlanRenewalNotifications(user.id);
-      setSubscriptionState(state);
-
-      const popupState = await shouldShowRenewalPopup(user.id);
-      if (popupState.show) {
-        setSubscriptionState(popupState.state);
-        setShowRenewPopup(true);
-      }
-
-      await loadNotifications();
-    } catch (error) {
-      console.error('Failed to check subscription status:', error);
-    }
+    // Disable subscription check
+    return;
   }
 
   async function checkUpcomingEvents() {
@@ -253,6 +264,18 @@ export default function Layout({ children }: LayoutProps) {
     return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
   };
 
+  const planLabel = subscriptionState?.plan?.name || 'Starter';
+  const planStatusLabel = (() => {
+    if (!subscriptionState) return 'No plan selected';
+    if (subscriptionState.status === 'active') return 'Active';
+    if (subscriptionState.status === 'expiring' && subscriptionState.daysRemaining !== null) {
+      return `Expiring in ${subscriptionState.daysRemaining} day${subscriptionState.daysRemaining === 1 ? '' : 's'}`;
+    }
+    if (subscriptionState.status === 'expiring') return 'Expiring soon';
+    if (subscriptionState.status === 'expired') return 'Expired';
+    return 'Plan status unknown';
+  })();
+
   const filteredMenuItems = user ? menuItems : [];
 
   return (
@@ -336,6 +359,11 @@ export default function Layout({ children }: LayoutProps) {
                 <p className="text-lg font-bold text-white leading-none">{formatTime(currentTime)}</p>
                 <p className="text-[11px] font-medium uppercase tracking-wider mt-1">{formatDate(currentTime)}</p>
               </div>
+            </div>
+
+            {/* Real-time Status Indicator */}
+            <div className="hidden lg:block">
+              <RealtimeStatus />
             </div>
 
               <div className="flex items-center gap-3">
@@ -530,11 +558,25 @@ export default function Layout({ children }: LayoutProps) {
                         </div>
                         <p className="font-bold text-slate-800 dark:text-white text-lg">{user?.firstName || user?.email?.split('@')[0] || 'User'}</p>
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{user?.email || ''}</p>
-                        <span className="inline-block mt-2 px-3 py-1 text-xs font-medium rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400">
-                          Administrator
-                        </span>
+                        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                            Plan: {planLabel}
+                          </span>
+                          <span className="text-[10px] font-medium uppercase tracking-widest px-3 py-1 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400">
+                            Administrator
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">{planStatusLabel}</p>
                       </div>
                       <div className="p-2">
+                        <button 
+                          onClick={() => { setProfileOpen(false); navigate('/plans'); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                        >
+                          <CreditCard size={18} className="text-slate-400 dark:text-slate-500" />
+                          <span className="font-medium">Plans & billing</span>
+                        </button>
+                        <div className="border-t border-slate-100 dark:border-slate-700 my-2 mx-4" />
                         <button 
                           onClick={() => { setProfileOpen(false); navigate('/settings'); }}
                           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
@@ -542,13 +584,7 @@ export default function Layout({ children }: LayoutProps) {
                           <Settings size={18} className="text-slate-400 dark:text-slate-500" />
                           <span className="font-medium">Settings</span>
                         </button>
-                        <button 
-                          onClick={() => { setProfileOpen(false); navigate('/plans'); }}
-                          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
-                        >
-                          <CreditCard size={18} className="text-slate-400 dark:text-slate-500" />
-                          <span className="font-medium">Plans & Subscription</span>
-                        </button>
+                        <div className="border-t border-slate-100 dark:border-slate-700 my-2 mx-4" />
                         <button 
                           onClick={() => { setProfileOpen(false); logout(); }}
                           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
@@ -581,53 +617,6 @@ export default function Layout({ children }: LayoutProps) {
         />
       )}
 
-      {showRenewPopup && subscriptionState && (
-        <div className="fixed inset-x-0 top-0 bg-black/60 backdrop-blur-sm z-[60] flex items-start justify-center p-4 pt-8 overflow-y-auto">
-          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden">
-            <div className={`px-5 py-4 flex items-center gap-3 ${
-              subscriptionState.status === 'expired' ? 'bg-red-600' : 'bg-amber-500'
-            }`}>
-              <AlertTriangle size={20} className="text-white" />
-              <h3 className="text-lg font-bold text-white">
-                {subscriptionState.status === 'expired' ? 'Subscription Expired' : 'Renew Your Plan'}
-              </h3>
-            </div>
-            <div className="p-5 space-y-4">
-                <p className="text-sm text-slate-700 dark:text-slate-300">
-                  {subscriptionState.status === 'expired'
-                  ? `Your ${subscriptionState.plan?.name || 'selected'} plan has expired. Renew now to continue using the app.`
-                  : `Your ${subscriptionState.plan?.name || 'selected'} plan expires in ${subscriptionState.daysRemaining} day${subscriptionState.daysRemaining === 1 ? '' : 's'}. Renew now to avoid interruption.`}
-                </p>
-              {!subscriptionState.eligible && (
-                <p className="text-sm text-red-600 dark:text-red-400">
-                  Your enrolled students are above the selected plan limit. Upgrade to restore access.
-                </p>
-              )}
-              <div className="flex gap-3">
-                <button
-                  onClick={async () => {
-                    if (user?.id) await markRenewalPopupShown(user.id);
-                    setShowRenewPopup(false);
-                    navigate('/plans');
-                  }}
-                  className="flex-1 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
-                >
-                  Renew Plan
-                </button>
-                <button
-                  onClick={async () => {
-                    if (user?.id) await markRenewalPopupShown(user.id);
-                    setShowRenewPopup(false);
-                  }}
-                  className="px-4 py-2.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium"
-                >
-                  Later
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
       <InstallPWA />
     </div>
   );

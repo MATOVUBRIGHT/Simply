@@ -66,7 +66,7 @@ const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
 };
 
 export default function Subjects() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,11 +96,11 @@ export default function Subjects() {
   ];
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadSubjects();
       loadClasses();
     }
-  }, [user?.id]);
+  }, [user?.id, schoolId]);
 
   useEffect(() => {
     const handleSubjectsUpdated = () => { loadSubjects(); loadClasses(); };
@@ -118,9 +118,10 @@ export default function Subjects() {
   }, []);
 
   async function loadSubjects() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const data = await dataService.getAll(user.id, 'subjects');
+      const data = await dataService.getAll(id, 'subjects');
       const sorted = data.sort((a, b) => {
         const dateA = new Date(a.createdAt || 0).getTime();
         const dateB = new Date(b.createdAt || 0).getTime();
@@ -135,9 +136,10 @@ export default function Subjects() {
   }
 
   async function loadClasses() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const data = await dataService.getAll(user.id, 'classes');
+      const data = await dataService.getAll(id, 'classes');
       setClasses(data.sort((left, right) => left.name.localeCompare(right.name)));
     } catch (error) {
       console.error('Failed to load classes:', error);
@@ -240,18 +242,19 @@ export default function Subjects() {
   }
 
   async function handleBulkDelete() {
+    const id = schoolId || user?.id;
+    if (!id) return;
     if (selectedSubjects.size === 0) return;
     if (!confirm(`Are you sure you want to delete ${selectedSubjects.size} subject(s)?`)) return;
-    if (!user?.id) return;
     
     try {
       const now = new Date().toISOString();
       
-      for (const id of selectedSubjects) {
-        const subject = subjects.find(s => s.id === id);
+      for (const idSubject of selectedSubjects) {
+        const subject = subjects.find(s => s.id === idSubject);
         if (subject) {
-          await dataService.delete(user.id, 'subjects', id);
-          addToRecycleBin(user.id, {
+          await dataService.delete(id, 'subjects', idSubject);
+          addToRecycleBin(id, {
             id: `subject-${Date.now()}-${Math.random()}`,
             type: 'subject',
             name: subject.name,
@@ -276,7 +279,8 @@ export default function Subjects() {
       addToast('Please fill all required fields', 'error');
       return;
     }
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const now = new Date().toISOString();
       const existingKeys = new Set(subjects.map((subject) => `${subject.name.toLowerCase()}::${subject.classId}`));
@@ -296,7 +300,7 @@ export default function Subjects() {
       }
 
       for (const subject of newSubjects) {
-        await dataService.create(user.id, 'subjects', subject as any);
+        await dataService.create(id, 'subjects', subject as any);
       }
       setSubjects((prev) => [...newSubjects, ...prev]);
       resetSubjectForm();
@@ -306,15 +310,16 @@ export default function Subjects() {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(idSubject: string) {
+    const id = schoolId || user?.id;
     if (confirm('Delete this subject?')) {
-      if (!user?.id) return;
+      if (!id) return;
       try {
-        const subject = subjects.find(s => s.id === id);
-        await dataService.delete(user.id, 'subjects', id);
+        const subject = subjects.find(s => s.id === idSubject);
+        await dataService.delete(id, 'subjects', idSubject);
         
         if (subject) {
-          addToRecycleBin(user.id, {
+          addToRecycleBin(id, {
             id: `subject-${Date.now()}`,
             type: 'subject',
             name: subject.name,
@@ -323,7 +328,7 @@ export default function Subjects() {
           });
         }
         
-        setSubjects(prev => prev.filter(s => s.id !== id));
+        setSubjects(prev => prev.filter(s => s.id !== idSubject));
         addToast('Subject moved to recycle bin', 'success');
       } catch (error) {
         addToast('Failed to delete', 'error');
@@ -453,7 +458,8 @@ export default function Subjects() {
   }
 
   async function executeImport() {
-    if (importPreview.length === 0 || !user?.id) { addToast('No valid subjects to import', 'error'); return; }
+    const id = schoolId || user?.id;
+    if (importPreview.length === 0 || !id) { addToast('No valid subjects to import', 'error'); return; }
     try {
       const now = new Date().toISOString();
       let successCount = 0;
@@ -465,7 +471,7 @@ export default function Subjects() {
           classId: (data.classId as string) || 'primary',
           createdAt: now,
         };
-        await dataService.create(user.id, 'subjects', subject as any);
+        await dataService.create(id, 'subjects', subject as any);
         successCount++;
       }
       await loadSubjects();

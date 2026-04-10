@@ -23,7 +23,7 @@ import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, M
 import { Announcement } from '@schofy/shared';
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const navigate = useNavigate();
   const { formatMoney } = useCurrency();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -33,11 +33,11 @@ export default function Dashboard() {
   const activeStudents = useActiveStudents();
 
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id || schoolId) {
       loadAnnouncements();
       loadOtherData();
     }
-  }, [user]);
+  }, [user, schoolId]);
 
   useEffect(() => {
     const handleDataRefresh = () => {
@@ -65,9 +65,10 @@ export default function Dashboard() {
   }, []);
 
   async function loadAnnouncements() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const data = await dataService.getAll(user.id, 'announcements');
+      const data = await dataService.getAll(id, 'announcements');
       setAnnouncements(data);
     } catch (error) {
       console.error('Failed to load announcements:', error);
@@ -75,13 +76,14 @@ export default function Dashboard() {
   }
 
   async function loadOtherData() {
-    if (!user?.id) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
       const [staff, payments, fees, attendance] = await Promise.all([
-        dataService.getAll(user.id, 'staff'),
-        dataService.getAll(user.id, 'payments'),
-        dataService.getAll(user.id, 'fees'),
-        dataService.getAll(user.id, 'attendance')
+        dataService.getAll(id, 'staff'),
+        dataService.getAll(id, 'payments'),
+        dataService.getAll(id, 'fees'),
+        dataService.getAll(id, 'attendance')
       ]);
       setOtherData({ staff, payments, fees, attendance });
     } catch (error) {
