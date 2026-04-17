@@ -9,7 +9,8 @@
     "electron": "vite build && electron electron/main.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.101.1",
+    "@supabase/supabase-js": "^2.102.1",
+    "@tanstack/react-query": "^5.99.0",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "dexie": "^4.0.4",

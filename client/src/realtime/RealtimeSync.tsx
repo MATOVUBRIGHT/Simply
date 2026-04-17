@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { userDBManager } from '../lib/database/UserDatabaseManager';
+import { queryCache } from '../lib/cache/QueryCache';
 
 interface RealtimeChange {
   table: string;
@@ -50,9 +52,6 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
         lastChangeRef.current = change;
         
         try {
-          const { userDBManager } = await import('../lib/database/UserDatabaseManager');
-          const { queryCache } = await import('../lib/cache/QueryCache');
-          
           if (change.type === 'DELETE') {
             await userDBManager.delete(change.userId, change.table, change.record.id);
           } else if (change.type === 'INSERT' || change.type === 'UPDATE') {
@@ -74,18 +73,14 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
         window.dispatchEvent(new CustomEvent(eventName, { detail: change }));
         window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: change }));
         window.dispatchEvent(new CustomEvent('dataRefresh'));
-        
-        console.log(`📡 Realtime: ${change.type} on ${change.table}`, change.record?.id);
       }
     });
 
     channel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         isConnectedRef.current = true;
-        console.log('📡 Realtime sync connected');
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         isConnectedRef.current = false;
-        console.log('📡 Realtime sync error, will retry...');
       } else if (status === 'CLOSED') {
         isConnectedRef.current = false;
       }

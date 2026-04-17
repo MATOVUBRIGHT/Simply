@@ -1,5 +1,5 @@
 const DB_NAME_PREFIX = 'schofy_user_db_';
-const DB_VERSION = 3;
+const DB_VERSION = 5;
 
 export interface SyncMeta {
   id: string;
@@ -130,6 +130,13 @@ export interface UserDBSchema {
     key: string;
     value: any;
   };
+  invoices: any;
+  profiles: any;
+  follows: any;
+  messages: any;
+  subscriptions: any;
+  pointTransactions: any;
+  instructors: any;
   syncQueue: {
     id: string;
     table: string;
@@ -139,6 +146,9 @@ export interface UserDBSchema {
     timestamp: string;
     synced: boolean;
     retryCount: number;
+    nextRetryAt?: string | null;
+    lastError?: string | null;
+    verifiedAt?: string | null;
   };
   syncMeta: {
     id: string;
@@ -206,6 +216,16 @@ class UserDatabaseManager {
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
+        const oldVersion = event.oldVersion;
+
+        if (oldVersion > 0 && oldVersion < 5 && db.objectStoreNames.contains('settings')) {
+          const tx = (event.target as IDBOpenDBRequest).transaction!;
+          const settingsStore = tx.objectStore('settings');
+          if (settingsStore.indexNames.contains('key')) {
+            settingsStore.deleteIndex('key');
+          }
+          settingsStore.createIndex('key', 'key', { unique: false });
+        }
 
         const stores = [
           { name: 'schools', indexes: [{ name: 'name', keyPath: 'name' }] },
@@ -313,10 +333,54 @@ class UserDatabaseManager {
             { name: 'month', keyPath: 'month' },
             { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
-          { name: 'settings', indexes: [{ name: 'key', keyPath: 'key', unique: true }] },
+          { name: 'invoices', indexes: [
+            { name: 'schoolId', keyPath: 'schoolId' },
+            { name: 'studentId', keyPath: 'studentId' },
+            { name: 'status', keyPath: 'status' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
+          ]},
+          { name: 'profiles', indexes: [
+            { name: 'schoolId', keyPath: 'schoolId' },
+            { name: 'userId', keyPath: 'userId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
+          ]},
+          { name: 'follows', indexes: [
+            { name: 'schoolId', keyPath: 'schoolId' },
+            { name: 'followerId', keyPath: 'followerId' },
+            { name: 'followingId', keyPath: 'followingId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
+          ]},
+          { name: 'messages', indexes: [
+            { name: 'schoolId', keyPath: 'schoolId' },
+            { name: 'senderId', keyPath: 'senderId' },
+            { name: 'recipientId', keyPath: 'recipientId' },
+            { name: 'conversationId', keyPath: 'conversationId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
+          ]},
+          { name: 'subscriptions', indexes: [
+            { name: 'schoolId', keyPath: 'schoolId' },
+            { name: 'userId', keyPath: 'userId' },
+            { name: 'status', keyPath: 'status' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
+          ]},
+          { name: 'pointTransactions', indexes: [
+            { name: 'schoolId', keyPath: 'schoolId' },
+            { name: 'userId', keyPath: 'userId' },
+            { name: 'direction', keyPath: 'direction' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
+          ]},
+          { name: 'instructors', indexes: [
+            { name: 'schoolId', keyPath: 'schoolId' },
+            { name: 'staffId', keyPath: 'staffId' },
+            { name: 'employeeId', keyPath: 'employeeId' },
+            { name: 'updatedAt', keyPath: 'updatedAt' }
+          ]},
+          { name: 'settings', indexes: [{ name: 'key', keyPath: 'key' }] },
           { name: 'syncQueue', indexes: [
             { name: 'synced', keyPath: 'synced' },
-            { name: 'timestamp', keyPath: 'timestamp' }
+            { name: 'timestamp', keyPath: 'timestamp' },
+            { name: 'retryCount', keyPath: 'retryCount' },
+            { name: 'nextRetryAt', keyPath: 'nextRetryAt' }
           ]},
           { name: 'syncMeta', indexes: [{ name: 'tableName', keyPath: 'tableName', unique: true }] }
         ];
@@ -325,7 +389,9 @@ class UserDatabaseManager {
           if (!db.objectStoreNames.contains(store.name)) {
             const objectStore = db.createObjectStore(store.name, { keyPath: 'id' });
             for (const index of store.indexes) {
-              objectStore.createIndex(index.name, index.keyPath, { unique: index.name === 'key' });
+              objectStore.createIndex(index.name, index.keyPath, {
+                unique: (index as { unique?: boolean }).unique === true,
+              });
             }
           }
         }
@@ -658,6 +724,9 @@ class UserDatabaseManager {
       timestamp: new Date().toISOString(),
       synced: 0,
       retryCount: 0,
+      nextRetryAt: null,
+      lastError: null,
+      verifiedAt: null,
     };
 
     return new Promise((resolve, reject) => {
@@ -669,6 +738,56 @@ class UserDatabaseManager {
       const transaction = db.transaction(['syncQueue'], 'readwrite');
       const store = transaction.objectStore('syncQueue');
       const request = store.add(item);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async updateSyncQueueItem(
+    userId: string,
+    itemId: string,
+    updates: Record<string, any>
+  ): Promise<void> {
+    await this.ensureDatabaseOpen(userId);
+    return new Promise((resolve, reject) => {
+      const db = this.databases.get(userId);
+      if (!db) {
+        reject(new Error('Database not open'));
+        return;
+      }
+
+      const transaction = db.transaction(['syncQueue'], 'readwrite');
+      const store = transaction.objectStore('syncQueue');
+      const getRequest = store.get(itemId);
+
+      getRequest.onsuccess = () => {
+        const existing = getRequest.result;
+        if (!existing) {
+          resolve();
+          return;
+        }
+
+        const updated = { ...existing, ...updates };
+        const putRequest = store.put(updated);
+        putRequest.onsuccess = () => resolve();
+        putRequest.onerror = () => reject(putRequest.error);
+      };
+
+      getRequest.onerror = () => reject(getRequest.error);
+    });
+  }
+
+  async removeSyncQueueItem(userId: string, itemId: string): Promise<void> {
+    await this.ensureDatabaseOpen(userId);
+    return new Promise((resolve, reject) => {
+      const db = this.databases.get(userId);
+      if (!db) {
+        reject(new Error('Database not open'));
+        return;
+      }
+      const transaction = db.transaction(['syncQueue'], 'readwrite');
+      const store = transaction.objectStore('syncQueue');
+      const request = store.delete(itemId);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });

@@ -1,22 +1,22 @@
-import { useEffect, useState, useRef } from 'react';
-import { DollarSign, Receipt, FileText, Users, Layers, Trash2, Wand2, Plus, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight } from 'lucide-react';
+﻿import { useEffect, useState, useRef } from 'react';
+import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
-import { Fee, Payment, PaymentMethod, FeeStructure, FeeCategory } from '@schofy/shared';
+import { Fee, Payment, PaymentMethod } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrency } from '../hooks/useCurrency';
 import { exportToPDF, exportToCSV, exportToExcel } from '../utils/export';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/DataService';
-import { userDBManager } from '../lib/database/UserDatabaseManager';
 
 export default function Finance() {
   const { user, schoolId } = useAuth();
-  const [activeTab, setActiveTab] = useState<'students' | 'invoices' | 'payments' | 'fees'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'invoices' | 'payments'>('students');
   const { addToast } = useToast();
-  const { formatMoney, currency } = useCurrency();
+  const { formatMoney } = useCurrency();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const termFilterRef = useRef<HTMLDivElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
@@ -27,240 +27,94 @@ export default function Finance() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTerm, setFilterTerm] = useState('all');
   const [showTermFilter, setShowTermFilter] = useState(false);
-  const termFilterRef = useRef<HTMLDivElement>(null);
 
   const students = useActiveStudents();
-
   const [fees, setFees] = useState<Fee[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [feeStructures, setFeeStructures] = useState<FeeStructure[]>([]);
-  const [classes, setClasses] = useState<any[]>([]);
-  const [showStructureForm, setShowStructureForm] = useState(false);
-  const [structureFormData, setStructureFormData] = useState({
-    classId: '', name: '', category: FeeCategory.TUITION, amount: 0, term: '1', year: new Date().getFullYear().toString()
-  });
-  const [selectedClassForStructure, setSelectedClassForStructure] = useState<string>('');
-  const [structureFilterTerm, setStructureFilterTerm] = useState<string>(new Date().getFullYear().toString());
 
   useEffect(() => {
     if (user?.id || schoolId) {
       loadFees();
       loadPayments();
-      loadClasses();
-      loadFeeStructures();
     }
   }, [user?.id, schoolId]);
 
   useEffect(() => {
-    const handleFeesUpdated = () => loadFees();
-    const handlePaymentsUpdated = () => loadPayments();
-    const handleDataRefresh = () => { loadFees(); loadPayments(); loadFeeStructures(); };
-    
-    window.addEventListener('feesUpdated', handleFeesUpdated);
-    window.addEventListener('paymentsUpdated', handlePaymentsUpdated);
-    window.addEventListener('dataRefresh', handleDataRefresh);
-    
+    const reload = () => { loadFees(); loadPayments(); };
+    window.addEventListener('feesUpdated', reload);
+    window.addEventListener('paymentsUpdated', reload);
+    window.addEventListener('dataRefresh', reload);
+    window.addEventListener('schofyDataRefresh', reload);
     return () => {
-      window.removeEventListener('feesUpdated', handleFeesUpdated);
-      window.removeEventListener('paymentsUpdated', handlePaymentsUpdated);
-      window.removeEventListener('dataRefresh', handleDataRefresh);
+      window.removeEventListener('feesUpdated', reload);
+      window.removeEventListener('paymentsUpdated', reload);
+      window.removeEventListener('dataRefresh', reload);
+      window.removeEventListener('schofyDataRefresh', reload);
     };
   }, []);
 
   async function loadFees() {
     const id = schoolId || user?.id;
     if (!id) return;
-    try {
-      const data = await dataService.getAll(id, 'fees');
-      setFees(data);
-    } catch (error) {
-      console.error(error);
-    }
+    try { setFees(await dataService.getAll(id, 'fees')); } catch {}
   }
 
   async function loadPayments() {
     const id = schoolId || user?.id;
     if (!id) return;
-    try {
-      const data = await dataService.getAll(id, 'payments');
-      setPayments(data);
-    } catch (error) {
-      console.error(error);
-    }
+    try { setPayments(await dataService.getAll(id, 'payments')); } catch {}
   }
 
-  async function loadClasses() {
+  async function handleRecordPayment(feeId: string, studentId: string, _amount: number) {
     const id = schoolId || user?.id;
     if (!id) return;
+    const raw = prompt('Enter payment amount:');
+    if (!raw || isNaN(parseFloat(raw))) return;
     try {
-      const data = await dataService.getAll(id, 'classes');
-      setClasses(data);
-    } catch (error) {
-      console.error(error);
-    }
-  }
-
-  async function loadFeeStructures() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const data = await userDBManager.getAll(id, 'feeStructures');
-      setFeeStructures(data);
-    } catch (error) {
-      console.error(error);
-    }
-  }
-
-  async function handleCreateFeeStructure(e: React.FormEvent) {
-    e.preventDefault();
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const newStructure: FeeStructure = {
-        id: uuidv4(),
-        classId: structureFormData.classId,
-        name: structureFormData.name,
-        category: structureFormData.category,
-        amount: structureFormData.amount,
-        isRequired: true,
-        term: structureFormData.term,
-        year: structureFormData.year,
+      await dataService.create(id, 'payments', {
+        id: uuidv4(), feeId, studentId,
+        amount: parseFloat(raw),
+        method: PaymentMethod.CASH,
+        date: new Date().toISOString(),
         createdAt: new Date().toISOString(),
-      };
-      await userDBManager.add(id, 'feeStructures', newStructure);
-      setShowStructureForm(false);
-      setStructureFormData({ classId: '', name: '', category: FeeCategory.TUITION, amount: 0, term: '1', year: new Date().getFullYear().toString() });
-      loadFeeStructures();
-      addToast('Fee structure created successfully', 'success');
-    } catch (error) {
-      addToast('Failed to create fee structure', 'error');
-    }
+      } as any);
+      addToast('Payment recorded', 'success');
+    } catch { addToast('Failed to record payment', 'error'); }
   }
 
-  async function handleDeleteFeeStructure(id: string) {
-    const authId = schoolId || user?.id;
-    if (!authId) return;
-    if (!confirm('Delete this fee structure?')) return;
-    try {
-      await userDBManager.delete(authId, 'feeStructures', id);
-      loadFeeStructures();
-      addToast('Fee structure deleted', 'success');
-    } catch (error) {
-      addToast('Failed to delete fee structure', 'error');
-    }
+  // ── Export helpers ──────────────────────────────────────────────────────────
+  function handleExportInvoicesCSV() {
+    const data = fees.map(f => { const s = students.find(x => x.id === f.studentId); return { ...f, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A' }; });
+    exportToCSV(data, 'invoices', [{ key: 'studentName' as any, label: 'Student' }, { key: 'description' as any, label: 'Description' }, { key: 'amount' as any, label: 'Amount' }, { key: 'term' as any, label: 'Term' }]);
+    addToast('Exported CSV', 'success'); setShowExportMenu(false);
+  }
+  function handleExportInvoicesPDF() {
+    const data = fees.map(f => { const s = students.find(x => x.id === f.studentId); const paid = payments.filter(p => p.feeId === f.id).reduce((a, p) => a + p.amount, 0); return { ...f, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A', status: paid >= f.amount ? 'Paid' : paid > 0 ? 'Partial' : 'Pending' }; });
+    exportToPDF('Invoices Report', data, [{ key: 'studentName', label: 'Student' }, { key: 'description', label: 'Description' }, { key: 'amount', label: 'Amount' }, { key: 'status', label: 'Status' }], 'invoices');
+    addToast('Exported PDF', 'success'); setShowExportMenu(false);
+  }
+  function handleExportInvoicesExcel() {
+    const data = fees.map(f => { const s = students.find(x => x.id === f.studentId); return { ...f, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A' }; });
+    exportToExcel(data, 'invoices', [{ key: 'studentName' as any, label: 'Student' }, { key: 'description' as any, label: 'Description' }, { key: 'amount' as any, label: 'Amount' }, { key: 'term' as any, label: 'Term' }]);
+    addToast('Exported Excel', 'success'); setShowExportMenu(false);
+  }
+  function handleExportPaymentsCSV() {
+    const data = payments.map(p => { const s = students.find(x => x.id === p.studentId); return { ...p, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A' }; });
+    exportToCSV(data, 'payments', [{ key: 'studentName' as any, label: 'Student' }, { key: 'amount' as any, label: 'Amount' }, { key: 'method' as any, label: 'Method' }, { key: 'date' as any, label: 'Date' }]);
+    addToast('Exported CSV', 'success'); setShowExportMenu(false);
+  }
+  function handleExportPaymentsPDF() {
+    const data = payments.map(p => { const s = students.find(x => x.id === p.studentId); return { ...p, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A', date: new Date(p.date).toLocaleDateString() }; });
+    exportToPDF('Payments Report', data, [{ key: 'studentName', label: 'Student' }, { key: 'amount', label: 'Amount' }, { key: 'method', label: 'Method' }, { key: 'date', label: 'Date' }], 'payments');
+    addToast('Exported PDF', 'success'); setShowExportMenu(false);
+  }
+  function handleExportPaymentsExcel() {
+    const data = payments.map(p => { const s = students.find(x => x.id === p.studentId); return { ...p, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A' }; });
+    exportToExcel(data, 'payments', [{ key: 'studentName' as any, label: 'Student' }, { key: 'amount' as any, label: 'Amount' }, { key: 'method' as any, label: 'Method' }, { key: 'date' as any, label: 'Date' }]);
+    addToast('Exported Excel', 'success'); setShowExportMenu(false);
   }
 
-  async function handleGenerateInvoicesForClass(classId: string, term: string, year: string) {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const structures = feeStructures.filter(s => s.classId === classId && s.term === term && s.year === year);
-      if (structures.length === 0) {
-        addToast('No fee structures found for this class/term', 'warning');
-        return;
-      }
-      const classStudents = students.filter(s => s.classId === classId);
-      const activeStudents = classStudents.filter((s: any) => s.status !== 'completed' && s.status !== 'graduated');
-      
-      let invoicesCreated = 0;
-      for (const student of activeStudents) {
-        for (const structure of structures) {
-          const existingFee = fees.find(f => f.studentId === student.id && f.description === structure.name && f.term === term && f.year === year);
-          if (!existingFee) {
-            const newFee: Fee = {
-              id: uuidv4(),
-              studentId: student.id,
-              description: structure.name,
-              amount: structure.amount,
-              term,
-              year,
-              createdAt: new Date().toISOString(),
-            };
-            await dataService.create(id, 'fees', newFee as any);
-            invoicesCreated++;
-          }
-        }
-      }
-      
-      loadFees();
-      addToast(`Created ${invoicesCreated} invoices for ${activeStudents.length} students`, 'success');
-    } catch (error) {
-      addToast('Failed to generate invoices', 'error');
-    }
-  }
-
-  async function handleGenerateInvoicesForAllClasses(term: string, year: string) {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      let totalInvoices = 0;
-      let classesWithStructures = 0;
-      
-      for (const cls of classes) {
-        const structures = feeStructures.filter(s => s.classId === cls.id && s.term === term && s.year === year);
-        if (structures.length === 0) continue;
-        
-        classesWithStructures++;
-        const classStudents = students.filter(s => s.classId === cls.id);
-        const activeStudents = classStudents.filter((s: any) => s.status !== 'completed' && s.status !== 'graduated');
-        
-        for (const student of activeStudents) {
-          for (const structure of structures) {
-            const existingFee = fees.find(f => f.studentId === student.id && f.description === structure.name && f.term === term && f.year === year);
-            if (!existingFee) {
-              const newFee: Fee = {
-                id: uuidv4(),
-                studentId: student.id,
-                description: structure.name,
-                amount: structure.amount,
-                term,
-                year,
-                createdAt: new Date().toISOString(),
-              };
-              await dataService.create(id, 'fees', newFee as any);
-              totalInvoices++;
-            }
-          }
-        }
-      }
-      
-      loadFees();
-      addToast(`Created ${totalInvoices} invoices across ${classesWithStructures} classes`, 'success');
-    } catch (error) {
-      addToast('Failed to generate invoices', 'error');
-    }
-  }
-
-  function getCategoryLabel(category: FeeCategory): string {
-    const labels: Record<string, string> = {
-      [FeeCategory.TUITION]: 'Tuition',
-      [FeeCategory.BOARDING]: 'Boarding',
-      [FeeCategory.EXAM]: 'Examination',
-      [FeeCategory.REGISTRATION]: 'Registration',
-      [FeeCategory.UNIFORM]: 'Uniform',
-      [FeeCategory.BOOKS]: 'Books',
-      [FeeCategory.TRANSPORT]: 'Transport',
-      [FeeCategory.ACTIVITY]: 'Activity',
-      [FeeCategory.OTHER]: 'Other',
-    };
-    return labels[category] || 'Other';
-  }
-
-  function getCategoryColor(category: FeeCategory): string {
-    const colors: Record<string, string> = {
-      [FeeCategory.TUITION]: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-      [FeeCategory.BOARDING]: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
-      [FeeCategory.EXAM]: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
-      [FeeCategory.REGISTRATION]: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
-      [FeeCategory.UNIFORM]: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300',
-      [FeeCategory.BOOKS]: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
-      [FeeCategory.TRANSPORT]: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300',
-      [FeeCategory.ACTIVITY]: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
-      [FeeCategory.OTHER]: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
-    };
-    return colors[category] || colors[FeeCategory.OTHER];
-  }
-
+  // ── Import helpers ──────────────────────────────────────────────────────────
   const paymentExpectedFields = [
     { key: 'studentName', label: 'Student Name', required: true },
     { key: 'amount', label: 'Amount', required: true },
@@ -268,321 +122,102 @@ export default function Finance() {
     { key: 'date', label: 'Date', required: true },
   ];
 
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
-        setShowExportMenu(false);
-      }
-      if (termFilterRef.current && !termFilterRef.current.contains(event.target as Node)) {
-        setShowTermFilter(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  async function handleRecordPayment(feeId: string, studentId: string, _amount: number) {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    const paymentAmount = prompt('Enter payment amount:');
-    if (!paymentAmount || isNaN(parseFloat(paymentAmount))) return;
-    
-    try {
-      const newPayment: Payment = {
-        id: uuidv4(),
-        feeId,
-        studentId,
-        amount: parseFloat(paymentAmount),
-        method: PaymentMethod.CASH,
-        date: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      };
-      await dataService.create(id, 'payments', newPayment as any);
-      addToast('Payment recorded successfully', 'success');
-    } catch (error) {
-      addToast('Failed to record payment', 'error');
-    }
-  }
-
-  function handleExportInvoicesCSV() {
-    const exportData = (fees || []).map(fee => {
-      const student = students.find(s => s.id === fee.studentId);
-      return { ...fee, studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A' };
-    });
-    exportToCSV(exportData, 'invoices', [
-      { key: 'studentName' as keyof typeof exportData[0], label: 'Student' },
-      { key: 'description' as keyof typeof exportData[0], label: 'Description' },
-      { key: 'amount' as keyof typeof exportData[0], label: 'Amount' },
-      { key: 'term' as keyof typeof exportData[0], label: 'Term' },
-      { key: 'year' as keyof typeof exportData[0], label: 'Year' },
-    ]);
-    addToast('Invoices exported to CSV', 'success');
-    setShowExportMenu(false);
-  }
-
-  function handleExportPaymentsCSV() {
-    const exportData = (payments || []).map(payment => {
-      const student = students.find(s => s.id === payment.studentId);
-      return { ...payment, studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A' };
-    });
-    exportToCSV(exportData, 'payments', [
-      { key: 'studentName' as keyof typeof exportData[0], label: 'Student' },
-      { key: 'amount' as keyof typeof exportData[0], label: 'Amount' },
-      { key: 'method' as keyof typeof exportData[0], label: 'Method' },
-      { key: 'date' as keyof typeof exportData[0], label: 'Date' },
-    ]);
-    addToast('Payments exported to CSV', 'success');
-    setShowExportMenu(false);
-  }
-
-  function handleExportInvoicesPDF() {
-    const exportData = (fees || []).map(fee => {
-      const student = students.find(s => s.id === fee.studentId);
-      const studentPayments = (payments || []).filter(p => p.feeId === fee.id);
-      const paidAmount = studentPayments.reduce((sum, p) => sum + p.amount, 0);
-      const status = paidAmount >= fee.amount ? 'Paid' : paidAmount > 0 ? 'Partial' : 'Pending';
-      return {
-        ...fee,
-        studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A',
-        status
-      };
-    });
-    exportToPDF('Invoices Report', exportData, [
-      { key: 'studentName', label: 'Student' },
-      { key: 'description', label: 'Description' },
-      { key: 'amount', label: 'Amount' },
-      { key: 'term', label: 'Term' },
-      { key: 'status', label: 'Status' },
-    ], 'invoices');
-    addToast('Invoices exported to PDF', 'success');
-    setShowExportMenu(false);
-  }
-
-  function handleExportPaymentsPDF() {
-    const exportData = (payments || []).map(payment => {
-      const student = students.find(s => s.id === payment.studentId);
-      return {
-        ...payment,
-        studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A',
-        date: new Date(payment.date).toLocaleDateString()
-      };
-    });
-    exportToPDF('Payments Report', exportData, [
-      { key: 'studentName', label: 'Student' },
-      { key: 'amount', label: 'Amount' },
-      { key: 'method', label: 'Method' },
-      { key: 'date', label: 'Date' },
-    ], 'payments');
-    addToast('Payments exported to PDF', 'success');
-    setShowExportMenu(false);
-  }
-
-  function handleExportInvoicesExcel() {
-    const exportData = (fees || []).map(fee => {
-      const student = students.find(s => s.id === fee.studentId);
-      return { ...fee, studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A' };
-    });
-    exportToExcel(exportData, 'invoices', [
-      { key: 'studentName' as keyof typeof exportData[0], label: 'Student' },
-      { key: 'description' as keyof typeof exportData[0], label: 'Description' },
-      { key: 'amount' as keyof typeof exportData[0], label: 'Amount' },
-      { key: 'term' as keyof typeof exportData[0], label: 'Term' },
-    ]);
-    addToast('Invoices exported to Excel', 'success');
-    setShowExportMenu(false);
-  }
-
-  function handleExportPaymentsExcel() {
-    const exportData = (payments || []).map(payment => {
-      const student = students.find(s => s.id === payment.studentId);
-      return { ...payment, studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A' };
-    });
-    exportToExcel(exportData, 'payments', [
-      { key: 'studentName' as keyof typeof exportData[0], label: 'Student' },
-      { key: 'amount' as keyof typeof exportData[0], label: 'Amount' },
-      { key: 'method' as keyof typeof exportData[0], label: 'Method' },
-      { key: 'date' as keyof typeof exportData[0], label: 'Date' },
-    ]);
-    addToast('Payments exported to Excel', 'success');
-    setShowExportMenu(false);
-  }
-
   function downloadTemplate() {
-    const fields = paymentExpectedFields;
-    const headers = fields.map(f => f.label);
-    const sampleRows = [['John Doe', '50000', 'cash', '2024-01-15']];
-    const csv = [headers.join(','), ...sampleRows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `payments-import-template.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+    const csv = ['Student Name,Amount,Method,Date', 'John Doe,50000,cash,2024-01-15'].join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'payments-template.csv'; a.click();
     addToast('Template downloaded', 'success');
   }
 
   function closeImportModal() {
-    setShowImportModal(false);
-    setImportStep('upload');
-    setCsvHeaders([]);
-    setCsvData([]);
-    setFieldMapping({});
-    setImportPreview([]);
+    setShowImportModal(false); setImportStep('upload');
+    setCsvHeaders([]); setCsvData([]); setFieldMapping({}); setImportPreview([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
   function parseCSVLine(line: string): string[] {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') inQuotes = !inQuotes;
-      else if (char === ',' && !inQuotes) { result.push(current.trim()); current = ''; }
-      else current += char;
-    }
-    result.push(current.trim());
-    return result;
+    const result: string[] = []; let cur = ''; let inQ = false;
+    for (const ch of line) { if (ch === '"') inQ = !inQ; else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; } else cur += ch; }
+    result.push(cur.trim()); return result;
   }
 
-  async function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; if (!file) return;
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
+      const lines = (await file.text()).split('\n').filter(l => l.trim());
+      if (lines.length < 2) { addToast('CSV needs headers + data', 'error'); return; }
       const headers = parseCSVLine(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
-      setCsvHeaders(headers);
-      setCsvData(data);
-      const fields = paymentExpectedFields;
-      const autoMapping: Record<string, string> = {};
-      fields.forEach(field => {
-        const matchingHeader = headers.find(h => h.toLowerCase() === field.label.toLowerCase() || h.toLowerCase().includes(field.key.toLowerCase()));
-        if (matchingHeader) autoMapping[field.key] = matchingHeader;
-      });
-      setFieldMapping(autoMapping);
-      setImportStep('map');
-      setShowImportModal(true);
-    } catch (error) { addToast('Failed to read CSV file', 'error'); }
-    event.target.value = '';
+      setCsvHeaders(headers); setCsvData(lines.slice(1).map(parseCSVLine));
+      const auto: Record<string, string> = {};
+      paymentExpectedFields.forEach(f => { const h = headers.find(h => h.toLowerCase().includes(f.key.toLowerCase())); if (h) auto[f.key] = h; });
+      setFieldMapping(auto); setImportStep('map'); setShowImportModal(true);
+    } catch { addToast('Failed to read CSV', 'error'); }
+    e.target.value = '';
   }
 
   function processMapping() {
-    const fields = paymentExpectedFields;
-    const mappedData: any[] = [];
-    for (const row of csvData) {
-      const record: any = {};
-      fields.forEach(field => {
-        const csvHeader = fieldMapping[field.key];
-        if (csvHeader) {
-          const headerIndex = csvHeaders.indexOf(csvHeader);
-          if (headerIndex !== -1 && row[headerIndex]) {
-            record[field.key] = row[headerIndex];
-          }
-        }
-      });
-      if (record.studentName && record.amount) {
-        mappedData.push(record);
-      }
-    }
-    setImportPreview(mappedData);
-    setImportStep('preview');
+    const mapped = csvData.map(row => {
+      const rec: any = {};
+      paymentExpectedFields.forEach(f => { const h = fieldMapping[f.key]; if (h) { const i = csvHeaders.indexOf(h); if (i !== -1) rec[f.key] = row[i]; } });
+      return rec;
+    }).filter(r => r.studentName && r.amount);
+    setImportPreview(mapped); setImportStep('preview');
   }
 
   async function executeImport() {
     const id = schoolId || user?.id;
-    if (importPreview.length === 0 || !id) { addToast('No valid records to import', 'error'); return; }
-    try {
-      const now = new Date().toISOString();
-      let successCount = 0;
-
-      for (const data of importPreview) {
-        const student = students.find(s => `${s.firstName} ${s.lastName}` === data.studentName);
-        if (!student) continue;
-        const payment: Payment = {
-          id: uuidv4(),
-          feeId: '',
-          studentId: student.id,
-          amount: parseFloat(data.amount),
-          method: (data.method as PaymentMethod) || PaymentMethod.CASH,
-          date: data.date || now,
-          createdAt: now,
-        };
-        await dataService.create(id, 'payments', payment as any);
-        successCount++;
-      }
-      addToast(`Successfully imported ${successCount} payments`, 'success');
-      closeImportModal();
-    } catch (error) { addToast('Failed to import', 'error'); }
+    if (!importPreview.length || !id) { addToast('No valid records', 'error'); return; }
+    let count = 0;
+    const now = new Date().toISOString();
+    for (const d of importPreview) {
+      const s = students.find(x => `${x.firstName} ${x.lastName}` === d.studentName);
+      if (!s) continue;
+      await dataService.create(id, 'payments', { id: uuidv4(), feeId: '', studentId: s.id, amount: parseFloat(d.amount), method: (d.method as PaymentMethod) || PaymentMethod.CASH, date: d.date || now, createdAt: now } as any);
+      count++;
+    }
+    addToast(`Imported ${count} payments`, 'success'); closeImportModal();
   }
 
-  const totalCollected = (payments || []).reduce((sum, p) => sum + p.amount, 0);
-  const totalInvoiced = (fees || []).reduce((sum, f) => sum + f.amount, 0);
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) setShowExportMenu(false);
+      if (termFilterRef.current && !termFilterRef.current.contains(e.target as Node)) setShowTermFilter(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  // ── Derived data ────────────────────────────────────────────────────────────
+  const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
+  const totalInvoiced = fees.reduce((s, f) => s + f.amount, 0);
   const totalPending = totalInvoiced - totalCollected;
+
+  const filteredFees = fees.filter(f => {
+    const s = students.find(x => x.id === f.studentId);
+    const q = searchTerm.toLowerCase();
+    return (!q || f.description.toLowerCase().includes(q) || (s ? `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) : false))
+      && (filterTerm === 'all' || f.term === filterTerm);
+  });
+
+  const filteredPayments = payments.filter(p => {
+    const s = students.find(x => x.id === p.studentId);
+    const q = searchTerm.toLowerCase();
+    return !q || (s ? `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) : false) || p.method.toLowerCase().includes(q);
+  });
+
+  const studentFinanceSummary = students.map(student => {
+    const sf = fees.filter(f => f.studentId === student.id);
+    const inv = sf.reduce((a, f) => a + f.amount, 0);
+    const paid = payments.filter(p => p.feeId ? sf.some(f => f.id === p.feeId) : p.studentId === student.id).reduce((a, p) => a + p.amount, 0);
+    return { id: student.id, studentName: `${student.firstName} ${student.lastName}`, admissionNo: student.admissionNo, totalInvoiced: inv, totalPaid: paid, balance: inv - paid, invoiceCount: sf.length, isCleared: sf.length > 0 && inv - paid <= 0 };
+  }).filter(s => s.invoiceCount > 0 || filterTerm === 'all');
+
+  const filteredStudentFinance = studentFinanceSummary.filter(s => !searchTerm || s.studentName.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const tabs = [
     { id: 'students', label: 'Students', icon: Users },
     { id: 'invoices', label: 'Invoices', icon: FileText },
     { id: 'payments', label: 'Payments', icon: Receipt },
-    { id: 'fees', label: 'Fee Structure', icon: DollarSign },
   ];
-
-  const filteredFees = (fees || []).filter(fee => {
-    const student = students.find(s => s.id === fee.studentId);
-    const search = searchTerm.toLowerCase();
-    const matchesSearch = !searchTerm || 
-      fee.description.toLowerCase().includes(search) ||
-      (student ? `${student.firstName} ${student.lastName}`.toLowerCase().includes(search) : false);
-    const matchesTerm = filterTerm === 'all' || fee.term === filterTerm;
-    return matchesSearch && matchesTerm;
-  });
-
-  const filteredPayments = (payments || []).filter(payment => {
-    const student = students.find(s => s.id === payment.studentId);
-    const search = searchTerm.toLowerCase();
-    return !searchTerm || 
-      (student ? `${student.firstName} ${student.lastName}`.toLowerCase().includes(search) : false) ||
-      payment.method.toLowerCase().includes(search);
-  });
-
-  // Student finance summary
-  const studentFinanceSummary = students.map(student => {
-    const studentFees = (fees || []).filter(f => f.studentId === student.id);
-    const totalInvoiced = studentFees.reduce((sum, f) => sum + f.amount, 0);
-    const studentPayments = (payments || []).filter(p => {
-      if (p.feeId && studentFees.some(f => f.id === p.feeId)) return true;
-      if (!p.feeId && p.studentId === student.id) return true;
-      return false;
-    });
-    const totalPaid = studentPayments.reduce((sum, p) => sum + p.amount, 0);
-    const balance = totalInvoiced - totalPaid;
-    const invoiceCount = studentFees.length;
-    const paymentCount = studentPayments.length;
-    const isCleared = invoiceCount > 0 && balance <= 0;
-    const hasPayments = paymentCount > 0;
-    
-    return {
-      id: student.id,
-      studentName: `${student.firstName} ${student.lastName}`,
-      admissionNo: student.admissionNo,
-      classId: student.classId,
-      totalInvoiced,
-      totalPaid,
-      balance,
-      invoiceCount,
-      paymentCount,
-      isCleared,
-      hasPayments,
-    };
-  }).filter(s => s.invoiceCount > 0 || filterTerm === 'all');
-
-  const filteredStudentFinance = studentFinanceSummary.filter(s => {
-    const search = searchTerm.toLowerCase();
-    if (search && !s.studentName.toLowerCase().includes(search)) return false;
-    return true;
-  });
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -593,269 +228,109 @@ export default function Finance() {
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Track fees, invoices, and payments</p>
         </div>
         <div className="flex items-center gap-2">
-          {(activeTab === 'invoices' || activeTab === 'fees') && (
-            <>
-              <div className="relative" ref={exportMenuRef}>
-                <button 
-                  onClick={() => setShowExportMenu(!showExportMenu)} 
-                  className="btn btn-secondary"
-                  title="Export"
-                >
-                  <Download size={16} />
-                  <span className="hidden sm:inline">Export</span>
-                  <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
-                </button>
-                {showExportMenu && (
-                  <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
-                    <button
-                      onClick={handleExportInvoicesPDF}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                    >
-                      <FileText size={14} />
-                      Export PDF
-                    </button>
-                    <button
-                      onClick={handleExportInvoicesCSV}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                    >
-                      <Download size={14} />
-                      Export CSV
-                    </button>
-                    <button
-                      onClick={handleExportInvoicesExcel}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                    >
-                      <FileText size={14} />
-                      Export Excel
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary" title="Import">
-                <Upload size={16} />
-                <span className="hidden sm:inline">Import</span>
+          {activeTab === 'invoices' && (
+            <div className="relative" ref={exportMenuRef}>
+              <button onClick={() => setShowExportMenu(!showExportMenu)} className="btn btn-secondary">
+                <Download size={16} /><span className="hidden sm:inline">Export</span>
+                <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
               </button>
-            </>
+              {showExportMenu && (
+                <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
+                  <button onClick={handleExportInvoicesPDF} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export PDF</button>
+                  <button onClick={handleExportInvoicesCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Download size={14} />Export CSV</button>
+                  <button onClick={handleExportInvoicesExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export Excel</button>
+                </div>
+              )}
+            </div>
           )}
           {activeTab === 'payments' && (
             <>
               <div className="relative" ref={exportMenuRef}>
-                <button 
-                  onClick={() => setShowExportMenu(!showExportMenu)} 
-                  className="btn btn-secondary"
-                  title="Export"
-                >
-                  <Download size={16} />
-                  <span className="hidden sm:inline">Export</span>
+                <button onClick={() => setShowExportMenu(!showExportMenu)} className="btn btn-secondary">
+                  <Download size={16} /><span className="hidden sm:inline">Export</span>
                   <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
                 </button>
                 {showExportMenu && (
                   <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
-                    <button
-                      onClick={handleExportPaymentsPDF}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                    >
-                      <FileText size={14} />
-                      Export PDF
-                    </button>
-                    <button
-                      onClick={handleExportPaymentsCSV}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                    >
-                      <Download size={14} />
-                      Export CSV
-                    </button>
-                    <button
-                      onClick={handleExportPaymentsExcel}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                    >
-                      <FileText size={14} />
-                      Export Excel
-                    </button>
+                    <button onClick={handleExportPaymentsPDF} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export PDF</button>
+                    <button onClick={handleExportPaymentsCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Download size={14} />Export CSV</button>
+                    <button onClick={handleExportPaymentsExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export Excel</button>
                   </div>
                 )}
               </div>
-              <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary" title="Import">
-                <Upload size={16} />
-                <span className="hidden sm:inline">Import</span>
+              <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary">
+                <Upload size={16} /><span className="hidden sm:inline">Import</span>
               </button>
             </>
           )}
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileSelect}
-            accept=".csv"
-            className="hidden"
-          />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".csv" className="hidden" />
         </div>
       </div>
 
-      {/* Stats Row */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card-solid-emerald p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
-              <Receipt size={24} className="text-white" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-white/80">Collected</p>
-              <p className="text-2xl font-bold text-white">{formatMoney(totalCollected)}</p>
-            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Receipt size={24} className="text-white" /></div>
+            <div><p className="text-sm font-medium text-white/80">Collected</p><p className="text-2xl font-bold text-white">{formatMoney(totalCollected)}</p></div>
           </div>
         </div>
         <div className="card-solid-rose p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
-              <DollarSign size={24} className="text-white" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-white/80">Pending</p>
-              <p className="text-2xl font-bold text-white">{formatMoney(totalPending)}</p>
-            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><DollarSign size={24} className="text-white" /></div>
+            <div><p className="text-sm font-medium text-white/80">Pending</p><p className="text-2xl font-bold text-white">{formatMoney(totalPending)}</p></div>
           </div>
         </div>
         <div className="card-solid-indigo p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
-              <FileText size={24} className="text-white" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-white/80">Invoiced</p>
-              <p className="text-2xl font-bold text-white">{formatMoney(totalInvoiced)}</p>
-            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><FileText size={24} className="text-white" /></div>
+            <div><p className="text-sm font-medium text-white/80">Invoiced</p><p className="text-2xl font-bold text-white">{formatMoney(totalInvoiced)}</p></div>
           </div>
         </div>
         <div className="card-solid-violet p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
-              <Receipt size={24} className="text-white" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-white/80">Transactions</p>
-              <p className="text-2xl font-bold text-white">{(payments || []).length}</p>
-            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Receipt size={24} className="text-white" /></div>
+            <div><p className="text-sm font-medium text-white/80">Transactions</p><p className="text-2xl font-bold text-white">{payments.length}</p></div>
           </div>
         </div>
       </div>
 
-      {/* Main Card with Tabs */}
+      {/* Main Card */}
       <div className="card">
         <div className="card-header">
           <div className="flex flex-wrap gap-4 items-center justify-between">
             <div className="flex gap-2 flex-wrap">
               {tabs.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    activeTab === tab.id 
-                      ? 'bg-indigo-600 text-white' 
-                      : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-                  }`}
-                >
-                  <tab.icon size={16} />
-                  {tab.label}
+                <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}>
+                  <tab.icon size={16} />{tab.label}
                 </button>
               ))}
             </div>
             <div className="flex items-center gap-2">
-              {activeTab === 'fees' && (
-                <>
-                  <select
-                    value={structureFilterTerm}
-                    onChange={e => setStructureFilterTerm(e.target.value)}
-                    className="form-input py-1.5 text-sm w-28"
-                  >
-                    <option value="1">Term 1</option>
-                    <option value="2">Term 2</option>
-                    <option value="3">Term 3</option>
-                  </select>
-                  <button
-                    onClick={() => handleGenerateInvoicesForAllClasses(structureFilterTerm, new Date().getFullYear().toString())}
-                    className="btn btn-primary py-1.5 text-sm"
-                  >
-                    <Wand2 size={14} />
-                    <span className="hidden sm:inline">Generate All</span>
-                  </button>
-                  <button
-                    onClick={() => { setStructureFormData(prev => ({ ...prev, term: structureFilterTerm, year: new Date().getFullYear().toString() })); setShowStructureForm(true); }}
-                    className="btn btn-secondary py-1.5 text-sm"
-                  >
-                    <Plus size={14} />
-                    <span className="hidden sm:inline">Add Fee</span>
-                  </button>
-                </>
-              )}
-              {activeTab !== 'fees' && (
-                <>
-                  <div className="relative" ref={termFilterRef}>
-                    <button
-                      onClick={() => setShowTermFilter(!showTermFilter)}
-                      className={`btn btn-secondary flex items-center gap-2 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
-                    >
-                      <Filter size={16} />
-                      <span className="hidden sm:inline">
-                        {filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}
-                      </span>
-                      <span className="sm:hidden">Terms</span>
-                      <ChevronDown size={14} className={`transition-transform duration-300 ${showTermFilter ? 'rotate-180' : ''}`} />
-                    </button>
-                    {showTermFilter && (
-                      <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden animate-dropdown-in">
-                        <div className="py-1">
-                          <button
-                            onClick={() => { setFilterTerm('all'); setShowTermFilter(false); }}
-                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                              filterTerm === 'all' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                            }`}
-                          >
-                            All Terms
-                            {filterTerm === 'all' && <Check size={14} className="ml-auto" />}
-                          </button>
-                          <button
-                            onClick={() => { setFilterTerm('1'); setShowTermFilter(false); }}
-                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                              filterTerm === '1' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                            }`}
-                          >
-                            Term 1
-                            {filterTerm === '1' && <Check size={14} className="ml-auto" />}
-                          </button>
-                          <button
-                            onClick={() => { setFilterTerm('2'); setShowTermFilter(false); }}
-                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                              filterTerm === '2' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                            }`}
-                          >
-                            Term 2
-                            {filterTerm === '2' && <Check size={14} className="ml-auto" />}
-                          </button>
-                          <button
-                            onClick={() => { setFilterTerm('3'); setShowTermFilter(false); }}
-                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                              filterTerm === '3' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                            }`}
-                          >
-                            Term 3
-                            {filterTerm === '3' && <Check size={14} className="ml-auto" />}
-                          </button>
-                        </div>
-                      </div>
-                    )}
+              <div className="relative" ref={termFilterRef}>
+                <button onClick={() => setShowTermFilter(!showTermFilter)}
+                  className={`btn btn-secondary flex items-center gap-2 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}>
+                  <Filter size={16} />
+                  <span className="hidden sm:inline">{filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}</span>
+                  <ChevronDown size={14} className={`transition-transform ${showTermFilter ? 'rotate-180' : ''}`} />
+                </button>
+                {showTermFilter && (
+                  <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden">
+                    {['all', '1', '2', '3'].map(t => (
+                      <button key={t} onClick={() => { setFilterTerm(t); setShowTermFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${filterTerm === t ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+                        {t === 'all' ? 'All Terms' : `Term ${t}`}
+                        {filterTerm === t && <Check size={14} className="ml-auto" />}
+                      </button>
+                    ))}
                   </div>
-                  <div className="relative">
-                    <Search size={18} className="search-input-icon" />
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={e => setSearchTerm(e.target.value)}
-                      placeholder="Search..."
-                      className="search-input w-48"
-                    />
-                  </div>
-                </>
-              )}
+                )}
+              </div>
+              <div className="relative">
+                <Search size={18} className="search-input-icon" />
+                <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search..." className="search-input w-48" />
+              </div>
             </div>
           </div>
         </div>
@@ -867,523 +342,149 @@ export default function Finance() {
                 {activeTab === 'students' && <><th>Student</th><th>Admission No</th><th>Invoices</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></>}
                 {activeTab === 'invoices' && <><th>Student</th><th>Description</th><th>Amount</th><th>Term</th><th>Status</th><th>Actions</th></>}
                 {activeTab === 'payments' && <><th>Date</th><th>Student</th><th>Amount</th><th>Method</th></>}
-                {activeTab === 'fees' && <><th>Class</th><th>Fee Items</th><th>Total Per Student</th><th>Students</th><th>Actions</th></>}
               </tr>
             </thead>
             <tbody>
-              {!fees || !payments ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-12">
-                    <div className="flex flex-col items-center gap-2 text-slate-400">
-                      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                      <p className="text-sm">Loading...</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : activeTab === 'students' && filteredStudentFinance.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-12">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-                        <Users size={24} className="text-violet-400" />
-                      </div>
-                      <p className="text-slate-500 font-medium">No invoiced students</p>
-                      <p className="text-slate-400 text-sm">Create invoices to see student summaries</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : activeTab === 'invoices' && filteredFees.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center py-12">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-                        <FileText size={24} className="text-violet-400" />
-                      </div>
-                      <p className="text-slate-500 font-medium">No invoices yet</p>
-                      <p className="text-slate-400 text-sm">Generate invoices from Fee Structure tab</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : activeTab === 'payments' && filteredPayments.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="text-center py-12">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                        <Receipt size={24} className="text-green-400" />
-                      </div>
-                      <p className="text-slate-500 font-medium">No payments recorded</p>
-                      <p className="text-slate-400 text-sm">Record payments from invoices tab</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : activeTab === 'fees' && filteredFees.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="text-center py-12">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                        <DollarSign size={24} className="text-amber-400" />
-                      </div>
-                      <p className="text-slate-500 font-medium">No fee structure set</p>
-                      <p className="text-slate-400 text-sm">Create invoices to set up fees</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                <>
-                  {activeTab === 'students' && filteredStudentFinance.map(student => (
-                    <tr key={student.id}>
-                      <td className="font-medium">{student.studentName}</td>
-                      <td className="text-slate-500">{student.admissionNo}</td>
-                      <td><span className="badge badge-info">{student.invoiceCount}</span></td>
-                      <td className="font-semibold">{formatMoney(student.totalInvoiced)}</td>
-                      <td className="text-emerald-600 font-semibold">{formatMoney(student.totalPaid)}</td>
-                      <td className={student.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>
-                        {formatMoney(student.balance)}
-                      </td>
-                      <td>
-                        {student.isCleared ? (
-                          <span className="badge badge-success">Cleared</span>
-                        ) : student.balance > 0 ? (
-                          <span className="badge badge-danger">Balance: {formatMoney(student.balance)}</span>
-                        ) : (
-                          <span className="badge badge-warning">No Invoice</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {activeTab === 'invoices' && filteredFees.map(fee => {
-                    const student = students.find(s => s.id === fee.studentId);
-                    const studentPayments = payments.filter(p => p.feeId === fee.id);
-                    const paidAmount = studentPayments.reduce((sum, p) => sum + p.amount, 0);
-                    const status = paidAmount >= fee.amount ? 'Paid' : paidAmount > 0 ? 'Partial' : 'Pending';
-                    const statusColors: Record<string, string> = {
-                      Paid: 'badge-success',
-                      Partial: 'badge-warning',
-                      Pending: 'badge-danger',
-                    };
-                    return (
-                      <tr key={fee.id}>
-                        <td className="font-medium">{student ? `${student.firstName} ${student.lastName}` : <span className="text-slate-400">N/A</span>}</td>
-                        <td>{fee.description}</td>
-                        <td className="font-semibold">{formatMoney(fee.amount)}</td>
-                        <td><span className="badge badge-info">Term {fee.term}</span></td>
-                        <td><span className={`badge ${statusColors[status]}`}>{status}</span></td>
-                        <td>
-                          {status !== 'Paid' && (
-                            <button onClick={() => handleRecordPayment(fee.id, fee.studentId!, fee.amount - paidAmount)} className="btn btn-secondary text-xs py-1.5">
-                              <CreditCard size={12} /> Record
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {activeTab === 'payments' && filteredPayments.map(payment => {
-                    const student = students.find(s => s.id === payment.studentId);
-                    return (
-                      <tr key={payment.id}>
-                        <td className="text-slate-500">{new Date(payment.date).toLocaleDateString()}</td>
-                        <td className="font-medium">{student ? `${student.firstName} ${student.lastName}` : 'N/A'}</td>
-                        <td className="font-bold text-green-600 dark:text-green-400">{formatMoney(payment.amount)}</td>
-                        <td>
-                          <span className="badge badge-info capitalize">{payment.method.replace('_', ' ')}</span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {activeTab === 'fees' && (
-                    <>
-                      {classes.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="text-center py-12">
-                            <div className="flex flex-col items-center gap-2">
-                              <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                                <Layers size={24} className="text-amber-400" />
-                              </div>
-                              <p className="text-slate-500 font-medium">No classes found</p>
-                              <p className="text-slate-400 text-sm">Create classes first to set up fee structures</p>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : (
-                        classes.map(cls => {
-                          const classStructures = feeStructures.filter(s => s.classId === cls.id && s.term === structureFilterTerm);
-                          const classStudents = students.filter(s => s.classId === cls.id);
-                          const activeStudents = classStudents.filter((s: any) => s.status !== 'completed' && s.status !== 'graduated');
-                          const totalPerClass = classStructures.reduce((sum, s) => sum + s.amount, 0);
-                          
-                          return (
-                            <tr key={cls.id}>
-                              <td className="font-medium">
-                                <div className="flex items-center gap-2">
-                                  <span className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
-                                    {cls.name?.charAt(0)?.toUpperCase() || '?'}
-                                  </span>
-                                  <div>
-                                    <p className="font-semibold">{cls.name}</p>
-                                    <p className="text-xs text-slate-400">{cls.level || ''} {cls.section || ''}</p>
-                                  </div>
-                                </div>
-                              </td>
-                              <td>
-                                <span className="badge badge-info">{classStructures.length} items</span>
-                              </td>
-                              <td className="font-semibold">{formatMoney(totalPerClass)}</td>
-                              <td>
-                                <span className="text-sm text-slate-500">{activeStudents.length} students</span>
-                              </td>
-                              <td>
-                                <div className="flex items-center gap-1">
-                                  <button 
-                                    onClick={() => handleGenerateInvoicesForClass(cls.id, structureFilterTerm, new Date().getFullYear().toString())}
-                                    className="btn btn-secondary text-xs py-1.5 px-2"
-                                    title="Generate invoices for this class"
-                                  >
-                                    <Wand2 size={12} /> Generate
-                                  </button>
-                                  <button 
-                                    onClick={() => { setSelectedClassForStructure(cls.id); setShowStructureForm(true); }}
-                                    className="btn btn-ghost text-xs py-1.5 px-2"
-                                    title="Add fee item"
-                                  >
-                                    <Plus size={12} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </>
-                  )}
-                </>
+              {activeTab === 'students' && filteredStudentFinance.length === 0 && (
+                <tr><td colSpan={7} className="text-center py-12">
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><Users size={24} className="text-violet-400" /></div>
+                    <p className="text-slate-500 font-medium">No invoiced students</p>
+                    <p className="text-slate-400 text-sm">Generate invoices from the Invoices page</p>
+                  </div>
+                </td></tr>
               )}
+              {activeTab === 'invoices' && filteredFees.length === 0 && (
+                <tr><td colSpan={6} className="text-center py-12">
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><FileText size={24} className="text-violet-400" /></div>
+                    <p className="text-slate-500 font-medium">No invoices yet</p>
+                    <p className="text-slate-400 text-sm">Go to the Invoices page to generate invoices</p>
+                  </div>
+                </td></tr>
+              )}
+              {activeTab === 'payments' && filteredPayments.length === 0 && (
+                <tr><td colSpan={4} className="text-center py-12">
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center"><Receipt size={24} className="text-green-400" /></div>
+                    <p className="text-slate-500 font-medium">No payments recorded</p>
+                  </div>
+                </td></tr>
+              )}
+              {activeTab === 'students' && filteredStudentFinance.map(s => (
+                <tr key={s.id}>
+                  <td className="font-medium">{s.studentName}</td>
+                  <td className="text-slate-500">{s.admissionNo}</td>
+                  <td><span className="badge badge-info">{s.invoiceCount}</span></td>
+                  <td className="font-semibold">{formatMoney(s.totalInvoiced)}</td>
+                  <td className="text-emerald-600 font-semibold">{formatMoney(s.totalPaid)}</td>
+                  <td className={s.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>{formatMoney(s.balance)}</td>
+                  <td>{s.isCleared ? <span className="badge badge-success">Cleared</span> : s.balance > 0 ? <span className="badge badge-danger">Balance: {formatMoney(s.balance)}</span> : <span className="badge badge-warning">No Invoice</span>}</td>
+                </tr>
+              ))}
+              {activeTab === 'invoices' && filteredFees.map(fee => {
+                const s = students.find(x => x.id === fee.studentId);
+                const paid = payments.filter(p => p.feeId === fee.id).reduce((a, p) => a + p.amount, 0);
+                const status = paid >= fee.amount ? 'Paid' : paid > 0 ? 'Partial' : 'Pending';
+                const badge: Record<string, string> = { Paid: 'badge-success', Partial: 'badge-warning', Pending: 'badge-danger' };
+                return (
+                  <tr key={fee.id}>
+                    <td className="font-medium">{s ? `${s.firstName} ${s.lastName}` : <span className="text-slate-400">N/A</span>}</td>
+                    <td>{fee.description}</td>
+                    <td className="font-semibold">{formatMoney(fee.amount)}</td>
+                    <td><span className="badge badge-info">Term {fee.term}</span></td>
+                    <td><span className={`badge ${badge[status]}`}>{status}</span></td>
+                    <td>{status !== 'Paid' && <button onClick={() => handleRecordPayment(fee.id, fee.studentId!, fee.amount - paid)} className="btn btn-secondary text-xs py-1.5"><CreditCard size={12} /> Record</button>}</td>
+                  </tr>
+                );
+              })}
+              {activeTab === 'payments' && filteredPayments.map(p => {
+                const s = students.find(x => x.id === p.studentId);
+                return (
+                  <tr key={p.id}>
+                    <td className="text-slate-500">{new Date(p.date).toLocaleDateString()}</td>
+                    <td className="font-medium">{s ? `${s.firstName} ${s.lastName}` : 'N/A'}</td>
+                    <td className="font-bold text-green-600 dark:text-green-400">{formatMoney(p.amount)}</td>
+                    <td><span className="badge badge-info capitalize">{p.method.replace('_', ' ')}</span></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
+      {/* Import Modal */}
       {showImportModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={e => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <Upload size={18} className="text-white" />
-                <h2 className="font-bold text-white">Import Payments</h2>
-              </div>
-              <button onClick={closeImportModal} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
+              <div className="flex items-center gap-2"><Upload size={18} className="text-white" /><h2 className="font-bold text-white">Import Payments</h2></div>
+              <button onClick={closeImportModal} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>
             </div>
-
             <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
               {importStep === 'upload' && (
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <button onClick={downloadTemplate} className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-lg transition-colors text-sm font-medium">
-                      <Download size={14} />
-                      Download Template
-                    </button>
-                  </div>
-
-                  <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors cursor-pointer text-center"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
+                  <button onClick={downloadTemplate} className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-lg text-sm font-medium"><Download size={14} />Download Template</button>
+                  <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-400 transition-colors" onClick={() => fileInputRef.current?.click()}>
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
-                    <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
-                  </div>
-
-                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-                    <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-2 text-sm">Expected Fields:</h4>
-                    <div className="grid grid-cols-2 gap-1.5 text-xs">
-                      {paymentExpectedFields.map(field => (
-                        <div key={field.key} className="flex items-center gap-1.5">
-                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${field.required ? 'bg-red-500' : 'bg-slate-400'}`} />
-                          <span className="text-slate-600 dark:text-slate-300 truncate">{field.label}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV</p>
                   </div>
                 </div>
               )}
-
               {importStep === 'map' && (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded">1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">2 Map</span>
-                    <ArrowRight size={12} />
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">1</span><ArrowRight size={12} />
+                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">2 Map</span><ArrowRight size={12} />
                     <span className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-500 rounded">3</span>
                   </div>
-
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
-                    <table className="w-full text-xs">
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {paymentExpectedFields.filter((f: any) => f.required).map((field: any) => (
-                          <tr key={field.key}>
-                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">
-                              {field.label}*
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <select
-                                value={fieldMapping[field.key] || ''}
-                                onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
-                                className="w-full form-input py-1 px-2 text-xs"
-                              >
-                                <option value="">-- Skip --</option>
-                                {csvHeaders.map(header => (
-                                  <option key={header} value={header}>{header}</option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <table className="w-full text-xs"><tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {paymentExpectedFields.filter(f => f.required).map(f => (
+                        <tr key={f.key}>
+                          <td className="px-3 py-2 font-medium whitespace-nowrap">{f.label}*</td>
+                          <td className="px-2 py-1.5">
+                            <select value={fieldMapping[f.key] || ''} onChange={e => setFieldMapping(p => ({ ...p, [f.key]: e.target.value }))} className="w-full form-input py-1 px-2 text-xs">
+                              <option value="">-- Skip --</option>
+                              {csvHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody></table>
                   </div>
-
                   <div className="flex justify-end gap-2 pt-2">
                     <button onClick={closeImportModal} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
-                    <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
-                      Preview <ArrowRight size={14} />
-                    </button>
+                    <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">Preview <ArrowRight size={14} /></button>
                   </div>
                 </div>
               )}
-
               {importStep === 'preview' && (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span>
-                    <ArrowRight size={12} />
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 1</span><ArrowRight size={12} />
+                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span><ArrowRight size={12} />
                     <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
                   </div>
-
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                      <strong>{importPreview.length}</strong> payments ready to import
-                    </p>
+                    <p className="text-sm text-emerald-700 dark:text-emerald-300"><strong>{importPreview.length}</strong> payments ready</p>
                   </div>
-
                   <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
                     <table className="w-full text-xs">
-                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
-                        <tr>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">#</th>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Name</th>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Amount</th>
-                        </tr>
-                      </thead>
+                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0"><tr><th className="px-2 py-1.5 text-left">#</th><th className="px-2 py-1.5 text-left">Name</th><th className="px-2 py-1.5 text-left">Amount</th></tr></thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 5).map((record, index) => (
-                          <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                            <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
-                            <td className="px-2 py-1.5">{record.studentName || record.description || '-'}</td>
-                            <td className="px-2 py-1.5">{record.amount || '-'}</td>
-                          </tr>
-                        ))}
+                        {importPreview.slice(0, 5).map((r, i) => <tr key={i}><td className="px-2 py-1.5 text-slate-500">{i + 1}</td><td className="px-2 py-1.5">{r.studentName || '-'}</td><td className="px-2 py-1.5">{r.amount || '-'}</td></tr>)}
                       </tbody>
                     </table>
-                    {importPreview.length > 5 && (
-                      <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">
-                        ... and {importPreview.length - 5} more
-                      </div>
-                    )}
+                    {importPreview.length > 5 && <div className="p-2 text-center text-xs text-slate-500">... and {importPreview.length - 5} more</div>}
                   </div>
-
                   <div className="flex justify-between pt-2">
                     <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
-                      <CheckIcon size={14} /> Import {importPreview.length}
-                    </button>
+                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1"><CheckIcon size={14} /> Import {importPreview.length}</button>
                   </div>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showStructureForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowStructureForm(false); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <DollarSign size={18} className="text-white" />
-                <h2 className="font-bold text-white">Add Fee Structure</h2>
-              </div>
-              <button onClick={() => setShowStructureForm(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateFeeStructure} className="p-5 space-y-4">
-              <div className="space-y-1.5">
-                <label className="form-label">Class</label>
-                <select 
-                  value={structureFormData.classId} 
-                  onChange={e => setStructureFormData(prev => ({ ...prev, classId: e.target.value }))} 
-                  className="form-input" 
-                  required
-                >
-                  <option value="">Select Class</option>
-                  {classes.map(cls => (
-                    <option key={cls.id} value={cls.id}>{cls.name} {cls.level || ''}</option>
-                  ))}
-                </select>
-              </div>
-              
-              <div className="space-y-1.5">
-                <label className="form-label">Fee Name</label>
-                <input 
-                  value={structureFormData.name} 
-                  onChange={e => setStructureFormData(prev => ({ ...prev, name: e.target.value }))} 
-                  className="form-input" 
-                  required 
-                  placeholder="e.g., Term 1 Tuition" 
-                />
-              </div>
-              
-              <div className="space-y-1.5">
-                <label className="form-label">Category</label>
-                <select 
-                  value={structureFormData.category} 
-                  onChange={e => setStructureFormData(prev => ({ ...prev, category: e.target.value as FeeCategory }))} 
-                  className="form-input"
-                >
-                  <option value={FeeCategory.TUITION}>Tuition</option>
-                  <option value={FeeCategory.BOARDING}>Boarding</option>
-                  <option value={FeeCategory.EXAM}>Examination</option>
-                  <option value={FeeCategory.REGISTRATION}>Registration</option>
-                  <option value={FeeCategory.UNIFORM}>Uniform</option>
-                  <option value={FeeCategory.BOOKS}>Books & Materials</option>
-                  <option value={FeeCategory.TRANSPORT}>Transport</option>
-                  <option value={FeeCategory.ACTIVITY}>Activity Fee</option>
-                  <option value={FeeCategory.OTHER}>Other</option>
-                </select>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="form-label">Amount ({currency.symbol})</label>
-                  <input 
-                    type="number" 
-                    value={structureFormData.amount} 
-                    onChange={e => setStructureFormData(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))} 
-                    className="form-input" 
-                    required 
-                    min="0" 
-                    step="0.01"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="form-label">Term</label>
-                  <select 
-                    value={structureFormData.term} 
-                    onChange={e => setStructureFormData(prev => ({ ...prev, term: e.target.value }))} 
-                    className="form-input"
-                  >
-                    <option value="1">Term 1</option>
-                    <option value="2">Term 2</option>
-                    <option value="3">Term 3</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowStructureForm(false)} className="btn btn-secondary">Cancel</button>
-                <button type="submit" className="btn btn-primary flex items-center gap-2">
-                  <Plus size={16} /> Add Fee Structure
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {selectedClassForStructure && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setSelectedClassForStructure(''); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <Layers size={18} className="text-white" />
-                <h2 className="font-bold text-white">
-                  Fee Structure - {classes.find(c => c.id === selectedClassForStructure)?.name}
-                </h2>
-              </div>
-              <button onClick={() => setSelectedClassForStructure('')} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto flex-1">
-              {feeStructures.filter(s => s.classId === selectedClassForStructure).length === 0 ? (
-                <div className="text-center py-8">
-                  <DollarSign size={40} className="mx-auto text-slate-300 mb-3" />
-                  <p className="text-slate-500">No fee items for this class</p>
-                  <button 
-                    onClick={() => { setStructureFormData(prev => ({ ...prev, classId: selectedClassForStructure })); setShowStructureForm(true); }}
-                    className="btn btn-primary mt-3"
-                  >
-                    <Plus size={16} /> Add Fee Item
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {feeStructures.filter(s => s.classId === selectedClassForStructure).map(structure => (
-                    <div key={structure.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <span className={`px-2 py-1 rounded-md text-xs font-medium ${getCategoryColor(structure.category)}`}>
-                          {getCategoryLabel(structure.category)}
-                        </span>
-                        <div>
-                          <p className="font-medium">{structure.name}</p>
-                          <p className="text-sm text-slate-500">Term {structure.term}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-semibold">{formatMoney(structure.amount)}</span>
-                        <button 
-                          onClick={() => handleDeleteFeeStructure(structure.id)}
-                          className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="flex justify-between items-center pt-3 border-t border-slate-200 dark:border-slate-700">
-                    <span className="font-semibold text-slate-600 dark:text-slate-300">Total per Student:</span>
-                    <span className="text-xl font-bold" style={{ color: 'var(--primary-color)' }}>
-                      {formatMoney(feeStructures.filter(s => s.classId === selectedClassForStructure).reduce((sum, s) => sum + s.amount, 0))}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
-              <div className="flex justify-between">
-                <button 
-                  onClick={() => { setStructureFormData(prev => ({ ...prev, classId: selectedClassForStructure })); setShowStructureForm(true); }}
-                  className="btn btn-secondary"
-                >
-                  <Plus size={16} /> Add Fee Item
-                </button>
-                <button 
-                  onClick={() => {
-                    handleGenerateInvoicesForClass(selectedClassForStructure, structureFilterTerm, new Date().getFullYear().toString());
-                    setSelectedClassForStructure('');
-                  }}
-                  className="btn btn-primary"
-                >
-                  <Wand2 size={16} /> Generate Invoices
-                </button>
-              </div>
             </div>
           </div>
         </div>

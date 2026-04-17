@@ -1,5 +1,5 @@
 import type { Class, Student } from '@schofy/shared';
-import { userDBManager } from '../lib/database/UserDatabaseManager';
+import { dataService } from '../lib/database/DataService';
 
 export interface ClassOption {
   id: string;
@@ -51,8 +51,8 @@ export function getClassDisplayName(
 
 export async function getStudentClassOptions(userId: string, excludeStudentId?: string): Promise<ClassOption[]> {
   const [classes, students] = await Promise.all([
-    userDBManager.getAll(userId, 'classes'),
-    userDBManager.getAll(userId, 'students'),
+    dataService.getAll(userId, 'classes'),
+    dataService.getAll(userId, 'students'),
   ]);
 
   const relevantStudents = students.filter(
@@ -105,8 +105,8 @@ export async function getClassCapacityState(userId: string, classId: string, exc
  */
 export async function validateStudentClassAssignments(userId: string) {
   const [classes, students] = await Promise.all([
-    userDBManager.getAll(userId, 'classes'),
-    userDBManager.getAll(userId, 'students'),
+    dataService.getAll(userId, 'classes'),
+    dataService.getAll(userId, 'students'),
   ]);
 
   const classIds = new Set(classes.map(c => c.id));
@@ -135,12 +135,7 @@ export async function fixInvalidClassAssignments(userId: string) {
   let fixed = 0;
   for (const student of validation.invalidStudents) {
     try {
-      // Use put method to update the student with classId set to null
-      const updatedStudent = {
-        ...student,
-        classId: null,
-      };
-      await userDBManager.put(userId, 'students', updatedStudent);
+      await dataService.update(userId, 'students', student.id, { classId: null } as any);
       fixed++;
     } catch (error) {
       console.error(`Failed to fix class assignment for student ${student.id}:`, error);

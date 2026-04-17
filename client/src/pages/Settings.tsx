@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, UploadCloud } from 'lucide-react';
+import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSync } from '../contexts/SyncContext';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { dataService } from '../lib/database/DataService';
-import { userDBManager } from '../lib/database/UserDatabaseManager';
 
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -18,12 +17,16 @@ export default function Settings() {
   const { primaryColor, setPrimaryColor } = useTheme();
   const { addToast } = useToast();
   const { setCurrency } = useCurrency();
-  const { isOnline, isSyncing, pendingChanges, lastSyncTime, syncNow, forceFullSync, exportBackup, importBackup, isSyncEnabled, enableSync, disableSync, isSupabaseConfigured } = useSync();
+  const { isOnline, isSyncing, pendingChanges, lastSyncTime, exportBackup, importBackup, isSyncEnabled, enableSync, disableSync, isSupabaseConfigured } = useSync();
   const { user, schoolId } = useAuth();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showPromoteModal, setShowPromoteModal] = useState(false);
+  const [promoteNewTerm, setPromoteNewTerm] = useState('1');
+  const [promoteNewYear, setPromoteNewYear] = useState(new Date().getFullYear().toString());
+  const [isPromoting, setIsPromoting] = useState(false);
   const [settings, setSettings] = useState({
     schoolName: 'My School',
     schoolAddress: '',
@@ -41,6 +44,7 @@ export default function Settings() {
     busFee: '100',
     libraryFee: '50',
     sportsFee: '75',
+    schoolType: 'both',
   });
 
   const currentCurrency = currencies.find(c => c.code === settings.currency) || currencies[0];
@@ -64,36 +68,74 @@ export default function Settings() {
     }
   }
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    const id = schoolId || user?.id;
-    if (!id) return;
+  async function handleSave(e?: React.FormEvent | React.MouseEvent) {
+    if (e) e.preventDefault();
+    const sid = schoolId || user?.id;
+    if (!sid) return;
 
-    // Validate required fields
-    if (!settings.schoolName || settings.schoolName.trim() === '' || settings.schoolName === 'My School') {
+    if (!settings.schoolName || settings.schoolName.trim() === '') {
       addToast('Please enter your school name', 'error');
       return;
     }
 
     try {
-      for (const [key, value] of Object.entries(settings)) {
-        const settingRecord = { id: key, key, value, updatedAt: new Date().toISOString() };
-        
-        // Cloud-first: save to Supabase when online
-        if (isSupabaseConfigured && supabase) {
-          try {
-            await supabase.from('settings').upsert({ ...settingRecord, school_id: id }, { onConflict: 'id' });
-          } catch (e) { console.warn('Cloud save failed:', e); }
-        }
-        // Also save locally
-        await userDBManager.put(id, 'settings', settingRecord);
+      const result = await dataService.saveSettings(sid, settings);
+      if (!result.success) {
+        addToast(result.error || 'Failed to save settings', 'error');
+        return;
       }
-      // Broadcast settings update to all pages
+      
+      localStorage.setItem('schofy_currency', settings.currency || 'USD');
+      
+      await autoCreateClasses(sid);
       window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
+      window.dispatchEvent(new CustomEvent('classesUpdated'));
+      window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
       addToast('Settings saved', 'success');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Save settings error:', error);
-      addToast('Failed to save settings', 'error');
+      addToast(error?.message || 'Failed to save settings', 'error');
+    }
+  }
+
+  async function autoCreateClasses(sid: string) {
+    const schoolType = settings.schoolType || 'both';
+    
+    const primaryClasses = ['P.1', 'P.2', 'P.3', 'P.4', 'P.5', 'P.6', 'P.7'];
+    const secondaryClasses = ['S.1', 'S.2', 'S.3', 'S.4'];
+    
+    const classesToCreate: { name: string; level: number }[] = [];
+    
+    if (schoolType === 'primary' || schoolType === 'both') {
+      primaryClasses.forEach((name, index) => {
+        classesToCreate.push({ name, level: index + 1 });
+      });
+    }
+    
+    if (schoolType === 'secondary' || schoolType === 'both') {
+      secondaryClasses.forEach((name, index) => {
+        const startLevel = schoolType === 'both' ? 8 + index : index + 1;
+        classesToCreate.push({ name, level: startLevel });
+      });
+    }
+
+    const existingClasses = await dataService.getAll(sid, 'classes');
+    const existingNames = new Set(existingClasses.map((c: any) => c.name));
+    
+    let createdCount = 0;
+    for (const cls of classesToCreate) {
+      if (!existingNames.has(cls.name)) {
+        await dataService.create(sid, 'classes', {
+          name: cls.name,
+          level: cls.level,
+          capacity: 40,
+        } as any);
+        createdCount++;
+      }
+    }
+    
+    if (createdCount > 0) {
+      addToast(`${createdCount} classes auto-created`, 'info');
     }
   }
 
@@ -103,6 +145,71 @@ export default function Settings() {
     
     if (name === 'currency') {
       setCurrency(value as 'USD' | 'UGX');
+    }
+  }
+
+  async function handlePromoteStudents() {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    setIsPromoting(true);
+    try {
+      // Load all classes sorted by level
+      const allClasses = await dataService.getAll(id, 'classes');
+      const sorted = [...allClasses].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0));
+
+      // Build next-class map: classId → nextClassId
+      const nextClassMap: Record<string, string> = {};
+      for (let i = 0; i < sorted.length - 1; i++) {
+        nextClassMap[(sorted[i] as any).id] = (sorted[i + 1] as any).id;
+      }
+      // Students in the last class get marked completed
+      const lastClassId = sorted.length > 0 ? (sorted[sorted.length - 1] as any).id : null;
+
+      // Load all active students
+      const allStudents = await dataService.getAll(id, 'students');
+      const active = allStudents.filter((s: any) => s.status === 'active');
+
+      let promoted = 0;
+      let graduated = 0;
+      const now = new Date().toISOString();
+
+      for (const student of active) {
+        const currentClassId = (student as any).classId;
+        if (currentClassId === lastClassId) {
+          // Graduate — mark completed
+          await dataService.update(id, 'students', (student as any).id, {
+            status: 'completed',
+            completedYear: parseInt(promoteNewYear),
+            completedTerm: settings.currentTerm,
+            updatedAt: now,
+          } as any);
+          graduated++;
+        } else if (nextClassMap[currentClassId]) {
+          // Promote to next class
+          await dataService.update(id, 'students', (student as any).id, {
+            classId: nextClassMap[currentClassId],
+            updatedAt: now,
+          } as any);
+          promoted++;
+        }
+      }
+
+      // Update current term in settings
+      await dataService.saveSettings(id, {
+        ...settings,
+        currentTerm: promoteNewTerm,
+        academicYear: promoteNewYear,
+      });
+      setSettings(prev => ({ ...prev, currentTerm: promoteNewTerm, academicYear: promoteNewYear }));
+
+      window.dispatchEvent(new CustomEvent('studentsUpdated'));
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      setShowPromoteModal(false);
+      addToast(`Term started: ${promoted} students promoted, ${graduated} graduated`, 'success');
+    } catch (err: any) {
+      addToast(err?.message || 'Promotion failed', 'error');
+    } finally {
+      setIsPromoting(false);
     }
   }
 
@@ -166,6 +273,56 @@ export default function Settings() {
     }
   }
 
+  async function cleanAllDuplicates() {
+    const sid = schoolId || user?.id;
+    if (!sid) return;
+    
+    const tables = ['students', 'staff', 'classes', 'subjects', 'announcements', 'transportRoutes'];
+    let totalRemoved = 0;
+    let tablesProcessed = 0;
+    
+    for (const table of tables) {
+      try {
+        const records = await dataService.getAll(sid, table);
+        const seen = new Map<string, any>();
+        const toRemove: string[] = [];
+        
+        for (const record of records) {
+          let key = '';
+          if (table === 'students' || table === 'staff') {
+            key = `${record.firstName?.toLowerCase()}-${record.lastName?.toLowerCase()}-${record.classId || ''}`;
+          } else {
+            key = `${record.name?.toLowerCase()}-${record.classId || ''}`;
+          }
+          
+          if (seen.has(key)) {
+            toRemove.push(record.id);
+          } else {
+            seen.set(key, record);
+          }
+        }
+        
+        for (const id of toRemove) {
+          await dataService.delete(sid, table, id);
+        }
+        
+        if (toRemove.length > 0) {
+          totalRemoved += toRemove.length;
+          tablesProcessed++;
+        }
+      } catch (err) {
+        console.error(`Error cleaning duplicates in ${table}:`, err);
+      }
+    }
+    
+    if (totalRemoved > 0) {
+      addToast(`Removed ${totalRemoved} duplicate(s) from ${tablesProcessed} table(s)`, 'success');
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+    } else {
+      addToast('No duplicates found', 'info');
+    }
+  }
+
   const colorOptions = [
     { color: '#4F46E5', name: 'Indigo' },
     { color: '#2da32d', name: 'Green' },
@@ -201,6 +358,14 @@ export default function Settings() {
               <label className="form-label">Phone Number</label>
               <input name="schoolPhone" value={settings.schoolPhone} onChange={handleChange} className="form-input" />
             </div>
+            <div>
+              <label className="form-label">School Type</label>
+              <select name="schoolType" value={settings.schoolType} onChange={handleChange} className="form-input">
+                <option value="both">Both Primary & Secondary</option>
+                <option value="primary">Primary Only</option>
+                <option value="secondary">Secondary Only</option>
+              </select>
+            </div>
             <div className="md:col-span-2">
               <label className="form-label">Address</label>
               <textarea name="schoolAddress" value={settings.schoolAddress} onChange={handleChange} className="form-input" rows={2} />
@@ -230,6 +395,57 @@ export default function Settings() {
                 <option value="3">Term 3</option>
               </select>
             </div>
+            <div>
+              <label className="form-label">Term 1 Start</label>
+              <input type="date" name="term1Start" value={settings.term1Start} onChange={handleChange} className="form-input" />
+            </div>
+            <div>
+              <label className="form-label">Term 1 End</label>
+              <input type="date" name="term1End" value={settings.term1End} onChange={handleChange} className="form-input" />
+            </div>
+            <div>
+              <label className="form-label">Term 2 Start</label>
+              <input type="date" name="term2Start" value={settings.term2Start} onChange={handleChange} className="form-input" />
+            </div>
+            <div>
+              <label className="form-label">Term 2 End</label>
+              <input type="date" name="term2End" value={settings.term2End} onChange={handleChange} className="form-input" />
+            </div>
+            <div>
+              <label className="form-label">Term 3 Start</label>
+              <input type="date" name="term3Start" value={settings.term3Start} onChange={handleChange} className="form-input" />
+            </div>
+            <div>
+              <label className="form-label">Term 3 End</label>
+              <input type="date" name="term3End" value={settings.term3End} onChange={handleChange} className="form-input" />
+            </div>
+          </div>
+        </div>
+
+        {/* Start New Term */}
+        <div className="card border-amber-200 dark:border-amber-700">
+          <div className="card-header flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20">
+            <GraduationCap size={20} className="text-amber-600" />
+            <h2 className="font-semibold text-amber-800 dark:text-amber-300">Start New Term</h2>
+          </div>
+          <div className="card-body">
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+              When a term ends, promote all active students to their next class. Students in the final class will be graduated (marked completed).
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const next = String((parseInt(settings.currentTerm) % 3) + 1);
+                const nextYear = next === '1' ? String(parseInt(settings.academicYear) + 1) : settings.academicYear;
+                setPromoteNewTerm(next);
+                setPromoteNewYear(nextYear);
+                setShowPromoteModal(true);
+              }}
+              className="btn btn-primary bg-amber-500 hover:bg-amber-600 border-amber-500"
+            >
+              <ArrowRight size={16} />
+              Start New Term &amp; Promote Students
+            </button>
           </div>
         </div>
 
@@ -343,128 +559,43 @@ export default function Settings() {
                   <span className="text-sm font-medium">Sync Status</span>
                 </div>
                 <p className="text-2xl font-bold text-slate-800 dark:text-white">
-                  {isSyncing ? 'Syncing...' : isSyncEnabled ? 'Active' : 'Inactive'}
+                  {isSyncing ? 'Syncing...' : isSyncEnabled ? 'Automatic' : 'Paused'}
                 </p>
               </div>
 
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
                 <div className="flex items-center gap-2 mb-2">
                   <CheckCircle size={16} className="text-slate-400" />
-                  <span className="text-sm font-medium">Last Sync</span>
+                  <span className="text-sm font-medium">Last cloud merge</span>
                 </div>
                 <p className="text-lg font-bold text-slate-800 dark:text-white">
                   {lastSyncTime ? new Date(lastSyncTime).toLocaleString() : 'Never'}
                 </p>
               </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2 mb-2">
+                  <Database size={16} className="text-slate-400" />
+                  <span className="text-sm font-medium">Pending upload</span>
+                </div>
+                <p className="text-2xl font-bold text-slate-800 dark:text-white">{pendingChanges}</p>
+              </div>
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+              Schofy saves every change to this device first, then syncs to the cloud in the background (about every 8 seconds when
+              online). No manual sync is required. When you reconnect to the internet, pending changes upload automatically.
+            </p>
+
+            <div className="flex flex-wrap gap-3 items-center">
               {isSyncEnabled ? (
-                <>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await syncNow();
-                      } catch (err) {
-                        console.error('Sync error:', err);
-                        addToast('Sync failed. Check console for details.', 'error');
-                      }
-                    }}
-                    disabled={!isOnline || isSyncing}
-                    className="btn btn-primary flex items-center gap-2"
-                  >
-                    <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
-                    Sync Now
-                  </button>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await forceFullSync();
-                      } catch (err) {
-                        console.error('Full sync error:', err);
-                        addToast('Full sync failed. Check console for details.', 'error');
-                      }
-                    }}
-                    disabled={isSyncing}
-                    className="btn btn-secondary flex items-center gap-2"
-                    title="Pull all data from cloud to this device"
-                  >
-                    <Download size={16} />
-                    Pull from Cloud
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const id = user?.id || schoolId;
-                      if (!id) {
-                        addToast('No user ID', 'error');
-                        return;
-                      }
-                      try {
-                        const { userDBManager } = await import('../lib/database/UserDatabaseManager');
-                        const tables = ['students', 'staff', 'classes', 'subjects', 'announcements', 'fees', 'payments'];
-                        let pushedCount = 0;
-                        for (const table of tables) {
-                          const records = await userDBManager.getAll(id, table);
-                          if (records.length === 0) continue;
-                          
-                          for (const record of records) {
-                            if (!record.id) continue;
-                            const payload: any = { id: record.id };
-                            
-                            if (record.firstName) payload.first_name = record.firstName;
-                            if (record.lastName) payload.last_name = record.lastName;
-                            if (record.name) payload.name = record.name;
-                            if (record.level) payload.level = record.level;
-                            if (record.section) payload.section = record.section;
-                            if (record.admissionNo) payload.admission_no = record.admissionNo;
-                            if (record.gender) payload.gender = record.gender;
-                            if (record.dob) payload.dob = record.dob;
-                            if (record.classId) payload.class_id = record.classId;
-                            if (record.studentId) payload.student_id = record.studentId;
-                            if (record.description) payload.description = record.description;
-                            if (record.amount) payload.amount = record.amount;
-                            if (record.term) payload.term = record.term.toString();
-                            if (record.year) payload.year = record.year.toString();
-                            if (record.method) payload.method = record.method;
-                            if (record.date) payload.date = record.date;
-                            if (record.phone) payload.phone = record.phone;
-                            if (record.email) payload.email = record.email;
-                            if (record.address) payload.address = record.address;
-                            if (record.status) payload.status = record.status;
-                            
-                            payload.school_id = id;
-                            payload.updated_at = record.updatedAt || new Date().toISOString();
-                            if (record.createdAt) payload.created_at = record.createdAt;
-                            
-                            const { error } = await supabase.from(table).upsert(payload, { onConflict: 'id' });
-                            if (error && !error.message.includes('duplicate')) {
-                              console.error(`${table} error:`, error.message);
-                            } else {
-                              pushedCount++;
-                            }
-                          }
-                        }
-                        addToast(`${pushedCount} records synced to cloud`, 'success');
-                      } catch (err: any) {
-                        addToast('Sync failed', 'error');
-                      }
-                    }}
-                    disabled={!isOnline || !isSupabaseConfigured}
-                    className="btn btn-primary flex items-center gap-2"
-                  >
-                    <UploadCloud size={16} />
-                    Push to Cloud
-                  </button>
-                  <button
-                    onClick={disableSync}
-                    className="btn btn-secondary flex items-center gap-2"
-                  >
-                    <CloudOff size={16} />
-                    Disable Sync
-                  </button>
-                </>
+                <button type="button" onClick={disableSync} className="btn btn-secondary flex items-center gap-2 text-sm">
+                  <CloudOff size={16} />
+                  Pause cloud sync
+                </button>
               ) : (
                 <button
+                  type="button"
                   onClick={async () => {
                     try {
                       await enableSync();
@@ -476,9 +607,56 @@ export default function Settings() {
                   className="btn btn-primary flex items-center gap-2"
                 >
                   <Cloud size={16} />
-                  Enable Cloud Sync
+                  Enable cloud sync
                 </button>
               )}
+              <button
+                type="button"
+                onClick={async () => {
+                  const sid = schoolId || user?.id;
+                  if (!sid) { addToast('Not logged in', 'error'); return; }
+                  addToast('Pulling all data from cloud...', 'info');
+                  try {
+                    const { dataService } = await import('../lib/database/DataService');
+                    const result = await dataService.forcePull(sid);
+                    if (result.success) {
+                      addToast(`Pulled ${result.pulled} records from cloud`, 'success');
+                      window.dispatchEvent(new CustomEvent('dataRefresh'));
+                    } else {
+                      addToast(result.error || 'Pull failed — check your connection', 'error');
+                    }
+                  } catch (err: any) {
+                    addToast(err?.message || 'Pull failed', 'error');
+                  }
+                }}
+                className="btn btn-secondary flex items-center gap-2 text-sm"
+              >
+                <Download size={16} />
+                Pull from Cloud
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const sid = schoolId || user?.id;
+                  if (!sid) { addToast('Not logged in', 'error'); return; }
+                  addToast('Pushing local data to cloud...', 'info');
+                  try {
+                    const { dataService } = await import('../lib/database/DataService');
+                    const result = await dataService.forcePush(sid);
+                    if (result.success) {
+                      addToast(`Pushed ${result.pushed} records to cloud`, 'success');
+                    } else {
+                      addToast(result.error || 'Push failed — check your connection', 'error');
+                    }
+                  } catch (err: any) {
+                    addToast(err?.message || 'Push failed', 'error');
+                  }
+                }}
+                className="btn btn-secondary flex items-center gap-2 text-sm"
+              >
+                <Upload size={16} />
+                Push to Cloud
+              </button>
             </div>
 
             <div className="border-t border-slate-200 dark:border-slate-700 pt-6">
@@ -509,9 +687,16 @@ export default function Settings() {
                     }}
                   />
                 </label>
+                <button
+                  onClick={cleanAllDuplicates}
+                  className="btn btn-secondary flex items-center gap-2"
+                >
+                  <Users size={16} />
+                  Clean Duplicates
+                </button>
               </div>
               <p className="text-xs text-slate-500 mt-2">
-                Export your data as JSON for backup. Import to restore data from a backup file.
+                Export your data as JSON for backup. Import to restore data from a backup file. Clean duplicates removes repeated entries from all tables.
               </p>
             </div>
 
@@ -520,7 +705,11 @@ export default function Settings() {
                 <h4 className="font-medium text-blue-800 dark:text-blue-300 mb-2">Cloud Sync Status</h4>
                 <div className="space-y-1 text-sm text-blue-700 dark:text-blue-400">
                   <p><strong>Connection:</strong> {isOnline ? 'Online' : 'Offline'}</p>
-                  <p><strong>Auto-sync:</strong> {isSyncEnabled ? 'Enabled' : 'Disabled'}</p>
+                  <p><strong>Background sync:</strong> {isSyncEnabled ? 'On (automatic)' : 'Paused'}</p>
+                  <p className="text-xs mt-2 opacity-90">
+                    Developer: run <code className="bg-blue-100/50 dark:bg-blue-950/50 px-1 rounded">await window.debugSync()</code> in
+                    the console to compare local vs remote counts and the sync queue.
+                  </p>
                 </div>
               </div>
             ) : (
@@ -598,6 +787,50 @@ export default function Settings() {
           </div>
         </div>
       </form>
+
+      {/* Promote Students Modal */}
+      {showPromoteModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="flex items-center gap-3 p-5 border-b border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/20">
+              <GraduationCap size={22} className="text-amber-600" />
+              <div>
+                <h2 className="font-bold text-slate-800 dark:text-white">Start New Term</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Promote all active students to their next class</p>
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">New Term</label>
+                  <select value={promoteNewTerm} onChange={e => setPromoteNewTerm(e.target.value)} className="form-input">
+                    <option value="1">Term 1</option>
+                    <option value="2">Term 2</option>
+                    <option value="3">Term 3</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Academic Year</label>
+                  <input type="text" value={promoteNewYear} onChange={e => setPromoteNewYear(e.target.value)} className="form-input" placeholder="e.g. 2026" />
+                </div>
+              </div>
+              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-3 space-y-1.5 text-sm text-amber-800 dark:text-amber-300">
+                <div className="flex items-center gap-2 font-semibold"><Users size={14} /> What will happen:</div>
+                <p>• Each active student moves to the next class (by level)</p>
+                <p>• Students in the final class are graduated (marked completed)</p>
+                <p>• Current term is updated to Term {promoteNewTerm} / {promoteNewYear}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 px-5 pb-5">
+              <button type="button" onClick={() => setShowPromoteModal(false)} className="btn btn-secondary" disabled={isPromoting}>Cancel</button>
+              <button type="button" onClick={handlePromoteStudents} className="btn btn-primary bg-amber-500 hover:bg-amber-600 border-amber-500 flex items-center gap-2" disabled={isPromoting}>
+                {isPromoting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <ArrowRight size={16} />}
+                {isPromoting ? 'Promoting...' : 'Confirm & Promote'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

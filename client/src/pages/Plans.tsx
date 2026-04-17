@@ -61,7 +61,7 @@ export default function Plans() {
     try {
       const [savedBillingCycle, usage, receipt] = await Promise.all([
         getCurrentBillingCycle(authId),
-        getSubscriptionAccessState(authId),
+        getSubscriptionAccessState(authId, undefined, { authUserId: user?.id }),
         getLatestReceipt(authId),
         hasSeenPlanIntro(authId),
       ]);
@@ -413,7 +413,9 @@ Powered by Schofy`;
                       const authId = schoolId || user?.id;
                       if (!authId) return;
 
-                      const usage = await saveCurrentPlan(authId, selectedPlan.id, billingCycle);
+                      const usage = await saveCurrentPlan(authId, selectedPlan.id, billingCycle, {
+                        authUserId: user?.id,
+                      });
                       setCurrentPlanId(usage.selectedPlanId);
                       setStudentCount(usage.used);
                       setAccessState(usage);

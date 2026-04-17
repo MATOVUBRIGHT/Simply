@@ -19,7 +19,7 @@ import {
   Tooltip,
   CartesianGrid
 } from 'recharts';
-import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, Megaphone, Calendar as CalendarIcon } from 'lucide-react';
+import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, Megaphone, Calendar as CalendarIcon, Clock } from 'lucide-react';
 import { Announcement } from '@schofy/shared';
 
 export default function Dashboard() {
@@ -28,7 +28,9 @@ export default function Dashboard() {
   const { formatMoney } = useCurrency();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [otherData, setOtherData] = useState<{ staff: any[]; payments: any[]; fees: any[]; attendance: any[] }>({ staff: [], payments: [], fees: [], attendance: [] });
+  const [termSettings, setTermSettings] = useState<Record<string, string>>({});
 
   const activeStudents = useActiveStudents();
 
@@ -36,6 +38,7 @@ export default function Dashboard() {
     if (user?.id || schoolId) {
       loadAnnouncements();
       loadOtherData();
+      loadTermSettings();
     }
   }, [user, schoolId]);
 
@@ -90,6 +93,99 @@ export default function Dashboard() {
       console.error('Failed to load data:', error);
     }
   }
+
+  async function loadTermSettings() {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    try {
+      const stored = await dataService.getAll(id, 'settings');
+      const obj: Record<string, string> = {};
+      stored.forEach((s: any) => { obj[s.key] = s.value; });
+      setTermSettings(obj);
+    } catch {}
+  }
+
+  // Also reload term settings when settings are saved
+  useEffect(() => {
+    const onSettingsUpdated = () => loadTermSettings();
+    window.addEventListener('settingsUpdated', onSettingsUpdated);
+    window.addEventListener('dataRefresh', onSettingsUpdated);
+    return () => {
+      window.removeEventListener('settingsUpdated', onSettingsUpdated);
+      window.removeEventListener('dataRefresh', onSettingsUpdated);
+    };
+  }, [user, schoolId]);
+
+  // Build all calendar events from every data source
+  const allCalendarEvents = useMemo(() => {
+    type CalEvent = { date: Date; label: string; type: 'term-start' | 'term-end' | 'announcement' | 'exam' | 'payment' | 'salary' };
+    const events: CalEvent[] = [];
+
+    // Term start & end dates from settings
+    for (const t of ['1', '2', '3']) {
+      const startRaw = termSettings[`term${t}Start`];
+      const endRaw = termSettings[`term${t}End`];
+      if (startRaw) {
+        const d = new Date(startRaw);
+        if (!isNaN(d.getTime())) events.push({ date: d, label: `Term ${t} Start`, type: 'term-start' });
+      }
+      if (endRaw) {
+        const d = new Date(endRaw);
+        if (!isNaN(d.getTime())) events.push({ date: d, label: `Term ${t} End`, type: 'term-end' });
+      }
+    }
+
+    // Announcements
+    for (const a of announcements) {
+      const d = new Date(a.createdAt);
+      if (!isNaN(d.getTime())) events.push({ date: d, label: a.title || 'Announcement', type: 'announcement' });
+    }
+
+    // Fee payment dates (unique months with fees)
+    const feeMonths = new Set<string>();
+    for (const f of otherData.fees) {
+      if (f.createdAt) {
+        const d = new Date(f.createdAt);
+        if (!isNaN(d.getTime())) {
+          const key = `${d.getFullYear()}-${d.getMonth()}`;
+          if (!feeMonths.has(key)) {
+            feeMonths.add(key);
+            events.push({ date: d, label: `Fees Due (Term ${f.term || ''})`, type: 'payment' });
+          }
+        }
+      }
+    }
+
+    // Salary payment dates
+    const salaryMonths = new Set<string>();
+    for (const p of otherData.payments) {
+      if (p.date) {
+        const d = new Date(p.date);
+        if (!isNaN(d.getTime())) {
+          const key = `${d.getFullYear()}-${d.getMonth()}`;
+          if (!salaryMonths.has(key)) {
+            salaryMonths.add(key);
+            events.push({ date: d, label: 'Payment Recorded', type: 'salary' });
+          }
+        }
+      }
+    }
+
+    return events;
+  }, [termSettings, announcements, otherData.fees, otherData.payments]);
+
+  // Derive term end dates from settings
+  const termEndDates = useMemo(() => {
+    return allCalendarEvents.filter(e => e.type === 'term-end');
+  }, [allCalendarEvents]);
+
+  // Next upcoming term end
+  const nextTermEnd = useMemo(() => {
+    const now = new Date();
+    return termEndDates
+      .filter(e => e.date >= now)
+      .sort((a, b) => a.date.getTime() - b.date.getTime())[0] ?? null;
+  }, [termEndDates]);
 
   const activeStaff = otherData.staff.filter(s => s.status === 'active').length;
   const feesCollected = otherData.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
@@ -198,10 +294,13 @@ export default function Dashboard() {
   const years = [2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030];
 
   function getEventsForMonth(month: number, year: number) {
-    return announcements.filter(a => {
-      const date = new Date(a.createdAt);
-      return date.getMonth() === month && date.getFullYear() === year;
-    });
+    const evts = allCalendarEvents.filter(e => e.date.getMonth() === month && e.date.getFullYear() === year);
+    return {
+      count: evts.length,
+      hasTermEnd: evts.some(e => e.type === 'term-end'),
+      hasTermStart: evts.some(e => e.type === 'term-start'),
+      events: evts,
+    };
   }
 
   const dashboardStatsCards = [
@@ -223,6 +322,43 @@ export default function Dashboard() {
           <span className="text-blue-600 font-bold">2025-2026 Term 1</span>
         </div>
       </div>
+
+      {/* Term End Countdown */}
+      {nextTermEnd && (() => {
+        const daysLeft = Math.ceil((nextTermEnd.date.getTime() - Date.now()) / 86400000);
+        const isUrgent = daysLeft <= 7;
+        const isSoon = daysLeft <= 30;
+        return (
+          <div className={`flex items-center gap-3 px-5 py-3 rounded-2xl border ${
+            isUrgent ? 'bg-rose-50 border-rose-200' :
+            isSoon ? 'bg-amber-50 border-amber-200' :
+            'bg-indigo-50 border-indigo-200'
+          }`}>
+            <Clock size={18} className={isUrgent ? 'text-rose-500' : isSoon ? 'text-amber-500' : 'text-indigo-500'} />
+            <div className="flex-1">
+              <span className={`font-semibold text-sm ${isUrgent ? 'text-rose-700' : isSoon ? 'text-amber-700' : 'text-indigo-700'}`}>
+                {nextTermEnd.label}
+              </span>
+              <span className={`text-sm ml-2 ${isUrgent ? 'text-rose-600' : isSoon ? 'text-amber-600' : 'text-indigo-600'}`}>
+                — {nextTermEnd.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+              </span>
+            </div>
+            <span className={`text-sm font-bold px-3 py-1 rounded-full ${
+              isUrgent ? 'bg-rose-100 text-rose-700' :
+              isSoon ? 'bg-amber-100 text-amber-700' :
+              'bg-indigo-100 text-indigo-700'
+            }`}>
+              {daysLeft === 0 ? 'Today' : daysLeft === 1 ? '1 day left' : `${daysLeft} days left`}
+            </span>
+            <button
+              onClick={() => navigate('/settings')}
+              className={`text-xs font-medium underline ml-2 ${isUrgent ? 'text-rose-600' : isSoon ? 'text-amber-600' : 'text-indigo-600'}`}
+            >
+              Start New Term
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
@@ -502,49 +638,140 @@ export default function Dashboard() {
 
             <div className="grid grid-cols-3 gap-2">
               {months.map((month, index) => {
-                const eventCount = getEventsForMonth(index, selectedYear).length;
+                const { count: eventCount, hasTermEnd, hasTermStart, events: monthEvents } = getEventsForMonth(index, selectedYear);
+                const tooltip = monthEvents.map(e => e.label).join(', ');
                 return (
-                  <button 
+                  <button
                     key={month}
-                    onClick={() => navigate('/announcements')}
+                    onClick={() => setSelectedMonth(index)}
                     className={`py-3 px-2 rounded-xl text-sm font-bold transition-all border relative ${
-                      eventCount > 0 
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-900/10 cursor-pointer hover:bg-indigo-700' 
+                      hasTermEnd
+                        ? 'bg-rose-500 text-white border-rose-500 shadow-md cursor-pointer hover:bg-rose-600'
+                        : hasTermStart
+                        ? 'bg-emerald-500 text-white border-emerald-500 shadow-md cursor-pointer hover:bg-emerald-600'
+                        : eventCount > 0
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md cursor-pointer hover:bg-indigo-700'
                         : 'bg-white text-slate-600 border-slate-100 hover:border-slate-200 hover:bg-slate-50'
                     }`}
+                    title={tooltip || undefined}
                   >
                     {month.slice(0, 3)}
-                    {eventCount > 0 && (
-                      <span className={`absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center ${
-                        eventCount > 0 ? 'bg-rose-500 text-white' : 'bg-slate-200 text-slate-600'
-                      }`}>
-                        {eventCount}
-                      </span>
+                    {hasTermEnd && (
+                      <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center bg-white text-rose-600">★</span>
                     )}
+                    {!hasTermEnd && hasTermStart && (
+                      <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center bg-white text-emerald-600">▶</span>
+                    )}
+                    {!hasTermEnd && !hasTermStart && eventCount > 0 && (
+                      <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center bg-rose-500 text-white">{eventCount}</span>
+)}
                   </button>
                 );
               })}
             </div>
 
             <div className="border-t border-slate-100 pt-4">
-              <p className="text-xs text-slate-400 font-medium mb-2">Quick access - Upcoming events</p>
-              <div className="flex gap-2 overflow-x-auto pb-2">
-                {announcements.slice(0, 5).map(ann => (
-                  <div 
-                    key={ann.id}
-                    className="shrink-0 px-3 py-2 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:border-indigo-200 hover:bg-indigo-50/50 transition-all"
-                    onClick={() => navigate('/announcements')}
-                  >
-                    <p className="text-xs font-bold text-slate-700 truncate max-w-[120px]">{ann.title}</p>
-                    <p className="text-[10px] text-slate-400">
-                      {new Date(ann.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </p>
+              {selectedMonth !== null ? (
+                <div className="mt-4 border-t border-slate-100 pt-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => setSelectedMonth(null)}
+                        className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+                      >
+                        <ChevronLeft size={18} className="text-slate-600" />
+                      </button>
+                      <h3 className="font-semibold text-slate-700">{months[selectedMonth]} {selectedYear}</h3>
+                    </div>
+                    <button 
+                      onClick={() => setSelectedMonth(null)}
+                      className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
+                      Back to Year
+                    </button>
                   </div>
-                ))}
-                {announcements.length === 0 && (
-                  <p className="text-sm text-slate-400 italic">No events yet. Create one in Announcements.</p>
-                )}
-              </div>
+                  
+                  <div className="grid grid-cols-7 gap-1 mb-2">
+                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                      <div key={day} className="text-center text-xs font-medium text-slate-400 py-1">{day}</div>
+                    ))}
+                  </div>
+                  
+                  <div className="grid grid-cols-7 gap-1">
+                    {(() => {
+                      const firstDay = new Date(selectedYear, selectedMonth, 1);
+                      const lastDay = new Date(selectedYear, selectedMonth + 1, 0);
+                      const startPadding = firstDay.getDay();
+                      const days: JSX.Element[] = [];
+                      
+                      for (let i = 0; i < startPadding; i++) {
+                        days.push(<div key={`pad-${i}`} className="h-8" />);
+                      }
+                      
+                      for (let d = 1; d <= lastDay.getDate(); d++) {
+                        const date = new Date(selectedYear, selectedMonth, d);
+                        const dayEvents = allCalendarEvents.filter(e => 
+                          e.date.getDate() === d && 
+                          e.date.getMonth() === selectedMonth && 
+                          e.date.getFullYear() === selectedYear
+                        );
+                        const isToday = new Date().toDateString() === date.toDateString();
+                        const dayAnnouncements = announcements.filter(a => {
+                          const annDate = new Date(a.createdAt);
+                          return annDate.getDate() === d && 
+                                 annDate.getMonth() === selectedMonth && 
+                                 annDate.getFullYear() === selectedYear;
+                        });
+                        const hasTermEnd = dayEvents.some(e => e.type === 'term-end');
+                        const hasTermStart = dayEvents.some(e => e.type === 'term-start');
+                        
+                        days.push(
+                          <div 
+                            key={d} 
+                            className={`h-8 flex items-center justify-center rounded-lg text-xs font-medium relative cursor-pointer hover:bg-indigo-50 transition-colors ${
+                              isToday ? 'bg-indigo-100 text-indigo-700 font-bold' : 'text-slate-600'
+                            } ${hasTermEnd ? 'bg-rose-500 text-white hover:bg-rose-600' : ''} ${hasTermStart ? 'bg-emerald-500 text-white hover:bg-emerald-600' : ''}`}
+                            title={dayEvents.map(e => e.label).join(', ') || (dayAnnouncements.length > 0 ? `${dayAnnouncements.length} announcement(s)` : '')}
+                          >
+                            {d}
+                            {dayAnnouncements.length > 0 && !hasTermEnd && !hasTermStart && (
+                              <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-indigo-600" />
+                            )}
+                          </div>
+                        );
+                      }
+                      
+                      return days;
+                    })()}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2 mb-3 text-xs">
+                    <span className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700"><span className="font-bold">▶</span> Term Start</span>
+                    <span className="flex items-center gap-1.5 px-2 py-1 bg-rose-50 border border-rose-200 rounded-lg text-rose-700"><span className="font-bold">★</span> Term End</span>
+                    <span className="flex items-center gap-1.5 px-2 py-1 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-700"><span className="w-2 h-2 rounded-full bg-indigo-600 inline-block" /> Events</span>
+                  </div>
+                  <p className="text-xs text-slate-400 font-medium mb-2">Upcoming announcements</p>
+                  <div className="flex gap-2 overflow-x-auto pb-2">
+                    {announcements.slice(0, 5).map(ann => (
+                      <div
+                        key={ann.id}
+                        className="shrink-0 px-3 py-2 bg-slate-50 rounded-lg border border-slate-100 cursor-pointer hover:border-indigo-200 hover:bg-indigo-50/50 transition-all"
+                        onClick={() => navigate('/announcements')}
+                      >
+                        <p className="text-xs font-bold text-slate-700 truncate max-w-[120px]">{ann.title}</p>
+                        <p className="text-[10px] text-slate-400">
+                          {new Date(ann.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </p>
+                      </div>
+                    ))}
+                    {announcements.length === 0 && (
+                      <p className="text-sm text-slate-400 italic">No announcements yet.</p>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

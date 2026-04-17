@@ -13,7 +13,8 @@ const faqs = [
 
 export default function Subscription() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, schoolId, logout } = useAuth();
+  const tenantId = schoolId || user?.id;
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'term' | 'yearly'>('term');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanDefinition | null>(null);
@@ -30,21 +31,17 @@ export default function Subscription() {
   }, []);
 
   async function loadPlanState() {
-    if (!user?.id) return;
+    if (!tenantId || !user?.id) return;
     try {
-      const [savedBillingCycle, usage, receipt, introSeen] = await Promise.all([
-        getCurrentBillingCycle(user.id),
-        getSubscriptionAccessState(user.id),
-        getLatestReceipt(user.id),
-        hasSeenPlanIntro(user.id),
+      const [savedBillingCycle, usage, receipt] = await Promise.all([
+        getCurrentBillingCycle(tenantId),
+        getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id }),
+        getLatestReceipt(tenantId),
       ]);
 
       setBillingCycle(savedBillingCycle);
       setCurrentPlanId(usage.selectedPlanId);
       setLatestReceipt(receipt);
-
-      // Bypass subscription page
-      navigate('/', { replace: true });
     } catch (error) {
       console.error('Failed to load plan state:', error);
     } finally {
@@ -288,7 +285,9 @@ export default function Subscription() {
                       alert('Please sign in first');
                       return;
                     }
-                    const usage = await saveCurrentPlan(user.id, selectedPlan.id, billingCycle);
+                    const usage = await saveCurrentPlan(tenantId!, selectedPlan.id, billingCycle, {
+                      authUserId: user.id,
+                    });
                     setCurrentPlanId(usage.selectedPlanId);
                     setPaymentSubmitted(true);
                   }}

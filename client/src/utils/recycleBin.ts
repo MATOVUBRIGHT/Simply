@@ -32,6 +32,11 @@ export function setRecycleBin(userId: string, items: DeletedItem[]): void {
 
 export function addToRecycleBin(userId: string, item: Omit<DeletedItem, 'userId'>): void {
   const items = getRecycleBin(userId);
+  const originalId = item.data?.id;
+  if (originalId) {
+    const alreadyExists = items.some(existing => existing.data?.id === originalId && existing.type === item.type);
+    if (alreadyExists) return;
+  }
   items.push({ ...item, userId } as DeletedItem);
   setRecycleBin(userId, items);
 }

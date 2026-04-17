@@ -1,7 +1,8 @@
 const DB_NAME = 'schofy_user_index';
 const DB_VERSION = 1;
 
-import { generateUUID } from '../utils/uuid';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { generateUUID } from '../../utils/uuid';
 
 export interface UserAccount {
   id: string;

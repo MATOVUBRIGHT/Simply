@@ -1,5 +1,5 @@
 import type { Notification, Student } from '@schofy/shared';
-import { userDBManager } from '../lib/database/UserDatabaseManager';
+import { dataService } from '../lib/database/DataService';
 
 export interface PlanDefinition {
   id: string;
@@ -131,12 +131,13 @@ function addMonths(date: Date, months: number) {
 }
 
 async function putSetting(userId: string, key: string, value: unknown) {
-  await userDBManager.put(userId, 'settings', { id: key, key, value });
+  await dataService.saveSettings(userId, { [key]: value });
 }
 
 async function getSetting<T>(userId: string, key: string) {
-  const record = await userDBManager.get(userId, 'settings', key);
-  return record?.value as T | undefined;
+  const rows = await dataService.getAll(userId, 'settings');
+  const row = rows.find((s: { key?: string }) => s.key === key);
+  return row?.value as T | undefined;
 }
 
 export function getPlanById(planId: string | null | undefined) {
@@ -162,42 +163,127 @@ export async function getCurrentPlan(userId: string) {
 }
 
 export async function getPlanStudentCount(userId: string) {
-  const students = await userDBManager.getAll(userId, 'students');
+  const students = await dataService.getAll(userId, 'students');
   return students.filter(countsTowardPlan).length;
 }
 
-export async function persistPlanEligibility(userId: string, eligible: boolean) {
-  await putSetting(userId, SETTINGS_KEYS.currentPlanEligible, eligible);
+export async function persistPlanEligibility(tenantId: string, eligible: boolean) {
+  await putSetting(tenantId, SETTINGS_KEYS.currentPlanEligible, eligible);
 }
 
-export async function getSubscriptionAccessState(userId: string, planId?: string): Promise<SubscriptionAccessState> {
-  const selectedPlanId = planId || await getCurrentPlanId(userId) || 'starter';
-  const currentPlan = getPlanById(selectedPlanId) || PLAN_DEFINITIONS[0];
-  const used = await getPlanStudentCount(userId);
-  const remaining = Math.max(0, currentPlan.studentLimit - used);
+const EXPIRING_DAYS_THRESHOLD = 14;
 
-  await persistPlanEligibility(userId, true);
+function pickEndsAt(row: Record<string, unknown> | null | undefined): string | null {
+  if (!row) return null;
+  const v = (row.endsAt ?? row.ends_at) as string | undefined;
+  return v && String(v).trim() ? String(v) : null;
+}
+
+async function getLatestLocalSubscription(
+  tenantId: string,
+  authUserId: string
+): Promise<Record<string, unknown> | null> {
+  const rows = await dataService.getAll(tenantId, 'subscriptions');
+  const filtered = (rows as Record<string, unknown>[]).filter((r) => {
+    const del = r.deletedAt ?? r.deleted_at;
+    if (del) return false;
+    const school = (r.schoolId ?? r.school_id) as string | undefined;
+    const uid = (r.userId ?? r.user_id) as string | undefined;
+    if (school && school !== tenantId) return false;
+    if (uid && uid !== authUserId && uid !== tenantId) return false;
+    return true;
+  });
+  filtered.sort((a, b) => {
+    const ta = new Date(String(a.updatedAt ?? a.updated_at ?? 0)).getTime();
+    const tb = new Date(String(b.updatedAt ?? b.updated_at ?? 0)).getTime();
+    return tb - ta;
+  });
+  return filtered[0] ?? null;
+}
+
+function classifySubscription(expiry: Date | null): { status: SubscriptionStatus; daysRemaining: number | null } {
+  if (!expiry || Number.isNaN(expiry.getTime())) {
+    return { status: 'incomplete', daysRemaining: null };
+  }
+  const now = Date.now();
+  const end = expiry.getTime();
+  if (end <= now) return { status: 'expired', daysRemaining: 0 };
+  const days = Math.ceil((end - now) / (24 * 60 * 60 * 1000));
+  if (days <= EXPIRING_DAYS_THRESHOLD) return { status: 'expiring', daysRemaining: days };
+  return { status: 'active', daysRemaining: days };
+}
+
+/**
+ * @param tenantId IndexedDB partition (usually `schoolId || user.id`).
+ * @param opts.authUserId Account owner for `subscriptions.user_id` when it differs from tenantId.
+ */
+export async function getSubscriptionAccessState(
+  tenantId: string,
+  planId?: string,
+  opts?: { authUserId?: string }
+): Promise<SubscriptionAccessState> {
+  const authUserId = opts?.authUserId || tenantId;
+  const subRow = await getLatestLocalSubscription(tenantId, authUserId);
+  const settingsPlanId = planId ?? (await getCurrentPlanId(tenantId));
+  const planFromRow = subRow?.plan != null ? String(subRow.plan).trim() : '';
+  const selectedPlanId =
+    (planFromRow && getPlanById(planFromRow) ? planFromRow : null) ??
+    (settingsPlanId && getPlanById(settingsPlanId) ? settingsPlanId : null);
+  const currentPlan = selectedPlanId ? getPlanById(selectedPlanId) : null;
+  const used = await getPlanStudentCount(tenantId);
+
+  if (!currentPlan) {
+    return {
+      plan: null,
+      selectedPlanId: null,
+      used,
+      remaining: 0,
+      eligible: false,
+      expiryDate: null,
+      status: 'incomplete',
+      daysRemaining: null,
+      requiresPlanAction: true,
+    };
+  }
+
+  const endsFromRow = pickEndsAt(subRow);
+  const endsFromSettings = await getSetting<string>(tenantId, SETTINGS_KEYS.expiryDate);
+  const expiryIso = endsFromRow || endsFromSettings || null;
+  const expiryDate = expiryIso && !Number.isNaN(new Date(expiryIso).getTime()) ? new Date(expiryIso) : null;
+  const { status, daysRemaining } = classifySubscription(expiryDate);
+  const remaining = Math.max(0, currentPlan.studentLimit - used);
+  const eligible = remaining > 0 && (status === 'active' || status === 'expiring');
+
+  await persistPlanEligibility(tenantId, eligible);
 
   return {
     plan: currentPlan,
     selectedPlanId,
     used,
     remaining,
-    eligible: true,
-    expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-    status: 'active',
-    daysRemaining: 365,
-    requiresPlanAction: false,
+    eligible,
+    expiryDate: expiryDate ? expiryDate.toISOString() : null,
+    status,
+    daysRemaining,
+    requiresPlanAction: status === 'incomplete' || status === 'expired',
   };
 }
 
-export async function getPlanUsage(userId: string, planId?: string) {
-  return getSubscriptionAccessState(userId, planId);
+export async function getPlanUsage(tenantId: string, planId?: string, opts?: { authUserId?: string }) {
+  return getSubscriptionAccessState(tenantId, planId, opts);
 }
 
-export async function saveCurrentPlan(userId: string, planId: string, billingCycle: BillingCycle = DEFAULT_BILLING_CYCLE) {
-  const currentPlanId = await getCurrentPlanId(userId);
-  const currentExpiry = await getSetting<string>(userId, SETTINGS_KEYS.expiryDate);
+export async function saveCurrentPlan(
+  tenantId: string,
+  planId: string,
+  billingCycle: BillingCycle = DEFAULT_BILLING_CYCLE,
+  opts?: { authUserId?: string }
+) {
+  const authUserId = opts?.authUserId || tenantId;
+  const currentPlanId = await getCurrentPlanId(tenantId);
+  const subRow = await getLatestLocalSubscription(tenantId, authUserId);
+  const currentExpiry =
+    pickEndsAt(subRow) || (await getSetting<string>(tenantId, SETTINGS_KEYS.expiryDate)) || null;
   const now = new Date();
   const selectedPlan = getPlanById(planId) || PLAN_DEFINITIONS[0];
 
@@ -211,10 +297,10 @@ export async function saveCurrentPlan(userId: string, planId: string, billingCyc
 
   const nextExpiry = addMonths(baseDate, cycleDurationMonths(billingCycle));
 
-  await putSetting(userId, SETTINGS_KEYS.currentPlanId, planId);
-  await putSetting(userId, SETTINGS_KEYS.billingCycle, billingCycle);
-  await putSetting(userId, SETTINGS_KEYS.expiryDate, nextExpiry.toISOString());
-  await putSetting(userId, SETTINGS_KEYS.receipt, {
+  await putSetting(tenantId, SETTINGS_KEYS.currentPlanId, planId);
+  await putSetting(tenantId, SETTINGS_KEYS.billingCycle, billingCycle);
+  await putSetting(tenantId, SETTINGS_KEYS.expiryDate, nextExpiry.toISOString());
+  await putSetting(tenantId, SETTINGS_KEYS.receipt, {
     planId,
     planName: selectedPlan.name,
     billingCycle,
@@ -223,7 +309,41 @@ export async function saveCurrentPlan(userId: string, planId: string, billingCyc
     expiresAt: nextExpiry.toISOString(),
   });
 
-  return getSubscriptionAccessState(userId, planId);
+  const startsAt =
+    (subRow?.startsAt as string) ||
+    (subRow?.starts_at as string) ||
+    now.toISOString();
+  const existingId = (subRow?.id as string) || undefined;
+  const meta = {
+    billingCycle,
+    receiptAt: now.toISOString(),
+    source: 'client',
+  };
+
+  if (existingId && typeof existingId === 'string') {
+    await dataService.update(tenantId, 'subscriptions', existingId, {
+      id: existingId,
+      schoolId: tenantId,
+      userId: authUserId,
+      plan: planId,
+      status: 'active',
+      startsAt,
+      endsAt: nextExpiry.toISOString(),
+      metadata: meta,
+    } as any);
+  } else {
+    await dataService.create(tenantId, 'subscriptions', {
+      schoolId: tenantId,
+      userId: authUserId,
+      plan: planId,
+      status: 'active',
+      startsAt,
+      endsAt: nextExpiry.toISOString(),
+      metadata: meta,
+    } as any);
+  }
+
+  return getSubscriptionAccessState(tenantId, planId, opts);
 }
 
 export async function getLatestReceipt(userId: string) {
@@ -245,8 +365,8 @@ export async function markPlanIntroSeen(userId: string) {
   await putSetting(userId, SETTINGS_KEYS.planIntroSeen, true);
 }
 
-export async function ensurePlanRenewalNotifications(userId: string) {
-  const state = await getSubscriptionAccessState(userId);
+export async function ensurePlanRenewalNotifications(tenantId: string, opts?: { authUserId?: string }) {
+  const state = await getSubscriptionAccessState(tenantId, undefined, opts);
   const todayKey = formatDateKey(new Date());
 
   let title = '';
@@ -266,9 +386,9 @@ export async function ensurePlanRenewalNotifications(userId: string) {
   }
 
   const notificationId = `subscription-${state.status}-${todayKey}`;
-  const existing = await userDBManager.get(userId, 'notifications', notificationId);
+  const existing = await dataService.get(tenantId, 'notifications', notificationId);
   if (!existing) {
-    await userDBManager.put(userId, 'notifications', {
+    await dataService.create(tenantId, 'notifications', {
       id: notificationId,
       title,
       message,
@@ -276,20 +396,20 @@ export async function ensurePlanRenewalNotifications(userId: string) {
       read: false,
       createdAt: new Date().toISOString(),
       link: '/plans',
-    });
+    } as any);
   }
 
   return state;
 }
 
-export async function shouldShowRenewalPopup(userId: string) {
-  const state = await getSubscriptionAccessState(userId);
+export async function shouldShowRenewalPopup(tenantId: string, opts?: { authUserId?: string }) {
+  const state = await getSubscriptionAccessState(tenantId, undefined, opts);
   if (state.status !== 'expiring' && state.status !== 'expired') {
     return { show: false, state };
   }
 
   const todayKey = formatDateKey(new Date());
-  const lastShown = await getSetting<string>(userId, SETTINGS_KEYS.renewPopupDate);
+  const lastShown = await getSetting<string>(tenantId, SETTINGS_KEYS.renewPopupDate);
   return {
     show: lastShown !== todayKey,
     state,

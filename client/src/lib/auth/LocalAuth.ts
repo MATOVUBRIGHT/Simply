@@ -18,11 +18,7 @@ async function syncUserToSupabase(user: UserAccount): Promise<{ success: boolean
     return { success: true };
   }
 
-  console.log('🔄 Starting Supabase sync for user:', user.email);
-  console.log('User ID:', user.id);
-
   try {
-    // Prepare sync payload - essential fields only
     const payload = {
       id: user.id,
       school_id: user.id,
@@ -32,67 +28,24 @@ async function syncUserToSupabase(user: UserAccount): Promise<{ success: boolean
       is_active: user.isActive,
       created_at: user.createdAt,
       updated_at: user.updatedAt || new Date().toISOString(),
-      role: 'admin',  // Add default role
     };
 
-    console.log('📤 Attempting insert to users table...');
-    console.log('Payload:', JSON.stringify(payload, null, 2));
+    const { error } = await supabase.from('users').upsert(payload, { onConflict: 'id' }).select();
 
-    // Try direct insert first
-    const { data: insertData, error: insertError } = await supabase
-      .from('users')
-      .insert([payload])
-      .select();
-
-    if (!insertError) {
-      console.log('✅ User successfully inserted to Supabase!');
-      console.log('Response:', insertData);
-      return { success: true };
-    }
-
-    // Log the specific error
-    console.warn('⚠️ Insert error:', insertError.message);
-    console.error('Error code:', insertError.code);
-    console.error('Error details:', JSON.stringify(insertError.details));
-    console.error('Error hint:', insertError.hint);
-
-    // If it's a duplicate key error, try update instead
-    if (insertError.code === '23505' || insertError.message.includes('duplicate')) {
-      console.log('📝 Record exists, attempting update...');
-      
-      const { data: updateData, error: updateError } = await supabase
-        .from('users')
-        .update(payload)
-        .eq('id', user.id)
-        .select();
-      
-      if (updateError) {
-        console.error('❌ Update error:', updateError.message);
-        return { success: false, error: `Update failed: ${updateError.message}` };
+    if (error) {
+      if (error.code === '42501' || String(error.message || '').includes('permission')) {
+        return {
+          success: false,
+          error: 'Supabase RLS policy blocked write — check dashboard policies.',
+        };
       }
-      
-      console.log('✅ User updated successfully!', updateData);
-      return { success: true };
+      return { success: false, error: error.message };
     }
 
-    // If it's an RLS permission error, provide helpful guidance
-    if (insertError.code === '42501' || insertError.message.includes('permission')) {
-      console.error('❌ RLS POLICY ISSUE - User cannot insert without RLS policy');
-      console.error('FIX: add RLS policy to allow insert in users table');
-      return { 
-        success: false, 
-        error: 'Supabase RLS policy blocking insert - contact admin' 
-      };
-    }
-
-    // Other errors
-    console.error('❌ Unexpected Supabase error:', insertError.message);
-    return { success: false, error: insertError.message };
-
-  } catch (err: any) {
-    console.error('❌ Critical sync exception:', err.message);
-    console.error('Stack:', err.stack);
-    return { success: false, error: `Exception: ${err.message}` };
+    return { success: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Exception: ${msg}` };
   }
 }
 

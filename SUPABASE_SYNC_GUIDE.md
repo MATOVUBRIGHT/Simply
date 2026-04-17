@@ -9,8 +9,8 @@ If users are being created locally but not appearing in Supabase, follow these s
 Check that `.env` OR `.env.local` has valid credentials:
 
 ```bash
-VITE_SUPABASE_URL=https://zbpevajwtjqzvvfikkbj.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
 Missing or invalid credentials will silently skip Supabase sync.

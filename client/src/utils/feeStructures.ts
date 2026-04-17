@@ -1,4 +1,4 @@
-import { userDBManager } from '../lib/database/UserDatabaseManager';
+import { dataService } from '../lib/database/DataService';
 import { FeeStructure, Fee, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -6,10 +6,14 @@ export interface FeeStructureWithTotal extends FeeStructure {
   totalAmount: number;
 }
 
-export async function getFeeStructuresByClass(userId: string, classId: string, term?: string, year?: string): Promise<FeeStructure[]> {
-  const structures = await userDBManager.getAll(userId, 'feeStructures');
-  
-  return structures.filter((s: FeeStructure) => {
+export async function getFeeStructuresByClass(
+  userId: string,
+  classId: string,
+  term?: string,
+  year?: string
+): Promise<FeeStructure[]> {
+  const all = await dataService.getAll(userId, 'feeStructures');
+  return all.filter((s: FeeStructure) => {
     if (s.classId !== classId) return false;
     if (term && s.term !== term) return false;
     if (year && s.year !== year) return false;
@@ -17,10 +21,13 @@ export async function getFeeStructuresByClass(userId: string, classId: string, t
   });
 }
 
-export async function getAllFeeStructures(userId: string, term?: string, year?: string): Promise<FeeStructure[]> {
-  const structures = await userDBManager.getAll(userId, 'feeStructures');
-  
-  return structures.filter((s: FeeStructure) => {
+export async function getAllFeeStructures(
+  userId: string,
+  term?: string,
+  year?: string
+): Promise<FeeStructure[]> {
+  const all = await dataService.getAll(userId, 'feeStructures');
+  return all.filter((s: FeeStructure) => {
     if (term && s.term !== term) return false;
     if (year && s.year !== year) return false;
     return true;
@@ -35,7 +42,7 @@ export async function createFeeStructure(
   amount: number,
   term: string,
   year: string,
-  isRequired: boolean = true,
+  isRequired = true,
   description?: string
 ): Promise<FeeStructure> {
   const structure: FeeStructure = {
@@ -50,24 +57,27 @@ export async function createFeeStructure(
     description,
     createdAt: new Date().toISOString(),
   };
-
-  await userDBManager.add(userId, 'feeStructures', structure);
+  await dataService.create(userId, 'feeStructures', structure as any);
   return structure;
 }
 
-export async function updateFeeStructure(userId: string, id: string, updates: Partial<FeeStructure>): Promise<void> {
-  const existing = await userDBManager.get(userId, 'feeStructures', id);
+export async function updateFeeStructure(
+  userId: string,
+  id: string,
+  updates: Partial<FeeStructure>
+): Promise<void> {
+  const existing = await dataService.get(userId, 'feeStructures', id);
   if (existing) {
-    await userDBManager.put(userId, 'feeStructures', {
+    await dataService.update(userId, 'feeStructures', id, {
       ...existing,
       ...updates,
       updatedAt: new Date().toISOString(),
-    });
+    } as any);
   }
 }
 
 export async function deleteFeeStructure(userId: string, id: string): Promise<void> {
-  await userDBManager.delete(userId, 'feeStructures', id);
+  await dataService.delete(userId, 'feeStructures', id);
 }
 
 export async function bulkCreateFeeStructures(
@@ -76,17 +86,16 @@ export async function bulkCreateFeeStructures(
   structures: Omit<FeeStructure, 'id' | 'classId' | 'createdAt' | 'updatedAt'>[]
 ): Promise<FeeStructure[]> {
   const now = new Date().toISOString();
-  const newStructures: FeeStructure[] = structures.map(s => ({
+  const created: FeeStructure[] = structures.map(s => ({
     ...s,
     id: uuidv4(),
     classId,
     createdAt: now,
   }));
-
-  for (const structure of newStructures) {
-    await userDBManager.add(userId, 'feeStructures', structure);
+  for (const s of created) {
+    await dataService.create(userId, 'feeStructures', s as any);
   }
-  return newStructures;
+  return created;
 }
 
 export async function copyFeeStructuresToClass(
@@ -96,9 +105,8 @@ export async function copyFeeStructuresToClass(
   term: string,
   year: string
 ): Promise<FeeStructure[]> {
-  const sourceStructures = await getFeeStructuresByClass(userId, fromClassId, term, year);
-  
-  const newStructures: FeeStructure[] = sourceStructures.map(s => ({
+  const source = await getFeeStructuresByClass(userId, fromClassId, term, year);
+  const copied: FeeStructure[] = source.map(s => ({
     ...s,
     id: uuidv4(),
     classId: toClassId,
@@ -107,12 +115,10 @@ export async function copyFeeStructuresToClass(
     createdAt: new Date().toISOString(),
     updatedAt: undefined,
   }));
-
-  for (const structure of newStructures) {
-    await userDBManager.add(userId, 'feeStructures', structure);
+  for (const s of copied) {
+    await dataService.create(userId, 'feeStructures', s as any);
   }
-
-  return newStructures;
+  return copied;
 }
 
 export async function generateInvoicesFromStructure(
@@ -122,46 +128,92 @@ export async function generateInvoicesFromStructure(
   year: string
 ): Promise<{ fees: Fee[]; studentsCount: number }> {
   const structures = await getFeeStructuresByClass(userId, classId, term, year);
-  
-  if (structures.length === 0) {
-    return { fees: [], studentsCount: 0 };
-  }
+  if (structures.length === 0) return { fees: [], studentsCount: 0 };
 
-  const students = await userDBManager.getAll(userId, 'students');
-  const activeStudents = students.filter((s: any) => s.classId === classId && s.status !== 'completed' && s.status !== 'graduated');
+  const [students, allBursaries, allDiscounts] = await Promise.all([
+    dataService.getAll(userId, 'students'),
+    dataService.getAll(userId, 'bursaries'),
+    dataService.getAll(userId, 'discounts'),
+  ]);
 
-  if (activeStudents.length === 0) {
-    return { fees: [], studentsCount: 0 };
-  }
+  const active = students.filter(
+    (s: any) =>
+      s.classId === classId &&
+      s.status !== 'completed' &&
+      s.status !== 'graduated'
+  );
+  if (active.length === 0) return { fees: [], studentsCount: 0 };
 
+  const termBursaries = allBursaries.filter(
+    (b: any) => b.term === term && b.year === year
+  );
+  const classDiscount = allDiscounts.find(
+    (d: any) => d.classId === classId && d.term === term && d.year === year
+  );
+  const applicable = structures.filter(
+    s =>
+      s.isRequired ||
+      s.category === FeeCategory.TUITION ||
+      s.category === FeeCategory.BOARDING
+  );
+  const baseTotal = applicable.reduce((sum, s) => sum + s.amount, 0);
   const now = new Date().toISOString();
   const fees: Fee[] = [];
 
-  for (const student of activeStudents) {
-    for (const structure of structures) {
-      if (structure.isRequired || structure.category === FeeCategory.TUITION || structure.category === FeeCategory.BOARDING) {
-        fees.push({
-          id: uuidv4(),
-          studentId: student.id,
-          classId,
-          description: structure.name,
-          amount: structure.amount,
-          term,
-          year,
-          createdAt: now,
-        });
+  for (const student of active) {
+    const bursary = termBursaries.find((b: any) => b.studentId === student.id);
+
+    if (bursary) {
+      fees.push({
+        id: uuidv4(),
+        studentId: student.id,
+        classId,
+        description: `Bursary Invoice (${applicable.map(s => s.name).join(', ')})`,
+        amount: bursary.amount,
+        term,
+        year,
+        createdAt: now,
+      });
+      continue;
+    }
+
+    for (const structure of applicable) {
+      let amount = structure.amount;
+      let description = structure.name;
+      if (classDiscount) {
+        if (classDiscount.type === 'percentage') {
+          amount = Math.max(0, amount - (amount * classDiscount.amount) / 100);
+          description += ` (Discount: ${classDiscount.amount}%)`;
+        } else {
+          const share = baseTotal > 0 ? structure.amount / baseTotal : 0;
+          amount = Math.max(0, amount - classDiscount.amount * share);
+        }
       }
+      fees.push({
+        id: uuidv4(),
+        studentId: student.id,
+        classId,
+        description,
+        amount,
+        term,
+        year,
+        createdAt: now,
+      });
     }
   }
 
   for (const fee of fees) {
-    await userDBManager.add(userId, 'fees', fee);
+    await dataService.create(userId, 'fees', fee as any);
   }
-
-  return { fees, studentsCount: activeStudents.length };
+  return { fees, studentsCount: active.length };
 }
 
-export async function getClassFeeSummary(userId: string, classId: string, term: string, year: string): Promise<{
+export async function getClassFeeSummary(
+  userId: string,
+  classId: string,
+  term: string,
+  year: string
+): Promise<{
   structures: FeeStructure[];
   totalPerStudent: number;
   requiredTotal: number;
@@ -169,19 +221,25 @@ export async function getClassFeeSummary(userId: string, classId: string, term: 
   studentCount: number;
 }> {
   const structures = await getFeeStructuresByClass(userId, classId, term, year);
-  const students = await userDBManager.getAll(userId, 'students');
-  const activeStudents = students.filter((s: any) => s.classId === classId && s.status !== 'completed' && s.status !== 'graduated');
-
-  const requiredTotal = structures.filter(s => s.isRequired).reduce((sum, s) => sum + s.amount, 0);
-  const optionalTotal = structures.filter(s => !s.isRequired).reduce((sum, s) => sum + s.amount, 0);
-  const totalPerStudent = requiredTotal + optionalTotal;
-
+  const students = await dataService.getAll(userId, 'students');
+  const active = students.filter(
+    (s: any) =>
+      s.classId === classId &&
+      s.status !== 'completed' &&
+      s.status !== 'graduated'
+  );
+  const requiredTotal = structures
+    .filter(s => s.isRequired)
+    .reduce((sum, s) => sum + s.amount, 0);
+  const optionalTotal = structures
+    .filter(s => !s.isRequired)
+    .reduce((sum, s) => sum + s.amount, 0);
   return {
     structures,
-    totalPerStudent,
+    totalPerStudent: requiredTotal + optionalTotal,
     requiredTotal,
     optionalTotal,
-    studentCount: activeStudents.length,
+    studentCount: active.length,
   };
 }
 

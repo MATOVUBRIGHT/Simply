@@ -1,7 +1,7 @@
 -- =====================================================
 -- SCHOFY SUPABASE MIGRATIONS
 -- Run this file in the Supabase SQL Editor
--- https://supabase.com/dashboard/project/zbpevajwtjqzvvfikkbj/sql
+-- https://supabase.com/dashboard/project/<your-project-ref>/sql
 -- =====================================================
 
 -- =====================================================

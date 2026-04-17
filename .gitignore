@@ -7,6 +7,10 @@ node_modules
 .env.production
 .env.production.local
 .env.*.example.local
+client/.env
+client/.env.local
+server/.env
+server/.env.local
 
 # API Keys and secrets
 .api-keys
@@ -35,6 +39,7 @@ yarn.lock
 *.log
 logs
 *.log*
+test-supabase-console.txt
 
 # IDE
 .vscode
@@ -64,6 +69,7 @@ desktop.ini
 
 # Supabase
 .supabase
+supabase/.temp
 
 # Development
 .env.test.local

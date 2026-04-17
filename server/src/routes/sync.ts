@@ -3,6 +3,27 @@ import { getDatabase } from '../db/init.js';
 import { asSqlString, getStringParam, isIsoDateString, rowToObject } from '../utils/sql.js';
 
 const router = Router();
+const changeColumnCache = new Map<string, string | null>();
+
+function getChangeTrackingColumn(db: ReturnType<typeof getDatabase>, table: string): string | null {
+  const cached = changeColumnCache.get(table);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const pragmaResult = db.exec(`PRAGMA table_info(${table})`);
+  if (pragmaResult.length === 0 || pragmaResult[0].values.length === 0) {
+    changeColumnCache.set(table, null);
+    return null;
+  }
+
+  const columns = pragmaResult[0].values.map(row => String(row[1]).toLowerCase());
+  const trackedColumn = ['updated_at', 'created_at', 'synced_at']
+    .find(column => columns.includes(column)) ?? null;
+
+  changeColumnCache.set(table, trackedColumn);
+  return trackedColumn;
+}
 
 router.post('/:table', async (req: Request, res: Response) => {
   try {
@@ -45,7 +66,13 @@ router.get('/changes', async (req: Request, res: Response) => {
     const safeSince = since && isIsoDateString(since) ? since : '1970-01-01T00:00:00.000Z';
 
     for (const table of tables) {
-      const result = db.exec(`SELECT * FROM ${table} WHERE updated_at > ${asSqlString(safeSince)}`);
+      const changeTrackingColumn = getChangeTrackingColumn(db, table);
+      if (!changeTrackingColumn) {
+        changes[table] = [];
+        continue;
+      }
+
+      const result = db.exec(`SELECT * FROM ${table} WHERE ${changeTrackingColumn} > ${asSqlString(safeSince)}`);
       changes[table] = result.length > 0
         ? result[0].values.map(row => rowToObject(result[0].columns, row))
         : [];

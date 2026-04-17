@@ -2,6 +2,9 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
 import { dataService } from '../lib/database/DataService';
+import { usersApi } from '../services/apiService';
+import { syncService } from '../services/sync';
+import { generateUUID } from '../utils/uuid';
 
 export interface LocalUser {
   id: string;
@@ -55,56 +58,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      console.log('🌐 Online - syncing with cloud');
-    };
-    const handleOffline = () => {
-      setIsOnline(false);
-      console.log('📴 Offline - using local data');
-    };
+    let active = true;
+    const stale = () => !active;
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    restoreSession();
+    void restoreSessionWithGuard(stale);
 
     return () => {
+      active = false;
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  async function restoreSession() {
+  async function initializeSyncForUser(userData: LocalUser): Promise<void> {
+    try {
+      syncService.configure({ supabaseClient: supabase! });
+      syncService.setUserId(userData.id);
+      syncService.setSchoolId(userData.schoolId);
+      localStorage.setItem('schofy_sync_enabled', 'true');
+      if (navigator.onLine) {
+        syncService.enableSync();
+      }
+    } catch (syncError) {
+      console.warn('Failed to initialize sync service:', syncError);
+    }
+
+    try {
+      await dataService.bootstrapSession(userData.id, userData.schoolId);
+    } catch (syncBootstrapError) {
+      console.warn('Data sync bootstrap failed:', syncBootstrapError);
+    }
+  }
+
+  async function restoreSessionWithGuard(stale: () => boolean) {
     const savedUser = getSession();
-    
+    const online = typeof navigator !== 'undefined' && navigator.onLine;
+
     if (!isSupabaseConfigured || !supabase) {
-      console.log('Supabase not configured');
-      if (savedUser) {
+      if (savedUser && !stale()) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
       }
-      setLoading(false);
+      if (!stale()) setLoading(false);
       return;
     }
 
-    if (savedUser && isOnline) {
+    if (savedUser && online) {
       try {
-        const { data, error } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', savedUser.id)
-          .single();
+        const { data, error } = await usersApi.getById(savedUser.id);
 
-        if (error && error.code === 'PGRST116') {
-          console.log('User not found in Supabase, clearing session');
+        if (stale()) return;
+
+        if (error) {
+          console.error('Session verify failed:', error);
+          setUser(savedUser);
+          setSchoolId(savedUser.schoolId);
+          await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+        } else if (!data) {
           clearSession();
           setUser(null);
           setSchoolId(null);
-        } else if (data) {
+        } else {
           const userData: LocalUser = {
             id: data.id,
-            schoolId: data.school_id,
+            schoolId: data.school_id || data.id,
             email: data.email,
             firstName: data.first_name,
             lastName: data.last_name,
@@ -114,48 +137,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(userData);
           setSchoolId(userData.schoolId);
           saveSession(userData);
-          
-          await userDBManager.openDatabase(userData.schoolId);
-          
-          // Initialize sync service for restored session
-          try {
-            const { syncService } = await import('../services/sync');
-            if (supabase) {
-              syncService.configure({ supabaseClient: supabase });
-              syncService.setUserId(userData.id);
-              syncService.setSchoolId(userData.schoolId);
-              
-              // Enable sync automatically for restored sessions
-              localStorage.setItem('schofy_sync_enabled', 'true');
-              if (navigator.onLine) {
-                syncService.enableSync();
-                console.log('🔄 Auto-sync enabled for restored session:', userData.email);
-              }
-            }
-          } catch (syncError) {
-            console.warn('Failed to initialize sync service during session restore:', syncError);
-          }
 
-          dataService.startRealtimeSync(userData.schoolId);
-          
-          console.log('Session restored from cloud');
+          await userDBManager.openDatabase(userData.schoolId);
+          await initializeSyncForUser(userData);
         }
       } catch (err) {
+        if (stale()) return;
         console.error('Failed to verify session with cloud:', err);
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
       }
-    } else if (savedUser && !isOnline) {
-      console.log('Offline - using cached session');
-      setUser(savedUser);
-      setSchoolId(savedUser.schoolId);
-      
-      await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
-    } else {
-      setLoading(false);
+    } else if (savedUser && !online) {
+      if (!stale()) {
+        setUser(savedUser);
+        setSchoolId(savedUser.schoolId);
+        await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+      }
     }
-    
-    setLoading(false);
+
+    if (!stale()) setLoading(false);
   }
 
   async function login(email: string, _password: string): Promise<{ success: boolean; error?: string }> {
@@ -168,23 +168,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (savedUser && savedUser.email === email) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
+        await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
         return { success: true };
       }
       return { success: false, error: 'You are offline. Please connect to login for the first time.' };
     }
 
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', email.toLowerCase())
-        .single();
+      const { data, error } = await usersApi.getByEmail(email);
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          return { success: false, error: 'No account found with this email' };
-        }
         return { success: false, error: error.message };
+      }
+
+      if (!data) {
+        return { success: false, error: 'No account found with this email' };
       }
 
       if (!data.is_active) {
@@ -193,7 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const userData: LocalUser = {
         id: data.id,
-        schoolId: data.school_id,
+        schoolId: data.school_id || data.id,
         email: data.email,
         firstName: data.first_name,
         lastName: data.last_name,
@@ -206,28 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       saveSession(userData);
 
       await userDBManager.openDatabase(userData.schoolId);
-
-      // Initialize sync service for this user
-      try {
-        const { syncService } = await import('../services/sync');
-        if (supabase) {
-          syncService.configure({ supabaseClient: supabase });
-          syncService.setUserId(userData.id);
-          syncService.setSchoolId(userData.schoolId);
-          
-          // Enable sync automatically for logged in users
-          localStorage.setItem('schofy_sync_enabled', 'true');
-          if (navigator.onLine) {
-            syncService.enableSync();
-            console.log('🔄 Auto-sync enabled for user:', userData.email);
-          }
-        }
-      } catch (syncError) {
-        console.warn('Failed to initialize sync service:', syncError);
-      }
-
-      // Start realtime listening for changes from other devices
-      dataService.startRealtimeSync(userData.schoolId);
+      await initializeSyncForUser(userData);
 
       return { success: true };
     } catch (error: any) {
@@ -251,26 +228,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const { data: existing } = await supabase
-        .from('users')
-        .select('id')
-        .eq('email', email.toLowerCase())
-        .single();
+      const { data: existing } = await usersApi.emailExists(email);
 
-      if (existing) {
+      if (existing?.id) {
         return { success: false, error: 'An account with this email already exists' };
       }
 
+      const newId = generateUUID();
+      const now = new Date().toISOString();
       const { data, error } = await supabase
         .from('users')
-        .insert({
-          email: email.toLowerCase(),
-          first_name: firstName,
-          last_name: lastName,
-          is_active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .upsert(
+          {
+            id: newId,
+            school_id: newId,
+            email: email.toLowerCase(),
+            first_name: firstName,
+            last_name: lastName,
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+          },
+          { onConflict: 'id' }
+        )
         .select()
         .single();
 
@@ -281,7 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const userData: LocalUser = {
         id: data.id,
-        schoolId: data.school_id,
+        schoolId: data.school_id || data.id,
         email: data.email,
         firstName: data.first_name,
         lastName: data.last_name,
@@ -294,27 +274,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       saveSession(userData);
 
       await userDBManager.openDatabase(userData.schoolId);
-
-// Initialize sync service for this user
-      try {
-        const { syncService } = await import('../services/sync');
-        if (supabase) {
-          syncService.configure({ supabaseClient: supabase });
-          syncService.setUserId(userData.id);
-          syncService.setSchoolId(userData.schoolId);
-          
-          // Enable by default for new users
-          localStorage.setItem('schofy_sync_enabled', 'true');
-          if (navigator.onLine) {
-            syncService.enableSync();
-            console.log('🔄 Auto-sync enabled for new user:', userData.email);
-          }
-        }
-      } catch (syncError) {
-        console.warn('Failed to initialize sync service:', syncError);
-      }
-
-      dataService.startRealtimeSync(userData.schoolId);
+      await initializeSyncForUser(userData);
 
       return { success: true };
     } catch (error: any) {
@@ -345,3 +305,5 @@ export function useAuth() {
 }
 
 export { userDBManager };
+
+

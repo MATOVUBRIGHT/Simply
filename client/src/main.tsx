@@ -1,25 +1,31 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { SyncProvider } from './contexts/SyncContext';
+import { getQueryClient } from './lib/queryClient';
 import './index.css';
+
+const queryClient = getQueryClient();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <ThemeProvider>
-        <ToastProvider>
-          <AuthProvider>
-            <SyncProvider>
-              <App />
-            </SyncProvider>
-          </AuthProvider>
-        </ToastProvider>
-      </ThemeProvider>
-    </BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <ThemeProvider>
+          <ToastProvider>
+            <AuthProvider>
+              <SyncProvider>
+                <App />
+              </SyncProvider>
+            </AuthProvider>
+          </ToastProvider>
+        </ThemeProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
   </React.StrictMode>
 );

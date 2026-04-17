@@ -28,6 +28,7 @@ export default function RecycleBin() {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('');
+  const [restoringIds, setRestoringIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const id = schoolId || user?.id;
@@ -48,24 +49,55 @@ export default function RecycleBin() {
   async function restoreItem(id: string) {
     const authId = schoolId || user?.id;
     if (!authId) return;
+    if (restoringIds.has(id)) return;
+    
     const item = deletedItems.find(i => i.id === id);
     if (!item) return;
+    if (!item.data) {
+      addToast('Cannot restore: data missing', 'error');
+      return;
+    }
+
+    setRestoringIds(prev => new Set(prev).add(id));
 
     try {
       const storeName = getStoreName(item.type);
       if (storeName) {
-        await dataService.create(authId, storeName, item.data as any);
+        const existingRecords = await dataService.getAll(authId, storeName);
+        const isDuplicate = existingRecords.some((record: any) => {
+          if (item.type === 'student') return record.firstName === item.data.firstName && record.lastName === item.data.lastName;
+          if (item.type === 'staff') return record.firstName === item.data.firstName && record.lastName === item.data.lastName;
+          return record.name === item.data.name;
+        });
+
+        if (isDuplicate) {
+          removeFromRecycleBin(authId, id);
+          loadDeletedItems();
+          addToast(`${item.type} already exists, removed from recycle bin`, 'info');
+        } else {
+          await dataService.create(authId, storeName, item.data as any);
+          removeFromRecycleBin(authId, id);
+          loadDeletedItems();
+          addToast(`${item.type.charAt(0).toUpperCase() + item.type.slice(1)} restored successfully`, 'success');
+        }
+        
+        setSelectedItems(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(id);
+          return newSet;
+        });
+      } else {
+        addToast(`Unknown item type: ${item.type}`, 'error');
       }
-      removeFromRecycleBin(authId, id);
-      loadDeletedItems();
-      setSelectedItems(prev => {
+    } catch (error: any) {
+      console.error('Restore error:', error);
+      addToast(`Failed to restore ${item.type}: ${error?.message || 'Unknown error'}`, 'error');
+    } finally {
+      setRestoringIds(prev => {
         const newSet = new Set(prev);
         newSet.delete(id);
         return newSet;
       });
-      addToast(`${item.type.charAt(0).toUpperCase() + item.type.slice(1)} restored successfully`, 'success');
-    } catch (error) {
-      addToast(`Failed to restore ${item.type}`, 'error');
     }
   }
 
@@ -85,11 +117,17 @@ export default function RecycleBin() {
     addToast(`${item.type.charAt(0).toUpperCase() + item.type.slice(1)} permanently deleted`, 'success');
   }
 
-  function restoreSelected() {
-    selectedItems.forEach(id => restoreItem(id));
+  async function restoreSelected() {
+    const ids = Array.from(selectedItems);
+    for (const id of ids) {
+      if (!restoringIds.has(id)) {
+        await restoreItem(id);
+      }
+    }
   }
 
   function deleteSelected() {
+    if (restoringIds.size > 0) return;
     const authId = schoolId || user?.id;
     if (!authId) return;
     if (confirm(`Are you sure you want to permanently delete ${selectedItems.size} item(s)?`)) {
@@ -105,6 +143,36 @@ export default function RecycleBin() {
       setDeletedItems([]);
       setSelectedItems(new Set());
       addToast('Recycle bin emptied', 'success');
+    }
+  }
+
+  function cleanDuplicates() {
+    const authId = schoolId || user?.id;
+    if (!authId) return;
+    
+    const seen = new Map<string, string>();
+    const toRemove: string[] = [];
+    let duplicatesFound = 0;
+
+    for (const item of deletedItems) {
+      const key = `${item.type}-${item.name || item.data?.name || item.data?.firstName || ''}`;
+      if (seen.has(key)) {
+        toRemove.push(item.id);
+        duplicatesFound++;
+      } else {
+        seen.set(key, item.id);
+      }
+    }
+
+    if (duplicatesFound === 0) {
+      addToast('No duplicates found', 'info');
+      return;
+    }
+
+    if (confirm(`Remove ${duplicatesFound} duplicate item(s)?`)) {
+      toRemove.forEach(id => removeFromRecycleBin(authId, id));
+      loadDeletedItems();
+      addToast(`Removed ${duplicatesFound} duplicate(s)`, 'success');
     }
   }
 
@@ -129,7 +197,8 @@ export default function RecycleBin() {
   }
 
   const filteredItems = deletedItems.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(search.toLowerCase());
+    const itemName = item.name || 'Unknown';
+    const matchesSearch = itemName.toLowerCase().includes(search.toLowerCase());
     const matchesType = !filterType || item.type === filterType;
     return matchesSearch && matchesType;
   });
@@ -201,10 +270,20 @@ export default function RecycleBin() {
           )}
           {deletedItems.length > 0 && (
             <button
-              onClick={emptyBin}
-              className="btn bg-slate-600 text-white hover:bg-slate-700 flex items-center gap-2"
+              onClick={cleanDuplicates}
+              className="btn btn-secondary flex items-center gap-2"
+              title="Remove duplicate items"
             >
               <Trash2 size={16} />
+              Clean Duplicates
+            </button>
+          )}
+          {deletedItems.length > 0 && (
+            <button
+              onClick={emptyBin}
+              className="btn bg-red-500 text-white hover:bg-red-600 flex items-center gap-2"
+            >
+              <Trash size={16} />
               Empty Bin
             </button>
           )}
@@ -280,7 +359,7 @@ export default function RecycleBin() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3">
                       <h4 className="font-medium text-slate-800 dark:text-white truncate">
-                        {item.name}
+                        {item.name || 'Unknown Item'}
                       </h4>
                       <span className={`px-2.5 py-1 rounded text-xs font-semibold capitalize ${getTypeColor(item.type)}`}>
                         {item.type}
@@ -294,10 +373,11 @@ export default function RecycleBin() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => restoreItem(item.id)}
-                      className="p-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-lg transition-colors"
+                      disabled={restoringIds.has(item.id)}
+                      className="p-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Restore"
                     >
-                      <RotateCcw size={18} />
+                      <RotateCcw size={18} className={restoringIds.has(item.id) ? 'animate-spin' : ''} />
                     </button>
                     <button
                       onClick={() => {
@@ -305,7 +385,8 @@ export default function RecycleBin() {
                           permanentlyDeleteItem(item.id);
                         }
                       }}
-                      className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors"
+                      disabled={restoringIds.has(item.id)}
+                      className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors disabled:opacity-50"
                       title="Delete permanently"
                     >
                       <Trash size={18} />

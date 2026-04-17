@@ -118,8 +118,8 @@ The schema might not match. Verify:
 Environment variables are missing. Create `.env.local` in `/client`:
 
 ```
-VITE_SUPABASE_URL=https://zbpevajwtjqzvvfikkbj.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
 Restart dev server after creating the file.

@@ -16,7 +16,6 @@ import {
   Building2,
   MessageSquare,
   ClipboardList,
-  RefreshCw,
   Bell,
   Trash2,
   Camera,
@@ -29,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
 import { UserRole, Notification as NotificationType } from '@schofy/shared';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
+import { dataService } from '../lib/database/DataService';
 import GlobalSearch from './GlobalSearch';
 import InstallPWA from './InstallPWA';
 import { getSubscriptionAccessState, SubscriptionAccessState } from '../utils/plans';
@@ -56,7 +56,7 @@ const menuItems = [
   { path: '/settings', label: 'Settings', icon: Settings, roles: [UserRole.ADMIN] },
 ];
 
-export default function Layout({ children }: LayoutProps) {
+function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [notifOpen, setNotifOpen] = useState(false);
@@ -69,8 +69,9 @@ export default function Layout({ children }: LayoutProps) {
   const [subscriptionState, setSubscriptionState] = useState<SubscriptionAccessState | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, isOnline } = useAuth();
-  const { isSyncing, syncNow } = useSync();
+  const { user, schoolId, logout, isOnline } = useAuth();
+  const tenantId = schoolId || user?.id;
+  const { isSyncing, pendingChanges, isSyncEnabled } = useSync();
   const headerRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -118,7 +119,8 @@ export default function Layout({ children }: LayoutProps) {
     let cancelled = false;
     (async () => {
       try {
-        const state = await getSubscriptionAccessState(user.id);
+        const tid = schoolId || user.id;
+        const state = await getSubscriptionAccessState(tid, undefined, { authUserId: user.id });
         if (!cancelled) {
           setSubscriptionState(state);
         }
@@ -130,13 +132,12 @@ export default function Layout({ children }: LayoutProps) {
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, schoolId]);
 
   async function loadSchoolName() {
-    if (!user?.id) return;
+    if (!tenantId) return;
     try {
-      // Load from local first
-      const stored = await userDBManager.getAll(user.id, 'settings');
+      const stored = await userDBManager.getAll(tenantId, 'settings');
       const schoolNameSetting = stored.find((s: any) => s.key === 'schoolName');
       if (schoolNameSetting?.value) {
         setSchoolName(schoolNameSetting.value);
@@ -182,7 +183,7 @@ export default function Layout({ children }: LayoutProps) {
   async function loadNotifications() {
     if (!user?.id) return;
     try {
-      const data = await userDBManager.getAll(user.id, 'notifications');
+      const data = await dataService.getAll(user.id, 'notifications');
       const sorted = data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setNotifications(sorted);
     } catch (error) {
@@ -198,8 +199,8 @@ export default function Layout({ children }: LayoutProps) {
   async function checkUpcomingEvents() {
     if (!user?.id) return;
     try {
-      const announcements = await userDBManager.getAll(user.id, 'announcements');
-      const notifications = await userDBManager.getAll(user.id, 'notifications');
+      const announcements = await dataService.getAll(user.id, 'announcements');
+      const notifications = await dataService.getAll(user.id, 'notifications');
       const now = new Date();
       
       for (const ann of announcements) {
@@ -210,7 +211,7 @@ export default function Layout({ children }: LayoutProps) {
           const existingNotif = notifications.find(n => n.title === `Upcoming: ${ann.title}`);
           
           if (!existingNotif) {
-            await userDBManager.add(user.id, 'notifications', {
+            await dataService.create(user.id, 'notifications', {
               id: `notif-${ann.id}-${Date.now()}`,
               title: `Upcoming: ${ann.title}`,
               message: `Event in ${daysUntil} day${daysUntil > 1 ? 's' : ''}`,
@@ -218,7 +219,7 @@ export default function Layout({ children }: LayoutProps) {
               read: 0,
               createdAt: new Date().toISOString(),
               link: '/announcements'
-            });
+            } as any);
           }
         }
       }
@@ -231,10 +232,10 @@ export default function Layout({ children }: LayoutProps) {
   async function markAllAsRead() {
     if (!user?.id) return;
     try {
-      const notifications = await userDBManager.getAll(user.id, 'notifications');
+      const notifications = await dataService.getAll(user.id, 'notifications');
       const unread = notifications.filter(n => n.read === 0);
       for (const notif of unread) {
-        await userDBManager.put(user.id, 'notifications', { ...notif, read: 1 });
+        await dataService.update(user.id, 'notifications', notif.id, { ...notif, read: 1 } as any);
       }
       await loadNotifications();
     } catch (error) {
@@ -245,7 +246,7 @@ export default function Layout({ children }: LayoutProps) {
   async function deleteNotification(id: string) {
     if (!user?.id) return;
     try {
-      await userDBManager.delete(user.id, 'notifications', id);
+      await dataService.delete(user.id, 'notifications', id);
       await loadNotifications();
     } catch (error) {
       console.error('Failed to delete notification:', error);
@@ -255,17 +256,15 @@ export default function Layout({ children }: LayoutProps) {
   async function clearAllNotifications() {
     if (!user?.id) return;
     try {
-      await userDBManager.clear(user.id, 'notifications');
+      const current = await dataService.getAll(user.id, 'notifications');
+      for (const notif of current) {
+        await dataService.delete(user.id, 'notifications', notif.id);
+      }
       await loadNotifications();
     } catch (error) {
       console.error('Failed to clear notifications:', error);
     }
   }
-
-  const handleSync = async () => {
-    await syncNow();
-    window.location.reload();
-  };
 
   React.useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -280,9 +279,10 @@ export default function Layout({ children }: LayoutProps) {
     return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
   };
 
-  const planLabel = subscriptionState?.plan?.name || 'Starter';
+  const planLabel = subscriptionState?.plan?.name ?? 'No subscription';
   const planStatusLabel = (() => {
     if (!subscriptionState) return 'No plan selected';
+    if (subscriptionState.status === 'incomplete') return 'Choose a plan';
     if (subscriptionState.status === 'active') return 'Active';
     if (subscriptionState.status === 'expiring' && subscriptionState.daysRemaining !== null) {
       return `Expiring in ${subscriptionState.daysRemaining} day${subscriptionState.daysRemaining === 1 ? '' : 's'}`;
@@ -386,7 +386,15 @@ export default function Layout({ children }: LayoutProps) {
               <div className="flex flex-col items-end mr-2">
                 <div className="flex items-center gap-2">
                   <span className={`text-[10px] font-bold uppercase tracking-widest ${isSyncing ? 'text-white' : 'text-white/80'}`}>
-                    {isSyncing ? 'Syncing...' : 'Synced'}
+                    {!isOnline
+                      ? 'Offline'
+                      : isSyncing
+                        ? 'Syncing...'
+                        : isSyncEnabled && pendingChanges > 0
+                          ? `${pendingChanges} pending`
+                          : isSyncEnabled
+                            ? 'Up to date'
+                            : 'Local'}
                   </span>
                   <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-white' : 'bg-white/50'} ${isSyncing ? 'animate-pulse' : ''}`} />
                 </div>
@@ -397,19 +405,6 @@ export default function Layout({ children }: LayoutProps) {
                   <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-white/30'}`} />
                 </div>
               </div>
-
-              <button
-                onClick={handleSync}
-                disabled={isSyncing || !isOnline}
-                className={`p-2 rounded-lg transition-all ${
-                  isSyncing 
-                    ? 'bg-white/20 cursor-not-allowed' 
-                    : 'bg-[#2da32d] hover:bg-[#259626] cursor-pointer'
-                }`}
-                title="Sync and refresh"
-              >
-                <RefreshCw size={18} className={`text-white animate-[spin_4s_linear_infinite] ${isSyncing ? 'opacity-100' : 'opacity-60 hover:opacity-100'}`} />
-              </button>
 
               <button
                 onClick={() => {
@@ -614,6 +609,15 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </header>
 
+        {!isOnline && (
+          <div
+            className="shrink-0 text-center text-sm font-medium py-2.5 px-4 bg-amber-400 text-amber-950 border-b border-amber-500/30"
+            role="status"
+          >
+            Offline — you can keep working. Changes stay on this device and sync automatically when the connection returns.
+          </div>
+        )}
+
         {/* Page Content */}
         <main className="flex-1 p-8 overflow-y-auto bg-[#f8fafc] dark:bg-slate-950">
           <div className="max-w-[1600px] mx-auto">
@@ -634,3 +638,5 @@ export default function Layout({ children }: LayoutProps) {
     </div>
   );
 }
+
+export default React.memo(Layout);

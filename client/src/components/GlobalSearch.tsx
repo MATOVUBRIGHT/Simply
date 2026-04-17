@@ -32,7 +32,7 @@ const pages = [
 ];
 
 export default function GlobalSearch() {
-  const { user } = useAuth();
+  const { user, schoolId } = useAuth();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -90,13 +90,14 @@ export default function GlobalSearch() {
     });
 
     try {
-      if (!user?.id) return;
-      
+      const tenantId = schoolId || user?.id;
+      if (!tenantId) return;
+
       const [students, staff, subjects, classes] = await Promise.all([
-        userDBManager.getAll(user.id, 'students'),
-        userDBManager.getAll(user.id, 'staff'),
-        userDBManager.getAll(user.id, 'subjects'),
-        userDBManager.getAll(user.id, 'classes'),
+        userDBManager.getAll(tenantId, 'students'),
+        userDBManager.getAll(tenantId, 'staff'),
+        userDBManager.getAll(tenantId, 'subjects'),
+        userDBManager.getAll(tenantId, 'classes'),
       ]);
 
       students

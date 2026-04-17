@@ -91,6 +91,9 @@ export default function Invoices() {
   const [fees, setFees] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [termSettings, setTermSettings] = useState<Record<string, string>>({});
+  const [showPromotionBanner, setShowPromotionBanner] = useState(false);
+  const [expiredTerm, setExpiredTerm] = useState('');
 
   const students = useActiveStudents();
   const { students: allStudents } = useStudents();
@@ -140,6 +143,33 @@ export default function Invoices() {
       loadFeesAndPayments();
     }
   }, [user, schoolId, refreshKey]);
+
+  // Realtime: reload when fees, bursaries, discounts or feeStructures change
+  useEffect(() => {
+    const reloadFees = () => { loadFeesAndPayments(); setRefreshKey(k => k + 1); };
+    const reloadBursaries = () => loadBursariesAndDiscounts();
+    const reloadStructures = () => { if (selectedClassId) loadFeeStructures(); };
+    window.addEventListener('feesUpdated', reloadFees);
+    window.addEventListener('feesDataChanged', reloadFees);
+    window.addEventListener('bursariesUpdated', reloadBursaries);
+    window.addEventListener('bursariesDataChanged', reloadBursaries);
+    window.addEventListener('discountsUpdated', reloadBursaries);
+    window.addEventListener('discountsDataChanged', reloadBursaries);
+    window.addEventListener('feeStructuresUpdated', reloadStructures);
+    window.addEventListener('feeStructuresDataChanged', reloadStructures);
+    window.addEventListener('schofyDataRefresh', reloadFees);
+    return () => {
+      window.removeEventListener('feesUpdated', reloadFees);
+      window.removeEventListener('feesDataChanged', reloadFees);
+      window.removeEventListener('bursariesUpdated', reloadBursaries);
+      window.removeEventListener('bursariesDataChanged', reloadBursaries);
+      window.removeEventListener('discountsUpdated', reloadBursaries);
+      window.removeEventListener('discountsDataChanged', reloadBursaries);
+      window.removeEventListener('feeStructuresUpdated', reloadStructures);
+      window.removeEventListener('feeStructuresDataChanged', reloadStructures);
+      window.removeEventListener('schofyDataRefresh', reloadFees);
+    };
+  }, [selectedClassId]);
 
   async function loadFeesAndPayments() {
     const id = schoolId || user?.id;
@@ -212,6 +242,7 @@ export default function Invoices() {
     if (user?.id || schoolId) {
       loadClasses();
       loadBursariesAndDiscounts();
+      loadTermSettings();
     }
   }, [user, schoolId]);
 
@@ -234,6 +265,25 @@ export default function Invoices() {
     } catch (error) {
       console.error('Failed to load bursaries and discounts:', error);
     }
+  }
+
+  async function loadTermSettings() {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    try {
+      const stored = await dataService.getAll(id, 'settings');
+      const obj: Record<string, string> = {};
+      stored.forEach((s: any) => { obj[s.key] = s.value; });
+      setTermSettings(obj);
+      // Check if current term has ended → prompt class promotion
+      const currentTerm = obj.currentTerm || '1';
+      const endKey = `term${currentTerm}End`;
+      const endDate = obj[endKey];
+      if (endDate && new Date(endDate) < new Date()) {
+        setExpiredTerm(currentTerm);
+        setShowPromotionBanner(true);
+      }
+    } catch {}
   }
 
   async function loadClasses() {
@@ -324,15 +374,31 @@ export default function Invoices() {
       const now = new Date().toISOString();
       
       for (const student of studentsInClass) {
+        const studentBursary = classBursaries.find(b => b.studentId === student.id);
+
+        // Bursary student: invoice only the bursary amount, no other fees
+        if (studentBursary) {
+          const id = schoolId || user?.id;
+          if (id) {
+            await dataService.create(id, 'fees', {
+              id: uuidv4(),
+              studentId: student.id,
+              classId: selectedClassId,
+              description: `Bursary Invoice (${structuresToApply.map(s => s.name).join(', ')})`,
+              amount: studentBursary.amount,
+              term: selectedTerm,
+              year: selectedYear,
+              createdAt: now,
+            } as any);
+            invoiceCount++;
+          }
+          continue;
+        }
+
+        // Normal student: apply base total with optional class discount
         let invoiceAmount = baseTotal;
         let description = structuresToApply.map(s => s.name).join(', ');
-        
-        const studentBursary = classBursaries.find(b => b.studentId === student.id);
-        if (studentBursary) {
-          invoiceAmount = Math.max(0, invoiceAmount - studentBursary.amount);
-          description += ` (Bursary: ${formatMoney(studentBursary.amount)})`;
-        }
-        
+
         if (discount) {
           if (discount.type === 'percentage') {
             const discountAmount = (invoiceAmount * discount.amount) / 100;
@@ -343,7 +409,7 @@ export default function Invoices() {
             description += ` (Discount: ${formatMoney(discount.amount)})`;
           }
         }
-        
+
         const id = schoolId || user?.id;
         if (invoiceAmount > 0 && id) {
           await dataService.create(id, 'fees', {
@@ -613,6 +679,21 @@ export default function Invoices() {
 
   return (
     <div className="space-y-6">
+      {/* Term ended — class promotion banner */}
+      {showPromotionBanner && (
+        <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl">
+          <GraduationCap size={20} className="text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-semibold text-amber-800 dark:text-amber-300">Term {expiredTerm} has ended</p>
+            <p className="text-sm text-amber-700 dark:text-amber-400 mt-0.5">
+              The end date for Term {expiredTerm} has passed. Consider promoting students to their next class in the Students page.
+            </p>
+          </div>
+          <button onClick={() => setShowPromotionBanner(false)} className="p-1 hover:bg-amber-100 dark:hover:bg-amber-800/40 rounded-lg transition-colors">
+            <X size={16} className="text-amber-600 dark:text-amber-400" />
+          </button>
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">

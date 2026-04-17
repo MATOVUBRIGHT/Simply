@@ -83,6 +83,7 @@ export default function Students() {
   const navigate = useNavigate();
   const statusFilterRef = useRef<HTMLDivElement>(null);
   const classFilterRef = useRef<HTMLDivElement>(null);
+  const isReloadingRef = useRef(false);
 
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
@@ -203,20 +204,42 @@ export default function Students() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectMode]);
 
-  // Real-time updates for classes
+  // Real-time updates for classes - with debounce to prevent infinite loops
   useEffect(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    
     const handleClassesUpdated = () => {
+      if (isReloadingRef.current) return;
       console.log('🔄 Classes updated, reloading...');
-      loadClasses();
+      isReloadingRef.current = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadClasses().finally(() => {
+          isReloadingRef.current = false;
+        });
+      }, 100);
     };
     const handleClassesDataChanged = () => {
+      if (isReloadingRef.current) return;
       console.log('🔄 Classes data changed, reloading students...');
-      loadClasses();
-      loadData(); // Reload students to refresh class names
+      isReloadingRef.current = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        await loadClasses();
+        await loadData();
+        isReloadingRef.current = false;
+      }, 100);
     };
     const handleDataRefresh = () => {
+      if (isReloadingRef.current) return;
       console.log('🔄 General data refresh, reloading classes...');
-      loadClasses();
+      isReloadingRef.current = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadClasses().finally(() => {
+          isReloadingRef.current = false;
+        });
+      }, 100);
     };
     
     window.addEventListener('classesUpdated', handleClassesUpdated);
@@ -229,6 +252,7 @@ export default function Students() {
       window.removeEventListener('ClassesUpdated', handleClassesUpdated);
       window.removeEventListener('classesDataChanged', handleClassesDataChanged);
       window.removeEventListener('schofyDataRefresh', handleDataRefresh);
+      if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [loadClasses, loadData]);
 

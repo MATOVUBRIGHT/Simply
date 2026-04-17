@@ -19,7 +19,6 @@ export function useRealtimeUpdate(table?: string) {
       return;
     }
     
-    console.log(`🔄 Real-time update received for ${update.type} on ${update.table}`);
     setLastUpdate(update);
   }, [table]);
 
@@ -80,8 +79,7 @@ export function useRealtimeRefresh(refreshCallback: () => void | Promise<void>, 
 
   useEffect(() => {
     if (lastUpdate) {
-      console.log(`🔄 Triggering data refresh for ${lastUpdate.table}`);
-      refreshCallback();
+      void refreshCallback();
     }
   }, [lastUpdate, refreshCallback]);
 }

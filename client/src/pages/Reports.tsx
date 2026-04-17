@@ -5,7 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 import { exportToCSV, exportToExcel } from '../utils/export';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
-import { userDBManager } from '../lib/database/UserDatabaseManager';
+import { dataService } from '../lib/database/DataService';
 
 type ReportType = 'students' | 'fees' | 'attendance' | 'staff' | 'classes';
 
@@ -84,7 +84,7 @@ export default function Reports() {
     }
 
     if (selectedReport === 'staff') {
-      const staff = await userDBManager.getAll(id, 'staff');
+      const staff = await dataService.getAll(id, 'staff');
       
       doc.setFontSize(12);
       doc.text('Staff Directory', 14, 55);
@@ -112,7 +112,7 @@ export default function Reports() {
     }
 
     if (selectedReport === 'fees') {
-      const [payments, fees] = await Promise.all([userDBManager.getAll(id, 'payments'), userDBManager.getAll(id, 'fees')]);
+      const [payments, fees] = await Promise.all([dataService.getAll(id, 'payments'), dataService.getAll(id, 'fees')]);
       const studentList = students;
       const totalCollected = payments.reduce((sum, p) => sum + p.amount, 0);
       const totalInvoiced = fees.reduce((sum, f) => sum + f.amount, 0);
@@ -146,7 +146,7 @@ export default function Reports() {
     }
 
     if (selectedReport === 'attendance') {
-      const attendance = await userDBManager.getAll(id, 'attendance');
+      const attendance = await dataService.getAll(id, 'attendance');
       const studentList = students;
       
       doc.setFontSize(12);
@@ -182,7 +182,7 @@ export default function Reports() {
     }
 
     if (selectedReport === 'classes') {
-      const [classes, studentList] = await Promise.all([userDBManager.getAll(id, 'classes'), Promise.resolve(students)]);
+      const [classes, studentList] = await Promise.all([dataService.getAll(id, 'classes'), Promise.resolve(students)]);
       
       doc.setFontSize(12);
       doc.text('Class Summary Report', 14, 55);
@@ -239,7 +239,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'staff') {
-      const staff = await userDBManager.getAll(id, 'staff');
+      const staff = await dataService.getAll(id, 'staff');
       const data = staff.map(s => ({
         employeeId: s.employeeId,
         firstName: s.firstName,
@@ -257,7 +257,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'fees') {
-      const payments = await userDBManager.getAll(id, 'payments');
+      const payments = await dataService.getAll(id, 'payments');
       const data = payments.map(p => {
         const student = students.find(s => s.id === p.studentId);
         return {
@@ -274,7 +274,7 @@ export default function Reports() {
         { key: 'method', label: 'Method' },
       ]);
     } else if (selectedReport === 'attendance') {
-      const attendance = await userDBManager.getAll(id, 'attendance');
+      const attendance = await dataService.getAll(id, 'attendance');
       const data = attendance.map(a => {
         const student = students.find(s => s.id === a.entityId);
         return {
@@ -289,7 +289,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'classes') {
-      const classes = await userDBManager.getAll(id, 'classes');
+      const classes = await dataService.getAll(id, 'classes');
       const data = classes.map(c => ({
         name: c.name,
         level: c.level,
@@ -332,7 +332,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'staff') {
-      const staff = await userDBManager.getAll(id, 'staff');
+      const staff = await dataService.getAll(id, 'staff');
       const data = staff.map(s => ({
         employeeId: s.employeeId,
         firstName: s.firstName,
@@ -350,7 +350,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'fees') {
-      const payments = await userDBManager.getAll(id, 'payments');
+      const payments = await dataService.getAll(id, 'payments');
       const data = payments.map(p => {
         const student = students.find(s => s.id === p.studentId);
         return {
@@ -367,7 +367,7 @@ export default function Reports() {
         { key: 'method', label: 'Method' },
       ]);
     } else if (selectedReport === 'attendance') {
-      const attendance = await userDBManager.getAll(id, 'attendance');
+      const attendance = await dataService.getAll(id, 'attendance');
       const data = attendance.map(a => {
         const student = students.find(s => s.id === a.entityId);
         return {
@@ -382,7 +382,7 @@ export default function Reports() {
         { key: 'status', label: 'Status' },
       ]);
     } else if (selectedReport === 'classes') {
-      const classes = await userDBManager.getAll(id, 'classes');
+      const classes = await dataService.getAll(id, 'classes');
       const data = classes.map(c => ({
         name: c.name,
         level: c.level,
@@ -483,3 +483,4 @@ export default function Reports() {
     </div>
   );
 }
+
