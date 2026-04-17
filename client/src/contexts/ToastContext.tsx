@@ -17,9 +17,45 @@ interface ToastContextType {
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
+const TOAST_SOUND_PATHS: Partial<Record<ToastType, string>> = {
+  success: '/sound/success.wav',
+  error: '/sound/error.wav',
+};
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const soundRefs = useRef<Partial<Record<ToastType, HTMLAudioElement>>>({});
+  const lastSoundTimeRef = useRef(0);
+
+  const getSound = useCallback((type: ToastType) => {
+    const path = TOAST_SOUND_PATHS[type];
+    if (!path || typeof window === 'undefined') return null;
+
+    const existing = soundRefs.current[type];
+    if (existing) return existing;
+
+    const audio = new Audio(path);
+    audio.preload = 'auto';
+    audio.volume = 0.65;
+    soundRefs.current[type] = audio;
+    return audio;
+  }, []);
+
+  const playToastSound = useCallback((type: ToastType) => {
+    if (type !== 'success' && type !== 'error') return;
+
+    const now = Date.now();
+    // Prevent harsh overlap if multiple toasts fire in the same instant.
+    if (now - lastSoundTimeRef.current < 120) return;
+    lastSoundTimeRef.current = now;
+
+    const audio = getSound(type);
+    if (!audio) return;
+
+    audio.currentTime = 0;
+    void audio.play().catch(() => {});
+  }, [getSound]);
 
   const removeToast = useCallback((id: string) => {
     const timeout = timeoutRefs.current.get(id);
@@ -38,6 +74,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addToast = useCallback((message: string, type: ToastType = 'info') => {
+    playToastSound(type);
+
     setToasts((prev) => {
       const existingIndex = prev.findIndex(t => !t.isExiting);
       if (existingIndex !== -1) {
@@ -70,11 +108,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       
       return [...prev, newToast];
     });
-  }, [removeToast]);
+  }, [removeToast, playToastSound]);
 
   useEffect(() => {
     return () => {
       timeoutRefs.current.forEach(timeout => clearTimeout(timeout));
+      Object.values(soundRefs.current).forEach((audio) => {
+        if (!audio) return;
+        audio.pause();
+      });
+      soundRefs.current = {};
     };
   }, []);
 
