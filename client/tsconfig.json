@@ -18,8 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@schofy/shared": ["../shared/src"]
+      "@schofy/shared": ["../shared/dist"]
     }
   },
-  "include": ["src", "../shared/src"]
+  "include": ["src", "../shared/dist"]
 }

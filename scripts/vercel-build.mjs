@@ -4,8 +4,13 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 
 function run(command, args) {
+  console.log(`[vercel-build] Running: ${command} ${args.join(' ')}`);
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', shell: false });
+    const isWin = process.platform === 'win32';
+    const child = spawn(command, args, { 
+      stdio: 'inherit', 
+      shell: isWin 
+    });
     child.on('exit', (code) => {
       if (code === 0) {
         resolve();
@@ -19,25 +24,30 @@ function run(command, args) {
 
 async function main() {
   const root = process.cwd();
+  console.log('[vercel-build] Root directory:', root);
+  console.log('[vercel-build] Node version:', process.version);
+  
   const clientDist = path.join(root, 'client', 'dist');
   const outputDist = path.join(root, 'public');
 
   console.log('[vercel-build] Building client workspace...');
-  if (process.platform === 'win32') {
-    await run('cmd.exe', ['/d', '/s', '/c', 'npm run build --workspace=client']);
-  } else {
-    await run('npm', ['run', 'build', '--workspace=client']);
-  }
+  // Use 'npm' directly on Linux, it's usually in the PATH
+  await run('npm', ['run', 'build', '--workspace=client']);
 
   try {
     await access(clientDist, constants.F_OK);
+    console.log('[vercel-build] Found client/dist');
   } catch (e) {
     console.error(`[vercel-build] Error: ${clientDist} does not exist after build!`);
     // List files to help debugging
-    if (process.platform === 'win32') {
-      await run('cmd.exe', ['/d', '/s', '/c', 'dir /s /b client\\dist']);
-    } else {
-      await run('ls', ['-R', 'client/dist']);
+    try {
+      if (process.platform === 'win32') {
+        await run('cmd.exe', ['/d', '/s', '/c', 'dir /s /b client']);
+      } else {
+        await run('ls', ['-R', 'client']);
+      }
+    } catch (lsError) {
+      console.error('[vercel-build] Failed to list files:', lsError.message);
     }
     throw e;
   }
