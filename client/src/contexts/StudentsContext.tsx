@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Student } from '@schofy/shared';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { useAuth } from './AuthContext';
 import { queryKeys } from '../lib/queryKeys';
 

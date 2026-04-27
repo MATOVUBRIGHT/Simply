@@ -5,7 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 import { exportToCSV, exportToExcel } from '../utils/export';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 type ReportType = 'students' | 'fees' | 'attendance' | 'staff' | 'classes';
 

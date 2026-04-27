@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Bell, Trash2, CheckCheck, Info, CheckCircle, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Notification } from '@schofy/shared';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 const typeConfig: Record<string, { bg: string; text: string; icon: any }> = {
   info: { bg: 'bg-blue-50', text: 'text-blue-600', icon: Info },

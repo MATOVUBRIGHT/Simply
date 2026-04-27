@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import ImageUpload from '../components/ImageUpload';
 import { getNextEmployeeId } from '../utils/identifiers';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 const initialFormData: Partial<Staff> = {
   firstName: '',
@@ -100,21 +100,22 @@ export default function StaffForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const authId = schoolId || user?.id;
-    if (!authId) return;
+    if (!authId || loading) return;
     setLoading(true);
+    const now = new Date().toISOString();
     try {
-      const now = new Date().toISOString();
       if (isEditing) {
         const finalEmployeeId = employeeId.trim() || await generateEmployeeId();
-        await dataService.update(authId, 'staff', id!, { ...formData, employeeId: finalEmployeeId, updatedAt: now } as any);
         addToast('Staff updated', 'success');
+        navigate('/staff');
+        await dataService.update(authId, 'staff', id!, { ...formData, employeeId: finalEmployeeId, updatedAt: now } as any);
       } else {
         const finalEmployeeId = employeeId.trim() || await generateEmployeeId();
         const newStaff: Staff = { id: uuidv4(), schoolId: authId, employeeId: finalEmployeeId, ...formData, createdAt: now, updatedAt: now } as Staff;
-        await dataService.create(authId, 'staff', newStaff as any);
         addToast('Staff added', 'success');
+        navigate('/staff');
+        await dataService.create(authId, 'staff', newStaff as any);
       }
-      navigate('/staff');
     } catch (error) {
       addToast('Failed to save staff', 'error');
     } finally {

@@ -28,7 +28,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
 import { UserRole, Notification as NotificationType } from '@schofy/shared';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import GlobalSearch from './GlobalSearch';
 import InstallPWA from './InstallPWA';
 import { getSubscriptionAccessState, SubscriptionAccessState } from '../utils/plans';

@@ -1,5 +1,5 @@
 import type { Class, Student } from '@schofy/shared';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 export interface ClassOption {
   id: string;

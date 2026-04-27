@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import ImageUpload from '../components/ImageUpload';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { ClassOption, getClassCapacityState, getClassDisplayName, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, extractFormatFromId, IdFormat } from '../utils/idFormat';
 
@@ -358,77 +358,52 @@ export default function StudentForm() {
     e.preventDefault();
 
     const errors = validateStep(currentStep);
-    if (errors.length > 0) {
-      showErrors(errors);
-      return;
-    }
+    if (errors.length > 0) { showErrors(errors); return; }
+    if (loading) return; // prevent double submit
 
     setLoading(true);
-
     const idAuth = schoolId || user?.id;
+    if (!idAuth) { setLoading(false); return; }
+
     try {
       const now = new Date().toISOString();
 
       if (isEditing) {
-        if (!idAuth) return;
         const classCapacity = formData.classId ? await getClassCapacityState(idAuth, formData.classId, id) : null;
         if (classCapacity?.isFull) {
           addToast(`${classCapacity.name} is full (${classCapacity.enrolled}/${classCapacity.capacity}). Choose another class.`, 'error');
-          setCurrentStep(1);
-          return;
+          setCurrentStep(1); setLoading(false); return;
         }
-
-        const students = await dataService.getAll(idAuth, 'students');
-        const existingValues = students.flatMap((s: any) => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
-        const finalStudentId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', existingValues);
-        await dataService.update(idAuth, 'students', id!, { ...formData, admissionNo: finalStudentId, studentId: finalStudentId, updatedAt: now } as any);
+        const finalStudentId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', []);
         addToast('Student updated successfully', 'success');
+        navigate('/students');
+        await dataService.update(idAuth, 'students', id!, { ...formData, admissionNo: finalStudentId, studentId: finalStudentId, updatedAt: now } as any);
+        window.dispatchEvent(new Event('studentsUpdated'));
       } else {
-        if (!idAuth) return;
-
         const classCapacity = formData.classId ? await getClassCapacityState(idAuth, formData.classId) : null;
         if (classCapacity?.isFull) {
           addToast(`${classCapacity.name} is full (${classCapacity.enrolled}/${classCapacity.capacity}). Choose another class.`, 'error');
-          setCurrentStep(1);
-          return;
+          setCurrentStep(1); setLoading(false); return;
         }
-
-        const existingVals = await dataService.getAll(idAuth, 'students');
-        const existingStudentValues = existingVals.flatMap(s => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
-        const finalStudentId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', existingStudentValues);
+        const finalStudentId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', []);
         const newStudent: Student = {
-          id: tempId,
-          userId: user!.id,
-          schoolId: idAuth,
-          admissionNo: finalStudentId,
-          studentId: finalStudentId,
-          firstName: formData.firstName || '',
-          lastName: formData.lastName || '',
-          dob: formData.dob || '',
-          gender: formData.gender || Gender.MALE,
-          classId: formData.classId || '',
-          address: formData.address || '',
-          guardianName: formData.guardianName || '',
-          guardianPhone: formData.guardianPhone || '',
-          guardianEmail: formData.guardianEmail,
-          medicalInfo: formData.medicalInfo,
-          photoUrl: formData.photoUrl,
-          status: formData.status || 'active',
-          tuitionFee: formData.tuitionFee,
-          boardingFee: formData.boardingFee,
-          requirements: formData.requirements || [],
-          customFields: formData.customFields || [],
-          attachments: formData.attachments || [],
-          createdAt: now,
-          updatedAt: now,
+          id: tempId, userId: user!.id, schoolId: idAuth,
+          admissionNo: finalStudentId, studentId: finalStudentId,
+          firstName: formData.firstName || '', lastName: formData.lastName || '',
+          dob: formData.dob || '', gender: formData.gender || Gender.MALE,
+          classId: formData.classId || '', address: formData.address || '',
+          guardianName: formData.guardianName || '', guardianPhone: formData.guardianPhone || '',
+          guardianEmail: formData.guardianEmail, medicalInfo: formData.medicalInfo,
+          photoUrl: formData.photoUrl, status: formData.status || 'active',
+          tuitionFee: formData.tuitionFee, boardingFee: formData.boardingFee,
+          requirements: formData.requirements || [], customFields: formData.customFields || [],
+          attachments: formData.attachments || [], createdAt: now, updatedAt: now,
         };
-        await dataService.create(idAuth, 'students', newStudent as any);
         addToast('Student admitted successfully', 'success');
+        navigate('/students');
+        await dataService.create(idAuth, 'students', newStudent as any);
         window.dispatchEvent(new Event('studentsUpdated'));
       }
-
-      await loadClasses();
-      navigate('/students');
     } catch (error) {
       console.error('Failed to save student:', error);
       addToast('Failed to save student', 'error');

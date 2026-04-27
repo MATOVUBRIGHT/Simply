@@ -6,7 +6,7 @@ import { AttendanceStatus, EntityType } from '@schofy/shared';
 import type { Attendance as AttendanceRecord, Student } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 const avatarColors = [
   'from-coral-400 to-orange-400',

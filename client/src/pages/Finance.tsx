@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
@@ -7,7 +7,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { exportToPDF, exportToCSV, exportToExcel } from '../utils/export';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 export default function Finance() {
   const { user, schoolId } = useAuth();
@@ -82,7 +82,7 @@ export default function Finance() {
     } catch { addToast('Failed to record payment', 'error'); }
   }
 
-  // ── Export helpers ──────────────────────────────────────────────────────────
+  // -- Export helpers ----------------------------------------------------------
   function handleExportInvoicesCSV() {
     const data = fees.map(f => { const s = students.find(x => x.id === f.studentId); return { ...f, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A' }; });
     exportToCSV(data, 'invoices', [{ key: 'studentName' as any, label: 'Student' }, { key: 'description' as any, label: 'Description' }, { key: 'amount' as any, label: 'Amount' }, { key: 'term' as any, label: 'Term' }]);
@@ -114,7 +114,7 @@ export default function Finance() {
     addToast('Exported Excel', 'success'); setShowExportMenu(false);
   }
 
-  // ── Import helpers ──────────────────────────────────────────────────────────
+  // -- Import helpers ----------------------------------------------------------
   const paymentExpectedFields = [
     { key: 'studentName', label: 'Student Name', required: true },
     { key: 'amount', label: 'Amount', required: true },
@@ -186,7 +186,7 @@ export default function Finance() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  // ── Derived data ────────────────────────────────────────────────────────────
+  // -- Derived data ------------------------------------------------------------
   const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
   const totalInvoiced = fees.reduce((s, f) => s + f.amount, 0);
   const totalPending = totalInvoiced - totalCollected;

@@ -4,7 +4,7 @@ import { DashboardStats } from '@schofy/shared';
 import { useCurrency } from '../hooks/useCurrency';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { 
   ResponsiveContainer,
   Cell,

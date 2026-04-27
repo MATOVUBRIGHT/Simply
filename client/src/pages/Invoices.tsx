@@ -7,7 +7,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor } from '../utils/feeStructures';
 import { ClassOption } from '../utils/classroom';
 import DropdownModal from '../components/DropdownModal';

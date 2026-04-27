@@ -1,4 +1,4 @@
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { FeeStructure, Fee, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 

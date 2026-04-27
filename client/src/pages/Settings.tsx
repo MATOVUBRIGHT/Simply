@@ -6,7 +6,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { useSync } from '../contexts/SyncContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },

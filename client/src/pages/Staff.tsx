@@ -10,7 +10,7 @@ import DropdownModal from '../components/DropdownModal';
 import { useCurrency } from '../hooks/useCurrency';
 import { generateUUID } from '../utils/uuid';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 
 const avatarColors = [
@@ -56,6 +56,7 @@ export default function StaffPage() {
   const [selectedPayment, setSelectedPayment] = useState<SalaryPayment | null>(null);
   const [payrollMonth, setPayrollMonth] = useState(new Date().toISOString().slice(0, 7));
   const [paymentNotes, setPaymentNotes] = useState('');
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (user?.id || schoolId) {
@@ -147,18 +148,21 @@ export default function StaffPage() {
 
   async function handleMarkAsPaid(payment: SalaryPayment) {
     const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      await dataService.update(id, 'salaryPayments', payment.id, { status: 'paid', paidAt: new Date().toISOString(), paymentMethod: PaymentMethod.BANK_TRANSFER, notes: paymentNotes || undefined } as any);
-      await loadStaff();
-      setShowPayModal(false);
-      setSelectedPayment(null);
-      setPaymentNotes('');
-      addToast(`Marked ${payment.staffName}'s salary as paid`, 'success');
-    } catch (error) {
-      console.error('Failed to mark as paid:', error);
-      addToast('Failed to update payment', 'error');
+    if (!id || submittingRef.current) return;
+    submittingRef.current = true;
+    const updated = { ...payment, status: 'paid', paidAt: new Date().toISOString(), paymentMethod: PaymentMethod.BANK_TRANSFER, notes: paymentNotes || undefined } as any;
+    // Optimistic update
+    setSalaryPayments(prev => prev.map(p => p.id === payment.id ? updated : p));
+    addToast(`Marked ${payment.staffName}'s salary as paid`, 'success');
+    setShowPayModal(false);
+    setSelectedPayment(null);
+    setPaymentNotes('');
+    const result = await dataService.update(id, 'salaryPayments', payment.id, updated);
+    if (!result.success) {
+      addToast('Failed to update payment: ' + result.error, 'error');
+      setSalaryPayments(prev => prev.map(p => p.id === payment.id ? payment : p));
     }
+    submittingRef.current = false;
   }
 
   async function handleDeletePayment(paymentId: string) {
@@ -300,27 +304,18 @@ export default function StaffPage() {
 
   async function handleDelete(id: string) {
     const authId = schoolId || user?.id;
-    if (!authId) return;
-    if (confirm('Are you sure you want to delete this staff member?')) {
-      try {
-        const staffMember = staff.find(s => s.id === id);
-        await dataService.delete(authId, 'staff', id);
-        
-        if (staffMember) {
-          addToRecycleBin(authId, {
-            id: `staff-${Date.now()}`,
-            type: 'staff',
-            name: `${staffMember.firstName} ${staffMember.lastName}`,
-            data: staffMember,
-            deletedAt: new Date().toISOString()
-          });
-        }
-        
-        setStaff((prev) => prev.filter((s) => s.id !== id));
-        addToast('Staff member moved to recycle bin', 'success');
-      } catch (error) {
-        addToast('Failed to delete staff', 'error');
-      }
+    if (!authId || !confirm('Are you sure you want to delete this staff member?')) return;
+    const staffMember = staff.find(s => s.id === id);
+    // Optimistic remove
+    setStaff(prev => prev.filter(s => s.id !== id));
+    addToast('Staff member moved to recycle bin', 'success');
+    if (staffMember) {
+      addToRecycleBin(authId, { id: `staff-${Date.now()}`, type: 'staff', name: `${staffMember.firstName} ${staffMember.lastName}`, data: staffMember, deletedAt: new Date().toISOString() });
+    }
+    const result = await dataService.delete(authId, 'staff', id);
+    if (!result.success) {
+      addToast('Failed to delete: ' + result.error, 'error');
+      if (staffMember) setStaff(prev => [...prev, staffMember]);
     }
   }
 
@@ -506,39 +501,40 @@ export default function StaffPage() {
 
   async function executeImport() {
     const id = schoolId || user?.id;
-    if (!id) return;
-    if (importPreview.length === 0) {
-      addToast('No valid staff to import', 'error');
-      return;
-    }
+    if (!id || submittingRef.current) return;
+    if (importPreview.length === 0) { addToast('No valid staff to import', 'error'); return; }
+    submittingRef.current = true;
     try {
       const now = new Date().toISOString();
       let successCount = 0;
+      const newStaff: Staff[] = [];
       for (const data of importPreview) {
         const staffMember: Staff = {
-          id: crypto.randomUUID(),
-          schoolId: id,
+          id: crypto.randomUUID(), schoolId: id,
           employeeId: (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           firstName: (data.firstName as string) || 'Unknown',
           lastName: (data.lastName as string) || 'Unknown',
           role: (data.role as any) || 'teacher',
-          department: data.department,
-          phone: (data.phone as string) || '',
-          email: data.email as string | undefined,
-          address: data.address as string | undefined,
-          status: 'active',
-          createdAt: now,
-          updatedAt: now,
+          department: data.department, phone: (data.phone as string) || '',
+          email: data.email as string | undefined, address: data.address as string | undefined,
+          status: 'active', createdAt: now, updatedAt: now,
         };
-        await dataService.create(id, 'staff', staffMember as any);
+        newStaff.push(staffMember);
         successCount++;
       }
-      await loadStaff();
-      addToast(`Successfully imported ${successCount} staff`, 'success');
+      // Optimistic update
+      setStaff(prev => [...newStaff, ...prev]);
+      addToast(`Imported ${successCount} staff`, 'success');
       closeImportModal();
+      // Fire to Supabase in background
+      for (const s of newStaff) {
+        const result = await dataService.create(id, 'staff', s as any);
+        if (!result.success) console.error('Import failed for', s.firstName, result.error);
+      }
     } catch (error) {
       addToast('Failed to import staff', 'error');
     }
+    submittingRef.current = false;
   }
 
   const teachersCount = staff.filter(s => s.role === 'teacher').length;

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Trash2, RotateCcw, Trash, ArrowLeft, Check, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { useToast } from '../contexts/ToastContext';
 import { getRecycleBin, removeFromRecycleBin, clearRecycleBin, DeletedItem } from '../utils/recycleBin';
 

@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { getClassDisplayName } from '../utils/classroom';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 
 const ugandaSubjects: Record<string, { name: string; code: string }[]> = {

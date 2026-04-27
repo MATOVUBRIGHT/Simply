@@ -5,7 +5,7 @@ import { Class } from '@schofy/shared';
 import { generateUUID } from '../utils/uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 
 const classColors = [

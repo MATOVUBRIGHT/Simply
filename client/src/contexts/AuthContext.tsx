@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { usersApi } from '../services/apiService';
 import { syncService } from '../services/sync';
 import { generateUUID } from '../utils/uuid';

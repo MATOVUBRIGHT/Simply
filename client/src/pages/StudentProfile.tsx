@@ -6,7 +6,7 @@ import ImageModal from '../components/ImageModal';
 import DropdownModal from '../components/DropdownModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 export default function StudentProfile() {
   const { id } = useParams();

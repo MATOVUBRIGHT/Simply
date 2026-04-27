@@ -6,7 +6,7 @@ import { Student, Gender } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import ImageUpload from '../components/ImageUpload';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, extractFormatFromId, IdFormat } from '../utils/idFormat';
 

@@ -5,7 +5,7 @@ import { Announcement, Priority } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 
 const priorityConfig: Record<string, { 
@@ -65,7 +65,7 @@ export default function Announcements() {
   const clickTimeoutRef = useRef<number | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-
+  const submittingRef = useRef(false);
   useEffect(() => {
     if (user?.id || schoolId) loadAnnouncements();
   }, [user?.id, schoolId]);
@@ -120,61 +120,64 @@ export default function Announcements() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      if (editingId) {
-        const updated: Announcement = {
-          id: editingId,
-          title: formData.title,
-          content: formData.content,
-          priority: formData.priority,
-          createdBy: 'admin',
-          createdAt: announcements.find(a => a.id === editingId)?.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        await dataService.update(id, 'announcements', editingId, updated as any);
-        setAnnouncements(prev => prev.map(a => a.id === editingId ? updated : a));
-        addToast('Announcement updated successfully', 'success');
-      } else {
-        const newAnnouncement: Announcement = {
-          id: uuidv4(),
-          ...formData,
-          createdBy: 'admin',
-          createdAt: new Date().toISOString(),
-        };
-        await dataService.create(id, 'announcements', newAnnouncement as any);
-        setAnnouncements(prev => [newAnnouncement, ...prev]);
-        addToast('Announcement published successfully', 'success');
-      }
+    if (!id || submittingRef.current) return;
+    submittingRef.current = true;
+
+    if (editingId) {
+      const updated: Announcement = {
+        id: editingId,
+        title: formData.title,
+        content: formData.content,
+        priority: formData.priority,
+        createdBy: 'admin',
+        createdAt: announcements.find(a => a.id === editingId)?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      // Optimistic update
+      setAnnouncements(prev => prev.map(a => a.id === editingId ? updated : a));
+      addToast('Announcement updated', 'success');
       handleCancelEdit();
-    } catch (error) {
-      addToast('Failed to save announcement', 'error');
+      const result = await dataService.update(id, 'announcements', editingId, updated as any);
+      if (!result.success) {
+        // Rollback
+        addToast('Failed to update: ' + result.error, 'error');
+        await loadAnnouncements();
+      }
+    } else {
+      const newAnnouncement: Announcement = {
+        id: uuidv4(),
+        ...formData,
+        createdBy: 'admin',
+        createdAt: new Date().toISOString(),
+      };
+      // Optimistic update
+      setAnnouncements(prev => [newAnnouncement, ...prev]);
+      addToast('Announcement published', 'success');
+      handleCancelEdit();
+      const result = await dataService.create(id, 'announcements', newAnnouncement as any);
+      if (!result.success) {
+        // Rollback
+        addToast('Failed to publish: ' + result.error, 'error');
+        setAnnouncements(prev => prev.filter(a => a.id !== newAnnouncement.id));
+      }
     }
+    submittingRef.current = false;
   }
 
   async function handleDelete(idAnnouncement: string) {
     const id = schoolId || user?.id;
-    if (confirm('Delete this announcement?')) {
-      if (!id) return;
-      try {
-        const announcement = announcements.find(a => a.id === idAnnouncement);
-        await dataService.delete(id, 'announcements', idAnnouncement);
-        
-        if (announcement) {
-          addToRecycleBin(id, {
-            id: `announcement-${Date.now()}`,
-            type: 'announcement',
-            name: announcement.title,
-            data: announcement,
-            deletedAt: new Date().toISOString()
-          });
-        }
-        
-        setAnnouncements(prev => prev.filter(a => a.id !== idAnnouncement));
-        addToast('Announcement moved to recycle bin', 'success');
-      } catch (error) {
-        addToast('Failed to delete', 'error');
-      }
+    if (!id || !confirm('Delete this announcement?')) return;
+    const announcement = announcements.find(a => a.id === idAnnouncement);
+    // Optimistic remove
+    setAnnouncements(prev => prev.filter(a => a.id !== idAnnouncement));
+    addToast('Announcement moved to recycle bin', 'success');
+    if (announcement) {
+      addToRecycleBin(id, { id: `announcement-${Date.now()}`, type: 'announcement', name: announcement.title, data: announcement, deletedAt: new Date().toISOString() });
+    }
+    const result = await dataService.delete(id, 'announcements', idAnnouncement);
+    if (!result.success) {
+      addToast('Failed to delete: ' + result.error, 'error');
+      if (announcement) setAnnouncements(prev => [announcement, ...prev]);
     }
   }
 

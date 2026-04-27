@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Plus, Bus, Trash2, User, MapPin, DollarSign, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { TransportRoute, TransportAssignment } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrency } from '../hooks/useCurrency';

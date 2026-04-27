@@ -16,7 +16,7 @@ import { PaymentMethod } from '@schofy/shared';
 import { useCurrency } from '../hooks/useCurrency';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import DropdownModal from '../components/DropdownModal';
 
 export default function Payroll() {

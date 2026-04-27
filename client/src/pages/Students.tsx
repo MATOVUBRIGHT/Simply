@@ -8,7 +8,7 @@ import { Gender } from '@schofy/shared';
 import ImageModal from '../components/ImageModal';
 import { useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/DataService';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments } from '../utils/classroom';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
