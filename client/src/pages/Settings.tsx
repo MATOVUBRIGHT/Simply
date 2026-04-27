@@ -44,7 +44,7 @@ export default function Settings() {
     busFee: '100',
     libraryFee: '50',
     sportsFee: '75',
-    schoolType: 'both',
+    schoolType: 'nursery_primary',
   });
 
   const currentCurrency = currencies.find(c => c.code === settings.currency) || currencies[0];
@@ -63,80 +63,110 @@ export default function Settings() {
       const settingsObj: Record<string, any> = {};
       stored.forEach(s => { settingsObj[s.key] = s.value; });
       setSettings(prev => ({ ...prev, ...settingsObj }));
+      // Apply currency immediately so all pages use the right symbol
+      if (settingsObj.currency && settingsObj.currency !== localStorage.getItem('schofy_currency')) {
+        localStorage.setItem('schofy_currency', settingsObj.currency);
+        window.dispatchEvent(new Event('currencyChanged'));
+      }
     } catch (error) {
       console.error(error);
     }
   }
 
+  const [isSaving, setIsSaving] = useState(false);
+
   async function handleSave(e?: React.FormEvent | React.MouseEvent) {
     if (e) e.preventDefault();
     const sid = schoolId || user?.id;
-    if (!sid) return;
+    if (!sid || isSaving) return;
 
     if (!settings.schoolName || settings.schoolName.trim() === '') {
       addToast('Please enter your school name', 'error');
       return;
     }
 
+    setIsSaving(true);
     try {
+      localStorage.setItem('schofy_currency', settings.currency || 'USD');
+      window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
+
       const result = await dataService.saveSettings(sid, settings);
       if (!result.success) {
         addToast(result.error || 'Failed to save settings', 'error');
         return;
       }
-      
-      localStorage.setItem('schofy_currency', settings.currency || 'USD');
-      
+
       await autoCreateClasses(sid);
-      window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
       window.dispatchEvent(new CustomEvent('classesUpdated'));
       window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
       addToast('Settings saved', 'success');
     } catch (error: any) {
       console.error('Save settings error:', error);
       addToast(error?.message || 'Failed to save settings', 'error');
+    } finally {
+      setIsSaving(false);
     }
   }
 
   async function autoCreateClasses(sid: string) {
-    const schoolType = settings.schoolType || 'both';
-    
-    const primaryClasses = ['P.1', 'P.2', 'P.3', 'P.4', 'P.5', 'P.6', 'P.7'];
-    const secondaryClasses = ['S.1', 'S.2', 'S.3', 'S.4'];
-    
-    const classesToCreate: { name: string; level: number }[] = [];
-    
-    if (schoolType === 'primary' || schoolType === 'both') {
-      primaryClasses.forEach((name, index) => {
-        classesToCreate.push({ name, level: index + 1 });
-      });
-    }
-    
-    if (schoolType === 'secondary' || schoolType === 'both') {
-      secondaryClasses.forEach((name, index) => {
-        const startLevel = schoolType === 'both' ? 8 + index : index + 1;
-        classesToCreate.push({ name, level: startLevel });
-      });
+    const schoolType = settings.schoolType || 'nursery_primary';
+
+    const CLASS_MAP: Record<string, { name: string; level: number }[]> = {
+      nursery: [
+        { name: 'Baby', level: 1 },
+        { name: 'Nursery', level: 2 },
+        { name: 'Middle', level: 3 },
+        { name: 'Top', level: 4 },
+      ],
+      primary: [
+        { name: 'P.1', level: 1 }, { name: 'P.2', level: 2 }, { name: 'P.3', level: 3 },
+        { name: 'P.4', level: 4 }, { name: 'P.5', level: 5 }, { name: 'P.6', level: 6 },
+        { name: 'P.7', level: 7 },
+      ],
+      secondary: [
+        { name: 'S.1', level: 1 }, { name: 'S.2', level: 2 }, { name: 'S.3', level: 3 },
+        { name: 'S.4', level: 4 }, { name: 'S.5', level: 5 }, { name: 'S.6', level: 6 },
+      ],
+    };
+
+    let classesToCreate: { name: string; level: number }[] = [];
+
+    if (schoolType === 'nursery') {
+      classesToCreate = CLASS_MAP.nursery;
+    } else if (schoolType === 'nursery_primary') {
+      classesToCreate = [
+        ...CLASS_MAP.nursery,
+        ...CLASS_MAP.primary.map(c => ({ ...c, level: c.level + 4 })),
+      ];
+    } else if (schoolType === 'primary') {
+      classesToCreate = CLASS_MAP.primary;
+    } else if (schoolType === 'secondary') {
+      classesToCreate = CLASS_MAP.secondary;
+    } else if (schoolType === 'primary_secondary') {
+      classesToCreate = [
+        ...CLASS_MAP.primary,
+        ...CLASS_MAP.secondary.map(c => ({ ...c, level: c.level + 7 })),
+      ];
+    } else if (schoolType === 'all') {
+      classesToCreate = [
+        ...CLASS_MAP.nursery,
+        ...CLASS_MAP.primary.map(c => ({ ...c, level: c.level + 4 })),
+        ...CLASS_MAP.secondary.map(c => ({ ...c, level: c.level + 11 })),
+      ];
     }
 
     const existingClasses = await dataService.getAll(sid, 'classes');
     const existingNames = new Set(existingClasses.map((c: any) => c.name));
-    
+
     let createdCount = 0;
     for (const cls of classesToCreate) {
       if (!existingNames.has(cls.name)) {
-        await dataService.create(sid, 'classes', {
-          name: cls.name,
-          level: cls.level,
-          capacity: 40,
-        } as any);
+        await dataService.create(sid, 'classes', { name: cls.name, level: cls.level, capacity: 40 } as any);
         createdCount++;
       }
     }
-    
-    if (createdCount > 0) {
-      addToast(`${createdCount} classes auto-created`, 'info');
-    }
+
+    if (createdCount > 0) addToast(`${createdCount} classes auto-created`, 'info');
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) {
@@ -340,7 +370,10 @@ export default function Settings() {
           <h1 className="text-2xl font-bold">Settings</h1>
           <p className="text-slate-500">Configure your school system</p>
         </div>
-        <button onClick={handleSave} className="btn btn-primary"><Save size={18} /> Save Changes</button>
+        <button onClick={handleSave} disabled={isSaving} className="btn btn-primary flex items-center gap-2 disabled:opacity-70">
+          {isSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={18} />}
+          {isSaving ? 'Saving...' : 'Save Changes'}
+        </button>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
@@ -361,9 +394,12 @@ export default function Settings() {
             <div>
               <label className="form-label">School Type</label>
               <select name="schoolType" value={settings.schoolType} onChange={handleChange} className="form-input">
-                <option value="both">Both Primary & Secondary</option>
+                <option value="nursery">Nursery Only</option>
+                <option value="nursery_primary">Nursery &amp; Primary</option>
                 <option value="primary">Primary Only</option>
                 <option value="secondary">Secondary Only</option>
+                <option value="primary_secondary">Primary &amp; Secondary</option>
+                <option value="all">Nursery, Primary &amp; Secondary</option>
               </select>
             </div>
             <div className="md:col-span-2">

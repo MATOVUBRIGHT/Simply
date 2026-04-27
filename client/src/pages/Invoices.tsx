@@ -8,7 +8,7 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
-import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor } from '../utils/feeStructures';
+import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor, generateInvoicesFromStructure } from '../utils/feeStructures';
 import { ClassOption } from '../utils/classroom';
 import DropdownModal from '../components/DropdownModal';
 
@@ -313,12 +313,16 @@ export default function Invoices() {
     }
   }
 
+  const [savingStructure, setSavingStructure] = useState(false);
+
   async function handleCreateStructure() {
     const id = schoolId || user?.id;
     if (!newStructure.name || newStructure.amount <= 0 || !id) {
       addToast('Please enter a name and amount', 'error');
       return;
     }
+    if (savingStructure) return;
+    setSavingStructure(true);
     try {
       const structure = await createFeeStructure(
         id,
@@ -331,19 +335,21 @@ export default function Invoices() {
         newStructure.isRequired,
         newStructure.description
       );
-      setFeeStructures([...feeStructures, structure]);
+      setFeeStructures(prev => [...prev, structure]);
       if (structure.isRequired) {
-        setSelectedStructureIds([...selectedStructureIds, structure.id]);
+        setSelectedStructureIds(prev => [...prev, structure.id]);
       }
       setNewStructure({ name: '', category: FeeCategory.TUITION, amount: 0, isRequired: true, description: '' });
       setShowAddStructureForm(false);
-      addToast('Fee structure created', 'success');
+      addToast('Fee structure saved', 'success');
     } catch (error: any) {
       if (error?.message === 'DUPLICATE_FEE_STRUCTURE') {
         addToast('A fee with this name already exists for this class/term/year', 'error');
       } else {
-        addToast('Failed to create fee structure', 'error');
+        addToast(error?.message || 'Failed to save fee structure', 'error');
       }
+    } finally {
+      setSavingStructure(false);
     }
   }
 
@@ -352,8 +358,8 @@ export default function Invoices() {
     if (!id) return;
     try {
       await deleteFeeStructure(id, idStructure);
-      setFeeStructures(feeStructures.filter(s => s.id !== id));
-      setSelectedStructureIds(selectedStructureIds.filter(sid => sid !== id));
+      setFeeStructures(prev => prev.filter(s => s.id !== idStructure));
+      setSelectedStructureIds(prev => prev.filter(sid => sid !== idStructure));
       addToast('Fee structure deleted', 'success');
     } catch (error) {
       addToast('Failed to delete fee structure', 'error');
@@ -365,71 +371,57 @@ export default function Invoices() {
       addToast('Please select at least one fee structure', 'error');
       return;
     }
+    const id = schoolId || user?.id;
+    if (!id) return;
     try {
-      const studentsInClass = students.filter(s => s.classId === selectedClassId);
-      const classBursaries = bursaries.filter(b => b.term === selectedTerm && b.year === selectedYear);
-      const classDiscounts = discounts.filter(d => d.classId === selectedClassId && d.term === selectedTerm && d.year === selectedYear);
-      
+      const isUUID = (v: any) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+      const studentsInClass = students.filter(s => s.classId === selectedClassId && isUUID(s.id));
+      const classBursaries = bursaries.filter(b => b.term === selectedTerm && String(b.year) === String(selectedYear));
+      const classDiscounts = discounts.filter(d => d.classId === selectedClassId && d.term === selectedTerm && String(d.year) === String(selectedYear));
       const structuresToApply = feeStructures.filter(s => selectedStructureIds.includes(s.id));
       const baseTotal = structuresToApply.reduce((sum, s) => sum + s.amount, 0);
       const discount = classDiscounts[0];
-      
+      const dueDate = new Date(); dueDate.setMonth(dueDate.getMonth() + 3);
+      const dueDateStr = dueDate.toISOString().split('T')[0];
+      const yearInt = parseInt(selectedYear);
+      const classIdVal = isUUID(selectedClassId) ? selectedClassId : null;
       let invoiceCount = 0;
       const now = new Date().toISOString();
-      
+
       for (const student of studentsInClass) {
         const studentBursary = classBursaries.find(b => b.studentId === student.id);
-
-        // Bursary student: invoice only the bursary amount, no other fees
         if (studentBursary) {
-          const id = schoolId || user?.id;
-          if (id) {
-            await dataService.create(id, 'fees', {
-              id: uuidv4(),
-              studentId: student.id,
-              classId: selectedClassId,
-              description: `Bursary Invoice (${structuresToApply.map(s => s.name).join(', ')})`,
-              amount: studentBursary.amount,
-              term: selectedTerm,
-              year: selectedYear,
-              createdAt: now,
-            } as any);
-            invoiceCount++;
-          }
+          await dataService.create(id, 'fees', {
+            id: uuidv4(), studentId: student.id, classId: classIdVal,
+            description: 'Bursary Invoice', amount: studentBursary.amount,
+            paidAmount: 0, dueDate: dueDateStr, term: selectedTerm,
+            year: yearInt, status: 'pending', createdAt: now,
+          } as any);
+          invoiceCount++;
           continue;
         }
 
-        // Normal student: apply base total with optional class discount
         let invoiceAmount = baseTotal;
-        let description = structuresToApply.map(s => s.name).join(', ');
-
+        let description = structuresToApply.map(s => s.name || s.description || 'Fee').join(', ') || 'School Fees';
         if (discount) {
           if (discount.type === 'percentage') {
-            const discountAmount = (invoiceAmount * discount.amount) / 100;
-            invoiceAmount = Math.max(0, invoiceAmount - discountAmount);
-            description += ` (Discount: ${discount.amount}%)`;
+            invoiceAmount = Math.max(0, invoiceAmount - (invoiceAmount * discount.amount) / 100);
+            description += ` (${discount.amount}% off)`;
           } else {
             invoiceAmount = Math.max(0, invoiceAmount - discount.amount);
-            description += ` (Discount: ${formatMoney(discount.amount)})`;
           }
         }
-
-        const id = schoolId || user?.id;
-        if (invoiceAmount > 0 && id) {
+        if (invoiceAmount > 0) {
           await dataService.create(id, 'fees', {
-            id: uuidv4(),
-            studentId: student.id,
-            classId: selectedClassId,
-            description,
-            amount: invoiceAmount,
-            term: selectedTerm,
-            year: selectedYear,
-            createdAt: now,
+            id: uuidv4(), studentId: student.id, classId: classIdVal,
+            description, amount: invoiceAmount, paidAmount: 0,
+            dueDate: dueDateStr, term: selectedTerm, year: yearInt,
+            status: 'pending', createdAt: now,
           } as any);
           invoiceCount++;
         }
       }
-      
+
       addToast(`Created ${invoiceCount} invoices for ${studentsInClass.length} students`, 'success');
       setShowCreateModal(false);
       setShowStructureModal(false);
@@ -442,40 +434,74 @@ export default function Invoices() {
   }
 
   async function handleBulkInvoiceWithData(description: string, amount: number, term: string) {
+    // Redirect to fee structures instead of manual entry
+    setShowCreateModal(false);
+    setShowStructureModal(true);
+  }
+
+  // Invoice a single student using their class fee structures
+  async function handleInvoiceStudent(studentId: string, classId: string) {
     const id = schoolId || user?.id;
-    if (selectedStudents.length === 0 || !id) {
-      addToast('Please select at least one student', 'error');
+    if (!id || !classId) { addToast('Student has no class assigned', 'error'); return; }
+    const structures = await getFeeStructuresByClass(id, classId, selectedTerm, selectedYear);
+    if (structures.length === 0) {
+      // No fee structures — open the structure modal for this class
+      setSelectedClassId(classId);
+      setShowStructureModal(true);
+      addToast('No fee structures found. Please set up fees for this class first.', 'info');
       return;
     }
-
     try {
+      const [allBursaries, allDiscounts] = await Promise.all([
+        dataService.getAll(id, 'bursaries'),
+        dataService.getAll(id, 'discounts'),
+      ]);
+      const bursary = allBursaries.find((b: any) => b.studentId === studentId && b.term === selectedTerm && b.year === selectedYear);
+      const discount = allDiscounts.find((d: any) => d.classId === classId && d.term === selectedTerm && d.year === selectedYear);
+      const applicable = structures.filter(s => s.isRequired || s.category === 'tuition' || s.category === 'boarding');
+      const baseTotal = applicable.reduce((sum, s) => sum + s.amount, 0);
       const now = new Date().toISOString();
-      const year = new Date().getFullYear().toString();
-      const newFees: Fee[] = [];
-
-      for (const studentId of selectedStudents) {
-        const newFee: Fee = {
-          id: uuidv4(),
-          studentId,
-          description,
-          amount,
-          term,
-          year,
-          createdAt: now,
-        };
-        newFees.push(newFee);
+      if (bursary) {
+        await dataService.create(id, 'fees', { id: uuidv4(), studentId, classId, description: `Bursary Invoice`, amount: bursary.amount, term: selectedTerm, year: selectedYear, createdAt: now } as any);
+      } else {
+        for (const structure of applicable) {
+          let amount = structure.amount;
+          let description = structure.name;
+          if (discount) {
+            if (discount.type === 'percentage') { amount = Math.max(0, amount - (amount * discount.amount) / 100); description += ` (${discount.amount}% off)`; }
+            else { const share = baseTotal > 0 ? structure.amount / baseTotal : 0; amount = Math.max(0, amount - discount.amount * share); }
+          }
+          if (amount > 0) await dataService.create(id, 'fees', { id: uuidv4(), studentId, classId, description, amount, term: selectedTerm, year: selectedYear, createdAt: now } as any);
+        }
       }
-
-      for (const newFee of newFees) {
-        await dataService.create(id, 'fees', newFee as any);
-      }
-      addToast(`Created ${newFees.length} invoices`, 'success');
-      setShowCreateModal(false);
-      setSelectedStudents([]);
+      addToast('Student invoiced successfully', 'success');
       setRefreshKey(k => k + 1);
-    } catch (error) {
-      addToast('Failed to create invoices', 'error');
-    }
+    } catch { addToast('Failed to invoice student', 'error'); }
+  }
+
+  // Bulk invoice all classes that have fee structures
+  async function handleBulkInvoiceAllClasses() {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    const submitting = (window as any).__bulkInvoicing;
+    if (submitting) return;
+    (window as any).__bulkInvoicing = true;
+    try {
+      let totalInvoiced = 0;
+      let classesProcessed = 0;
+      for (const cls of classes) {
+        const { fees: created } = await generateInvoicesFromStructure(id, cls.id, selectedTerm, selectedYear);
+        if (created.length > 0) { totalInvoiced += created.length; classesProcessed++; }
+      }
+      if (totalInvoiced === 0) {
+        addToast('No fee structures found. Set up fee structures per class first.', 'info');
+        setShowStructureModal(true);
+      } else {
+        addToast(`Invoiced ${totalInvoiced} fees across ${classesProcessed} classes`, 'success');
+        setRefreshKey(k => k + 1);
+      }
+    } catch { addToast('Bulk invoice failed', 'error'); }
+    finally { (window as any).__bulkInvoicing = false; }
   }
 
   async function markAsPaid(invoiceId: string) {
@@ -764,6 +790,14 @@ export default function Invoices() {
           <button onClick={() => setShowDiscountModal(true)} className="btn btn-secondary">
             <Percent size={16} />
             <span className="hidden sm:inline">Discount</span>
+          </button>
+          <button
+            onClick={handleBulkInvoiceAllClasses}
+            className="btn btn-secondary"
+            title="Invoice all students in all classes using their fee structures"
+          >
+            <Users size={16} />
+            <span className="hidden sm:inline">Invoice All Classes</span>
           </button>
           <button 
             onClick={() => setShowStructureModal(true)}
@@ -1125,10 +1159,7 @@ export default function Invoices() {
                     </td>
                     <td>
                       <button
-                        onClick={() => {
-                          setSelectedStudents([student.id]);
-                          setShowCreateModal(true);
-                        }}
+                        onClick={() => handleInvoiceStudent(student.id, student.classId || '')}
                         className="btn btn-secondary text-sm py-1.5"
                       >
                         <Plus size={14} /> Invoice
@@ -1167,8 +1198,8 @@ export default function Invoices() {
                           <FileText size={32} className="text-violet-400" />
                         </div>
                         <p className="text-slate-500 font-medium">No invoices found</p>
-                        <button onClick={() => setShowCreateModal(true)} className="text-primary-500 hover:text-primary-600 text-sm">
-                          Create bulk invoice
+                        <button onClick={() => setShowStructureModal(true)} className="text-primary-500 hover:text-primary-600 text-sm">
+                          Generate invoices from fee structures
                         </button>
                       </div>
                     </td>
@@ -1579,8 +1610,9 @@ export default function Invoices() {
                       />
                       <span className="text-sm">Required</span>
                     </label>
-                    <button onClick={handleCreateStructure} className="btn btn-primary flex-1">
-                      <Save size={16} /> Save
+                    <button onClick={handleCreateStructure} disabled={savingStructure} className="btn btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-70">
+                      {savingStructure ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={16} />}
+                      {savingStructure ? 'Saving...' : 'Save'}
                     </button>
                     <button onClick={() => { setShowAddStructureForm(false); setNewStructure({ name: '', category: FeeCategory.TUITION, amount: 0, isRequired: true, description: '' }); }} className="btn btn-secondary">
                       Cancel

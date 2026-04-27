@@ -4,6 +4,7 @@ import { DashboardStats } from '@schofy/shared';
 import { useCurrency } from '../hooks/useCurrency';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useTableData } from '../lib/store';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { 
   ResponsiveContainer,
@@ -26,153 +27,68 @@ export default function Dashboard() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
   const { formatMoney } = useCurrency();
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
-  const [otherData, setOtherData] = useState<{ staff: any[]; payments: any[]; fees: any[]; attendance: any[] }>({ staff: [], payments: [], fees: [], attendance: [] });
   const [termSettings, setTermSettings] = useState<Record<string, string>>({});
 
+  const sid = schoolId || user?.id || '';
   const activeStudents = useActiveStudents();
+  const { data: announcements } = useTableData(sid, 'announcements');
+  const { data: staff } = useTableData(sid, 'staff');
+  const { data: payments } = useTableData(sid, 'payments');
+  const { data: fees } = useTableData(sid, 'fees');
+  const { data: attendance } = useTableData(sid, 'attendance');
+  const { data: settingsRows } = useTableData(sid, 'settings');
 
   useEffect(() => {
-    if (user?.id || schoolId) {
-      loadAnnouncements();
-      loadOtherData();
-      loadTermSettings();
-    }
-  }, [user, schoolId]);
+    const obj: Record<string, string> = {};
+    settingsRows.forEach((s: any) => { obj[s.key] = s.value; });
+    setTermSettings(obj);
+  }, [settingsRows]);
 
-  useEffect(() => {
-    const handleDataRefresh = () => {
-      loadAnnouncements();
-      loadOtherData();
-    };
-    
-    window.addEventListener('studentsUpdated', handleDataRefresh);
-    window.addEventListener('staffUpdated', handleDataRefresh);
-    window.addEventListener('paymentsUpdated', handleDataRefresh);
-    window.addEventListener('feesUpdated', handleDataRefresh);
-    window.addEventListener('attendanceUpdated', handleDataRefresh);
-    window.addEventListener('announcementsUpdated', handleDataRefresh);
-    window.addEventListener('dataRefresh', handleDataRefresh);
-    
-    return () => {
-      window.removeEventListener('studentsUpdated', handleDataRefresh);
-      window.removeEventListener('staffUpdated', handleDataRefresh);
-      window.removeEventListener('paymentsUpdated', handleDataRefresh);
-      window.removeEventListener('feesUpdated', handleDataRefresh);
-      window.removeEventListener('attendanceUpdated', handleDataRefresh);
-      window.removeEventListener('announcementsUpdated', handleDataRefresh);
-      window.removeEventListener('dataRefresh', handleDataRefresh);
-    };
-  }, []);
-
-  async function loadAnnouncements() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const data = await dataService.getAll(id, 'announcements');
-      setAnnouncements(data);
-    } catch (error) {
-      console.error('Failed to load announcements:', error);
-    }
-  }
-
-  async function loadOtherData() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const [staff, payments, fees, attendance] = await Promise.all([
-        dataService.getAll(id, 'staff'),
-        dataService.getAll(id, 'payments'),
-        dataService.getAll(id, 'fees'),
-        dataService.getAll(id, 'attendance')
-      ]);
-      setOtherData({ staff, payments, fees, attendance });
-    } catch (error) {
-      console.error('Failed to load data:', error);
-    }
-  }
-
-  async function loadTermSettings() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const stored = await dataService.getAll(id, 'settings');
-      const obj: Record<string, string> = {};
-      stored.forEach((s: any) => { obj[s.key] = s.value; });
-      setTermSettings(obj);
-    } catch {}
-  }
-
-  // Also reload term settings when settings are saved
-  useEffect(() => {
-    const onSettingsUpdated = () => loadTermSettings();
-    window.addEventListener('settingsUpdated', onSettingsUpdated);
-    window.addEventListener('dataRefresh', onSettingsUpdated);
-    return () => {
-      window.removeEventListener('settingsUpdated', onSettingsUpdated);
-      window.removeEventListener('dataRefresh', onSettingsUpdated);
-    };
-  }, [user, schoolId]);
+  // Also reload term settings when settings are saved — now handled by useTableData
 
   // Build all calendar events from every data source
   const allCalendarEvents = useMemo(() => {
     type CalEvent = { date: Date; label: string; type: 'term-start' | 'term-end' | 'announcement' | 'exam' | 'payment' | 'salary' };
     const events: CalEvent[] = [];
 
-    // Term start & end dates from settings
     for (const t of ['1', '2', '3']) {
       const startRaw = termSettings[`term${t}Start`];
       const endRaw = termSettings[`term${t}End`];
-      if (startRaw) {
-        const d = new Date(startRaw);
-        if (!isNaN(d.getTime())) events.push({ date: d, label: `Term ${t} Start`, type: 'term-start' });
-      }
-      if (endRaw) {
-        const d = new Date(endRaw);
-        if (!isNaN(d.getTime())) events.push({ date: d, label: `Term ${t} End`, type: 'term-end' });
-      }
+      if (startRaw) { const d = new Date(startRaw); if (!isNaN(d.getTime())) events.push({ date: d, label: `Term ${t} Start`, type: 'term-start' }); }
+      if (endRaw) { const d = new Date(endRaw); if (!isNaN(d.getTime())) events.push({ date: d, label: `Term ${t} End`, type: 'term-end' }); }
     }
 
-    // Announcements
     for (const a of announcements) {
       const d = new Date(a.createdAt);
       if (!isNaN(d.getTime())) events.push({ date: d, label: a.title || 'Announcement', type: 'announcement' });
     }
 
-    // Fee payment dates (unique months with fees)
     const feeMonths = new Set<string>();
-    for (const f of otherData.fees) {
+    for (const f of fees) {
       if (f.createdAt) {
         const d = new Date(f.createdAt);
         if (!isNaN(d.getTime())) {
           const key = `${d.getFullYear()}-${d.getMonth()}`;
-          if (!feeMonths.has(key)) {
-            feeMonths.add(key);
-            events.push({ date: d, label: `Fees Due (Term ${f.term || ''})`, type: 'payment' });
-          }
+          if (!feeMonths.has(key)) { feeMonths.add(key); events.push({ date: d, label: `Fees Due (Term ${f.term || ''})`, type: 'payment' }); }
         }
       }
     }
 
-    // Salary payment dates
     const salaryMonths = new Set<string>();
-    for (const p of otherData.payments) {
+    for (const p of payments) {
       if (p.date) {
         const d = new Date(p.date);
         if (!isNaN(d.getTime())) {
           const key = `${d.getFullYear()}-${d.getMonth()}`;
-          if (!salaryMonths.has(key)) {
-            salaryMonths.add(key);
-            events.push({ date: d, label: 'Payment Recorded', type: 'salary' });
-          }
+          if (!salaryMonths.has(key)) { salaryMonths.add(key); events.push({ date: d, label: 'Payment Recorded', type: 'salary' }); }
         }
       }
     }
 
     return events;
-  }, [termSettings, announcements, otherData.fees, otherData.payments]);
+  }, [termSettings, announcements, fees, payments]);
 
   // Derive term end dates from settings
   const termEndDates = useMemo(() => {
@@ -187,14 +103,14 @@ export default function Dashboard() {
       .sort((a, b) => a.date.getTime() - b.date.getTime())[0] ?? null;
   }, [termEndDates]);
 
-  const activeStaff = otherData.staff.filter(s => s.status === 'active').length;
-  const feesCollected = otherData.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-  const totalFees = otherData.fees.reduce((sum, f) => sum + (f.amount || 0), 0);
+  const activeStaff = staff.filter(s => s.status === 'active').length;
+  const feesCollected = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const totalFees = fees.reduce((sum, f) => sum + (f.amount || 0), 0);
   const feesPending = Math.max(0, totalFees - feesCollected);
   const totalFinanceAmount = feesCollected + feesPending;
 
   const today = new Date().toISOString().split('T')[0];
-  const todayAttendance = otherData.attendance.filter(a => a.date === today);
+  const todayAttendance = attendance.filter(a => a.date === today);
   const present = todayAttendance.filter(a => a.status === 'present').length;
   const absent = todayAttendance.filter(a => a.status === 'absent').length;
   const late = todayAttendance.filter(a => a.status === 'late').length;
@@ -215,12 +131,12 @@ export default function Dashboard() {
   const enrollmentDataArray = useMemo(() => {
     const currentTerm = '1';
     const currentYear = new Date().getFullYear().toString();
-    const enrollmentTerms = otherData.fees.reduce((acc, fee) => {
+    const enrollmentTerms = fees.reduce((acc, fee) => {
       const key = `${fee.term}/${fee.year}`;
       if (!acc[key]) {
         acc[key] = { students: 0, staff: activeStaff };
       }
-      const relatedFees = otherData.fees.filter(f => f.term === fee.term && f.year === fee.year);
+      const relatedFees = fees.filter(f => f.term === fee.term && f.year === fee.year);
       acc[key].students = Math.max(acc[key].students, relatedFees.length * 2);
       return acc;
     }, {} as Record<string, { students: number; staff: number }>);
@@ -235,18 +151,18 @@ export default function Dashboard() {
       data.push({ term: `${currentTerm}/${currentYear}`, students, staff: activeStaff });
     }
     return data;
-  }, [otherData.fees, activeStaff, students]);
+  }, [fees, activeStaff, students]);
 
   const feeCollectionArray = useMemo(() => {
     const currentTerm = '1';
     const currentYear = new Date().getFullYear().toString();
-    const collectionByTerm = otherData.fees.reduce((acc, fee) => {
+    const collectionByTerm = fees.reduce((acc, fee) => {
       const key = `${fee.term}/${fee.year}`;
       if (!acc[key]) {
         acc[key] = { total: 0, collected: 0 };
       }
       acc[key].total += fee.amount || 0;
-      const relatedPayments = otherData.payments.filter(p => p.feeId === fee.id);
+      const relatedPayments = payments.filter(p => p.feeId === fee.id);
       acc[key].collected += relatedPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
       return acc;
     }, {} as Record<string, { total: number; collected: number }>);
@@ -270,7 +186,7 @@ export default function Dashboard() {
       });
     }
     return data;
-  }, [otherData.fees, otherData.payments, totalFees, feesCollected]);
+  }, [fees, payments, totalFees, feesCollected]);
 
   const growthStatsValue = useMemo(() => {
     const collectionRate = totalFees > 0 ? Math.round((feesCollected / totalFees) * 100) : 0;

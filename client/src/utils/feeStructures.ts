@@ -16,7 +16,7 @@ export async function getFeeStructuresByClass(
   return all.filter((s: FeeStructure) => {
     if (s.classId !== classId) return false;
     if (term && s.term !== term) return false;
-    if (year && s.year !== year) return false;
+    if (year && String(s.year) !== String(year)) return false;
     return true;
   });
 }
@@ -29,7 +29,7 @@ export async function getAllFeeStructures(
   const all = await dataService.getAll(userId, 'feeStructures');
   return all.filter((s: FeeStructure) => {
     if (term && s.term !== term) return false;
-    if (year && s.year !== year) return false;
+    if (year && String(s.year) !== String(year)) return false;
     return true;
   });
 }
@@ -45,17 +45,19 @@ export async function createFeeStructure(
   isRequired = true,
   description?: string
 ): Promise<FeeStructure> {
+  // Validate classId is a UUID — fee_structures.class_id is UUID FK
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(classId);
+  if (!isUUID) throw new Error('Invalid class selected. Please select a valid class.');
+
   const existing = await dataService.getAll(userId, 'feeStructures');
   const duplicate = existing.find((s: FeeStructure) =>
     s.classId === classId &&
     s.name?.toLowerCase() === name?.toLowerCase() &&
     s.category === category &&
     s.term === term &&
-    s.year === year
+    String(s.year) === String(year)
   );
-  if (duplicate) {
-    throw new Error('DUPLICATE_FEE_STRUCTURE');
-  }
+  if (duplicate) throw new Error('DUPLICATE_FEE_STRUCTURE');
 
   const structure: FeeStructure = {
     id: uuidv4(),
@@ -65,12 +67,12 @@ export async function createFeeStructure(
     amount,
     isRequired,
     term,
-    year,
+    year: parseInt(year) as any, // Supabase year column is INTEGER
     description,
     createdAt: new Date().toISOString(),
   };
   await dataService.create(userId, 'feeStructures', structure as any);
-  return structure;
+  return { ...structure, year: year as any }; // return string year for local state
 }
 
 export async function updateFeeStructure(
@@ -148,74 +150,86 @@ export async function generateInvoicesFromStructure(
     dataService.getAll(userId, 'discounts'),
   ]);
 
+  const isUUID = (v: any) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
   const active = students.filter(
-    (s: any) =>
-      s.classId === classId &&
-      s.status !== 'completed' &&
-      s.status !== 'graduated'
+    (s: any) => s.classId === classId && s.status !== 'completed' && s.status !== 'graduated'
   );
   if (active.length === 0) return { fees: [], studentsCount: 0 };
 
   const termBursaries = allBursaries.filter(
-    (b: any) => b.term === term && b.year === year
+    (b: any) => b.term === term && String(b.year) === String(year)
   );
   const classDiscount = allDiscounts.find(
-    (d: any) => d.classId === classId && d.term === term && d.year === year
+    (d: any) => d.classId === classId && d.term === term && String(d.year) === String(year)
   );
   const applicable = structures.filter(
-    s =>
-      s.isRequired ||
-      s.category === FeeCategory.TUITION ||
-      s.category === FeeCategory.BOARDING
+    s => s.isRequired || s.category === FeeCategory.TUITION || s.category === FeeCategory.BOARDING
   );
+  if (applicable.length === 0) return { fees: [], studentsCount: 0 };
+
   const baseTotal = applicable.reduce((sum, s) => sum + s.amount, 0);
   const now = new Date().toISOString();
+  // Default due date: end of current term (3 months from now)
+  const dueDate = new Date();
+  dueDate.setMonth(dueDate.getMonth() + 3);
+  const dueDateStr = dueDate.toISOString().split('T')[0];
+  const yearInt = parseInt(year);
   const fees: Fee[] = [];
 
   for (const student of active) {
+    if (!isUUID(student.id)) continue; // skip non-UUID student ids
     const bursary = termBursaries.find((b: any) => b.studentId === student.id);
 
     if (bursary) {
       fees.push({
         id: uuidv4(),
         studentId: student.id,
-        classId,
-        description: `Bursary Invoice (${applicable.map(s => s.name).join(', ')})`,
+        classId: isUUID(classId) ? classId : undefined as any,
+        description: `Bursary Invoice`,
         amount: bursary.amount,
+        paidAmount: 0,
+        dueDate: dueDateStr,
         term,
-        year,
+        year: yearInt as any,
+        status: 'pending',
         createdAt: now,
-      });
+      } as any);
       continue;
     }
 
     for (const structure of applicable) {
       let amount = structure.amount;
-      let description = structure.name;
+      let description = structure.name || structure.description || 'Fee';
       if (classDiscount) {
         if (classDiscount.type === 'percentage') {
           amount = Math.max(0, amount - (amount * classDiscount.amount) / 100);
-          description += ` (Discount: ${classDiscount.amount}%)`;
+          description += ` (${classDiscount.amount}% off)`;
         } else {
           const share = baseTotal > 0 ? structure.amount / baseTotal : 0;
           amount = Math.max(0, amount - classDiscount.amount * share);
         }
       }
+      if (amount <= 0) continue;
       fees.push({
         id: uuidv4(),
         studentId: student.id,
-        classId,
+        classId: isUUID(classId) ? classId : undefined as any,
         description,
         amount,
+        paidAmount: 0,
+        dueDate: dueDateStr,
         term,
-        year,
+        year: yearInt as any,
+        status: 'pending',
         createdAt: now,
-      });
+      } as any);
     }
   }
 
   for (const fee of fees) {
-    await dataService.create(userId, 'fees', fee as any);
+    const result = await dataService.create(userId, 'fees', fee as any);
+    if (!result.success) console.error('[generateInvoices] fee create failed:', result.error);
   }
   return { fees, studentsCount: active.length };
 }

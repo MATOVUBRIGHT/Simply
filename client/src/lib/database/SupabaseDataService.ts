@@ -183,11 +183,39 @@ function recycleBinType(t: string): string | null {
     transportRoutes:'transport' } as any)[t] || null;
 }
 
+// ── In-memory cache ───────────────────────────────────────────────────────────
+const CACHE_TTL = 60_000; // 1 minute
+interface CacheEntry { data: any[]; ts: number; }
+const memCache = new Map<string, CacheEntry>();
+const inflight = new Map<string, Promise<any[]>>();
+
+function cacheKey(sid: string, table: string) { return `${sid}:${table}`; }
+
+function cacheGet(sid: string, table: string): any[] | null {
+  const e = memCache.get(cacheKey(sid, table));
+  if (!e) return null;
+  if (Date.now() - e.ts > CACHE_TTL) { memCache.delete(cacheKey(sid, table)); return null; }
+  return e.data;
+}
+
+function cacheSet(sid: string, table: string, data: any[]) {
+  memCache.set(cacheKey(sid, table), { data, ts: Date.now() });
+}
+
+function cacheDel(sid: string, table: string) {
+  memCache.delete(cacheKey(sid, table));
+}
+
 function notifyUI(table: string) {
   const detail = { table };
   window.dispatchEvent(new CustomEvent(`${table}Updated`, { detail }));
   window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail }));
   window.dispatchEvent(new CustomEvent('dataRefresh', { detail }));
+  // Invalidate store so all useTableData hooks re-render immediately
+  const sid = localStorage.getItem('schofy_current_school_id') || '';
+  if (sid) {
+    import('./store').then(({ store }) => store.onRemoteChange(sid, table)).catch(() => {});
+  }
   try {
     const qc = getQueryClient();
     void qc.invalidateQueries({ predicate: q => String(q.queryKey[0] ?? '').includes(table) });
@@ -223,13 +251,35 @@ class SupabaseDataService {
     if (!this.ok) return [];
     const sid = this.sid(userId);
     const rt = getSupabaseTable(tableName);
-    try {
-      let q = this.db.from(rt).select('*');
-      q = applyScope(q, rt, sid);
-      const { data, error } = await q;
-      if (error) { console.error(`[getAll] ${rt}:`, error.message); return []; }
-      return (data || []).map(mapToLocal);
-    } catch (e: any) { console.error(`[getAll] ${rt}:`, e.message); return []; }
+
+    // Return cached data immediately
+    const cached = cacheGet(sid, tableName);
+    if (cached) return cached;
+
+    // Deduplicate concurrent requests for the same table
+    const key = cacheKey(sid, tableName);
+    const existing = inflight.get(key);
+    if (existing) return existing;
+
+    const req = (async () => {
+      try {
+        let q = this.db.from(rt).select('*');
+        q = applyScope(q, rt, sid);
+        const { data, error } = await q;
+        if (error) { console.error(`[getAll] ${rt}:`, error.message); return []; }
+        const result = (data || []).map(mapToLocal);
+        cacheSet(sid, tableName, result);
+        return result;
+      } catch (e: any) {
+        console.error(`[getAll] ${rt}:`, e.message);
+        return [];
+      } finally {
+        inflight.delete(key);
+      }
+    })();
+
+    inflight.set(key, req);
+    return req;
   }
 
   async get(userId: string, tableName: string, id: string): Promise<any | null> {
@@ -290,6 +340,7 @@ class SupabaseDataService {
         console.error(`[create] ${rt}:`, error.code, error.message, error.details, error.hint);
         return { success: false, syncedRemotely: false, savedLocally: false, error: `${error.message} — ${error.details}` };
       }
+      cacheDel(sid, tableName);
       notifyUI(tableName);
       return { success: true, syncedRemotely: true, savedLocally: true, record };
     } catch (e: any) {
@@ -300,6 +351,7 @@ class SupabaseDataService {
 
   async update<T>(userId: string, tableName: string, id: string, data: Partial<T>): Promise<SyncResult> {
     if (!this.ok) return { success: false, syncedRemotely: false, savedLocally: false, error: 'Supabase not configured.' };
+    const sid = this.sid(userId);
     const rt = getSupabaseTable(tableName);
     const record = { ...data, updatedAt: new Date().toISOString() };
     const payload = toRemote(record, rt);
@@ -312,6 +364,7 @@ class SupabaseDataService {
         console.error(`[update] ${rt}:`, error.code, error.message, error.details, error.hint);
         return { success: false, syncedRemotely: false, savedLocally: false, error: `${error.message} — ${error.details}` };
       }
+      cacheDel(sid, tableName);
       notifyUI(tableName);
       return { success: true, syncedRemotely: true, savedLocally: true, record };
     } catch (e: any) {
@@ -340,6 +393,7 @@ class SupabaseDataService {
         console.error(`[delete] ${rt}:`, error.message);
         return { success: false, syncedRemotely: false, savedLocally: false, error: error.message };
       }
+      cacheDel(sid, tableName);
       notifyUI(tableName);
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
@@ -353,6 +407,7 @@ class SupabaseDataService {
     try {
       const { error } = await this.db.from(rt).delete().in('id', ids);
       if (error) return { success: false, syncedRemotely: false, savedLocally: false, error: error.message };
+      cacheDel(this.sid(userId), tableName);
       notifyUI(tableName);
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
@@ -371,6 +426,7 @@ class SupabaseDataService {
           { onConflict: 'school_id,key' }
         );
       }
+      cacheDel(sid, 'settings');
       notifyUI('settings');
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {

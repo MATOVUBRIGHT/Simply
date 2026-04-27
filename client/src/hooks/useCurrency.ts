@@ -1,65 +1,79 @@
 import { useState, useEffect } from 'react';
 
-const currencies = {
-  USD: { symbol: '$', code: 'USD' },
-  UGX: { symbol: 'USh', code: 'UGX' },
+export const currencies: Record<string, { symbol: string; code: string; name: string }> = {
+  USD: { symbol: '$',   code: 'USD', name: 'US Dollar' },
+  UGX: { symbol: 'USh', code: 'UGX', name: 'Ugandan Shilling' },
+  KES: { symbol: 'KSh', code: 'KES', name: 'Kenyan Shilling' },
+  TZS: { symbol: 'TSh', code: 'TZS', name: 'Tanzanian Shilling' },
+  GHS: { symbol: 'GH₵', code: 'GHS', name: 'Ghanaian Cedi' },
+  NGN: { symbol: '₦',   code: 'NGN', name: 'Nigerian Naira' },
+  ZAR: { symbol: 'R',   code: 'ZAR', name: 'South African Rand' },
+  GBP: { symbol: '£',   code: 'GBP', name: 'British Pound' },
+  EUR: { symbol: '€',   code: 'EUR', name: 'Euro' },
 };
 
 export type CurrencyCode = keyof typeof currencies;
 
-export interface Currency {
-  symbol: string;
-  code: string;
-}
-
 const CURRENCY_KEY = 'schofy_currency';
 
+function getCurrencyFromStorage(): { symbol: string; code: string; name: string } {
+  const stored = localStorage.getItem(CURRENCY_KEY);
+  return (stored && currencies[stored]) ? currencies[stored] : currencies.USD;
+}
+
 export function useCurrency() {
-  const [currency, setCurrencyState] = useState<Currency>(() => {
-    const stored = localStorage.getItem(CURRENCY_KEY);
-    if (stored && currencies[stored as CurrencyCode]) {
-      return currencies[stored as CurrencyCode];
-    }
-    return currencies.USD;
-  });
+  const [currency, setCurrencyState] = useState(getCurrencyFromStorage);
 
   useEffect(() => {
-    const handleStorageChange = () => {
-      const stored = localStorage.getItem(CURRENCY_KEY);
-      if (stored && currencies[stored as CurrencyCode]) {
-        setCurrencyState(currencies[stored as CurrencyCode]);
-      }
-    };
+    function sync() {
+      setCurrencyState(getCurrencyFromStorage());
+    }
 
-    const handleSettingsUpdate = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      if (customEvent.detail?.currency && currencies[customEvent.detail.currency as CurrencyCode]) {
-        setCurrencyState(currencies[customEvent.detail.currency as CurrencyCode]);
+    // Listen for local changes
+    window.addEventListener('storage', sync);
+    window.addEventListener('currencyChanged', sync);
+
+    // Listen for settings saved (includes currency key from Supabase)
+    function onSettings(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      const code = detail?.currency || detail?.value;
+      if (code && currencies[code]) {
+        localStorage.setItem(CURRENCY_KEY, code);
+        setCurrencyState(currencies[code]);
       }
-    };
-    
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('currencyChanged', handleStorageChange);
-    window.addEventListener('settingsUpdated', handleSettingsUpdate);
-    
+    }
+    window.addEventListener('settingsUpdated', onSettings);
+
+    // Listen for realtime settings changes from other devices
+    function onDataRefresh(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.table === 'settings') {
+        // Re-read from localStorage (Settings page updates it on save)
+        sync();
+      }
+    }
+    window.addEventListener('schofyDataRefresh', onDataRefresh);
+
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('currencyChanged', handleStorageChange);
-      window.removeEventListener('settingsUpdated', handleSettingsUpdate);
+      window.removeEventListener('storage', sync);
+      window.removeEventListener('currencyChanged', sync);
+      window.removeEventListener('settingsUpdated', onSettings);
+      window.removeEventListener('schofyDataRefresh', onDataRefresh);
     };
   }, []);
 
-  function formatMoney(amount: number): string {
-    return `${currency.symbol}${amount.toLocaleString()}`;
+  function formatMoney(amount: number | undefined | null): string {
+    const n = typeof amount === 'number' ? amount : 0;
+    return `${currency.symbol}${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
   }
 
   function setCurrency(code: CurrencyCode) {
-    const newCurrency = currencies[code];
-    if (newCurrency) {
-      setCurrencyState(newCurrency);
-      localStorage.setItem(CURRENCY_KEY, code);
-      window.dispatchEvent(new Event('currencyChanged'));
-    }
+    const c = currencies[code];
+    if (!c) return;
+    localStorage.setItem(CURRENCY_KEY, code);
+    setCurrencyState(c);
+    window.dispatchEvent(new Event('currencyChanged'));
+    window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { currency: code } }));
   }
 
   return { currency, setCurrency, formatMoney };

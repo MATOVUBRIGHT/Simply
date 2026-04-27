@@ -1,130 +1,90 @@
-import React, { createContext, useContext, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { userDBManager } from '../lib/database/UserDatabaseManager';
-import { queryCache } from '../lib/cache/QueryCache';
-
-interface RealtimeChange {
-  table: string;
-  type: 'INSERT' | 'UPDATE' | 'DELETE';
-  record: any;
-  userId: string;
-  timestamp: number;
-}
+import { getQueryClient } from '../lib/queryClient';
+import { store } from '../lib/store';
 
 interface RealtimeSyncContextType {
   isConnected: boolean;
-  lastChange: RealtimeChange | null;
 }
 
-const RealtimeSyncContext = createContext<RealtimeSyncContextType>({
-  isConnected: false,
-  lastChange: null,
-});
+const RealtimeSyncContext = createContext<RealtimeSyncContextType>({ isConnected: false });
 
 export function useRealtimeSync() {
   return useContext(RealtimeSyncContext);
 }
 
-const CHANNEL_NAME = 'schofy-sync';
-const SYNC_EVENT = 'sync-change';
+// Tables to subscribe to for realtime changes
+const REALTIME_TABLES = [
+  'students', 'staff', 'classes', 'subjects', 'fees', 'fee_structures',
+  'payments', 'salary_payments', 'announcements', 'notifications',
+  'attendance', 'exams', 'exam_results', 'transport_routes',
+  'transport_assignments', 'bursaries', 'discounts', 'invoices', 'settings',
+];
+
+// Map remote table name back to local event name
+function localName(remoteTable: string): string {
+  const m: Record<string, string> = {
+    fee_structures: 'feeStructures', exam_results: 'examResults',
+    transport_routes: 'transportRoutes', transport_assignments: 'transportAssignments',
+    salary_payments: 'salaryPayments',
+  };
+  return m[remoteTable] || remoteTable;
+}
+
+function notifyUI(remoteTable: string) {
+  const local = localName(remoteTable);
+  window.dispatchEvent(new CustomEvent(`${local}Updated`));
+  window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: local } }));
+  window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: local } }));
+  try {
+    const qc = getQueryClient();
+    void qc.invalidateQueries({ predicate: q => String(q.queryKey[0] ?? '').includes(local) });
+  } catch { /* ignore */ }
+}
 
 export function RealtimeSyncProvider({ children }: { children: React.ReactNode }) {
-  const supabaseClient = supabase!;
-  const channelRef = useRef<ReturnType<typeof supabaseClient.channel> | null>(null);
-  const isConnectedRef = useRef(false);
-  const lastChangeRef = useRef<RealtimeChange | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const channelRef = useRef<any>(null);
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !supabase.channel) {
-      console.log('Supabase not configured, skipping realtime sync');
-      return;
-    }
+    if (!isSupabaseConfigured || !supabase) return;
 
-    const channel = supabase.channel(CHANNEL_NAME, {
-      config: {
-        broadcast: { self: false },
-      },
-    });
-
-    channel.on('broadcast', { event: SYNC_EVENT }, async (payload) => {
-      const change = payload.payload as RealtimeChange;
-      if (change && change.table) {
-        lastChangeRef.current = change;
-        
-        try {
-          if (change.type === 'DELETE') {
-            await userDBManager.delete(change.userId, change.table, change.record.id);
-          } else if (change.type === 'INSERT' || change.type === 'UPDATE') {
-            const existing = await userDBManager.get(change.userId, change.table, change.record.id);
-            if (change.type === 'UPDATE' && existing) {
-              await userDBManager.put(change.userId, change.table, { ...existing, ...change.record, syncStatus: 'synced' });
-            } else {
-              await userDBManager.put(change.userId, change.table, { ...change.record, syncStatus: 'synced' });
-            }
-          }
-          
-          // Clear cache so the UI doesn't render stale data!
-          queryCache.invalidatePattern(`${change.table}:*`);
-        } catch (err) {
-          console.error('Failed to merge realtime change:', err);
+    // Subscribe to all tables with Postgres Changes
+    const channel = supabase
+      .channel('schofy-realtime-all')
+      .on('postgres_changes', { event: '*', schema: 'public' }, (payload: any) => {
+        const table = payload.table as string;
+        if (REALTIME_TABLES.includes(table)) {
+          const local = localName(table);
+          // Update store for all active sessions
+          const sid = localStorage.getItem('schofy_current_school_id') || '';
+          if (sid) store.onRemoteChange(sid, local);
+          // Also notify via events for pages not yet using the store
+          window.dispatchEvent(new CustomEvent(`${local}Updated`));
+          window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: local } }));
+          window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: local } }));
+          try {
+            const qc = getQueryClient();
+            void qc.invalidateQueries({ predicate: q => String(q.queryKey[0] ?? '').includes(local) });
+          } catch { /* ignore */ }
         }
-
-        const eventName = `${change.table}Updated`;
-        window.dispatchEvent(new CustomEvent(eventName, { detail: change }));
-        window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: change }));
-        window.dispatchEvent(new CustomEvent('dataRefresh'));
-      }
-    });
-
-    channel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        isConnectedRef.current = true;
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        isConnectedRef.current = false;
-      } else if (status === 'CLOSED') {
-        isConnectedRef.current = false;
-      }
-    });
+      })
+      .subscribe((status: string) => {
+        setIsConnected(status === 'SUBSCRIBED');
+      });
 
     channelRef.current = channel;
 
-    window.broadcastSchofyChange = (table: string, type: 'INSERT' | 'UPDATE' | 'DELETE', record: any, userId: string) => {
-      if (channelRef.current && isConnectedRef.current) {
-        const change: RealtimeChange = {
-          table,
-          type,
-          record,
-          userId,
-          timestamp: Date.now(),
-        };
-        channelRef.current.send({
-          type: 'broadcast',
-          event: SYNC_EVENT,
-          payload: change,
-        }).catch((err) => {
-          console.error('Failed to broadcast change:', err);
-        });
-      }
-    };
-
     return () => {
-      if (channelRef.current) {
-        if (supabase && supabase.removeChannel) {
-          supabase.removeChannel(channelRef.current);
-        }
+      if (channelRef.current && supabase) {
+        supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
-      window.broadcastSchofyChange = undefined as any;
     };
   }, []);
 
-  const contextValue = {
-    isConnected: isConnectedRef.current,
-    lastChange: lastChangeRef.current,
-  };
-
   return (
-    <RealtimeSyncContext.Provider value={contextValue}>
+    <RealtimeSyncContext.Provider value={{ isConnected }}>
       {children}
     </RealtimeSyncContext.Provider>
   );
