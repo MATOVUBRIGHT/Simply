@@ -214,7 +214,7 @@ function notifyUI(table: string) {
   // Invalidate store so all useTableData hooks re-render immediately
   const sid = localStorage.getItem('schofy_current_school_id') || '';
   if (sid) {
-    import('./store').then(({ store }) => store.onRemoteChange(sid, table)).catch(() => {});
+    import('../store').then(({ store }) => store.onRemoteChange(sid, table)).catch(() => {});
   }
   try {
     const qc = getQueryClient();
