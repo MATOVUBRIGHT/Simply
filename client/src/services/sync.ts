@@ -4,11 +4,12 @@ import { dataService } from '../lib/database/DataService';
 class SyncService {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   /** Background pull + push interval (automatic; no manual sync required). */
-  private readonly SYNC_INTERVAL_MS = 8000;
+  private readonly SYNC_INTERVAL_MS = 30000;
   private currentUserId: string | null = null;
   private currentSchoolId: string | null = null;
   private intervalSchoolId: string | null = null;
   private syncEnabled = false;
+  private syncInProgress = false;
   private visibilityHandler: (() => void) | null = null;
 
   configure(options: { supabaseClient?: SupabaseClient }) {
@@ -108,7 +109,16 @@ class SyncService {
       return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'No school selected for sync.' };
     }
 
-    return await dataService.syncNow(schoolId);
+    if (this.syncInProgress) {
+      return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Sync already in progress.' };
+    }
+    this.syncInProgress = true;
+
+    try {
+      return await dataService.syncNow(schoolId);
+    } finally {
+      this.syncInProgress = false;
+    }
   }
 }
 

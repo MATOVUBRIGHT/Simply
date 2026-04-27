@@ -1,5 +1,5 @@
 const DB_NAME_PREFIX = 'schofy_user_db_';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 export interface SyncMeta {
   id: string;
@@ -489,9 +489,41 @@ class UserDatabaseManager {
     return new Promise((resolve, reject) => {
       const store = this.getStore(userId, storeName);
       const request = store.getAll();
-      request.onsuccess = () => resolve(request.result || []);
+      request.onsuccess = () => {
+        const items = request.result || [];
+        const deduped = this.deduplicateById(items);
+        resolve(deduped);
+      };
       request.onerror = () => reject(request.error);
     });
+  }
+
+  private deduplicateById(items: any[]): any[] {
+    const seen = new Map();
+    for (const item of items) {
+      if (item?.id && !seen.has(item.id)) {
+        seen.set(item.id, item);
+      }
+    }
+    return Array.from(seen.values());
+  }
+
+  async cleanupDuplicates(userId: string, storeName: string): Promise<number> {
+    await this.ensureDatabaseOpen(userId);
+    const items = await this.getAll(userId, storeName);
+    const seen = new Map<string, any>();
+    let removed = 0;
+    for (const item of items) {
+      if (item?.id) {
+        if (seen.has(item.id)) {
+          await this.delete(userId, storeName, item.id);
+          removed++;
+        } else {
+          seen.set(item.id, item);
+        }
+      }
+    }
+    return removed;
   }
 
   async where(

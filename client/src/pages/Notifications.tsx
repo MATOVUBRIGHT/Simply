@@ -20,6 +20,16 @@ export default function Notifications() {
     if (user?.id || schoolId) loadNotifications(); 
   }, [user?.id, schoolId]);
 
+  useEffect(() => {
+    const refresh = () => loadNotifications();
+    window.addEventListener('dataRefresh', refresh);
+    window.addEventListener('schofyDataRefresh', refresh);
+    return () => {
+      window.removeEventListener('dataRefresh', refresh);
+      window.removeEventListener('schofyDataRefresh', refresh);
+    };
+  }, []);
+
   async function loadNotifications() {
     const id = schoolId || user?.id;
     if (!id) return;

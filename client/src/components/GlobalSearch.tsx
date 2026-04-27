@@ -75,9 +75,9 @@ export default function GlobalSearch() {
     // Search pages
     pages.forEach(page => {
       if (
-        page.title.toLowerCase().includes(searchTerm) ||
-        page.subtitle.toLowerCase().includes(searchTerm) ||
-        page.keywords.some(k => k.includes(searchTerm))
+        (page.title || '').toLowerCase().includes(searchTerm) ||
+        (page.subtitle || '').toLowerCase().includes(searchTerm) ||
+        page.keywords.some(k => (k || '').includes(searchTerm))
       ) {
         found.push({
           id: page.path,
@@ -102,9 +102,9 @@ export default function GlobalSearch() {
 
       students
         .filter(s => 
-          s.firstName.toLowerCase().includes(searchTerm) ||
-          s.lastName.toLowerCase().includes(searchTerm) ||
-          s.admissionNo.toLowerCase().includes(searchTerm)
+          (s.firstName || '').toLowerCase().includes(searchTerm) ||
+          (s.lastName || '').toLowerCase().includes(searchTerm) ||
+          (s.admissionNo || '').toLowerCase().includes(searchTerm)
         )
         .slice(0, 3)
         .forEach(s => {
@@ -120,9 +120,9 @@ export default function GlobalSearch() {
 
       staff
         .filter(s => 
-          s.firstName.toLowerCase().includes(searchTerm) ||
-          s.lastName.toLowerCase().includes(searchTerm) ||
-          s.employeeId.toLowerCase().includes(searchTerm)
+          (s.firstName || '').toLowerCase().includes(searchTerm) ||
+          (s.lastName || '').toLowerCase().includes(searchTerm) ||
+          (s.employeeId || '').toLowerCase().includes(searchTerm)
         )
         .slice(0, 3)
         .forEach(s => {
@@ -137,7 +137,7 @@ export default function GlobalSearch() {
         });
 
       subjects
-        .filter(s => s.name.toLowerCase().includes(searchTerm) || s.code.toLowerCase().includes(searchTerm))
+        .filter(s => (s.name || '').toLowerCase().includes(searchTerm) || (s.code || '').toLowerCase().includes(searchTerm))
         .slice(0, 2)
         .forEach(s => {
           found.push({
@@ -150,7 +150,7 @@ export default function GlobalSearch() {
         });
 
       classes
-        .filter(c => c.name.toLowerCase().includes(searchTerm))
+        .filter(c => (c.name || '').toLowerCase().includes(searchTerm))
         .slice(0, 2)
         .forEach(c => {
           found.push({

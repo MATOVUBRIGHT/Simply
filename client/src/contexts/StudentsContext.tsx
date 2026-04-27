@@ -66,7 +66,7 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
       return r;
     },
     enabled: !!tenantId && isInitialized,
-    staleTime: 5 * 60_000,
+    staleTime: 0,
     gcTime: 30 * 60_000,
     placeholderData: (previousData) => previousData,
     retry: 1,

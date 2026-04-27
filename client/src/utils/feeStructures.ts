@@ -45,6 +45,18 @@ export async function createFeeStructure(
   isRequired = true,
   description?: string
 ): Promise<FeeStructure> {
+  const existing = await dataService.getAll(userId, 'feeStructures');
+  const duplicate = existing.find((s: FeeStructure) =>
+    s.classId === classId &&
+    s.name?.toLowerCase() === name?.toLowerCase() &&
+    s.category === category &&
+    s.term === term &&
+    s.year === year
+  );
+  if (duplicate) {
+    throw new Error('DUPLICATE_FEE_STRUCTURE');
+  }
+
   const structure: FeeStructure = {
     id: uuidv4(),
     classId,

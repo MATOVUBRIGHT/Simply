@@ -338,8 +338,12 @@ export default function Invoices() {
       setNewStructure({ name: '', category: FeeCategory.TUITION, amount: 0, isRequired: true, description: '' });
       setShowAddStructureForm(false);
       addToast('Fee structure created', 'success');
-    } catch (error) {
-      addToast('Failed to create fee structure', 'error');
+    } catch (error: any) {
+      if (error?.message === 'DUPLICATE_FEE_STRUCTURE') {
+        addToast('A fee with this name already exists for this class/term/year', 'error');
+      } else {
+        addToast('Failed to create fee structure', 'error');
+      }
     }
   }
 
@@ -761,8 +765,11 @@ export default function Invoices() {
             <Percent size={16} />
             <span className="hidden sm:inline">Discount</span>
           </button>
-          <button onClick={() => setShowCreateModal(true)} className="btn btn-primary shadow-lg shadow-primary-500/25">
-            <Plus size={18} /> Bulk Invoice
+          <button 
+            onClick={() => setShowStructureModal(true)}
+            className="btn btn-primary shadow-lg shadow-primary-500/25"
+          >
+            <Plus size={18} /> Generate Invoices
           </button>
         </div>
       </div>

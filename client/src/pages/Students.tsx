@@ -245,13 +245,11 @@ export default function Students() {
     window.addEventListener('classesUpdated', handleClassesUpdated);
     window.addEventListener('ClassesUpdated', handleClassesUpdated);
     window.addEventListener('classesDataChanged', handleClassesDataChanged);
-    window.addEventListener('schofyDataRefresh', handleDataRefresh);
     
     return () => {
       window.removeEventListener('classesUpdated', handleClassesUpdated);
       window.removeEventListener('ClassesUpdated', handleClassesUpdated);
       window.removeEventListener('classesDataChanged', handleClassesDataChanged);
-      window.removeEventListener('schofyDataRefresh', handleDataRefresh);
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [loadClasses, loadData]);

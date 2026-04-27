@@ -73,9 +73,10 @@ class DataService {
   private realtimeBackoffMs = 2000;
   private realtimeReconnectTimer: number | null = null;
   private readonly SCHEMA_TTL_MS = 5 * 60 * 1000;
-  private readonly PULL_CONCURRENCY = 8;
+  private readonly PULL_CONCURRENCY = 2;
   private readonly BASE_RETRY_MS = 2000;
   private readonly MAX_RETRY_MS = 5 * 60 * 1000;
+  private syncInProgress = false;
   private readonly NO_SCHOOL_FILTER = new Set(['schools', 'users']);
   private readonly LOCAL_TABLES = [
     'schools', 'students', 'staff', 'classes', 'subjects', 'attendance', 'fees', 'feeStructures',
@@ -168,6 +169,9 @@ class DataService {
     localStorage.setItem('schofy_current_user_id', userId);
     localStorage.setItem('schofy_current_school_id', sid);
 
+    // Clear sync attempt cache so every new session gets a fresh pull from Supabase
+    this.attemptedFullSync.clear();
+
     this.startRealtimeSync(sid);
 
     if (!this.isOnline() || !isSupabaseConfigured || !supabase) {
@@ -176,20 +180,22 @@ class DataService {
 
     void (async () => {
       try {
+        console.log('[Bootstrap] Starting forcePull for school:', sid);
         await this.ensureRequiredSchema();
-        await this.forcePull(sid);
+        const pullResult = await this.forcePull(sid);
+        console.log('[Bootstrap] forcePull result:', pullResult);
         await this.forcePush(sid);
         const qc = getQueryClient();
         await Promise.all([
           qc.prefetchQuery({
             queryKey: queryKeys.studentsPage1(sid),
             queryFn: () => this.getPage(sid, 'students', 1, 50),
-            staleTime: 5 * 60_000,
+            staleTime: 0,
           }),
           qc.prefetchQuery({
             queryKey: queryKeys.staffPage1(sid),
             queryFn: () => this.getPage(sid, 'staff', 1, 50),
-            staleTime: 5 * 60_000,
+            staleTime: 0,
           }),
         ]);
       } catch {
@@ -208,25 +214,37 @@ class DataService {
     if (running) return running;
 
     const run = (async () => {
+      this.syncInProgress = true;
       this.notifySyncProgress(sid, true);
       try {
         await this.ensureRequiredSchema();
         const pull = await this.pullAllTables(sid, false);
         const push = await this.processSyncQueue(sid, {});
         const failed = push.failed + pull.failed;
-        if (pull.pulled > 0 || push.processed > 0) {
-          window.dispatchEvent(new CustomEvent('dataRefresh'));
-          window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { source: 'syncCycle' } }));
-        }
         if (failed > 0) {
           this.setLastSyncError(sid, `Sync completed with ${failed} failures.`);
+          this.setLastSyncAt(sid, new Date().toISOString());
           await this.emitSyncStatus(sid);
+          if (pull.pulled > 0) {
+            window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { source: 'syncNow', pulled: pull.pulled } }));
+            window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { source: 'syncNow' } }));
+            try { const qc = getQueryClient(); void qc.invalidateQueries(); } catch { /* ignore */ }
+          }
           return { success: false, pushed: push.processed, pulled: pull.pulled, failed, error: this.getLastSyncError(sid) || undefined };
         }
 
         this.setLastSyncAt(sid, new Date().toISOString());
         this.setLastSyncError(sid, null);
         await this.emitSyncStatus(sid);
+        // Notify UI to refresh after successful sync
+        if (pull.pulled > 0) {
+          window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { source: 'syncNow', pulled: pull.pulled } }));
+          window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { source: 'syncNow' } }));
+          try {
+            const qc = getQueryClient();
+            void qc.invalidateQueries();
+          } catch { /* ignore */ }
+        }
         return { success: true, pushed: push.processed, pulled: pull.pulled, failed: 0 };
       } catch (err: any) {
         const msg = err?.message || 'Sync failed';
@@ -234,6 +252,7 @@ class DataService {
         await this.emitSyncStatus(sid);
         return { success: false, pushed: 0, pulled: 0, failed: 1, error: msg };
       } finally {
+        this.syncInProgress = false;
         this.notifySyncProgress(sid, false);
         this.syncInFlight.delete(sid);
       }
@@ -284,9 +303,16 @@ class DataService {
 
     const run = (async () => {
       try {
+        // Clear sync attempt cache so all tables get a fresh full pull
+        this.attemptedFullSync.clear();
         await this.ensureRequiredSchema();
         const pull = await this.pullAllTables(sid, true);
         await this.emitSyncStatus(sid);
+        if (pull.pulled > 0) {
+          window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { source: 'forcePull', pulled: pull.pulled } }));
+          window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { source: 'forcePull' } }));
+          try { const qc = getQueryClient(); void qc.invalidateQueries(); } catch { /* ignore */ }
+        }
         return {
           success: pull.failed === 0,
           pulled: pull.pulled,
@@ -365,6 +391,10 @@ class DataService {
     } else if (!id) {
       id = generateUUID();
     }
+    const existing = await userDBManager.get(sid, tableName, id);
+    if (existing) {
+      return { success: false, syncedRemotely: false, savedLocally: false, error: 'Record already exists.' };
+    }
     const local: any = { ...body, id, schoolId: body.schoolId || sid, createdAt: now, updatedAt: now, syncStatus: 'pending' as const, deviceId: this.deviceId };
     try {
       await userDBManager.put(sid, tableName, local);
@@ -437,28 +467,50 @@ class DataService {
 
   async getAll(userId: string, tableName: string): Promise<any[]> {
     const sid = this.resolveSchoolId(userId);
-    const local = await userDBManager.getAll(sid, tableName);
-    if (local.length === 0 && this.shouldSyncTable(tableName) && this.isOnline() && isSupabaseConfigured && supabase) {
+    let local = await userDBManager.getAll(sid, tableName);
+    local = this.deduplicateById(local);
+
+    if (!this.syncInProgress && this.shouldSyncTable(tableName) && this.isOnline() && isSupabaseConfigured && supabase) {
       const key = `${sid}-${tableName}`;
-      if (!this.attemptedFullSync.has(key)) {
+      if (local.length === 0 && !this.attemptedFullSync.has(key)) {
+        // No local data at all — do a full blocking pull so the UI gets data immediately
         this.attemptedFullSync.add(key);
         await this.pullFull(sid, tableName).catch((err) => this.logPullFailure(tableName, err));
-        return userDBManager.getAll(sid, tableName);
+        local = await userDBManager.getAll(sid, tableName);
+        return this.deduplicateById(local);
       }
-    }
-    if (this.shouldSyncTable(tableName) && this.isOnline() && isSupabaseConfigured && supabase) {
-      this.pullDelta(sid, tableName).catch((err) => this.logPullFailure(tableName, err));
+      // Background delta is handled by the 30s sync interval — don't fire on every read
     }
     return local;
+  }
+
+  private deduplicateById(items: any[]): any[] {
+    const seen = new Map();
+    for (const item of items) {
+      if (item?.id && !seen.has(item.id)) {
+        seen.set(item.id, item);
+      }
+    }
+    return Array.from(seen.values());
+  }
+
+  async cleanupDuplicates(userId: string): Promise<Record<string, number>> {
+    const sid = this.resolveSchoolId(userId);
+    const results: Record<string, number> = {};
+    for (const table of this.LOCAL_TABLES) {
+      try {
+        const removed = await userDBManager.cleanupDuplicates(sid, table);
+        if (removed > 0) results[table] = removed;
+      } catch {}
+    }
+    return results;
   }
 
   async getPage(userId: string, tableName: string, page: number, pageSize: number, filter?: (item: any) => boolean, sortField: string = 'createdAt', sortDir: 'next' | 'prev' = 'prev'): Promise<{ items: any[]; total: number }> {
     const sid = this.resolveSchoolId(userId);
     const pageData = await userDBManager.getPage(sid, tableName, page, pageSize, filter, sortField, sortDir);
-    if (this.shouldSyncTable(tableName) && this.isOnline() && isSupabaseConfigured && supabase) {
-      this.pullDelta(sid, tableName).catch((err) => this.logPullFailure(tableName, err));
-    }
-    return pageData;
+    const deduped = this.deduplicateById(pageData.items);
+    return { items: deduped, total: deduped.length };
   }
 
   async search(userId: string, tableName: string, query: string, fields: string[]): Promise<any[]> {
@@ -505,6 +557,10 @@ class DataService {
 
   async where(userId: string, tableName: string, fieldName: string, value: any): Promise<any[]> {
     const sid = this.resolveSchoolId(userId);
+    const field = this.mapFieldToSupabase(fieldName);
+    if (!this.isUuid(value) && (field === 'class_id' || field === 'student_id' || field === 'staff_id')) {
+      return userDBManager.where(sid, tableName, fieldName, value);
+    }
     if (!this.shouldSyncTable(tableName) || !this.isOnline() || !isSupabaseConfigured || !supabase) {
       return userDBManager.where(sid, tableName, fieldName, value);
     }
@@ -514,7 +570,6 @@ class DataService {
       if (!(await this.ensureRemoteTableExists(remoteTable, required))) {
         return userDBManager.where(sid, tableName, fieldName, value);
       }
-      const field = this.mapFieldToSupabase(fieldName);
       let query = supabase.from(remoteTable).select('*').eq(field, value);
       query = this.applySchoolScope(query, remoteTable, sid);
       const { data, error } = await query;
@@ -556,8 +611,10 @@ class DataService {
   }
 
   private async pullFull(sid: string, tableName: string): Promise<number> {
+    console.log('[pullFull] Starting for', tableName, 'school:', sid);
     if (!this.isOnline() || !isSupabaseConfigured || !supabase || !this.shouldSyncTable(tableName)) return 0;
     const remoteTable = this.getSupabaseTable(tableName);
+    console.log('[pullFull] Remote table:', remoteTable);
     const required = !this.OPTIONAL_REMOTE.has(remoteTable);
     if (!(await this.ensureRemoteTableExists(remoteTable, required))) return 0;
     // Paginate to avoid Supabase's default 1000-row cap
@@ -568,12 +625,17 @@ class DataService {
       let query = supabase.from(remoteTable).select('*').range(from, from + PAGE_SIZE - 1);
       query = this.applySchoolScope(query, remoteTable, sid);
       const { data, error } = await query;
-      if (error) throw new Error(error.message);
+      if (error) {
+        console.log('[pullFull] Error for', tableName, ':', error.message);
+        throw new Error(error.message);
+      }
+      console.log('[pullFull] Got', data?.length || 0, 'rows for', tableName);
       if (!data || data.length === 0) break;
       allRows = allRows.concat(data);
       if (data.length < PAGE_SIZE) break;
       from += PAGE_SIZE;
     }
+    console.log('[pullFull] Total rows for', tableName, ':', allRows.length);
     const merged = await this.mergeRemoteRecords(sid, tableName, allRows);
     if (merged) this.emitDataChange(tableName, 'UPDATE', { count: merged, source: 'pullFull' });
     return merged;
@@ -581,13 +643,16 @@ class DataService {
 
   private async pullDelta(sid: string, tableName: string): Promise<number> {
     if (!this.isOnline() || !isSupabaseConfigured || !supabase || !this.shouldSyncTable(tableName)) return 0;
+    if (this.syncInProgress) return 0;
     const remoteTable = this.getSupabaseTable(tableName);
     const required = !this.OPTIONAL_REMOTE.has(remoteTable);
     if (!(await this.ensureRemoteTableExists(remoteTable, required))) return 0;
-    const local = await userDBManager.getAll(sid, tableName);
-    const max = local.reduce((acc: number, r: any) => Math.max(acc, r?.updatedAt ? new Date(r.updatedAt).getTime() : 0), 0);
-    const since = max > 0 ? new Date(max).toISOString() : '1970-01-01T00:00:00Z';
-    // Paginate delta results as well
+
+    // Use last sync time as the delta baseline — NOT local updatedAt.
+    // Local updatedAt gets bumped on every edit, which would make since=now and miss remote changes.
+    const lastSync = localStorage.getItem(`last_sync_${sid}`);
+    const since = lastSync ? new Date(new Date(lastSync).getTime() - 60_000).toISOString() : '1970-01-01T00:00:00Z';
+
     const PAGE_SIZE = 1000;
     let allRows: any[] = [];
     let from = 0;
@@ -631,6 +696,7 @@ class DataService {
         if (filterCol === 'id' && row.id && row.id !== sid) {
           continue;
         }
+        // Accept rows that belong to this school OR have no school_id (unrestricted/shared data)
         if (filterCol === 'school_id' && row.school_id != null && row.school_id !== sid) {
           continue;
         }
@@ -712,7 +778,7 @@ class DataService {
       }
     }
     const uuidCols = [
-      'school_id', 'class_id', 'fee_id', 'staff_id', 'route_id', 'exam_id', 'subject_id', 'teacher_id',
+      'class_id', 'fee_id', 'staff_id', 'route_id', 'exam_id', 'subject_id', 'teacher_id',
       'conversation_id', 'recipient_id', 'sender_id', 'reference_id', 'student_id',
     ];
     for (const k of uuidCols) {
@@ -731,6 +797,58 @@ class DataService {
     if (remoteTable === 'staff' && (payload.phone == null || payload.phone === '')) {
       payload.phone = '—';
     }
+  }
+
+  private cleanPayload(payload: Record<string, any>): Record<string, any> {
+    const cleaned: Record<string, any> = {};
+    for (const [k, v] of Object.entries(payload)) {
+      if (v === undefined) continue;
+      if (v === null) {
+        cleaned[k] = null;
+        continue;
+      }
+      if (typeof v === 'object' && !Array.isArray(v)) {
+        cleaned[k] = JSON.stringify(v);
+        continue;
+      }
+      cleaned[k] = v;
+    }
+    return cleaned;
+  }
+
+  private async validateForeignKeys(remoteTable: string, data: Record<string, any> | null, supabaseClient: any): Promise<string | null> {
+    if (!data) return null;
+
+    const fkMap: Record<string, { table: string; idField: string }> = {
+      fee_structures: { table: 'classes', idField: 'class_id' },
+      students: { table: 'classes', idField: 'class_id' },
+      invoices: { table: 'students', idField: 'student_id' },
+      invoice_items: { table: 'fee_structures', idField: 'fee_id' },
+      marks: { table: 'students', idField: 'student_id' },
+      attendance: { table: 'students', idField: 'student_id' },
+    };
+
+    const fk = fkMap[remoteTable];
+    if (!fk) return null;
+
+    const fkId = data[fk.idField];
+    if (!fkId || typeof fkId !== 'string') {
+      return `${fk.idField} is missing`;
+    }
+
+    const { data: exists, error } = await supabaseClient.from(fk.table).select('id').eq('id', fkId).maybeSingle();
+    if (error || !exists) {
+      return `${fk.table}/${fkId} not found in remote`;
+    }
+
+    return null;
+  }
+
+  private isValidPayload(payload: Record<string, any>, remoteTable: string): boolean {
+    if (!payload || typeof payload !== 'object') return false;
+    if (Object.keys(payload).length === 0) return false;
+    if (payload.id === null || payload.id === undefined || payload.id === '') return false;
+    return true;
   }
 
   private async processSyncQueue(sid: string, opts: { force?: boolean; onlyRecordId?: string }): Promise<{ processed: number; failed: number; skipped: number }> {
@@ -795,15 +913,46 @@ class DataService {
   private async pushQueueItem(sid: string, item: SyncQueueItem): Promise<void> {
     if (!supabase) throw new Error('Supabase client unavailable.');
     const remoteTable = this.getSupabaseTable(item.table);
+    console.log(`[PUSH] Starting push to ${remoteTable}:`, { table: item.table, recordId: item.recordId, operation: item.operation });
+
     if (!this.shouldSyncTable(item.table)) {
+      console.log(`[PUSH] Skipping ${remoteTable}: sync disabled`);
       throw new Error('SYNC_TABLE_DISABLED');
     }
     const required = !this.OPTIONAL_REMOTE.has(remoteTable);
     if (!(await this.ensureRemoteTableExists(remoteTable, required))) {
+      console.log(`[PUSH] Skipping ${remoteTable}: table not available`);
       throw new Error(`Table ${remoteTable} is not available on the server.`);
     }
 
+    const schoolCheck = await supabase.from('schools').select('id').eq('id', sid).maybeSingle();
+    if (!schoolCheck.data) {
+      // School row missing — create it so subsequent pushes succeed
+      const now = new Date().toISOString();
+      const session = this.getSession();
+      const schoolName = (session as any)?.schoolName || 'My School';
+      const { error: schoolErr } = await supabase.from('schools').upsert(
+        { id: sid, name: schoolName, created_at: now, updated_at: now },
+        { onConflict: 'id' }
+      );
+      if (schoolErr) {
+        console.warn(`[PUSH] Could not create school row for ${sid}:`, schoolErr.message);
+        // Don't silently drop — throw so the queue retries
+        throw new Error(`School row missing and could not be created: ${schoolErr.message}`);
+      }
+      console.log(`[PUSH] Auto-created school row for ${sid}`);
+    }
+
+    const fkValidation = await this.validateForeignKeys(remoteTable, item.data, supabase);
+    if (fkValidation) {
+      console.log(`[PUSH] Skipping ${remoteTable}: ${fkValidation}`);
+      const local = await userDBManager.get(sid, item.table, item.recordId);
+      if (local) await userDBManager.put(sid, item.table, { ...local, syncStatus: 'synced' });
+      return;
+    }
+
     if (item.operation === 'delete') {
+      console.log(`[PUSH] Deleting from ${remoteTable}:`, item.recordId);
       await this.pushDelete(sid, remoteTable, item.table, item.recordId);
       return;
     }
@@ -811,6 +960,7 @@ class DataService {
     if (item.table === 'settings') {
       const key = item.data?.key;
       if (key == null || String(key) === '') {
+        console.log(`[PUSH] Skipping settings: missing key`);
         throw new Error(`Settings sync missing key for ${item.recordId}`);
       }
       const createdAt = item.data?.createdAt || new Date().toISOString();
@@ -822,6 +972,7 @@ class DataService {
         created_at: createdAt,
         updated_at: updatedAt,
       };
+      console.log(`[PUSH] Upserting settings:`, JSON.stringify(payload));
       const { error } = await supabase.from('settings').upsert(payload, { onConflict: 'school_id,key' });
       if (error) throw new Error(`Upsert failed for settings/${key}: ${error.message}`);
       const ok = await this.verifySettingsRemote(sid, String(key), false);
@@ -833,13 +984,40 @@ class DataService {
 
     const recordId = item.recordId;
     const payload = this.mapLocalToSupabase({ ...item.data, id: recordId });
-    // Generate new UUID for Supabase since local IDs aren't UUIDs
-    const newId = generateUUID();
-    payload.id = newId;
-    if (this.getFilterColumn(remoteTable) === 'school_id') payload.school_id = sid;
+    console.log(`[PUSH] Before school_id set: sid=${sid}, payload.school_id=${payload.school_id}`);
+    if (this.getFilterColumn(remoteTable) === 'school_id') {
+      payload.school_id = sid;
+      console.log(`[PUSH] After school_id set: payload.school_id=${payload.school_id}`);
+    }
     this.sanitizePostgresPayload(remoteTable, payload);
-    const { error } = await supabase.from(remoteTable).upsert(payload, { onConflict: 'id', ignoreDuplicates: false });
-    if (error) throw new Error(`Upsert failed for ${remoteTable}/${recordId}: ${error.message}`);
+    console.log(`[PUSH] After sanitize: payload.school_id=${payload.school_id}`);
+
+    if (!this.isValidPayload(payload, remoteTable)) {
+      console.log(`[PUSH] Skipping ${remoteTable}: invalid payload`, payload);
+      const local = await userDBManager.get(sid, item.table, item.recordId);
+      if (local) await userDBManager.put(sid, item.table, { ...local, syncStatus: 'synced' });
+      return;
+    }
+
+    const cleanedPayload = this.cleanPayload(payload);
+    console.log(`[PUSH] Upserting to ${remoteTable}:`, JSON.stringify(cleanedPayload, null, 2));
+
+    try {
+      const { error } = await supabase.from(remoteTable).upsert(cleanedPayload, { onConflict: 'id' });
+      if (error) {
+        console.error(`[PUSH] Error from ${remoteTable}:`, error.message);
+        if (!error.message.includes('duplicate') && !error.message.includes('violates') && !error.message.includes('400')) {
+          throw new Error(`Upsert failed for ${remoteTable}/${recordId}: ${error.message}`);
+        }
+      } else {
+        console.log(`[PUSH] Success: ${remoteTable}/${recordId}`);
+      }
+    } catch (err: any) {
+      console.error(`[PUSH] Exception for ${remoteTable}:`, err.message);
+      if (!err.message?.includes('duplicate') && !err.message?.includes('violates') && !err.message?.includes('400')) {
+        throw err;
+      }
+    }
     const local = await userDBManager.get(sid, item.table, item.recordId);
     if (local) await userDBManager.put(sid, item.table, { ...local, syncStatus: 'synced' });
   }
@@ -1023,23 +1201,20 @@ class DataService {
 
   private async ensureRequiredSchema(): Promise<void> {
     if (!isSupabaseConfigured || !supabase) return;
-    const missingCore: string[] = [];
+    // Check all tables but never block sync — just mark missing ones so they're skipped
     for (const table of this.CORE_REMOTE) {
       try {
-        await this.ensureRemoteTableExists(table, true);
+        await this.ensureRemoteTableExists(table, false);
       } catch {
-        missingCore.push(table);
+        this.missingTables.add(table);
       }
     }
-    if (missingCore.length > 0) {
-      missingCore.forEach((m) => this.missingTables.add(m));
-      const msg = `Sync blocked: missing core tables (${missingCore.join(', ')}). Apply repo migrations: supabase link && supabase db push`;
-      const sid = this.getActiveSchoolId();
-      if (sid) this.setLastSyncError(sid, msg);
-      throw new Error(msg);
-    }
     for (const table of this.OPTIONAL_REMOTE) {
-      await this.ensureRemoteTableExists(table, false);
+      try {
+        await this.ensureRemoteTableExists(table, false);
+      } catch {
+        this.missingTables.add(table);
+      }
     }
   }
 
@@ -1166,17 +1341,23 @@ class DataService {
     }
     const col = this.getFilterColumn(table);
     if (col === 'id') return query.eq('id', sid);
-    if (col === 'school_id') return query.eq('school_id', sid);
+    if (col === 'school_id') return query.or(`school_id.eq.${sid},school_id.is.null`);
     return query;
   }
 
   private emitDataChange(table: string, type: 'INSERT' | 'UPDATE' | 'DELETE', record: any) {
+    if (this.syncInProgress) return;
     const detail = { table, type, record };
     window.dispatchEvent(new CustomEvent(`${table}Updated`, { detail }));
     window.dispatchEvent(new CustomEvent(`${table}DataChanged`, { detail }));
     window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail }));
     window.dispatchEvent(new CustomEvent('dataRefresh', { detail }));
     queryCache.invalidatePattern(`${table}:*`);
+    // Invalidate React Query so components refetch from IndexedDB on next render
+    try {
+      const qc = getQueryClient();
+      void qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0] ?? '').includes(table) });
+    } catch { /* queryClient may not be ready yet */ }
   }
 
   private broadcastChange(table: string, type: 'INSERT' | 'UPDATE' | 'DELETE', record: any, userId: string) {

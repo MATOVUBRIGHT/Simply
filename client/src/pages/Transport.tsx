@@ -40,6 +40,16 @@ export default function Transport() {
 
   useEffect(() => { if (user?.id || schoolId) loadData(); }, [user?.id, schoolId]);
 
+  useEffect(() => {
+    const refresh = () => loadData();
+    window.addEventListener('dataRefresh', refresh);
+    window.addEventListener('schofyDataRefresh', refresh);
+    return () => {
+      window.removeEventListener('dataRefresh', refresh);
+      window.removeEventListener('schofyDataRefresh', refresh);
+    };
+  }, []);
+
   async function loadData() {
     const id = schoolId || user?.id;
     if (!id) return;
