@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   DollarSign, 
@@ -18,55 +18,23 @@ import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import DropdownModal from '../components/DropdownModal';
+import { useTableData } from '../lib/store';
 
 export default function Payroll() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
   const { formatMoney } = useCurrency();
   const { addToast } = useToast();
-  
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const sid = schoolId || user?.id || '';
+  const { data: staff, loading } = useTableData(sid, 'staff');
+  const { data: salaryPayments } = useTableData(sid, 'salaryPayments');
+
   const [showPayrollModal, setShowPayrollModal] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<SalaryPayment | null>(null);
   const [payrollMonth, setPayrollMonth] = useState(new Date().toISOString().slice(0, 7));
   const [paymentNotes, setPaymentNotes] = useState('');
-
-  useEffect(() => {
-    if (user?.id || schoolId) {
-      loadData();
-    }
-  }, [user?.id, schoolId]);
-
-  useEffect(() => {
-    const handleDataRefresh = () => loadData();
-    window.addEventListener('schofyDataRefresh', handleDataRefresh);
-    
-    return () => {
-      window.removeEventListener('schofyDataRefresh', handleDataRefresh);
-    };
-  }, []);
-
-  async function loadData() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const [staffData, paymentsData] = await Promise.all([
-        dataService.getAll(id, 'staff'),
-        dataService.getAll(id, 'salaryPayments')
-      ]);
-      setStaff(staffData);
-      setSalaryPayments(paymentsData);
-    } catch (error) {
-      console.error('Failed to load payroll data:', error);
-      addToast('Failed to load payroll data', 'error');
-    } finally {
-      setLoading(false);
-    }
-  }
 
   const payrollStats = {
     pending: salaryPayments.filter(p => p.status === 'pending'),
@@ -105,8 +73,6 @@ export default function Payroll() {
           count++;
         }
       }
-
-      await loadData();
       setShowPayrollModal(false);
       addToast(`Generated payroll for ${count} staff members`, 'success');
     } catch (error) {
@@ -125,7 +91,6 @@ export default function Payroll() {
         paymentMethod: PaymentMethod.BANK_TRANSFER, 
         notes: paymentNotes || undefined 
       } as any);
-      await loadData();
       setShowPayModal(false);
       setSelectedPayment(null);
       setPaymentNotes('');
@@ -142,7 +107,6 @@ export default function Payroll() {
     if (!confirm('Delete this payment record?')) return;
     try {
       await dataService.delete(id, 'salaryPayments', paymentId);
-      await loadData();
       addToast('Payment record deleted', 'success');
     } catch (error) {
       console.error('Failed to delete payment:', error);

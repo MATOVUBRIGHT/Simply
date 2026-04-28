@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { Bell, Trash2, CheckCheck, Info, CheckCircle, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Notification } from '@schofy/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { useTableData } from '../lib/store';
 
 const typeConfig: Record<string, { bg: string; text: string; icon: any }> = {
   info: { bg: 'bg-blue-50', text: 'text-blue-600', icon: Info },
@@ -13,36 +14,12 @@ const typeConfig: Record<string, { bg: string; text: string; icon: any }> = {
 
 export default function Notifications() {
   const { user, schoolId } = useAuth();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => { 
-    if (user?.id || schoolId) loadNotifications(); 
-  }, [user?.id, schoolId]);
-
-  useEffect(() => {
-    const refresh = () => loadNotifications();
-    window.addEventListener('dataRefresh', refresh);
-    window.addEventListener('schofyDataRefresh', refresh);
-    return () => {
-      window.removeEventListener('dataRefresh', refresh);
-      window.removeEventListener('schofyDataRefresh', refresh);
-    };
-  }, []);
-
-  async function loadNotifications() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const data = await dataService.getAll(id, 'notifications');
-      const sorted = data.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setNotifications(sorted);
-    } catch (error) {
-      console.error('Failed to load notifications:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const sid = schoolId || user?.id || '';
+  const { data: rawNotifications, loading } = useTableData(sid, 'notifications');
+  const notifications = useMemo(() =>
+    [...rawNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [rawNotifications]
+  ) as Notification[];
 
   async function markAllAsRead() {
     const id = schoolId || user?.id;
@@ -52,7 +29,6 @@ export default function Notifications() {
       for (const notif of unread) {
         await dataService.update(id, 'notifications', notif.id, { read: true } as any);
       }
-      await loadNotifications();
     } catch (error) {
       console.error('Failed to mark all as read:', error);
     }
@@ -63,7 +39,6 @@ export default function Notifications() {
     if (!id) return;
     try {
       await dataService.update(id, 'notifications', notificationId, { read: true } as any);
-      await loadNotifications();
     } catch (error) {
       console.error('Failed to mark as read:', error);
     }
@@ -74,7 +49,6 @@ export default function Notifications() {
     if (!id) return;
     try {
       await dataService.delete(id, 'notifications', notificationId);
-      await loadNotifications();
     } catch (error) {
       console.error('Failed to delete notification:', error);
     }
@@ -89,7 +63,6 @@ export default function Notifications() {
         for (const notif of all) {
           await dataService.delete(id, 'notifications', notif.id);
         }
-        await loadNotifications();
       } catch (error) {
         console.error('Failed to clear notifications:', error);
       }

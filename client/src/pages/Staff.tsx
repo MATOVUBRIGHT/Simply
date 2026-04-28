@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -12,6 +12,7 @@ import { generateUUID } from '../utils/uuid';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
+import { useTableData } from '../lib/store';
 
 const avatarColors = [
   'bg-violet-500',
@@ -30,8 +31,16 @@ function getAvatarColor(name: string) {
 
 export default function StaffPage() {
   const { user, schoolId } = useAuth();
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [loading, setLoading] = useState(true);
+  const sid = schoolId || user?.id || '';
+  const { data: staffData, loading } = useTableData(sid, 'staff');
+  const { data: salaryPaymentsData } = useTableData(sid, 'salaryPayments');
+
+  const staff = useMemo(() =>
+    [...staffData].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [staffData]
+  ) as Staff[];
+  const salaryPayments = salaryPaymentsData as SalaryPayment[];
+
   const [search, setSearch] = useState('');
   const { addToast } = useToast();
   const { formatMoney } = useCurrency();
@@ -48,8 +57,7 @@ export default function StaffPage() {
   const [selectedStaff, setSelectedStaff] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const navigate = useNavigate();
-  
-  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
+
   const [showPayrollModal, setShowPayrollModal] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -57,47 +65,6 @@ export default function StaffPage() {
   const [payrollMonth, setPayrollMonth] = useState(new Date().toISOString().slice(0, 7));
   const [paymentNotes, setPaymentNotes] = useState('');
   const submittingRef = useRef(false);
-
-  useEffect(() => {
-    if (user?.id || schoolId) {
-      loadStaff();
-    }
-  }, [user?.id, schoolId]);
-
-  useEffect(() => {
-    const handleStaffUpdated = () => loadStaff();
-    const handleDataRefresh = () => loadStaff();
-    
-    window.addEventListener('staffUpdated', handleStaffUpdated);
-    window.addEventListener('dataRefresh', handleDataRefresh);
-    
-    return () => {
-      window.removeEventListener('staffUpdated', handleStaffUpdated);
-      window.removeEventListener('dataRefresh', handleDataRefresh);
-    };
-  }, []);
-
-  async function loadStaff() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const [data, payments] = await Promise.all([
-        dataService.getAll(id, 'staff'),
-        dataService.getAll(id, 'salaryPayments')
-      ]);
-      const sorted = data.sort((a: any, b: any) => {
-        const dateA = new Date(a.createdAt).getTime();
-        const dateB = new Date(b.createdAt).getTime();
-        return dateB - dateA;
-      });
-      setStaff(sorted);
-      setSalaryPayments(payments);
-    } catch (error) {
-      console.error('Failed to load staff:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   const payrollStats = {
     pending: salaryPayments.filter(p => p.status === 'pending'),
@@ -136,8 +103,6 @@ export default function StaffPage() {
           count++;
         }
       }
-
-      await loadStaff();
       setShowPayrollModal(false);
       addToast(`Generated payroll for ${count} staff members`, 'success');
     } catch (error) {
@@ -171,7 +136,6 @@ export default function StaffPage() {
     if (!confirm('Delete this payment record?')) return;
     try {
       await dataService.delete(id, 'salaryPayments', paymentId);
-      await loadStaff();
       addToast('Payment record deleted', 'success');
     } catch (error) {
       console.error('Failed to delete payment:', error);

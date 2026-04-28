@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { Plus, Megaphone, Clock, Trash2, AlertCircle, CheckCircle, Info, Bell, Pin, Edit2, X, Download, FileText, ChevronDown, Check, Trash, Search } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Announcement, Priority } from '@schofy/shared';
@@ -7,6 +7,7 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
+import { useTableData } from '../lib/store';
 
 const priorityConfig: Record<string, { 
   bg: string; 
@@ -52,8 +53,13 @@ const priorityConfig: Record<string, {
 
 export default function Announcements() {
   const { user, schoolId } = useAuth();
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [loading, setLoading] = useState(true);
+  const sid = schoolId || user?.id || '';
+  const { data: rawAnnouncements, loading } = useTableData(sid, 'announcements');
+  const announcements = useMemo(() =>
+    [...rawAnnouncements].sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()),
+    [rawAnnouncements]
+  ) as Announcement[];
+
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ title: '', content: '', priority: Priority.MEDIUM });
@@ -66,40 +72,6 @@ export default function Announcements() {
   const [selectMode, setSelectMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const submittingRef = useRef(false);
-  useEffect(() => {
-    if (user?.id || schoolId) loadAnnouncements();
-  }, [user?.id, schoolId]);
-
-  useEffect(() => {
-    const handleAnnouncementsUpdated = () => loadAnnouncements();
-    const handleDataRefresh = () => loadAnnouncements();
-    
-    window.addEventListener('announcementsUpdated', handleAnnouncementsUpdated);
-    window.addEventListener('dataRefresh', handleDataRefresh);
-    
-    return () => {
-      window.removeEventListener('announcementsUpdated', handleAnnouncementsUpdated);
-      window.removeEventListener('dataRefresh', handleDataRefresh);
-    };
-  }, []);
-
-  async function loadAnnouncements() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const data = await dataService.getAll(id, 'announcements');
-      const sorted = data.sort((a: any, b: any) => {
-        const dateA = new Date(a.createdAt || 0).getTime();
-        const dateB = new Date(b.createdAt || 0).getTime();
-        return dateB - dateA;
-      });
-      setAnnouncements(sorted);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   function handleEdit(announcement: Announcement) {
     setEditingId(announcement.id);
@@ -133,8 +105,6 @@ export default function Announcements() {
         createdAt: announcements.find(a => a.id === editingId)?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      // Optimistic update
-      setAnnouncements(prev => prev.map(a => a.id === editingId ? updated : a));
       addToast('Announcement updated', 'success');
       handleCancelEdit();
       const result = await dataService.update(id, 'announcements', editingId, updated as any);
@@ -150,15 +120,12 @@ export default function Announcements() {
         createdBy: 'admin',
         createdAt: new Date().toISOString(),
       };
-      // Optimistic update
-      setAnnouncements(prev => [newAnnouncement, ...prev]);
       addToast('Announcement published', 'success');
       handleCancelEdit();
       const result = await dataService.create(id, 'announcements', newAnnouncement as any);
       if (!result.success) {
         // Rollback
         addToast('Failed to publish: ' + result.error, 'error');
-        setAnnouncements(prev => prev.filter(a => a.id !== newAnnouncement.id));
       }
     }
     submittingRef.current = false;
@@ -169,7 +136,6 @@ export default function Announcements() {
     if (!id || !confirm('Delete this announcement?')) return;
     const announcement = announcements.find(a => a.id === idAnnouncement);
     // Optimistic remove
-    setAnnouncements(prev => prev.filter(a => a.id !== idAnnouncement));
     addToast('Announcement moved to recycle bin', 'success');
     if (announcement) {
       addToRecycleBin(id, { id: `announcement-${Date.now()}`, type: 'announcement', name: announcement.title, data: announcement, deletedAt: new Date().toISOString() });
@@ -177,7 +143,7 @@ export default function Announcements() {
     const result = await dataService.delete(id, 'announcements', idAnnouncement);
     if (!result.success) {
       addToast('Failed to delete: ' + result.error, 'error');
-      if (announcement) setAnnouncements(prev => [announcement, ...prev]);
+      if (announcement)
     }
   }
 
@@ -245,8 +211,6 @@ export default function Announcements() {
           });
         }
       }
-      
-      setAnnouncements(prev => prev.filter(a => !selectedAnnouncements.has(a.id)));
       setSelectedAnnouncements(new Set());
       setSelectMode(false);
       addToast(`${selectedAnnouncements.size} announcements moved to recycle bin`, 'success');

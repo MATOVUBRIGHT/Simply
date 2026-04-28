@@ -8,6 +8,7 @@ import { exportToPDF, exportToCSV, exportToExcel } from '../utils/export';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { useTableData } from '../lib/store';
 
 export default function Finance() {
   const { user, schoolId } = useAuth();
@@ -29,41 +30,9 @@ export default function Finance() {
   const [showTermFilter, setShowTermFilter] = useState(false);
 
   const students = useActiveStudents();
-  const [fees, setFees] = useState<Fee[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
-
-  useEffect(() => {
-    if (user?.id || schoolId) {
-      loadFees();
-      loadPayments();
-    }
-  }, [user?.id, schoolId]);
-
-  useEffect(() => {
-    const reload = () => { loadFees(); loadPayments(); };
-    window.addEventListener('feesUpdated', reload);
-    window.addEventListener('paymentsUpdated', reload);
-    window.addEventListener('dataRefresh', reload);
-    window.addEventListener('schofyDataRefresh', reload);
-    return () => {
-      window.removeEventListener('feesUpdated', reload);
-      window.removeEventListener('paymentsUpdated', reload);
-      window.removeEventListener('dataRefresh', reload);
-      window.removeEventListener('schofyDataRefresh', reload);
-    };
-  }, []);
-
-  async function loadFees() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try { setFees(await dataService.getAll(id, 'fees')); } catch {}
-  }
-
-  async function loadPayments() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try { setPayments(await dataService.getAll(id, 'payments')); } catch {}
-  }
+  const sid = schoolId || user?.id || '';
+  const { data: fees } = useTableData(sid, 'fees');
+  const { data: payments } = useTableData(sid, 'payments');
 
   async function handleRecordPayment(feeId: string, studentId: string, _amount: number) {
     const id = schoolId || user?.id;
