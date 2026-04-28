@@ -44,21 +44,22 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
 
-    const channel = supabase
-      .channel('schofy-realtime-all')
-      .on('postgres_changes', { event: '*', schema: 'public' }, (payload: any) => {
-        const table = payload.table as string;
-        if (!REALTIME_TABLES.includes(table)) return;
-        const sid = localStorage.getItem('schofy_current_school_id') || '';
-        if (sid) store.onRemoteChange(sid, localName(table));
-      })
-      .subscribe((status: string) => {
-        setIsConnected(status === 'SUBSCRIBED');
-      });
+    // Subscribe per-table — Supabase requires explicit table filters for postgres_changes
+    const channels = REALTIME_TABLES.map(table => {
+      return supabase!
+        .channel(`realtime-${table}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+          const sid = localStorage.getItem('schofy_current_school_id') || '';
+          if (sid) store.onRemoteChange(sid, localName(table));
+        })
+        .subscribe((status: string) => {
+          if (status === 'SUBSCRIBED') setIsConnected(true);
+        });
+    });
 
-    channelRef.current = channel;
+    channelRef.current = channels;
     return () => {
-      if (supabase && channelRef.current) supabase.removeChannel(channelRef.current);
+      if (supabase) channels.forEach(ch => supabase!.removeChannel(ch));
     };
   }, []);
 
