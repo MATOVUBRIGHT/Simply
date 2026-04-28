@@ -10,6 +10,15 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 
 const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
+  'nursery': [
+    { name: 'Reading Readiness', code: 'RR' },
+    { name: 'Number Work', code: 'NW' },
+    { name: 'Creative Arts', code: 'ART' },
+    { name: 'Music & Movement', code: 'MUS' },
+    { name: 'Environmental Studies', code: 'ENV' },
+    { name: 'Physical Education', code: 'PE' },
+    { name: 'Language Development', code: 'LANG' },
+  ],
   'primary': [
     { name: 'Mathematics', code: 'MATH' },
     { name: 'English', code: 'ENG' },
@@ -48,18 +57,12 @@ const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
     { name: 'History', code: 'HIST' },
     { name: 'Religious Education', code: 'RE' },
     { name: 'Computer Studies', code: 'COMP' },
-    { name: 'Art & Design', code: 'ART' },
-    { name: 'Music', code: 'MUS' },
-    { name: 'Agriculture', code: 'AGR' },
-    { name: 'Entrepreneurship', code: 'ENT' },
     { name: 'Economics', code: 'ECON' },
     { name: 'Commerce', code: 'COMM' },
     { name: 'Literature', code: 'LIT' },
-    { name: 'Latin', code: 'LAT' },
-    { name: 'French', code: 'FRE' },
-    { name: 'Chinese', code: 'CHI' },
-    { name: 'German', code: 'GER' },
-    { name: 'Arabic', code: 'ARA' },
+    { name: 'Entrepreneurship', code: 'ENT' },
+    { name: 'Agriculture', code: 'AGR' },
+    { name: 'Art & Design', code: 'ART' },
     { name: 'Physical Education', code: 'PE' },
     { name: 'General Paper', code: 'GP' },
   ],
@@ -74,6 +77,7 @@ export default function Subjects() {
   const [formData, setFormData] = useState({ name: '', code: '', classId: '', customSubject: false });
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [selectedLevel, setSelectedLevel] = useState<string>('');
+  const [schoolType, setSchoolType] = useState<string>('nursery_primary');
   const { addToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -88,6 +92,7 @@ export default function Subjects() {
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
   const clickTimeoutRef = useRef<number | null>(null);
   const [selectMode, setSelectMode] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const subjectExpectedFields = [
     { key: 'name', label: 'Subject Name', required: true },
@@ -141,26 +146,65 @@ export default function Subjects() {
     try {
       const data = await dataService.getAll(id, 'classes');
       setClasses(data.sort((left, right) => left.name.localeCompare(right.name)));
+      
+      const settingsData = await dataService.getAll(id, 'settings');
+      const schoolTypeSetting = settingsData.find((s: any) => s.key === 'schoolType');
+      const st = schoolTypeSetting?.value || 'nursery_primary';
+      setSchoolType(st);
     } catch (error) {
       console.error('Failed to load classes:', error);
     }
   }
 
-  function getClassLevel(classId: string) {
-    const cls = classes.find(c => c.id === classId);
-    const level = cls?.level || 0;
-    if (level >= 1 && level <= 7) return 'primary';
-    if (level >= 8 && level <= 11) return 'jss';
-    if (level >= 12 && level <= 13) return 'ss';
-    return '';
+  function getClassLevel(classId: string): string {
+    const cls = classes.find(c => c.id === classId) as any;
+    if (!cls) return '';
+    const name = cls.name?.toLowerCase() || '';
+    // Nursery classes by name
+    if (['baby', 'nursery', 'middle', 'top'].includes(name)) return 'nursery';
+    const level = cls.level || 0;
+    // Map by level ranges based on school type
+    if (schoolType === 'nursery_primary' || schoolType === 'all') {
+      if (level >= 1 && level <= 4) return 'nursery';
+      if (level >= 5 && level <= 11) return 'primary';
+      if (level >= 12 && level <= 17) return 'jss';
+      if (level >= 18) return 'ss';
+    }
+    if (schoolType === 'nursery') {
+      if (level >= 1 && level <= 4) return 'nursery';
+    }
+    if (schoolType === 'primary') {
+      if (level >= 1 && level <= 7) return 'primary';
+    }
+    if (schoolType === 'secondary') {
+      if (level >= 1 && level <= 6) return level <= 4 ? 'jss' : 'ss';
+    }
+    if (schoolType === 'primary_secondary') {
+      if (level >= 1 && level <= 7) return 'primary';
+      if (level >= 8 && level <= 11) return 'jss';
+      if (level >= 12) return 'ss';
+    }
+    // Fallback: guess from class name
+    if (name.startsWith('p.') || name.startsWith('p ')) return 'primary';
+    if (name.startsWith('s.') || name.startsWith('s ')) return level <= 4 ? 'jss' : 'ss';
+    return 'primary';
   }
 
-  function getEducationLevelFromLevel(level: number): string {
-    if (level >= 1 && level <= 7) return 'primary';
-    if (level >= 8 && level <= 11) return 'jss';
-    if (level >= 12 && level <= 13) return 'ss';
-    return '';
-  }
+  // Levels available based on school type from settings
+  const availableLevels = (() => {
+    const levels: { key: string; label: string }[] = [];
+    if (schoolType.includes('nursery')) levels.push({ key: 'nursery', label: 'Nursery' });
+    if (schoolType.includes('primary') || schoolType === 'nursery_primary') levels.push({ key: 'primary', label: 'Primary' });
+    if (schoolType.includes('secondary') || schoolType === 'primary_secondary') {
+      levels.push({ key: 'jss', label: 'S.1–S.4 (JSS)' });
+      levels.push({ key: 'ss', label: 'S.5–S.6 (SS)' });
+    }
+    if (schoolType === 'all') {
+      levels.push({ key: 'jss', label: 'S.1–S.4 (JSS)' });
+      levels.push({ key: 'ss', label: 'S.5–S.6 (SS)' });
+    }
+    return levels;
+  })();
 
   function generateSubjectCode(name: string) {
     const cleaned = name.toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').trim();
@@ -184,7 +228,9 @@ export default function Subjects() {
     return `${base}${suffix}`;
   }
 
-  const classesForSelectedLevel = classes.filter((classItem) => getClassLevel(classItem.id) === selectedLevel);
+  const classesForSelectedLevel = classes
+    .filter((c) => getClassLevel(c.id) === selectedLevel)
+    .sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0));
 
   function resetSubjectForm() {
     setShowForm(false);
@@ -505,8 +551,11 @@ export default function Subjects() {
   }
 
   const uniqueSubjects = [...new Set(subjects.map(s => s.name))];
-  const primaryCount = subjects.filter(s => s.classId?.includes('primary')).length;
-  const secondaryCount = subjects.filter(s => s.classId?.includes('jss') || s.classId?.includes('ss')).length;
+  const primaryCount = subjects.filter(s => getClassLevel(s.classId) === 'primary').length;
+  const secondaryCount = subjects.filter(s => ['jss','ss'].includes(getClassLevel(s.classId))).length;
+  const filteredSubjects = searchTerm
+    ? subjects.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.code?.toLowerCase().includes(searchTerm.toLowerCase()))
+    : subjects;
 
   return (
     <div className="space-y-6">
@@ -637,21 +686,22 @@ export default function Subjects() {
           </div>
           <form onSubmit={handleSubmit} className="card-body grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <label className="form-label">Education Level</label>
-              <select
-                value={selectedLevel}
-                onChange={e => {
-                  setSelectedLevel(e.target.value);
-                  setSelectedClassIds([]);
-                  setFormData(prev => ({ ...prev, name: '', code: '', classId: '', customSubject: false }));
-                }}
-                className="form-input"
-              >
-                <option value="">Select Level</option>
-                <option value="primary">Primary (P1-P7)</option>
-                <option value="jss">Junior Secondary (JSS 1-3)</option>
-                <option value="ss">Senior Secondary (SS 1-3)</option>
-              </select>
+              <label className="form-label">Education Level <span className="text-xs text-slate-400">(from settings: {schoolType})</span></label>
+              <div className="flex flex-wrap gap-2">
+                {availableLevels.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => { setSelectedLevel(selectedLevel === key ? '' : key); setSelectedClassIds([]); }}
+                    className={`btn ${selectedLevel === key ? 'btn-primary' : 'btn-secondary'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {availableLevels.length === 0 && (
+                <p className="text-xs text-amber-600">No school type set. Go to Settings to configure.</p>
+              )}
             </div>
             <div className="space-y-2">
               <label className="form-label">Subject</label>
@@ -760,13 +810,25 @@ export default function Subjects() {
 
       <div className="card">
         <div className="card-header bg-gradient-to-r from-sky-50 to-cyan-50 dark:from-sky-900/20 dark:to-cyan-900/20">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-cyan-400 flex items-center justify-center shadow-md">
-                <BookOpen size={20} className="text-white" />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-cyan-400 flex items-center justify-center shadow-md">
+                  <BookOpen size={20} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-800 dark:text-white">All Subjects</h2>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{subjects.length} subject entries</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-bold text-slate-800 dark:text-white">All Subjects</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">{subjects.length} subject entries</p>
+              <div className="relative w-64">
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Search subjects..."
+                  className="form-input pl-9 py-2 text-sm"
+                />
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
               </div>
             </div>
         </div>
@@ -828,22 +890,20 @@ export default function Subjects() {
                     </div>
                   </td>
                 </tr>
-              ) : subjects.length === 0 ? (
+              ) : filteredSubjects.length === 0 ? (
                 <tr>
                   <td colSpan={selectMode ? 6 : 5} className="text-center py-12">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                         <Book size={32} className="text-violet-400" />
                       </div>
-                      <p className="text-slate-500 font-medium">No subjects yet</p>
-                      <p className="text-slate-400 text-sm">Add subjects for your classes</p>
-                      <button onClick={() => setShowForm(true)} className="text-primary-500 hover:text-primary-600 text-sm">
-                        Add your first subject
-                      </button>
+                      <p className="text-slate-500 font-medium">{searchTerm ? 'No subjects match your search' : 'No subjects yet'}</p>
+                      <p className="text-slate-400 text-sm">{searchTerm ? 'Try a different search term' : 'Add subjects for your classes'}</p>
+                      {!searchTerm && <button onClick={() => setShowForm(true)} className="text-primary-500 hover:text-primary-600 text-sm">Add your first subject</button>}
                     </div>
                   </td>
                 </tr>
-              ) : subjects.map((s, index) => (
+              ) : filteredSubjects.map((s, index) => (
                 <tr 
                   key={s.id}
                   className={`cursor-pointer transition-colors ${selectedSubjects.has(s.id) ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}

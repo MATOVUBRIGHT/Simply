@@ -90,8 +90,15 @@ export default function GlobalSearch() {
     });
 
     try {
-      const tenantId = schoolId || user?.id;
-      if (!tenantId) return;
+      const tenantId = schoolId || user?.schoolId || user?.id;
+      console.log('[GlobalSearch] tenantId:', tenantId, 'schoolId:', schoolId, 'user:', user?.id, 'userSchoolId:', user?.schoolId);
+      if (!tenantId) {
+        console.log('[GlobalSearch] No tenantId, returning');
+        return;
+      }
+
+      await userDBManager.openDatabase(tenantId);
+      console.log('[GlobalSearch] DB opened for:', tenantId);
 
       const [students, staff, subjects, classes] = await Promise.all([
         userDBManager.getAll(tenantId, 'students'),
