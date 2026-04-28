@@ -147,9 +147,18 @@ export default function Subjects() {
   }
 
   function getClassLevel(classId: string) {
-    if (classId.startsWith('primary')) return 'primary';
-    if (classId.startsWith('jss')) return 'jss';
-    if (classId.startsWith('ss')) return 'ss';
+    const cls = classes.find(c => c.id === classId);
+    const level = cls?.level || 0;
+    if (level >= 1 && level <= 7) return 'primary';
+    if (level >= 8 && level <= 11) return 'jss';
+    if (level >= 12 && level <= 13) return 'ss';
+    return '';
+  }
+
+  function getEducationLevelFromLevel(level: number): string {
+    if (level >= 1 && level <= 7) return 'primary';
+    if (level >= 8 && level <= 11) return 'jss';
+    if (level >= 12 && level <= 13) return 'ss';
     return '';
   }
 

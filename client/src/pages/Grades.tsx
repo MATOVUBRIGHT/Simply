@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, Upload, X, ArrowRight, Check, Filter } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -35,6 +36,7 @@ function getGrade(score: number): { grade: string; remark: string; points: numbe
 
 export default function Grades() {
   const { user, schoolId } = useAuth();
+  const navigate = useNavigate();
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('all');
@@ -490,6 +492,9 @@ export default function Grades() {
           >
             <FileText size={16} />
             <span className="hidden sm:inline">Invoice ({studentsWithGrades.length})</span>
+          </button>
+          <button onClick={() => navigate('/exam-marks')} className="btn btn-secondary flex items-center gap-2">
+            <BarChart3 size={16} /> Exam Marks
           </button>
           <button onClick={() => setShowForm(true)} className="btn btn-primary shadow-lg shadow-primary-500/25">
             <Plus size={16} /> Add Grade

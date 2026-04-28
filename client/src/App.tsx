@@ -28,6 +28,8 @@ const About = lazy(() => import('./pages/About'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const Grades = lazy(() => import('./pages/Grades'));
+const ExamMarks = lazy(() => import('./pages/ExamMarks'));
+const ReportCard = lazy(() => import('./pages/ReportCard'));
 const Plans = lazy(() => import('./pages/Plans'));
 const Subscription = lazy(() => import('./pages/Subscription'));
 const RecycleBin = lazy(() => import('./pages/RecycleBin'));
@@ -110,6 +112,8 @@ function MainApp() {
                   <Route path="/finance" element={<Finance />} />
                   <Route path="/invoices" element={<Invoices />} />
                   <Route path="/grades" element={<Grades />} />
+                  <Route path="/exam-marks" element={<ExamMarks />} />
+                  <Route path="/report-card/:id" element={<ReportCard />} />
                   <Route path="/transport" element={<Transport />} />
                   <Route path="/announcements" element={<Announcements />} />
                   <Route path="/notifications" element={<Notifications />} />
