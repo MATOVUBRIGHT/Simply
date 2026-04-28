@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class, Subject } from '@schofy/shared';
@@ -551,11 +551,34 @@ export default function Subjects() {
   }
 
   const uniqueSubjects = [...new Set(subjects.map(s => s.name))];
-  const primaryCount = subjects.filter(s => getClassLevel(s.classId) === 'primary').length;
-  const secondaryCount = subjects.filter(s => ['jss','ss'].includes(getClassLevel(s.classId))).length;
-  const filteredSubjects = searchTerm
-    ? subjects.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.code?.toLowerCase().includes(searchTerm.toLowerCase()))
-    : subjects;
+  const primaryCount = [...new Set(subjects.filter(s => getClassLevel(s.classId) === 'primary').map(s => s.name))].length;
+  const secondaryCount = [...new Set(subjects.filter(s => ['jss','ss'].includes(getClassLevel(s.classId))).map(s => s.name))].length;
+
+  // Group subjects by name — one row per subject, showing all assigned classes
+  const groupedSubjects = useMemo(() => {
+    const map = new Map<string, { name: string; code: string; ids: string[]; classIds: string[] }>();
+    for (const s of subjects) {
+      const key = s.name.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, { name: s.name, code: s.code || '', ids: [], classIds: [] });
+      }
+      const entry = map.get(key)!;
+      entry.ids.push(s.id);
+      entry.classIds.push(s.classId);
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [subjects]);
+
+  const filteredGrouped = searchTerm
+    ? groupedSubjects.filter(s =>
+        s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        s.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        s.classIds.some(cid => {
+          const cls = classes.find((c: any) => c.id === cid);
+          return cls?.name?.toLowerCase().includes(searchTerm.toLowerCase());
+        })
+      )
+    : groupedSubjects;
 
   return (
     <div className="space-y-6">
@@ -817,7 +840,7 @@ export default function Subjects() {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-slate-800 dark:text-white">All Subjects</h2>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{subjects.length} subject entries</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{filteredGrouped.length} unique subject{filteredGrouped.length !== 1 ? 's' : ''}{searchTerm ? ` matching "${searchTerm}"` : ''}</p>
                 </div>
               </div>
               <div className="relative w-64">
@@ -890,7 +913,7 @@ export default function Subjects() {
                     </div>
                   </td>
                 </tr>
-              ) : filteredSubjects.length === 0 ? (
+              ) : filteredGrouped.length === 0 ? (
                 <tr>
                   <td colSpan={selectMode ? 6 : 5} className="text-center py-12">
                     <div className="flex flex-col items-center gap-3">
@@ -903,55 +926,61 @@ export default function Subjects() {
                     </div>
                   </td>
                 </tr>
-              ) : filteredSubjects.map((s, index) => (
-                <tr 
-                  key={s.id}
-                  className={`cursor-pointer transition-colors ${selectedSubjects.has(s.id) ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
-                  onClick={() => selectMode && handleRowClick(s.id)}
-                  onDoubleClick={() => !selectMode && setShowForm(true)}
-                >
-                  <td className="text-center text-xs text-slate-400 dark:text-slate-500">
-                    {index + 1}
-                  </td>
-                  {selectMode && (
-                    <td className="text-center">
-                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                        selectedSubjects.has(s.id) 
-                          ? 'bg-primary-600 border-primary-600' 
-                          : 'border-slate-300 dark:border-slate-600'
-                      }`}>
-                        {selectedSubjects.has(s.id) && (
-                          <Check size={12} className="text-white" />
-                        )}
+              ) : filteredGrouped.map((group, index) => {
+                const allSelected = group.ids.every(id => selectedSubjects.has(id));
+                return (
+                  <tr
+                    key={group.name}
+                    className={`cursor-pointer transition-colors ${allSelected ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+                    onClick={() => selectMode && group.ids.forEach(id => handleRowClick(id))}
+                  >
+                    <td className="text-center text-xs text-slate-400">{index + 1}</td>
+                    {selectMode && (
+                      <td className="text-center">
+                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${allSelected ? 'bg-primary-600 border-primary-600' : 'border-slate-300 dark:border-slate-600'}`}>
+                          {allSelected && <Check size={12} className="text-white" />}
+                        </div>
+                      </td>
+                    )}
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getSubjectColor(group.name)} flex items-center justify-center shadow-md shrink-0`}>
+                          <Book size={18} className="text-white" />
+                        </div>
+                        <span className="font-semibold text-slate-800 dark:text-white">{group.name}</span>
                       </div>
                     </td>
-                  )}
-                  <td>
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getSubjectColor(s.name)} flex items-center justify-center shadow-md`}>
-                        <Book size={18} className="text-white" />
+                    <td>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-700 font-mono text-sm font-semibold text-slate-600 dark:text-slate-300">
+                        {group.code}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        {group.classIds.map(cid => {
+                          const cls = classes.find((c: any) => c.id === cid);
+                          return cls ? (
+                            <span key={cid} className="badge badge-info text-xs">{cls.name}</span>
+                          ) : null;
+                        })}
                       </div>
-                      <span className="font-semibold text-slate-800 dark:text-white">{s.name}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-700 font-mono text-sm font-semibold text-slate-600 dark:text-slate-300">
-                      {s.code}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="badge badge-info">{getClassDisplayName(s.classId, classes)}</span>
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button 
-                      onClick={() => handleDelete(s.id)} 
-                      className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete "${group.name}" from all ${group.ids.length} class(es)?`)) {
+                            group.ids.forEach(id => handleDelete(id));
+                          }
+                        }}
+                        className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
+                        title={`Delete from ${group.ids.length} class(es)`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
