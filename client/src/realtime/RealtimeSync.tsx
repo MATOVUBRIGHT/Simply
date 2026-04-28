@@ -2,10 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { store } from '../lib/store';
 
-interface RealtimeSyncContextType {
-  isConnected: boolean;
-}
-
+interface RealtimeSyncContextType { isConnected: boolean; }
 const RealtimeSyncContext = createContext<RealtimeSyncContextType>({ isConnected: false });
 export function useRealtimeSync() { return useContext(RealtimeSyncContext); }
 
@@ -21,23 +18,16 @@ const TABLE_NAME_MAP: Record<string, string> = {
   transport_routes: 'transportRoutes', transport_assignments: 'transportAssignments',
   salary_payments: 'salaryPayments',
 };
-
 function localName(t: string) { return TABLE_NAME_MAP[t] || t; }
 
-function refreshAll() {
+// Only refresh tables with active subscribers and stale data
+function refreshStale() {
   const sid = localStorage.getItem('schofy_current_school_id') || '';
   if (!sid) return;
-  for (const t of REALTIME_TABLES) {
-    store.onRemoteChange(sid, localName(t));
-  }
-  // Also fire a global refresh for pages using event listeners
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('dataRefresh'));
-    window.dispatchEvent(new CustomEvent('schofyDataRefresh'));
-  }
+  store.refreshStale(sid, REALTIME_TABLES.map(localName));
 }
 
-const POLL_INTERVAL = 3000; // 3 seconds
+const POLL_INTERVAL = 30_000; // 30 seconds — only for stale tables
 
 export function RealtimeSyncProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
@@ -45,71 +35,55 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
   const pollRef = useRef<number | null>(null);
   const lastActiveRef = useRef<number>(Date.now());
 
-  // ── Supabase Postgres Changes (fires instantly when replication is enabled) ──
+  // ── Single Supabase channel for all tables ──────────────────────────────────
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
 
-    // Subscribe per-table — Supabase requires explicit table filters for postgres_changes
-    const channels = REALTIME_TABLES.map(table => {
-      return supabase!
-        .channel(`realtime-${table}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
-          console.log('[realtime]', table, payload.eventType);
-          const sid = localStorage.getItem('schofy_current_school_id') || '';
-          if (sid) store.onRemoteChange(sid, localName(table));
-        })
-        .subscribe((status: string) => {
-          console.log(`[realtime] ${table}:`, status);
-          if (status === 'SUBSCRIBED') setIsConnected(true);
-        });
+    // One channel, filter per table — much cheaper than 19 channels
+    let ch = supabase.channel('schofy-all');
+    for (const table of REALTIME_TABLES) {
+      ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+        const sid = localStorage.getItem('schofy_current_school_id') || '';
+        if (sid) store.onRemoteChange(sid, localName(table));
+      }) as any;
+    }
+    ch.subscribe((status: string) => {
+      if (status === 'SUBSCRIBED') setIsConnected(true);
     });
 
-    channelRef.current = channels;
-    return () => {
-      if (supabase) channels.forEach(ch => supabase!.removeChannel(ch));
-    };
+    channelRef.current = ch;
+    return () => { if (supabase) supabase.removeChannel(ch); };
   }, []);
 
-  // ── Polling fallback — refreshes all tables every 8s when tab is visible ──
+  // ── Polling fallback — only refreshes stale tables with active subscribers ──
   useEffect(() => {
     function startPoll() {
       if (pollRef.current) return;
       pollRef.current = window.setInterval(() => {
-        if (document.visibilityState === 'visible') refreshAll();
+        if (document.visibilityState === 'visible') refreshStale();
       }, POLL_INTERVAL);
     }
-
     function stopPoll() {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     }
-
-    // On tab focus/visibility — refresh immediately if away > 5s
     function onVisible() {
       const away = Date.now() - lastActiveRef.current;
-      if (away > 5000) refreshAll();
+      // Only refresh if away > 30s
+      if (away > 30_000) refreshStale();
       lastActiveRef.current = Date.now();
       startPoll();
     }
+    function onHidden() { lastActiveRef.current = Date.now(); stopPoll(); }
 
-    function onHidden() {
-      lastActiveRef.current = Date.now();
-      stopPoll();
-    }
-
-    function onFocus() { onVisible(); }
-
-    document.addEventListener('visibilitychange', () => {
-      document.visibilityState === 'visible' ? onVisible() : onHidden();
-    });
-    window.addEventListener('focus', onFocus);
-
-    // Start polling immediately
+    document.addEventListener('visibilitychange', () =>
+      document.visibilityState === 'visible' ? onVisible() : onHidden()
+    );
+    window.addEventListener('focus', onVisible);
     startPoll();
 
     return () => {
       stopPoll();
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', onVisible);
     };
   }, []);
 

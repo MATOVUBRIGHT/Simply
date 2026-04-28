@@ -184,7 +184,7 @@ function recycleBinType(t: string): string | null {
 }
 
 // ── In-memory cache ───────────────────────────────────────────────────────────
-const CACHE_TTL = 60_000; // 1 minute
+const CACHE_TTL = 5 * 60_000; // 5 minutes
 interface CacheEntry { data: any[]; ts: number; }
 const memCache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<any[]>>();
@@ -333,7 +333,6 @@ class SupabaseDataService {
     const id = isUUID(data.id) ? data.id : generateUUID();
     const record = { ...data, id, schoolId: data.schoolId || sid, createdAt: now, updatedAt: now };
     const payload = toRemote(record, rt);
-    console.log(`[create] ${rt}`, payload);
     try {
       const { error } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
       if (error) {
@@ -357,7 +356,6 @@ class SupabaseDataService {
     const payload = toRemote(record, rt);
     delete payload.id;
     delete payload.created_at;
-    console.log(`[update] ${rt}/${id}`, payload);
     try {
       const { error } = await this.db.from(rt).update(payload).eq('id', id);
       if (error) {
