@@ -30,9 +30,14 @@ function refreshAll() {
   for (const t of REALTIME_TABLES) {
     store.onRemoteChange(sid, localName(t));
   }
+  // Also fire a global refresh for pages using event listeners
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('dataRefresh'));
+    window.dispatchEvent(new CustomEvent('schofyDataRefresh'));
+  }
 }
 
-const POLL_INTERVAL = 8000; // 8 seconds
+const POLL_INTERVAL = 3000; // 3 seconds
 
 export function RealtimeSyncProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
@@ -48,11 +53,13 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
     const channels = REALTIME_TABLES.map(table => {
       return supabase!
         .channel(`realtime-${table}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+        .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+          console.log('[realtime]', table, payload.eventType);
           const sid = localStorage.getItem('schofy_current_school_id') || '';
           if (sid) store.onRemoteChange(sid, localName(table));
         })
         .subscribe((status: string) => {
+          console.log(`[realtime] ${table}:`, status);
           if (status === 'SUBSCRIBED') setIsConnected(true);
         });
     });

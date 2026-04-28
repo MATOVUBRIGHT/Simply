@@ -94,9 +94,17 @@ class DataStore {
     void this.fetch(sid, table, true);
   }
 
-  /** Called by realtime listener — bust and refresh */
+  /** Called by realtime listener — bust and refresh, then notify all pages */
   onRemoteChange(sid: string, table: string) {
-    this.invalidate(sid, table);
+    this.set(sid, table, { lastFetch: 0 });
+    // Fire events immediately so pages using local state start reloading now
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(`${table}Updated`));
+      window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table } }));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table } }));
+    }
+    // Then fetch fresh data — useTableData subscribers re-render when done
+    void this.fetch(sid, table, true);
   }
 }
 
