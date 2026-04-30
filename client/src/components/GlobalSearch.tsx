@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, GraduationCap, Users, BookOpen, LayoutDashboard, Calendar, Receipt, FileBarChart, Bus, MessageSquare, ClipboardList, Settings, Award, UserPlus } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { userDBManager } from '../lib/database/UserDatabaseManager';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { getClassDisplayName } from '../utils/classroom';
 
 interface SearchResult {
@@ -90,21 +90,14 @@ export default function GlobalSearch() {
     });
 
     try {
-      const tenantId = schoolId || user?.schoolId || user?.id;
-      console.log('[GlobalSearch] tenantId:', tenantId, 'schoolId:', schoolId, 'user:', user?.id, 'userSchoolId:', user?.schoolId);
-      if (!tenantId) {
-        console.log('[GlobalSearch] No tenantId, returning');
-        return;
-      }
-
-      await userDBManager.openDatabase(tenantId);
-      console.log('[GlobalSearch] DB opened for:', tenantId);
+      const tenantId = schoolId || user?.id;
+      if (!tenantId) return;
 
       const [students, staff, subjects, classes] = await Promise.all([
-        userDBManager.getAll(tenantId, 'students'),
-        userDBManager.getAll(tenantId, 'staff'),
-        userDBManager.getAll(tenantId, 'subjects'),
-        userDBManager.getAll(tenantId, 'classes'),
+        dataService.getAll(tenantId, 'students'),
+        dataService.getAll(tenantId, 'staff'),
+        dataService.getAll(tenantId, 'subjects'),
+        dataService.getAll(tenantId, 'classes'),
       ]);
 
       students

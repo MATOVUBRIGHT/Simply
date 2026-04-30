@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
@@ -74,6 +74,25 @@ export default function Settings() {
   }
 
   const [isSaving, setIsSaving] = useState(false);
+  const [autoSaved, setAutoSaved] = useState(false);
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-save to Supabase 1s after last change
+  const autoSave = useCallback(async (newSettings: typeof settings) => {
+    const sid = schoolId || user?.id;
+    if (!sid || !newSettings.schoolName?.trim()) return;
+    setIsSaving(true);
+    try {
+      localStorage.setItem('schofy_currency', newSettings.currency || 'USD');
+      window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: newSettings }));
+      await dataService.saveSettings(sid, newSettings);
+      window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
+      setAutoSaved(true);
+      setTimeout(() => setAutoSaved(false), 2000);
+    } catch { /* silent */ } finally {
+      setIsSaving(false);
+    }
+  }, [schoolId, user?.id]);
 
   async function handleSave(e?: React.FormEvent | React.MouseEvent) {
     if (e) e.preventDefault();
@@ -171,11 +190,16 @@ export default function Settings() {
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) {
     const { name, value } = e.target;
-    setSettings(prev => ({ ...prev, [name]: value }));
-    
+    const newSettings = { ...settings, [name]: value };
+    setSettings(newSettings);
+
     if (name === 'currency') {
-      setCurrency(value as 'USD' | 'UGX');
+      setCurrency(value as any);
     }
+
+    // Debounced auto-save — fires 1s after last keystroke
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => void autoSave(newSettings), 1000);
   }
 
   async function handlePromoteStudents() {
@@ -370,10 +394,14 @@ export default function Settings() {
           <h1 className="text-2xl font-bold">Settings</h1>
           <p className="text-slate-500">Configure your school system</p>
         </div>
-        <button onClick={handleSave} disabled={isSaving} className="btn btn-primary flex items-center gap-2 disabled:opacity-70">
-          {isSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={18} />}
-          {isSaving ? 'Saving...' : 'Save Changes'}
-        </button>
+        <div className="flex items-center gap-3">
+          {autoSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle size={14} /> Auto-saved</span>}
+          {isSaving && <span className="text-sm text-slate-400 flex items-center gap-1"><div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> Saving...</span>}
+          <button onClick={handleSave} disabled={isSaving} className="btn btn-primary flex items-center gap-2 disabled:opacity-70">
+            {isSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={18} />}
+            {isSaving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">

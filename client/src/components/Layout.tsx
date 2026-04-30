@@ -356,257 +356,170 @@ function Layout({ children }: LayoutProps) {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header/Top Bar */}
-        <header ref={headerRef} className="h-20 max-w-full w-full flex items-center justify-between px-8 shrink-0 z-30 border-b" style={{ backgroundColor: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}>
-          <div className="flex items-center gap-4 flex-1">
+        <header ref={headerRef} className="relative shrink-0 z-30 border-b" style={{ backgroundColor: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}>
+          {/* Main header row */}
+          <div className="flex items-center gap-2 px-3 sm:px-6 h-16">
+            {/* Hamburger */}
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 hover:bg-white/10 rounded-lg transition-colors"
+              className="lg:hidden p-2 hover:bg-white/10 rounded-lg transition-colors shrink-0"
             >
               <Menu size={22} className="text-white" />
             </button>
-            <div className="flex-1 max-w-2xl relative group">
+
+            {/* Search — always visible, grows to fill space */}
+            <div className="flex-1 min-w-0">
               <GlobalSearch />
             </div>
-          </div>
 
-          <div className="flex items-center gap-6 ml-6">
-            <div className="hidden xl:flex items-center gap-4 text-white/80">
-              <div className="text-right">
-                <p className="text-lg font-bold text-white leading-none">{formatTime(currentTime)}</p>
-                <p className="text-[11px] font-medium uppercase tracking-wider mt-1">{formatDate(currentTime)}</p>
-              </div>
-            </div>
-
-            {/* Real-time Status Indicator */}
-            <div className="hidden lg:block">
-              <RealtimeStatus />
-            </div>
-
-              <div className="flex items-center gap-3">
-              <div className="flex flex-col items-end mr-2">
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-bold uppercase tracking-widest ${isSyncing ? 'text-white' : 'text-white/80'}`}>
-                    {!isOnline
-                      ? 'Offline'
-                      : isSyncing
-                        ? 'Syncing...'
-                        : isSyncEnabled && pendingChanges > 0
-                          ? `${pendingChanges} pending`
-                          : isSyncEnabled
-                            ? 'Up to date'
-                            : 'Local'}
-                  </span>
-                  <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-white' : 'bg-white/50'} ${isSyncing ? 'animate-pulse' : ''}`} />
+            {/* Right side actions */}
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+              {/* Time — hidden on small screens */}
+              <div className="hidden xl:flex items-center gap-4 text-white/80 mr-2">
+                <div className="text-right">
+                  <p className="text-base font-bold text-white leading-none">{formatTime(currentTime)}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wider mt-1">{formatDate(currentTime)}</p>
                 </div>
-                <div className="flex items-center justify-end gap-2 mt-0.5">
-                  <span className={`text-[10px] ${isOnline ? 'text-white/70' : 'text-white/50'}`}>
-                    {isOnline ? 'Online' : 'Offline'}
-                  </span>
+              </div>
+
+              {/* Realtime status — hidden on small */}
+              <div className="hidden lg:block">
+                <RealtimeStatus />
+              </div>
+
+              {/* Sync status — hidden on small */}
+              <div className="hidden md:flex flex-col items-end mr-1">
+                <span className={`text-[10px] font-bold uppercase tracking-widest ${isSyncing ? 'text-white' : 'text-white/80'}`}>
+                  {!isOnline ? 'Offline' : isSyncing ? 'Syncing...' : isSyncEnabled && pendingChanges > 0 ? `${pendingChanges} pending` : isSyncEnabled ? 'Up to date' : 'Local'}
+                </span>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className={`text-[10px] ${isOnline ? 'text-white/70' : 'text-white/50'}`}>{isOnline ? 'Online' : 'Offline'}</span>
                   <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-white/30'}`} />
                 </div>
               </div>
 
+              {/* Notifications */}
               <button
-                onClick={() => {
-                  setNotifOpen(!notifOpen);
-                  setProfileOpen(false);
-                }}
-                className="relative p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all cursor-pointer"
+                onClick={() => { setNotifOpen(!notifOpen); setProfileOpen(false); }}
+                className="relative p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all"
                 title="Notifications"
               >
                 <Bell size={18} className={`text-[#f68818] ${unreadCount > 0 ? 'animate-[shake_0.5s_ease-in-out_infinite]' : 'opacity-80'}`} />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white">
-                    {unreadCount}
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-[9px] font-bold text-white">
+                    {unreadCount > 9 ? '9+' : unreadCount}
                   </span>
                 )}
               </button>
 
+              {/* Recycle bin */}
               <button
-                onClick={() => {
-                  setNotifOpen(false);
-                  setProfileOpen(false);
-                  navigate('/recycle-bin');
-                }}
-                className="relative p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all cursor-pointer"
+                onClick={() => { setNotifOpen(false); setProfileOpen(false); navigate('/recycle-bin'); }}
+                className="relative p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all"
                 title="Recycle Bin"
               >
                 <Trash2 size={18} className="text-white/80" />
                 {deletedItemsCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white">
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center text-[9px] font-bold text-white">
                     {deletedItemsCount}
                   </span>
                 )}
               </button>
 
-              {notifOpen && (
-                <div 
-                  className="absolute top-20 right-8 w-96 animate-dropdown-in z-50"
-                >
-                  <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-                    <div className="px-5 py-4 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
-                      <div className="flex items-center gap-3">
-                        <Bell size={20} className="text-white" />
-                        <h3 className="font-bold text-white text-lg">Notifications</h3>
-                        {unreadCount > 0 && (
-                          <span className="bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                            {unreadCount} new
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {unreadCount > 0 && (
-                          <button onClick={markAllAsRead} className="hover:bg-white/20 rounded px-3 py-1.5 text-xs font-medium text-white transition-colors">
-                            Mark all read
-                          </button>
-                        )}
-                        <button onClick={() => setNotifOpen(false)} className="hover:bg-white/20 rounded p-1.5 transition-colors">
-                          <X size={18} className="text-white" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="max-h-80 overflow-y-auto custom-scrollbar">
-                      {notifications.length === 0 ? (
-                        <div className="py-12 text-center">
-                          <Bell className="mx-auto text-slate-300 dark:text-slate-600 mb-3" size={40} />
-                          <p className="text-slate-400 dark:text-slate-500 text-sm font-medium">No notifications yet</p>
-                        </div>
-                      ) : (
-                        notifications.slice(0, 5).map(notif => (
-                          <div 
-                            key={notif.id} 
-                            className={`px-5 py-4 border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors cursor-pointer group ${!notif.read ? 'bg-indigo-50/50 dark:bg-indigo-900/20' : ''}`}
-                          >
-                            <div className="flex items-start gap-4">
-                              {!notif.read && (
-                                <div className="w-2.5 h-2.5 bg-indigo-600 rounded-full mt-2 shrink-0 animate-pulse" />
-                              )}
-                              <div className="flex-1 min-w-0" onClick={() => notif.link && navigate(notif.link)}>
-                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                                  {notif.title}
-                                </p>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{notif.message}</p>
-                                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2">
-                                  {new Date(notif.createdAt).toLocaleDateString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric',
-                                    hour: '2-digit', 
-                                    minute: '2-digit' 
-                                  })}
-                                </p>
-                              </div>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); deleteNotification(notif.id); }} 
-                                className="text-slate-300 hover:text-red-500 p-1 shrink-0 opacity-0 group-hover:opacity-100 transition-all"
-                                title="Delete"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    <div className="px-5 py-3 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center">
-                      <button 
-                        onClick={() => { clearAllNotifications(); setNotifOpen(false); }} 
-                        className="text-xs text-red-500 dark:text-red-400 font-medium hover:text-red-600 dark:hover:text-red-300 transition-colors flex items-center gap-1.5"
-                      >
-                        <Trash2 size={14} />
-                        Clear all
-                      </button>
-                      <button 
-                        onClick={() => { setNotifOpen(false); navigate('/notifications'); }} 
-                        className="text-xs font-medium transition-colors flex items-center gap-1.5"
-                        style={{ color: 'var(--primary-color)' }}
-                      >
-                        View all
-                        <span className="text-lg">→</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3 pl-6 border-l border-white/20 relative">
+              {/* Profile */}
+              <div className="relative pl-2 border-l border-white/20">
                 <button
-                  onClick={() => setProfileOpen(!profileOpen)}
-                  className="w-10 h-10 rounded-full bg-white/20 p-0.5 border-2 border-white/30 hover:border-white/50 transition-all overflow-hidden"
+                  onClick={() => { setProfileOpen(!profileOpen); setNotifOpen(false); }}
+                  className="w-9 h-9 rounded-full bg-white/20 p-0.5 border-2 border-white/30 hover:border-white/50 transition-all overflow-hidden"
                 >
-                  <img 
-                    src={profileImage} 
-                    alt="User" 
-                    className="w-full h-full rounded-full object-cover object-top"
-                  />
+                  <img src={profileImage} alt="User" className="w-full h-full rounded-full object-cover object-top" />
                 </button>
-
-                {profileOpen && (
-                  <div 
-                    className="absolute top-full right-0 mt-3 w-72 animate-dropdown-in z-50"
-                  >
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-                      <div className="p-6 text-center border-b border-slate-100 dark:border-slate-700">
-                        <div className="relative w-20 h-20 mx-auto mb-3">
-                          <img 
-                            src={profileImage} 
-                            alt="Profile" 
-                            className="w-20 h-20 rounded-full object-cover object-top border-4 border-white dark:border-slate-700 shadow-lg"
-                          />
-                          <label className="absolute bottom-0 right-0 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer shadow-lg transition-transform hover:scale-110"
-                            style={{ backgroundColor: 'var(--primary-color)' }}
-                          >
-                            <Camera size={16} className="text-white" />
-                            <input 
-                              type="file" 
-                              accept="image/*" 
-                              onChange={handleImageUpload} 
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-                        <p className="font-bold text-slate-800 dark:text-white text-lg">{user?.firstName || user?.email?.split('@')[0] || 'User'}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{user?.email || ''}</p>
-                        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-                          <span className="text-[10px] font-semibold uppercase tracking-wider px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
-                            Plan: {planLabel}
-                          </span>
-                          <span className="text-[10px] font-medium uppercase tracking-widest px-3 py-1 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400">
-                            Administrator
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">{planStatusLabel}</p>
-                      </div>
-                      <div className="p-2">
-                        <button 
-                          onClick={() => { setProfileOpen(false); navigate('/plans'); }}
-                          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
-                        >
-                          <CreditCard size={18} className="text-slate-400 dark:text-slate-500" />
-                          <span className="font-medium">Plans & billing</span>
-                        </button>
-                        <div className="border-t border-slate-100 dark:border-slate-700 my-2 mx-4" />
-                        <button 
-                          onClick={() => { setProfileOpen(false); navigate('/settings'); }}
-                          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
-                        >
-                          <Settings size={18} className="text-slate-400 dark:text-slate-500" />
-                          <span className="font-medium">Settings</span>
-                        </button>
-                        <div className="border-t border-slate-100 dark:border-slate-700 my-2 mx-4" />
-                        <button 
-                          onClick={() => { setProfileOpen(false); logout(); }}
-                          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                        >
-                          <LogOut size={18} />
-                          <span className="font-medium">Sign Out</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>
+
+          {/* Notifications dropdown */}
+          {notifOpen && (
+            <div className="absolute top-16 right-2 sm:right-6 w-[calc(100vw-1rem)] sm:w-96 max-w-sm animate-dropdown-in z-50">
+              <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="px-4 py-3 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
+                  <div className="flex items-center gap-2">
+                    <Bell size={18} className="text-white" />
+                    <h3 className="font-bold text-white">Notifications</h3>
+                    {unreadCount > 0 && <span className="bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full">{unreadCount} new</span>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {unreadCount > 0 && <button onClick={markAllAsRead} className="hover:bg-white/20 rounded px-2 py-1 text-xs font-medium text-white">Mark read</button>}
+                    <button onClick={() => setNotifOpen(false)} className="hover:bg-white/20 rounded p-1"><X size={16} className="text-white" /></button>
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="py-10 text-center"><Bell className="mx-auto text-slate-300 mb-2" size={32} /><p className="text-slate-400 text-sm">No notifications</p></div>
+                  ) : notifications.slice(0, 5).map(notif => (
+                    <div key={notif.id} className={`px-4 py-3 border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer group ${!notif.read ? 'bg-indigo-50/50 dark:bg-indigo-900/20' : ''}`}>
+                      <div className="flex items-start gap-3">
+                        {!notif.read && <div className="w-2 h-2 bg-indigo-600 rounded-full mt-1.5 shrink-0 animate-pulse" />}
+                        <div className="flex-1 min-w-0" onClick={() => notif.link && navigate(notif.link)}>
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{notif.title}</p>
+                          <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{notif.message}</p>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); deleteNotification(notif.id); }} className="text-slate-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100"><Trash2 size={12} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-100 dark:border-slate-700 flex justify-between">
+                  <button onClick={() => { clearAllNotifications(); setNotifOpen(false); }} className="text-xs text-red-500 font-medium flex items-center gap-1"><Trash2 size={12} />Clear all</button>
+                  <button onClick={() => { setNotifOpen(false); navigate('/notifications'); }} className="text-xs font-medium" style={{ color: 'var(--primary-color)' }}>View all →</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Profile dropdown */}
+          {profileOpen && (
+            <div className="absolute top-16 right-2 sm:right-6 w-72 animate-dropdown-in z-50">
+              <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[80vh] overflow-y-auto">
+                <div className="p-5 text-center border-b border-slate-100 dark:border-slate-700">
+                  <div className="relative w-16 h-16 mx-auto mb-2">
+                    <img src={profileImage} alt="Profile" className="w-16 h-16 rounded-full object-cover border-4 border-white dark:border-slate-700 shadow-lg" />
+                    <label className="absolute bottom-0 right-0 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer shadow-lg hover:scale-110 transition-transform" style={{ backgroundColor: 'var(--primary-color)' }}>
+                      <Camera size={14} className="text-white" />
+                      <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                    </label>
+                  </div>
+                  <p className="font-bold text-slate-800 dark:text-white">{user?.firstName || user?.email?.split('@')[0] || 'User'}</p>
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">{user?.email || ''}</p>
+                  <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5">
+                    <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700">Plan: {planLabel}</span>
+                    <span className="text-[10px] font-medium uppercase px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600">Admin</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">{planStatusLabel}</p>
+                </div>
+                <div className="p-2">
+                  {[
+                    { label: 'Plans & Billing', icon: CreditCard, path: '/plans' },
+                    { label: 'Settings', icon: Settings, path: '/settings' },
+                    { label: 'Notifications', icon: Bell, path: '/notifications' },
+                    { label: 'Recycle Bin', icon: Trash2, path: '/recycle-bin' },
+                  ].map(({ label, icon: Icon, path }) => (
+                    <button key={path} onClick={() => { setProfileOpen(false); navigate(path); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                      <Icon size={16} className="text-slate-400 shrink-0" />
+                      <span className="font-medium text-sm">{label}</span>
+                    </button>
+                  ))}
+                  <div className="border-t border-slate-100 dark:border-slate-700 my-1 mx-3" />
+                  <button onClick={() => { setProfileOpen(false); logout(); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                    <LogOut size={16} className="shrink-0" />
+                    <span className="font-medium text-sm">Sign Out</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </header>
 
         {!isOnline && (
@@ -619,7 +532,7 @@ function Layout({ children }: LayoutProps) {
         )}
 
         {/* Page Content */}
-        <main className="flex-1 p-8 overflow-y-auto bg-[#f8fafc] dark:bg-slate-950">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto overflow-x-hidden bg-[#f8fafc] dark:bg-slate-950">
           <div className="max-w-[1600px] mx-auto">
             {children}
           </div>
