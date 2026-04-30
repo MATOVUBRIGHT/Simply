@@ -13,6 +13,17 @@ export interface IdFormat {
 }
 
 const defaultFormats: Record<string, IdFormat> = {
+  initials_number: {
+    pattern: 'INI###',
+    prefix: '',
+    useNameInitials: true,
+    useRandomNumbers: false,
+    randomNumberLength: 3,
+    useYear: false,
+    useSequential: true,
+    separator: '',
+    customExample: 'mb114',
+  },
   sequential: {
     pattern: 'ADM/YYYY/####',
     prefix: 'ADM',
@@ -33,31 +44,27 @@ const defaultFormats: Record<string, IdFormat> = {
     useYear: false,
     useSequential: false,
     separator: '',
-    customExample: 'JOKI0001',
+    customExample: 'mb1047',
   },
   mixed: {
-    pattern: 'PRE_INI_YYYY_####',
+    pattern: 'PRE-INI-YYYY-####',
     prefix: 'SCH',
     useNameInitials: true,
     useRandomNumbers: false,
     randomNumberLength: 4,
     useYear: true,
     useSequential: true,
-    separator: '_',
-    customExample: 'SCH_JOKI_2026_0001',
+    separator: '-',
+    customExample: 'SCH-MB-2026-0001',
   },
 };
 
 export function getSavedIdFormat(): IdFormat {
   try {
     const saved = localStorage.getItem(ID_FORMAT_KEY);
-    if (saved) {
-      return JSON.parse(saved);
-    }
-  } catch (e) {
-    console.error('Failed to load ID format:', e);
-  }
-  return defaultFormats.sequential;
+    if (saved) return JSON.parse(saved);
+  } catch { /* ignore */ }
+  return defaultFormats.initials_number;
 }
 
 export function saveIdFormat(format: IdFormat): void {
@@ -72,68 +79,36 @@ export function getPresetFormats(): Record<string, IdFormat> {
   return defaultFormats;
 }
 
-export function parsePattern(pattern: string): IdFormat {
-  const parts = pattern.split(/[\/\-_]/);
-  const separators = pattern.match(/[\/\-_]/g) || [];
-  
-  const useYear = pattern.includes('YYYY') || pattern.includes('YY');
-  const useSequential = pattern.includes('####') || pattern.includes('####');
-  const useRandomNumbers = pattern.includes('****');
-  const useNameInitials = pattern.includes('INI');
-
-  const prefix = parts[0]?.replace('INI', '').replace('YYYY', '').replace('YY', '').replace('####', '').replace('****', '') || '';
-
-  let randomNumberLength = 4;
-  const randomMatch = pattern.match(/\*{4,}/);
-  if (randomMatch) {
-    randomNumberLength = randomMatch[0].length;
-  }
-
-  const separator = separators[0] || '';
-
-  return {
-    pattern,
-    prefix,
-    useNameInitials,
-    useRandomNumbers,
-    randomNumberLength,
-    useYear,
-    useSequential,
-    separator,
-    customExample: generateExampleId({ ...getSavedIdFormat(), pattern }),
-  };
-}
-
-function generateRandomNumber(length: number): string {
-  const chars = '0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 function getNameInitials(firstName: string, lastName: string): string {
-  const first = firstName?.trim()?.[0]?.toUpperCase() || '';
-  const last = lastName?.trim()?.[0]?.toUpperCase() || '';
+  const first = (firstName?.trim()?.[0] || '').toLowerCase();
+  const last = (lastName?.trim()?.[0] || '').toLowerCase();
   return first + last;
 }
 
-function getNextSequenceNumber(prefix: string, existingValues: string[]): string {
-  const matcher = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[\\/\\_\\-])?(.*)$`);
-  
-  let highestSequence = 0;
-  for (const value of existingValues) {
-    const match = value.match(matcher);
-    if (match) {
-      const numPart = match[1].replace(/\D/g, '');
-      if (numPart) {
-        highestSequence = Math.max(highestSequence, parseInt(numPart, 10));
-      }
+function generateRandomNumber(length: number): string {
+  let result = '';
+  for (let i = 0; i < length; i++) result += Math.floor(Math.random() * 10);
+  return result;
+}
+
+function getNextSequenceNumber(prefix: string, existingValues: string[], padLength = 3): string {
+  // Find highest number among existing IDs that start with the same prefix (case-insensitive)
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const matcher = new RegExp(`^${escaped}(\\d+)`, 'i');
+  let highest = 0;
+  for (const v of existingValues) {
+    const m = v.match(matcher);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (!isNaN(n)) highest = Math.max(highest, n);
     }
   }
-  return String(highestSequence + 1).padStart(4, '0');
+  return String(highest + 1).padStart(padLength, '0');
 }
+
+// ── main generator ────────────────────────────────────────────────────────────
 
 export function generateStudentId(
   firstName: string,
@@ -141,137 +116,94 @@ export function generateStudentId(
   existingValues: string[] = []
 ): string {
   const format = getSavedIdFormat();
+  const year = new Date().getFullYear();
+  const initials = format.useNameInitials ? getNameInitials(firstName, lastName) : '';
+
   let result = format.pattern;
 
-  const year = new Date().getFullYear();
-  const yearStr = format.useYear ? String(year) : '';
-  const twoDigitYear = String(year).slice(-2);
+  // Replace year tokens
+  result = result.replace(/YYYY/g, String(year));
+  result = result.replace(/YY/g, String(year).slice(-2));
 
-  result = result.replace(/YYYY/g, yearStr);
-  result = result.replace(/YY/g, twoDigitYear);
-
+  // Replace initials token
   if (format.useNameInitials) {
-    const initials = getNameInitials(firstName, lastName);
     result = result.replace(/INI/g, initials);
-  } else if (format.prefix && !result.startsWith(format.prefix)) {
-    const prefixIndex = result.indexOf(format.prefix);
-    if (prefixIndex > 0) {
-      const beforePrefix = result.substring(0, prefixIndex);
-      result = beforePrefix + result.substring(prefixIndex);
-    }
   }
 
+  // Replace number tokens
   if (format.useRandomNumbers) {
-    const randomNum = generateRandomNumber(format.randomNumberLength);
-    result = result.replace(/\*+/g, randomNum);
+    result = result.replace(/\*+/g, generateRandomNumber(format.randomNumberLength));
   }
 
   if (format.useSequential) {
-    const seqNum = getNextSequenceNumber(result, existingValues);
-    result = result.replace(/#+/g, seqNum);
+    // Build the prefix up to the # signs to find the right sequence
+    const prefixPart = result.replace(/#+.*$/, '');
+    const padLen = (result.match(/#+/)?.[0]?.length) || 3;
+    const seqNum = getNextSequenceNumber(prefixPart, existingValues, padLen);
+    result = result.replace(/#+/, seqNum);
   }
 
-  if (result.includes('#') || result.includes('*')) {
-    result = result.replace(/#/g, '0').replace(/\*/g, '0');
-  }
+  // Clean up any remaining tokens
+  result = result.replace(/#+/g, '001').replace(/\*+/g, '0000');
 
-  result = result.replace(/[\/\-_]{2,}/g, format.separator || '_');
-
-  let finalResult = result.toUpperCase();
-  
-  const allExisting = new Set(existingValues);
-  
+  // Ensure uniqueness
+  const existing = new Set(existingValues.map(v => v.toLowerCase()));
+  let final = result;
   let attempts = 0;
-  const maxAttempts = 100;
-  
-  while (allExisting.has(finalResult) && attempts < maxAttempts) {
-    const suffix = generateRandomNumber(4);
-    const parts = finalResult.split(/[\/\-_]/);
-    const lastPart = parts[parts.length - 1];
-    
-    if (/^\d+$/.test(lastPart)) {
-      parts[parts.length - 1] = lastPart + suffix;
-      finalResult = parts.join(format.separator || '/').toUpperCase();
-    } else {
-      finalResult = (finalResult + suffix).toUpperCase();
-    }
+  while (existing.has(final.toLowerCase()) && attempts < 50) {
+    const suffix = generateRandomNumber(2);
+    final = result.replace(/\d+$/, m => String(parseInt(m) + parseInt(suffix) + 1).padStart(m.length, '0'));
     attempts++;
   }
-  
-  if (attempts >= maxAttempts) {
-    const timestamp = Date.now().toString(36).toUpperCase();
-    const suffix = generateRandomNumber(2);
-    finalResult = (finalResult.slice(0, -4) + timestamp.slice(-4) + suffix).toUpperCase();
-  }
 
-  return finalResult;
+  return final;
 }
 
 export function generateExampleId(format?: Partial<IdFormat>): string {
-  const f = format || getSavedIdFormat();
+  const f = { ...getSavedIdFormat(), ...format };
   let result = f.pattern || '';
-
   result = result.replace(/YYYY/g, '2026');
   result = result.replace(/YY/g, '26');
-  result = result.replace(/INI/g, 'JOKI');
+  result = result.replace(/INI/g, 'mb');
+  result = result.replace(/\*+/g, generateRandomNumber(f.randomNumberLength || 4));
+  result = result.replace(/#+/, '114');
+  return result;
+}
 
-  if (f.useRandomNumbers) {
-    result = result.replace(/\*+/g, generateRandomNumber(f.randomNumberLength || 4));
-  }
-  if (f.useSequential) {
-    result = result.replace(/#+/g, '0001');
-  }
+export function parsePattern(pattern: string): IdFormat {
+  const useYear = /YYYY|YY/.test(pattern);
+  const useSequential = /#+/.test(pattern);
+  const useRandomNumbers = /\*+/.test(pattern);
+  const useNameInitials = /INI/.test(pattern);
+  const separators = pattern.match(/[\/\-_]/g) || [];
+  const separator = separators[0] || '';
+  const prefix = pattern.split(/INI|YYYY|YY|#+|\*+|[\/\-_]/)[0] || '';
+  const padLen = (pattern.match(/#+/)?.[0]?.length) || 3;
 
-  return result.toUpperCase();
+  return {
+    pattern,
+    prefix,
+    useNameInitials,
+    useRandomNumbers,
+    randomNumberLength: padLen,
+    useYear,
+    useSequential,
+    separator,
+    customExample: generateExampleId({ pattern, useNameInitials, useRandomNumbers, useYear, useSequential, randomNumberLength: padLen, prefix, separator }),
+  };
 }
 
 export function extractFormatFromId(id: string): IdFormat | null {
   if (!id || id.length < 3) return null;
-
-  const parts = id.split(/[\/\-_]/);
-  if (parts.length < 2) return null;
-
-  let pattern = '';
-  const separators: string[] = [];
-  
-  for (let i = 0; i < id.length; i++) {
-    const char = id[i];
-    if (/[\/\-_]/.test(char)) {
-      separators.push(char);
-    }
-  }
-
-  const idParts = id.split(/[\/\-_]/);
-  const tempPatternParts: string[] = [];
-  
-  for (let i = 0; i < idParts.length; i++) {
-    const part = idParts[i];
-    
-    if (/^\d{4}$/.test(part)) {
-      tempPatternParts.push('YYYY');
-    } else if (/^\d{2}$/.test(part) && i < idParts.length - 1) {
-      tempPatternParts.push('YY');
-    } else if (/^\d+$/.test(part) && part.length >= 4) {
-      const hashCount = '#'.repeat(part.length);
-      tempPatternParts.push(hashCount);
-    } else if (/^[A-Z]{2,4}$/.test(part) && i === 0) {
-      tempPatternParts.push(part);
-    } else {
-      tempPatternParts.push(part);
-    }
-  }
-
-  pattern = tempPatternParts.join(separators[0] || '/');
-  
-  return {
-    pattern,
-    prefix: idParts[0] || '',
-    useNameInitials: /^[A-Z]{2,4}$/.test(idParts.find(p => /^[A-Z]{2,4}$/.test(p)) || ''),
-    useRandomNumbers: /\d{3,}/.test(idParts.find(p => /\d{3,}/.test(p)) || ''),
-    randomNumberLength: 4,
-    useYear: pattern.includes('YYYY') || pattern.includes('YY'),
-    useSequential: pattern.includes('#'),
-    separator: separators[0] || '/',
-    customExample: id,
-  };
+  const sep = id.match(/[\/\-_]/)?.[0] || '';
+  const parts = sep ? id.split(sep) : [id];
+  const patternParts = parts.map(p => {
+    if (/^\d{4}$/.test(p)) return 'YYYY';
+    if (/^\d{2}$/.test(p)) return 'YY';
+    if (/^\d+$/.test(p)) return '#'.repeat(p.length);
+    if (/^[a-z]{2}$/i.test(p)) return 'INI';
+    return p.toUpperCase();
+  });
+  const pattern = patternParts.join(sep);
+  return parsePattern(pattern);
 }
