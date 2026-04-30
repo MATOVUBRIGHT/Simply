@@ -143,7 +143,6 @@ export default function Announcements() {
     const result = await dataService.delete(id, 'announcements', idAnnouncement);
     if (!result.success) {
       addToast('Failed to delete: ' + result.error, 'error');
-      if (announcement)
     }
   }
 
