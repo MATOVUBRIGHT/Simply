@@ -69,6 +69,14 @@ async function main() {
   await rm(outputDist, { recursive: true, force: true });
   await cp(clientDist, outputDist, { recursive: true });
 
+  // Verify index.html exists
+  try {
+    await access(path.join(outputDist, 'index.html'), constants.F_OK);
+    console.log('[vercel-build] ✓ index.html found in output directory');
+  } catch {
+    throw new Error('index.html missing from output directory!');
+  }
+
   console.log('[vercel-build] Done. Output directory:', outputDist);
 }
 

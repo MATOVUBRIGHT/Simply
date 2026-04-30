@@ -30,6 +30,7 @@ dist
 build
 .next
 out
+public
 
 # Package manager
 pnpm-lock.yaml
