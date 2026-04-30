@@ -12,6 +12,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments } from '../utils/classroom';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
+import { useTableData } from '../lib/store';
 
 const avatarColors = [
   'bg-rose-500',
@@ -49,6 +50,11 @@ function generateStudentId(firstName: string, lastName: string): string {
 
 export default function Students() {
   const { user, schoolId } = useAuth();
+  const sid = schoolId || user?.id || '';
+  // All students from store — always up to date, used for stats cards
+  const { data: allStudentsData } = useTableData(sid, 'students');
+  const allStudents = allStudentsData as Student[];
+
   const { loadPage, searchStudents } = useStudents();
   const [students, setStudents] = useState<Student[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -966,9 +972,11 @@ export default function Students() {
     }
   }
 
-  const activeCount = students.filter(s => s.status === 'active').length;
-  const deactivatedCount = students.filter(s => s.status === 'inactive').length;
-  const completedCount = students.filter(s => s.status === 'completed').length;
+  // Stats use ALL students (not just current page) — always accurate
+  const activeCount = allStudents.filter(s => s.status === 'active').length;
+  const deactivatedCount = allStudents.filter(s => s.status === 'inactive').length;
+  const completedCount = allStudents.filter(s => s.status === 'completed').length;
+  const totalEnrolled = allStudents.filter(s => s.status !== 'completed').length;
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -1066,7 +1074,7 @@ export default function Students() {
             </div>
             <div>
               <p className="text-sm font-medium text-white/80">Total Students</p>
-              <p className="text-2xl font-bold text-white">{students.filter(s => s.status !== 'completed').length}</p>
+              <p className="text-2xl font-bold text-white">{totalEnrolled}</p>
             </div>
           </div>
         </button>

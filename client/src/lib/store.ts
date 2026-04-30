@@ -85,19 +85,26 @@ class DataStore {
     void this.fetch(sid, table, true);
   }
 
-  /** Called by realtime — only re-fetch if not already fetching and data is > 2s old */
+  private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** Called by realtime — debounced to prevent duplicate fetches from rapid events */
   onRemoteChange(sid: string, table: string) {
-    const s = this.get(sid, table);
-    const age = Date.now() - s.lastFetch;
-    // Skip if we just fetched this table (avoids echo from own writes)
-    if (age < 2000) return;
-    this.set(sid, table, { lastFetch: 0 });
-    void this.fetch(sid, table, true);
-    // Notify event-listener pages
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(`${table}Updated`));
-      window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table } }));
-    }
+    const age = Date.now() - this.get(sid, table).lastFetch;
+    if (age < 2000) return; // skip echo from own writes
+
+    const k = this.key(sid, table);
+    const existing = this.debounceTimers.get(k);
+    if (existing) clearTimeout(existing);
+
+    this.debounceTimers.set(k, setTimeout(() => {
+      this.debounceTimers.delete(k);
+      this.set(sid, table, { lastFetch: 0 });
+      void this.fetch(sid, table, true);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(`${table}Updated`));
+        window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table } }));
+      }
+    }, 300));
   }
 
   /** Refresh only tables that are actually stale (used by polling) */

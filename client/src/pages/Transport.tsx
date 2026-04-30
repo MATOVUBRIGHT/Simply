@@ -40,16 +40,6 @@ export default function Transport() {
 
   useEffect(() => { if (user?.id || schoolId) loadData(); }, [user?.id, schoolId]);
 
-  useEffect(() => {
-    const refresh = () => loadData();
-    window.addEventListener('dataRefresh', refresh);
-    window.addEventListener('schofyDataRefresh', refresh);
-    return () => {
-      window.removeEventListener('dataRefresh', refresh);
-      window.removeEventListener('schofyDataRefresh', refresh);
-    };
-  }, []);
-
   async function loadData() {
     const id = schoolId || user?.id;
     if (!id) return;
@@ -74,7 +64,7 @@ export default function Transport() {
     try {
       const newRoute: TransportRoute = { id: uuidv4(), ...formData, createdAt: new Date().toISOString() };
       await dataService.create(id, 'transportRoutes', newRoute as any);
-      setRoutes(prev => [...prev, newRoute]);
+      await loadData();
       setShowForm(false);
       setFormData({ name: '', description: '', fee: 0 });
       addToast('Route added successfully', 'success');

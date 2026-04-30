@@ -32,7 +32,12 @@ async function main() {
   const outputDist = path.join(root, 'public');
 
   console.log('[vercel-build] Building client workspace...');
-  // Change directory to client and run build there to avoid workspace issues
+  // Build shared package first so @schofy/shared types are available
+  const sharedDir = path.join(root, 'shared');
+  process.chdir(sharedDir);
+  console.log('[vercel-build] Building shared package...');
+  await run('npx', ['tsc', '-b']);
+  
   process.chdir(clientDir);
   console.log('[vercel-build] Changed directory to:', process.cwd());
   

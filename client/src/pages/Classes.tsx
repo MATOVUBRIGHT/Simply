@@ -84,18 +84,6 @@ export default function Classes() {
     if (user?.id || schoolId) loadClasses(); 
   }, [user?.id, schoolId, loadClasses]);
 
-  useEffect(() => {
-    function handleStudentsUpdated() {
-      loadClasses();
-    }
-    window.addEventListener('studentsUpdated', handleStudentsUpdated);
-    window.addEventListener('dataRefresh', loadClasses);
-    return () => {
-      window.removeEventListener('studentsUpdated', handleStudentsUpdated);
-      window.removeEventListener('dataRefresh', loadClasses);
-    };
-  }, [loadClasses]);
-
   function handleRowClick(classId: string) {
     if (clickTimeoutRef.current) {
       clearTimeout(clickTimeoutRef.current);

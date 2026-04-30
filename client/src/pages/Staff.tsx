@@ -116,8 +116,6 @@ export default function StaffPage() {
     if (!id || submittingRef.current) return;
     submittingRef.current = true;
     const updated = { ...payment, status: 'paid', paidAt: new Date().toISOString(), paymentMethod: PaymentMethod.BANK_TRANSFER, notes: paymentNotes || undefined } as any;
-    // Optimistic update
-    setSalaryPayments(prev => prev.map(p => p.id === payment.id ? updated : p));
     addToast(`Marked ${payment.staffName}'s salary as paid`, 'success');
     setShowPayModal(false);
     setSelectedPayment(null);
@@ -125,7 +123,6 @@ export default function StaffPage() {
     const result = await dataService.update(id, 'salaryPayments', payment.id, updated);
     if (!result.success) {
       addToast('Failed to update payment: ' + result.error, 'error');
-      setSalaryPayments(prev => prev.map(p => p.id === payment.id ? payment : p));
     }
     submittingRef.current = false;
   }
@@ -218,11 +215,10 @@ export default function StaffPage() {
         }
       }
       
-      setStaff(prev => prev.filter(s => !selectedStaff.has(s.id)));
+      
       setSelectedStaff(new Set());
       setSelectMode(false);
-      addToast(`${selectedStaff.size} staff moved to recycle bin`, 'success');
-    } catch (error) {
+      addToast(`${selectedStaff.size} staff moved to recycle bin`, 'success');    } catch (error) {
       addToast('Failed to delete staff', 'error');
     }
   }
@@ -246,12 +242,6 @@ export default function StaffPage() {
           else deactivated++;
         }
       }
-      
-      setStaff(prev => prev.map(s => 
-        selectedStaff.has(s.id) 
-          ? { ...s, status: s.status === 'active' ? 'inactive' : 'active' as typeof s.status }
-          : s
-      ));
       setSelectedStaff(new Set());
       setSelectMode(false);
       addToast(`${activated} activated, ${deactivated} deactivated`, 'success');
@@ -270,8 +260,6 @@ export default function StaffPage() {
     const authId = schoolId || user?.id;
     if (!authId || !confirm('Are you sure you want to delete this staff member?')) return;
     const staffMember = staff.find(s => s.id === id);
-    // Optimistic remove
-    setStaff(prev => prev.filter(s => s.id !== id));
     addToast('Staff member moved to recycle bin', 'success');
     if (staffMember) {
       addToRecycleBin(authId, { id: `staff-${Date.now()}`, type: 'staff', name: `${staffMember.firstName} ${staffMember.lastName}`, data: staffMember, deletedAt: new Date().toISOString() });
@@ -279,7 +267,6 @@ export default function StaffPage() {
     const result = await dataService.delete(authId, 'staff', id);
     if (!result.success) {
       addToast('Failed to delete: ' + result.error, 'error');
-      if (staffMember) setStaff(prev => [...prev, staffMember]);
     }
   }
 
@@ -487,7 +474,6 @@ export default function StaffPage() {
         successCount++;
       }
       // Optimistic update
-      setStaff(prev => [...newStaff, ...prev]);
       addToast(`Imported ${successCount} staff`, 'success');
       closeImportModal();
       // Fire to Supabase in background

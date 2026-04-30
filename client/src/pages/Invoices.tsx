@@ -144,30 +144,14 @@ export default function Invoices() {
     }
   }, [user, schoolId, refreshKey]);
 
-  // Realtime: reload when fees, bursaries, discounts or feeStructures change
+  // Realtime: fee structures reload when class selection changes
   useEffect(() => {
-    const reloadFees = () => { loadFeesAndPayments(); setRefreshKey(k => k + 1); };
-    const reloadBursaries = () => loadBursariesAndDiscounts();
     const reloadStructures = () => { if (selectedClassId) loadFeeStructures(); };
-    window.addEventListener('feesUpdated', reloadFees);
-    window.addEventListener('feesDataChanged', reloadFees);
-    window.addEventListener('bursariesUpdated', reloadBursaries);
-    window.addEventListener('bursariesDataChanged', reloadBursaries);
-    window.addEventListener('discountsUpdated', reloadBursaries);
-    window.addEventListener('discountsDataChanged', reloadBursaries);
     window.addEventListener('feeStructuresUpdated', reloadStructures);
     window.addEventListener('feeStructuresDataChanged', reloadStructures);
-    window.addEventListener('schofyDataRefresh', reloadFees);
     return () => {
-      window.removeEventListener('feesUpdated', reloadFees);
-      window.removeEventListener('feesDataChanged', reloadFees);
-      window.removeEventListener('bursariesUpdated', reloadBursaries);
-      window.removeEventListener('bursariesDataChanged', reloadBursaries);
-      window.removeEventListener('discountsUpdated', reloadBursaries);
-      window.removeEventListener('discountsDataChanged', reloadBursaries);
       window.removeEventListener('feeStructuresUpdated', reloadStructures);
       window.removeEventListener('feeStructuresDataChanged', reloadStructures);
-      window.removeEventListener('schofyDataRefresh', reloadFees);
     };
   }, [selectedClassId]);
 

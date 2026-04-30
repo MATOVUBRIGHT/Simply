@@ -107,21 +107,6 @@ export default function Subjects() {
     }
   }, [user?.id, schoolId]);
 
-  useEffect(() => {
-    const handleSubjectsUpdated = () => { loadSubjects(); loadClasses(); };
-    const handleDataRefresh = () => { loadSubjects(); loadClasses(); };
-    
-    window.addEventListener('subjectsUpdated', handleSubjectsUpdated);
-    window.addEventListener('classesUpdated', handleSubjectsUpdated);
-    window.addEventListener('dataRefresh', handleDataRefresh);
-    
-    return () => {
-      window.removeEventListener('subjectsUpdated', handleSubjectsUpdated);
-      window.removeEventListener('classesUpdated', handleSubjectsUpdated);
-      window.removeEventListener('dataRefresh', handleDataRefresh);
-    };
-  }, []);
-
   async function loadSubjects() {
     const id = schoolId || user?.id;
     if (!id) return;

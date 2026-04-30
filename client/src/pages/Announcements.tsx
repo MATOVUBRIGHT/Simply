@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Plus, Megaphone, Clock, Trash2, AlertCircle, CheckCircle, Info, Bell, Pin, Edit2, X, Download, FileText, ChevronDown, Check, Trash, Search } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Announcement, Priority } from '@schofy/shared';
@@ -111,7 +111,6 @@ export default function Announcements() {
       if (!result.success) {
         // Rollback
         addToast('Failed to update: ' + result.error, 'error');
-        await loadAnnouncements();
       }
     } else {
       const newAnnouncement: Announcement = {
