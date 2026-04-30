@@ -183,10 +183,32 @@ function recycleBinType(t: string): string | null {
     transportRoutes:'transport' } as any)[t] || null;
 }
 
-// ── In-memory cache ───────────────────────────────────────────────────────────
+// ── Persistent cache (survives page reload for offline use) ──────────────────
 const CACHE_TTL = 5 * 60_000; // 5 minutes
+const PERSIST_KEY = 'schofy_data_cache';
+
 interface CacheEntry { data: any[]; ts: number; }
 const memCache = new Map<string, CacheEntry>();
+
+// Load persisted cache on startup
+try {
+  const saved = localStorage.getItem(PERSIST_KEY);
+  if (saved) {
+    const parsed: Record<string, CacheEntry> = JSON.parse(saved);
+    for (const [k, v] of Object.entries(parsed)) {
+      memCache.set(k, v); // keep even if stale — better than nothing offline
+    }
+  }
+} catch { /* ignore */ }
+
+function persistCache() {
+  try {
+    const obj: Record<string, CacheEntry> = {};
+    for (const [k, v] of memCache) obj[k] = v;
+    localStorage.setItem(PERSIST_KEY, JSON.stringify(obj));
+  } catch { /* storage full — ignore */ }
+}
+
 const inflight = new Map<string, Promise<any[]>>();
 
 function cacheKey(sid: string, table: string) { return `${sid}:${table}`; }
@@ -194,16 +216,71 @@ function cacheKey(sid: string, table: string) { return `${sid}:${table}`; }
 function cacheGet(sid: string, table: string): any[] | null {
   const e = memCache.get(cacheKey(sid, table));
   if (!e) return null;
+  // Return stale data when offline — better than nothing
+  if (!isOnline() && e.data.length > 0) return e.data;
   if (Date.now() - e.ts > CACHE_TTL) { memCache.delete(cacheKey(sid, table)); return null; }
   return e.data;
 }
 
 function cacheSet(sid: string, table: string, data: any[]) {
   memCache.set(cacheKey(sid, table), { data, ts: Date.now() });
+  persistCache(); // persist to localStorage for offline use
 }
 
 function cacheDel(sid: string, table: string) {
   memCache.delete(cacheKey(sid, table));
+  persistCache();
+}
+
+// ── Offline queue ─────────────────────────────────────────────────────────────
+const QUEUE_KEY = 'schofy_offline_queue';
+
+interface QueueItem {
+  id: string;
+  op: 'create' | 'update' | 'delete' | 'batchDelete' | 'saveSettings';
+  userId: string;
+  tableName: string;
+  recordId?: string;
+  data?: any;
+  ids?: string[];
+  settings?: Record<string, any>;
+  ts: number;
+}
+
+function loadQueue(): QueueItem[] {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; }
+}
+function saveQueue(q: QueueItem[]) {
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+}
+function enqueue(item: Omit<QueueItem, 'id' | 'ts'>) {
+  const q = loadQueue();
+  q.push({ ...item, id: generateUUID(), ts: Date.now() });
+  saveQueue(q);
+}
+function dequeue(id: string) {
+  saveQueue(loadQueue().filter(i => i.id !== id));
+}
+
+function isOnline() { return navigator.onLine; }
+
+// Update in-memory cache optimistically for offline writes
+function cacheApplyCreate(sid: string, tableName: string, record: any) {
+  const existing = cacheGet(sid, tableName) || [];
+  const idx = existing.findIndex(r => r.id === record.id);
+  if (idx >= 0) existing[idx] = record;
+  else existing.unshift(record);
+  cacheSet(sid, tableName, existing);
+}
+function cacheApplyUpdate(sid: string, tableName: string, id: string, data: any) {
+  const existing = cacheGet(sid, tableName) || [];
+  const idx = existing.findIndex(r => r.id === id);
+  if (idx >= 0) existing[idx] = { ...existing[idx], ...data };
+  cacheSet(sid, tableName, existing);
+}
+function cacheApplyDelete(sid: string, tableName: string, id: string) {
+  const existing = cacheGet(sid, tableName) || [];
+  cacheSet(sid, tableName, existing.filter(r => r.id !== id));
 }
 
 function notifyUI(table: string) {
@@ -248,19 +325,21 @@ class SupabaseDataService {
   // ── reads ─────────────────────────────────────────────────────────────────
 
   async getAll(userId: string, tableName: string): Promise<any[]> {
-    if (!this.ok) return [];
     const sid = this.sid(userId);
-    const rt = getSupabaseTable(tableName);
 
-    // Return cached data immediately
+    // Return cached data immediately (works offline too)
     const cached = cacheGet(sid, tableName);
     if (cached) return cached;
+
+    // Offline with no cache — return empty
+    if (!isOnline() || !this.ok) return [];
 
     // Deduplicate concurrent requests for the same table
     const key = cacheKey(sid, tableName);
     const existing = inflight.get(key);
     if (existing) return existing;
 
+    const rt = getSupabaseTable(tableName);
     const req = (async () => {
       try {
         let q = this.db.from(rt).select('*');
@@ -283,8 +362,14 @@ class SupabaseDataService {
   }
 
   async get(userId: string, tableName: string, id: string): Promise<any | null> {
-    if (!this.ok) return null;
     const sid = this.sid(userId);
+    // Check cache first (works offline)
+    const cached = cacheGet(sid, tableName);
+    if (cached) {
+      const found = cached.find(r => r.id === id);
+      if (found) return found;
+    }
+    if (!isOnline() || !this.ok) return null;
     const rt = getSupabaseTable(tableName);
     try {
       let q = this.db.from(rt).select('*').eq('id', id);
@@ -310,7 +395,12 @@ class SupabaseDataService {
   }
 
   async where(userId: string, tableName: string, fieldName: string, value: any) {
-    if (!this.ok) return [];
+    // Offline: filter from cache
+    if (!isOnline() || !this.ok) {
+      const sid = this.sid(userId);
+      const cached = cacheGet(sid, tableName) || [];
+      return cached.filter(item => item[fieldName] === value || item[camelToSnake(fieldName)] === value);
+    }
     const sid = this.sid(userId);
     const rt = getSupabaseTable(tableName);
     const col = fieldName === 'schoolId' ? 'school_id' : camelToSnake(fieldName);
@@ -318,41 +408,68 @@ class SupabaseDataService {
       let q = this.db.from(rt).select('*').eq(col, value);
       q = applyScope(q, rt, sid);
       const { data, error } = await q;
-      if (error) return [];
+      if (error) {
+        // Fall back to cache on error
+        const cached = cacheGet(sid, tableName) || [];
+        return cached.filter(item => item[fieldName] === value);
+      }
       return (data || []).map(mapToLocal);
-    } catch { return []; }
+    } catch {
+      const cached = cacheGet(sid, tableName) || [];
+      return cached.filter(item => item[fieldName] === value);
+    }
   }
 
   // ── writes ────────────────────────────────────────────────────────────────
 
   async create<T extends { id?: string }>(userId: string, tableName: string, data: any): Promise<SyncResult> {
-    if (!this.ok) return { success: false, syncedRemotely: false, savedLocally: false, error: 'Supabase not configured.' };
     const sid = this.sid(userId);
-    const rt = getSupabaseTable(tableName);
     const now = new Date().toISOString();
     const id = isUUID(data.id) ? data.id : generateUUID();
-    const record = { ...data, id, schoolId: data.schoolId || sid, createdAt: now, updatedAt: now };
+    const record = { ...data, id, schoolId: data.schoolId || sid, createdAt: now, updatedAt: now, syncStatus: 'pending' };
+
+    // Always update cache optimistically
+    cacheApplyCreate(sid, tableName, record);
+    notifyUI(tableName);
+
+    // If offline, queue for later
+    if (!isOnline() || !this.ok) {
+      enqueue({ op: 'create', userId, tableName, data: record });
+      return { success: true, syncedRemotely: false, savedLocally: true, record };
+    }
+
+    const rt = getSupabaseTable(tableName);
     const payload = toRemote(record, rt);
     try {
       const { error } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
       if (error) {
         console.error(`[create] ${rt}:`, error.code, error.message, error.details, error.hint);
-        return { success: false, syncedRemotely: false, savedLocally: false, error: `${error.message} — ${error.details}` };
+        // Queue for retry even on error
+        enqueue({ op: 'create', userId, tableName, data: record });
+        return { success: true, syncedRemotely: false, savedLocally: true, record };
       }
-      cacheDel(sid, tableName);
-      notifyUI(tableName);
+      cacheDel(sid, tableName); // bust so next read gets fresh data
       return { success: true, syncedRemotely: true, savedLocally: true, record };
     } catch (e: any) {
-      console.error(`[create] ${rt} exception:`, e);
-      return { success: false, syncedRemotely: false, savedLocally: false, error: e.message };
+      enqueue({ op: 'create', userId, tableName, data: record });
+      return { success: true, syncedRemotely: false, savedLocally: true, record };
     }
   }
 
   async update<T>(userId: string, tableName: string, id: string, data: Partial<T>): Promise<SyncResult> {
-    if (!this.ok) return { success: false, syncedRemotely: false, savedLocally: false, error: 'Supabase not configured.' };
     const sid = this.sid(userId);
-    const rt = getSupabaseTable(tableName);
     const record = { ...data, updatedAt: new Date().toISOString() };
+
+    // Optimistic cache update
+    cacheApplyUpdate(sid, tableName, id, record);
+    notifyUI(tableName);
+
+    if (!isOnline() || !this.ok) {
+      enqueue({ op: 'update', userId, tableName, recordId: id, data: record });
+      return { success: true, syncedRemotely: false, savedLocally: true, record };
+    }
+
+    const rt = getSupabaseTable(tableName);
     const payload = toRemote(record, rt);
     delete payload.id;
     delete payload.created_at;
@@ -360,42 +477,49 @@ class SupabaseDataService {
       const { error } = await this.db.from(rt).update(payload).eq('id', id);
       if (error) {
         console.error(`[update] ${rt}:`, error.code, error.message, error.details, error.hint);
-        return { success: false, syncedRemotely: false, savedLocally: false, error: `${error.message} — ${error.details}` };
+        enqueue({ op: 'update', userId, tableName, recordId: id, data: record });
+        return { success: true, syncedRemotely: false, savedLocally: true, record };
       }
-      cacheDel(sid, tableName);
-      notifyUI(tableName);
       return { success: true, syncedRemotely: true, savedLocally: true, record };
     } catch (e: any) {
-      console.error(`[update] ${rt} exception:`, e);
-      return { success: false, syncedRemotely: false, savedLocally: false, error: e.message };
+      enqueue({ op: 'update', userId, tableName, recordId: id, data: record });
+      return { success: true, syncedRemotely: false, savedLocally: true, record };
     }
   }
 
   async delete(userId: string, tableName: string, id: string): Promise<SyncResult> {
-    if (!this.ok) return { success: false, syncedRemotely: false, savedLocally: false, error: 'Supabase not configured.' };
     const sid = this.sid(userId);
+
+    // Optimistic cache delete
+    const record = cacheGet(sid, tableName)?.find(r => r.id === id);
+    const rtype = recycleBinType(tableName);
+    if (record && rtype) {
+      addToRecycleBin(sid, {
+        id: `recycle-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        type: rtype as any,
+        name: record.name || `${record.firstName || ''} ${record.lastName || ''}`.trim() || 'Unknown',
+        data: record, deletedAt: new Date().toISOString(),
+      });
+    }
+    cacheApplyDelete(sid, tableName, id);
+    notifyUI(tableName);
+
+    if (!isOnline() || !this.ok) {
+      enqueue({ op: 'delete', userId, tableName, recordId: id });
+      return { success: true, syncedRemotely: false, savedLocally: true };
+    }
+
     const rt = getSupabaseTable(tableName);
     try {
-      const record = await this.get(userId, tableName, id);
-      const rtype = recycleBinType(tableName);
-      if (record && rtype) {
-        addToRecycleBin(sid, {
-          id: `recycle-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          type: rtype as any,
-          name: record.name || `${record.firstName || ''} ${record.lastName || ''}`.trim() || 'Unknown',
-          data: record, deletedAt: new Date().toISOString(),
-        });
-      }
       const { error } = await this.db.from(rt).delete().eq('id', id);
       if (error) {
-        console.error(`[delete] ${rt}:`, error.message);
-        return { success: false, syncedRemotely: false, savedLocally: false, error: error.message };
+        enqueue({ op: 'delete', userId, tableName, recordId: id });
+        return { success: true, syncedRemotely: false, savedLocally: true };
       }
-      cacheDel(sid, tableName);
-      notifyUI(tableName);
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
-      return { success: false, syncedRemotely: false, savedLocally: false, error: e.message };
+      enqueue({ op: 'delete', userId, tableName, recordId: id });
+      return { success: true, syncedRemotely: false, savedLocally: true };
     }
   }
 
@@ -414,9 +538,25 @@ class SupabaseDataService {
   }
 
   async saveSettings(userId: string, settings: Record<string, any>): Promise<SyncResult> {
-    if (!this.ok) return { success: false, syncedRemotely: false, savedLocally: false, error: 'Supabase not configured.' };
     const sid = this.sid(userId);
     const now = new Date().toISOString();
+
+    // Update settings cache optimistically
+    const existing = cacheGet(sid, 'settings') || [];
+    const updated = [...existing];
+    for (const [key, value] of Object.entries(settings)) {
+      const idx = updated.findIndex(s => s.key === key);
+      if (idx >= 0) updated[idx] = { ...updated[idx], value, updatedAt: now };
+      else updated.push({ id: `${sid}:${key}`, schoolId: sid, key, value, createdAt: now, updatedAt: now });
+    }
+    cacheSet(sid, 'settings', updated);
+    notifyUI('settings');
+
+    if (!isOnline() || !this.ok) {
+      enqueue({ op: 'saveSettings', userId, tableName: 'settings', settings });
+      return { success: true, syncedRemotely: false, savedLocally: true };
+    }
+
     try {
       for (const [key, value] of Object.entries(settings)) {
         await this.db.from('settings').upsert(
@@ -424,11 +564,10 @@ class SupabaseDataService {
           { onConflict: 'school_id,key' }
         );
       }
-      cacheDel(sid, 'settings');
-      notifyUI('settings');
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
-      return { success: false, syncedRemotely: false, savedLocally: false, error: e.message };
+      enqueue({ op: 'saveSettings', userId, tableName: 'settings', settings });
+      return { success: true, syncedRemotely: false, savedLocally: true };
     }
   }
 
@@ -441,6 +580,45 @@ class SupabaseDataService {
   }
   async cleanupDuplicates(_: string) { return {}; }
   async clear(_u: string, _t: string) {}
+
+  // ── Offline queue flush ───────────────────────────────────────────────────
+  async flushOfflineQueue(): Promise<void> {
+    if (!isOnline() || !this.ok) return;
+    const queue = loadQueue();
+    if (queue.length === 0) return;
+    console.log(`[offline] Flushing ${queue.length} queued operations`);
+    for (const item of queue) {
+      try {
+        if (item.op === 'create' && item.data) {
+          const rt = getSupabaseTable(item.tableName);
+          const payload = toRemote(item.data, rt);
+          await this.db.from(rt).upsert(payload, { onConflict: 'id' });
+        } else if (item.op === 'update' && item.recordId && item.data) {
+          const rt = getSupabaseTable(item.tableName);
+          const payload = toRemote(item.data, rt);
+          delete payload.id; delete payload.created_at;
+          await this.db.from(rt).update(payload).eq('id', item.recordId);
+        } else if (item.op === 'delete' && item.recordId) {
+          const rt = getSupabaseTable(item.tableName);
+          await this.db.from(rt).delete().eq('id', item.recordId);
+        } else if (item.op === 'saveSettings' && item.settings) {
+          const sid = this.sid(item.userId);
+          const now = new Date().toISOString();
+          for (const [key, value] of Object.entries(item.settings)) {
+            await this.db.from('settings').upsert({ school_id: sid, key, value, updated_at: now, created_at: now }, { onConflict: 'school_id,key' });
+          }
+        }
+        dequeue(item.id);
+        // Bust cache so next read gets fresh data
+        cacheDel(this.sid(item.userId), item.tableName);
+      } catch (e: any) {
+        console.error(`[offline] Failed to flush ${item.op} on ${item.tableName}:`, e.message);
+      }
+    }
+    // Notify UI after flush
+    const tables = [...new Set(queue.map(i => i.tableName))];
+    tables.forEach(t => notifyUI(t));
+  }
 }
 
 export const dataService = new SupabaseDataService();

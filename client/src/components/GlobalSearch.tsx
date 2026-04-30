@@ -93,11 +93,28 @@ export default function GlobalSearch() {
       const tenantId = schoolId || user?.id;
       if (!tenantId) return;
 
+      // Use store cache first (instant), fall back to direct fetch
+      const { store } = await import('../lib/store');
+      const getStoreData = (table: string) => {
+        const snap = store.getSnapshot(tenantId, table);
+        return snap.data.length > 0 ? snap.data : null;
+      };
+
+      // Also try user.id as alternate tenant if schoolId differs
+      const altId = user?.id !== tenantId ? user?.id : null;
+      const fetchWithFallback = async (table: string) => {
+        const cached = getStoreData(table);
+        if (cached) return cached;
+        const data = await dataService.getAll(tenantId, table);
+        if (data.length === 0 && altId) return dataService.getAll(altId, table);
+        return data;
+      };
+
       const [students, staff, subjects, classes] = await Promise.all([
-        dataService.getAll(tenantId, 'students'),
-        dataService.getAll(tenantId, 'staff'),
-        dataService.getAll(tenantId, 'subjects'),
-        dataService.getAll(tenantId, 'classes'),
+        fetchWithFallback('students'),
+        fetchWithFallback('staff'),
+        fetchWithFallback('subjects'),
+        fetchWithFallback('classes'),
       ]);
 
       students

@@ -75,6 +75,11 @@ body {
   background: var(--text-primary);
 }
 
+/* Smooth touch scrolling everywhere */
+* {
+  -webkit-overflow-scrolling: touch;
+}
+
 /* Animations */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-8px); }
@@ -449,10 +454,12 @@ body {
 .table-container {
   @apply w-full overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700;
   background: var(--bg-primary);
+  -webkit-overflow-scrolling: touch;
 }
 
 table {
   @apply w-full border-collapse;
+  min-width: 600px; /* ensures horizontal scroll on small screens */
 }
 
 th {

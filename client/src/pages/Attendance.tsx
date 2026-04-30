@@ -7,6 +7,7 @@ import type { Attendance as AttendanceRecord, Student } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { useTableData } from '../lib/store';
 
 const avatarColors = [
   'from-coral-400 to-orange-400',
@@ -23,14 +24,25 @@ function getAvatarColor(name: string) {
 }
 
 export default function Attendance() {
+  const { user, schoolId } = useAuth();
+  const sid = schoolId || user?.id || '';
+  const { data: classesData } = useTableData(sid, 'classes');
+  const classes = [...classesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0));
+
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedClass, setSelectedClass] = useState('primary-1');
+  const [selectedClass, setSelectedClass] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({});
   const [allAttendance, setAllAttendance] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const { addToast } = useToast();
-  const { user, schoolId } = useAuth();
+
+  // Default to first real class when classes load
+  useEffect(() => {
+    if (classes.length > 0 && !selectedClass) {
+      setSelectedClass((classes[0] as any).id);
+    }
+  }, [classes]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -65,18 +77,23 @@ export default function Attendance() {
 
   async function loadData() {
     const id = schoolId || user?.id;
-    if (!id) return;
+    if (!id || !selectedClass) return;
     setLoading(true);
     try {
-      const classStudents = await dataService.where(id, 'students', 'classId', selectedClass);
-      const records = await dataService.where(id, 'attendance', 'date', selectedDate);
-      const allRecords = await dataService.getAll(id, 'attendance');
-      
+      // Use getAll + filter — works offline via cache, no direct Supabase query
+      const [allStudents, allRecords] = await Promise.all([
+        dataService.getAll(id, 'students'),
+        dataService.getAll(id, 'attendance'),
+      ]);
+
+      const classStudents = allStudents.filter((s: any) => s.classId === selectedClass && s.status !== 'completed');
+      const todayRecords = allRecords.filter((r: any) => r.date === selectedDate);
+
       setStudents(classStudents);
       setAllAttendance(allRecords);
-      
+
       const attendanceMap: Record<string, AttendanceStatus> = {};
-      records.filter((r: any) => r.entityType === EntityType.STUDENT).forEach((r: any) => {
+      todayRecords.filter((r: any) => r.entityType === EntityType.STUDENT).forEach((r: any) => {
         attendanceMap[r.entityId] = r.status;
       });
       setAttendance(attendanceMap);
@@ -442,12 +459,10 @@ export default function Attendance() {
             Select Class
           </label>
           <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="form-input">
-            <option value="primary-1">Primary 1</option>
-            <option value="primary-2">Primary 2</option>
-            <option value="primary-3">Primary 3</option>
-            <option value="jss-1">JSS 1</option>
-            <option value="jss-2">JSS 2</option>
-            <option value="ss-1">SS 1</option>
+            {classes.length === 0 && <option value="">No classes yet</option>}
+            {classes.map((c: any) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
           </select>
         </div>
       </div>
@@ -460,7 +475,7 @@ export default function Attendance() {
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-800 dark:text-white">Student List</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{selectedClass.toUpperCase()} - {students.length} students</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{(classes.find((c: any) => c.id === selectedClass) as any)?.name || selectedClass} - {students.length} students</p>
             </div>
           </div>
           {totalMarked > 0 && (

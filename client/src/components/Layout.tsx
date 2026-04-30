@@ -532,7 +532,7 @@ function Layout({ children }: LayoutProps) {
         )}
 
         {/* Page Content */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto overflow-x-hidden bg-[#f8fafc] dark:bg-slate-950">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-[#f8fafc] dark:bg-slate-950">
           <div className="max-w-[1600px] mx-auto">
             {children}
           </div>

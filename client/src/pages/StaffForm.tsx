@@ -5,7 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 import { Staff, StaffRole, Subject } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import ImageUpload from '../components/ImageUpload';
-import { getNextEmployeeId } from '../utils/identifiers';
+import { generateStaffId } from '../utils/idFormat';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 
@@ -70,12 +70,14 @@ export default function StaffForm() {
   }
 
   async function generateEmployeeId(): Promise<string> {
-    return getNextEmployeeId(id);
+    const authId = schoolId || user?.id;
+    const existing = authId ? (await dataService.getAll(authId, 'staff')).map((s: any) => s.employeeId).filter(Boolean) : [];
+    return generateStaffId(formData.firstName || 'ST', formData.lastName || 'AF', existing);
   }
 
   async function hydrateEmployeeId() {
     try {
-      setEmployeeId(await getNextEmployeeId());
+      setEmployeeId(await generateEmployeeId());
     } catch (error) {
       console.error('Failed to generate employee ID:', error);
     }

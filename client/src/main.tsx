@@ -12,6 +12,13 @@ import './index.css';
 
 const queryClient = getQueryClient();
 
+// Flush offline queue when connection is restored
+window.addEventListener('online', () => {
+  import('./lib/database/SupabaseDataService').then(({ dataService }) => {
+    void (dataService as any).flushOfflineQueue?.();
+  });
+});
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

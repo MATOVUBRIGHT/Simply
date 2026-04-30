@@ -98,12 +98,17 @@ function getNextSequenceNumber(prefix: string, existingValues: string[], padLeng
   const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const matcher = new RegExp(`^${escaped}(\\d+)`, 'i');
   let highest = 0;
+  let found = false;
   for (const v of existingValues) {
     const m = v.match(matcher);
     if (m) {
       const n = parseInt(m[1], 10);
-      if (!isNaN(n)) highest = Math.max(highest, n);
+      if (!isNaN(n)) { highest = Math.max(highest, n); found = true; }
     }
+  }
+  // If no existing IDs found with this prefix, start from a random number to avoid collisions
+  if (!found) {
+    return String(Math.floor(100 + Math.random() * 900));
   }
   return String(highest + 1).padStart(padLength, '0');
 }
@@ -111,6 +116,22 @@ function getNextSequenceNumber(prefix: string, existingValues: string[], padLeng
 // ── main generator ────────────────────────────────────────────────────────────
 
 export function generateStudentId(
+  firstName: string,
+  lastName: string,
+  existingValues: string[] = []
+): string {
+  return _generateId(firstName, lastName, existingValues);
+}
+
+export function generateStaffId(
+  firstName: string,
+  lastName: string,
+  existingValues: string[] = []
+): string {
+  return _generateId(firstName, lastName, existingValues);
+}
+
+function _generateId(
   firstName: string,
   lastName: string,
   existingValues: string[] = []
@@ -143,8 +164,8 @@ export function generateStudentId(
     result = result.replace(/#+/, seqNum);
   }
 
-  // Clean up any remaining tokens
-  result = result.replace(/#+/g, '001').replace(/\*+/g, '0000');
+  // Clean up any remaining tokens with random numbers
+  result = result.replace(/#+/g, generateRandomNumber(3)).replace(/\*+/g, generateRandomNumber(4));
 
   // Ensure uniqueness
   const existing = new Set(existingValues.map(v => v.toLowerCase()));
