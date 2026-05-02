@@ -57,7 +57,7 @@ export default function Notifications() {
   async function clearAll() {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (confirm('Are you sure you want to delete all notifications?')) {
+    if (window.confirm('Are you sure you want to delete all notifications?')) {
       try {
         const all = await dataService.getAll(id, 'notifications');
         for (const notif of all) {
@@ -171,3 +171,4 @@ export default function Notifications() {
     </div>
   );
 }
+

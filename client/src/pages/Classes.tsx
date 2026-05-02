@@ -117,7 +117,7 @@ export default function Classes() {
 
   async function handleBulkDelete() {
     if (selectedClasses.size === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedClasses.size} class(es)?`)) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedClasses.size} class(es)?`)) return;
     const id = schoolId || user?.id;
     if (!id) return;
     
@@ -177,7 +177,7 @@ export default function Classes() {
   }
 
   async function handleDelete(id: string) {
-    if (confirm('Delete this class?')) {
+    if (window.confirm('Delete this class?')) {
       const authId = schoolId || user?.id;
       if (!authId) return;
       try {
@@ -726,3 +726,4 @@ export default function Classes() {
     </div>
   );
 }
+

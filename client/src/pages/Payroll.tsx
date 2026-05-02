@@ -104,7 +104,7 @@ export default function Payroll() {
   async function handleDeletePayment(paymentId: string) {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (!confirm('Delete this payment record?')) return;
+    if (!window.confirm('Delete this payment record?')) return;
     try {
       await dataService.delete(id, 'salaryPayments', paymentId);
       addToast('Payment record deleted', 'success');
@@ -482,3 +482,4 @@ export default function Payroll() {
     </div>
   );
 }
+

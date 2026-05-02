@@ -350,18 +350,17 @@ export default function Students() {
     try {
       addToast('Checking class assignments...', 'info');
       const validation = await validateStudentClassAssignments(id);
-      
       if (validation.invalidAssignments > 0) {
-        const confirmFix = confirm(
-          `Found ${validation.invalidAssignments} students with invalid class assignments.\n\n` +
-          `These students are assigned to classes that don't exist.\n` +
-          `Would you like to mark them as "Not assigned"?`
-        );
-        
-        if (confirmFix) {
+        const ok = await confirm({
+          title: 'Fix Class Assignments',
+          description: `Found ${validation.invalidAssignments} student${validation.invalidAssignments > 1 ? 's' : ''} assigned to classes that no longer exist. Mark them as "Not assigned"?`,
+          confirmLabel: 'Fix Now',
+          variant: 'warning',
+        });
+        if (ok) {
           const result = await fixInvalidClassAssignments(id);
           addToast(result.message, result.fixed > 0 ? 'success' : 'info');
-          await loadData(); // Reload to show updated class names
+          await loadData();
         }
       } else {
         addToast('All class assignments are valid', 'success');
@@ -514,9 +513,14 @@ export default function Students() {
 
   async function handleBulkDelete() {
     const id = schoolId || user?.id;
-    if (!id) return;
-    if (selectedStudents.size === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedStudents.size} student(s)? This action cannot be undone.`)) return;
+    if (!id || selectedStudents.size === 0) return;
+    const ok = await confirm({
+      title: `Delete ${selectedStudents.size} Student${selectedStudents.size > 1 ? 's' : ''}`,
+      description: `Permanently delete ${selectedStudents.size} student${selectedStudents.size > 1 ? 's' : ''} and move them to the recycle bin? This cannot be undone.`,
+      confirmLabel: 'Delete All',
+      variant: 'danger',
+    });
+    if (!ok) return;
     
     try {
       const now = new Date().toISOString();

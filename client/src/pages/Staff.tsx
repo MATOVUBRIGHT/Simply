@@ -131,7 +131,13 @@ export default function StaffPage() {
   async function handleDeletePayment(paymentId: string) {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (!confirm('Delete this payment record?')) return;
+    const ok = await confirm({
+      title: 'Delete Payment Record',
+      description: 'Remove this salary payment record? This cannot be undone.',
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await dataService.delete(id, 'salaryPayments', paymentId);
       addToast('Payment record deleted', 'success');

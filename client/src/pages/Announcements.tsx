@@ -190,7 +190,7 @@ export default function Announcements() {
   async function handleBulkDelete() {
     const id = schoolId || user?.id;
     if (selectedAnnouncements.size === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedAnnouncements.size} announcement(s)?`)) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedAnnouncements.size} announcement(s)?`)) return;
     if (!id) return;
     
     try {
@@ -556,3 +556,4 @@ export default function Announcements() {
     </div>
   );
 }
+

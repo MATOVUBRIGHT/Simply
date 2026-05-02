@@ -57,7 +57,7 @@ export default function Transport() {
   async function handleDelete(idRoute: string) {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (confirm('Delete this route? Students will be unassigned.')) {
+    const _ok = await (async () => window.confirm('Delete this route? Students will be unassigned.'))(); if (_ok) {
       try {
         const route = routes.find(r => r.id === idRoute);
         const relatedAssignments = assignments.filter(a => a.routeId === idRoute);
@@ -669,3 +669,4 @@ export default function Transport() {
     </div>
   );
 }
+

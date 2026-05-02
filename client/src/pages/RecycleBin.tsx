@@ -130,7 +130,7 @@ export default function RecycleBin() {
     if (restoringIds.size > 0) return;
     const authId = schoolId || user?.id;
     if (!authId) return;
-    if (confirm(`Are you sure you want to permanently delete ${selectedItems.size} item(s)?`)) {
+    if (window.confirm(`Are you sure you want to permanently delete ${selectedItems.size} item(s)?`)) {
       selectedItems.forEach(id => permanentlyDeleteItem(id));
     }
   }
@@ -138,7 +138,7 @@ export default function RecycleBin() {
   function emptyBin() {
     const authId = schoolId || user?.id;
     if (!authId) return;
-    if (confirm('Are you sure you want to permanently delete all items in the recycle bin? This action cannot be undone.')) {
+    if (window.confirm('Are you sure you want to permanently delete all items in the recycle bin? This action cannot be undone.')) {
       clearRecycleBin(authId);
       setDeletedItems([]);
       setSelectedItems(new Set());
@@ -169,7 +169,7 @@ export default function RecycleBin() {
       return;
     }
 
-    if (confirm(`Remove ${duplicatesFound} duplicate item(s)?`)) {
+    if (window.confirm(`Remove ${duplicatesFound} duplicate item(s)?`)) {
       toRemove.forEach(id => removeFromRecycleBin(authId, id));
       loadDeletedItems();
       addToast(`Removed ${duplicatesFound} duplicate(s)`, 'success');
@@ -381,7 +381,7 @@ export default function RecycleBin() {
                     </button>
                     <button
                       onClick={() => {
-                        if (confirm('Permanently delete this item? This cannot be undone.')) {
+                        if (window.confirm('Permanently delete this item? This cannot be undone.')) {
                           permanentlyDeleteItem(item.id);
                         }
                       }}
@@ -418,3 +418,4 @@ export default function RecycleBin() {
     </div>
   );
 }
+

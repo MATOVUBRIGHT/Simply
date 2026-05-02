@@ -138,7 +138,7 @@ export default function Grades() {
   async function handleDelete(idResult: string) {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (!confirm('Delete this grade?')) return;
+    if (!window.confirm('Delete this grade?')) return;
     try {
       await dataService.delete(id, 'examResults', idResult);
       addToast('Grade deleted successfully', 'success');
@@ -1026,4 +1026,5 @@ export default function Grades() {
     </div>
   );
 }
+
 
