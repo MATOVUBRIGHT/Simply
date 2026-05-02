@@ -13,6 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
 const avatarColors = [
   'bg-violet-500',
@@ -196,7 +197,13 @@ export default function StaffPage() {
     const id = schoolId || user?.id;
     if (!id) return;
     if (selectedStaff.size === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedStaff.size} staff member(s)?`)) return;
+    const ok = await confirm({
+      title: `Delete ${selectedStaff.size} Staff Member${selectedStaff.size > 1 ? 's' : ''}`,
+      description: `This will permanently delete ${selectedStaff.size} staff member${selectedStaff.size > 1 ? 's' : ''} and move them to the recycle bin.`,
+      confirmLabel: 'Delete All',
+      variant: 'danger',
+    });
+    if (!ok) return;
     
     try {
       const now = new Date().toISOString();
@@ -258,16 +265,22 @@ export default function StaffPage() {
 
   async function handleDelete(id: string) {
     const authId = schoolId || user?.id;
-    if (!authId || !confirm('Are you sure you want to delete this staff member?')) return;
+    if (!authId) return;
     const staffMember = staff.find(s => s.id === id);
-    addToast('Staff member moved to recycle bin', 'success');
+    const name = staffMember ? `${staffMember.firstName} ${staffMember.lastName}` : 'this staff member';
+    const ok = await confirm({
+      title: 'Delete Staff Member',
+      description: `Delete ${name}? They will be moved to the recycle bin.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     if (staffMember) {
       addToRecycleBin(authId, { id: `staff-${Date.now()}`, type: 'staff', name: `${staffMember.firstName} ${staffMember.lastName}`, data: staffMember, deletedAt: new Date().toISOString() });
     }
+    addToast('Staff member moved to recycle bin', 'success');
     const result = await dataService.delete(authId, 'staff', id);
-    if (!result.success) {
-      addToast('Failed to delete: ' + result.error, 'error');
-    }
+    if (!result.success) addToast('Failed to delete: ' + result.error, 'error');
   }
 
   const staffCSVColumns = [
@@ -487,6 +500,9 @@ export default function StaffPage() {
     submittingRef.current = false;
   }
 
+  const [showTeachersPanel, setShowTeachersPanel] = useState(false);
+  const confirm = useConfirm();
+
   const teachersCount = staff.filter(s => s.role === 'teacher').length;
   const activeCount = staff.filter(s => s.status === 'active').length;
 
@@ -544,7 +560,7 @@ export default function StaffPage() {
             </div>
           </div>
         </div>
-        <div className="card-solid-indigo p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
+        <div className="card-solid-indigo p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all cursor-pointer" onClick={() => setShowTeachersPanel(v => !v)}>
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
               <Briefcase size={24} className="text-white" />
@@ -552,6 +568,7 @@ export default function StaffPage() {
             <div>
               <p className="text-sm font-medium text-white/80">Teachers</p>
               <p className="text-2xl font-bold text-white">{teachersCount}</p>
+              <p className="text-xs text-white/60 mt-0.5">{showTeachersPanel ? 'Click to hide' : 'Click to view'}</p>
             </div>
           </div>
         </div>
@@ -580,88 +597,61 @@ export default function StaffPage() {
         </div>
       </div>
 
-      {/* Teachers Card */}
-      <div className="card">
-        <div className="card-header flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg">
-              <Briefcase size={20} className="text-white" />
+      {/* Teachers Panel — only shown when Teachers card is clicked */}
+      {showTeachersPanel && (
+        <div className="card">
+          <div className="card-header flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg">
+                <Briefcase size={20} className="text-white" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-800 dark:text-white">Teachers</h3>
+                <p className="text-xs text-slate-500">Teaching staff overview</p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-slate-800 dark:text-white">Teachers</h3>
-              <p className="text-xs text-slate-500">Teaching staff overview</p>
+            <div className="flex items-center gap-2">
+              <button onClick={() => navigate('/payroll')} className="btn btn-secondary text-sm">
+                <DollarSign size={16} /> Payroll
+              </button>
+              <button onClick={() => navigate('/staff/new')} className="btn btn-primary text-sm">
+                <Plus size={16} /> Add Teacher
+              </button>
+              <button onClick={() => setShowTeachersPanel(false)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-slate-400">
+                <X size={16} />
+              </button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={() => navigate('/payroll')}
-              className="btn btn-secondary text-sm"
-            >
-              <DollarSign size={16} />
-              Payroll
-            </button>
-            <button 
-              onClick={() => navigate('/staff/new')}
-              className="btn btn-primary text-sm"
-            >
-              <Plus size={16} />
-              Add Teacher
-            </button>
-          </div>
-        </div>
-        <div className="card-body">
-          {filteredStaff.filter(s => s.role === StaffRole.TEACHER).length === 0 ? (
-            <div className="text-center py-8">
-              <Briefcase size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-              <p className="text-slate-500 font-medium">No teachers found</p>
-              <p className="text-sm text-slate-400 mt-1">Add teaching staff to get started</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {filteredStaff
-                .filter(s => s.role === StaffRole.TEACHER)
-                .slice(0, 5)
-                .map((teacher) => (
+          <div className="card-body">
+            {filteredStaff.filter(s => s.role === StaffRole.TEACHER).length === 0 ? (
+              <div className="text-center py-8">
+                <Briefcase size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                <p className="text-slate-500 font-medium">No teachers found</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredStaff.filter(s => s.role === StaffRole.TEACHER).map((teacher) => (
                   <div key={teacher.id} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
                     <div className="flex items-center gap-3">
                       <div className={`w-8 h-8 rounded-lg ${getAvatarColor(teacher.firstName)} flex items-center justify-center`}>
-                        <span className="text-xs font-bold text-white">
-                          {teacher.firstName?.charAt(0)}{teacher.lastName?.charAt(0)}
-                        </span>
+                        <span className="text-xs font-bold text-white">{teacher.firstName?.charAt(0)}{teacher.lastName?.charAt(0)}</span>
                       </div>
                       <div>
-                        <p className="font-medium text-slate-800 dark:text-white text-sm">
-                          {teacher.firstName} {teacher.lastName}
-                        </p>
-                        <p className="text-xs text-slate-500">{teacher.email || 'No email'}</p>
+                        <p className="font-medium text-slate-800 dark:text-white text-sm">{teacher.firstName} {teacher.lastName}</p>
+                        <p className="text-xs text-slate-500">{teacher.email || teacher.phone || 'No contact'}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`badge ${teacher.status === 'active' ? 'badge-success' : 'badge-gray'} text-xs`}>
-                        {teacher.status}
-                      </span>
-                      {teacher.salary && (
-                        <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                          {formatMoney(teacher.salary)}
-                        </span>
-                      )}
+                      <span className={`badge ${teacher.status === 'active' ? 'badge-success' : 'badge-gray'} text-xs`}>{teacher.status}</span>
+                      {teacher.salary && <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{formatMoney(teacher.salary)}</span>}
                     </div>
                   </div>
                 ))}
-              {filteredStaff.filter(s => s.role === StaffRole.TEACHER).length > 5 && (
-                <div className="text-center pt-2">
-                  <button 
-                    onClick={() => setSearch('')}
-                    className="text-xs text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-medium"
-                  >
-                    View all {filteredStaff.filter(s => s.role === StaffRole.TEACHER).length} teachers →
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Table Card */}
       <div className="card">

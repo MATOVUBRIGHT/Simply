@@ -177,7 +177,7 @@ export default function Finance() {
     const sf = fees.filter(f => f.studentId === student.id);
     const inv = sf.reduce((a, f) => a + f.amount, 0);
     const paid = payments.filter(p => p.feeId ? sf.some(f => f.id === p.feeId) : p.studentId === student.id).reduce((a, p) => a + p.amount, 0);
-    return { id: student.id, studentName: `${student.firstName} ${student.lastName}`, admissionNo: student.admissionNo, totalInvoiced: inv, totalPaid: paid, balance: inv - paid, invoiceCount: sf.length, isCleared: sf.length > 0 && inv - paid <= 0 };
+    return { id: student.id, studentName: `${student.firstName} ${student.lastName}`, studentId: student.studentId, totalInvoiced: inv, totalPaid: paid, balance: inv - paid, invoiceCount: sf.length, isCleared: sf.length > 0 && inv - paid <= 0 };
   }).filter(s => s.invoiceCount > 0 || filterTerm === 'all');
 
   const filteredStudentFinance = studentFinanceSummary.filter(s => !searchTerm || s.studentName.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -343,7 +343,7 @@ export default function Finance() {
               {activeTab === 'students' && filteredStudentFinance.map(s => (
                 <tr key={s.id}>
                   <td className="font-medium">{s.studentName}</td>
-                  <td className="text-slate-500">{s.admissionNo}</td>
+                  <td className="text-slate-500">{s.studentId}</td>
                   <td><span className="badge badge-info">{s.invoiceCount}</span></td>
                   <td className="font-semibold">{formatMoney(s.totalInvoiced)}</td>
                   <td className="text-emerald-600 font-semibold">{formatMoney(s.totalPaid)}</td>
@@ -461,3 +461,4 @@ export default function Finance() {
     </div>
   );
 }
+

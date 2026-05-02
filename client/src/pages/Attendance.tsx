@@ -55,7 +55,7 @@ export default function Attendance() {
 
   const attendanceExpectedFields = [
     { key: 'date', label: 'Date', required: true },
-    { key: 'admissionNo', label: 'Admission No', required: true },
+    { key: 'admissionNo', label: 'ID', required: true },
     { key: 'status', label: 'Status', required: true },
   ];
 
@@ -157,7 +157,7 @@ export default function Attendance() {
     
     exportToCSV(exportData, 'attendance', [
       { key: 'date' as keyof typeof exportData[0], label: 'Date' },
-      { key: 'admissionNo' as keyof typeof exportData[0], label: 'Admission No' },
+      { key: 'admissionNo' as keyof typeof exportData[0], label: 'ID' },
       { key: 'studentName' as keyof typeof exportData[0], label: 'Student' },
       { key: 'status' as keyof typeof exportData[0], label: 'Status' },
     ]);
@@ -179,7 +179,7 @@ export default function Attendance() {
     
     exportToPDF('Attendance Report', exportData, [
       { key: 'date', label: 'Date' },
-      { key: 'admissionNo', label: 'Adm No' },
+      { key: 'admissionNo', label: 'ID' },
       { key: 'studentName', label: 'Student' },
       { key: 'status', label: 'Status' },
     ], 'attendance');
@@ -201,7 +201,7 @@ export default function Attendance() {
     
     exportToExcel(exportData, 'attendance', [
       { key: 'date' as keyof typeof exportData[0], label: 'Date' },
-      { key: 'admissionNo' as keyof typeof exportData[0], label: 'Admission No' },
+      { key: 'admissionNo' as keyof typeof exportData[0], label: 'ID' },
       { key: 'studentName' as keyof typeof exportData[0], label: 'Student' },
       { key: 'status' as keyof typeof exportData[0], label: 'Status' },
     ]);
@@ -489,7 +489,7 @@ export default function Attendance() {
             <thead>
               <tr>
                 <th>Student</th>
-                <th>Admission No.</th>
+                <th>ID</th>
                 <th className="text-center">Attendance Status</th>
               </tr>
             </thead>
@@ -529,7 +529,7 @@ export default function Attendance() {
                     </div>
                   </td>
                   <td className="font-mono text-sm bg-slate-50 dark:bg-slate-800/50 px-3 py-1 rounded-lg">
-                    {s.admissionNo}
+                    {s.studentId || s.admissionNo}
                   </td>
                   <td>
                     <div className="flex items-center justify-center gap-2">
@@ -722,3 +722,4 @@ export default function Attendance() {
     </div>
   );
 }
+

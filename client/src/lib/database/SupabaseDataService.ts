@@ -288,12 +288,18 @@ function notifyUI(table: string) {
   window.dispatchEvent(new CustomEvent(`${table}Updated`, { detail }));
   window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail }));
   window.dispatchEvent(new CustomEvent('dataRefresh', { detail }));
-  // Invalidate store so all useTableData hooks re-render immediately
+  // Push updated cache data directly into the store — instant UI update, no network round-trip
   const sid = localStorage.getItem('schofy_current_school_id') || '';
   if (sid) {
-    // Use lazy reference to avoid circular import — store registers itself here
     const storeRef = (globalThis as any).__schofyStore;
-    if (storeRef) storeRef.onRemoteChange(sid, table);
+    if (storeRef) {
+      const cached = memCache.get(cacheKey(sid, table));
+      if (cached) {
+        storeRef.push(sid, table, cached.data);
+      } else {
+        storeRef.invalidate(sid, table);
+      }
+    }
   }
   try {
     const qc = getQueryClient();

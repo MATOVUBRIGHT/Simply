@@ -1064,7 +1064,7 @@ export default function Invoices() {
               <thead>
                 <tr>
                   <th>Student</th>
-                  <th>Admission No</th>
+                  <th>ID</th>
                   <th>Invoices</th>
                   <th>Total Invoiced</th>
                   <th>Total Paid</th>
@@ -1981,4 +1981,5 @@ export default function Invoices() {
     </div>
   );
 }
+
 

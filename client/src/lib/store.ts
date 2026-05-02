@@ -18,6 +18,7 @@ interface TableState {
 }
 
 const STALE_MS = 5 * 60_000; // 5 minutes — only re-fetch when truly stale
+const ACTIVE_STALE_MS = 2_000; // 2 seconds for tables with recent writes
 
 class DataStore {
   private state = new Map<string, TableState>();
@@ -80,10 +81,28 @@ class DataStore {
     return req;
   }
 
-  /** Called after a write — invalidate only this table */
+  /** Called after a write — push cached data immediately, then refresh from network in background */
   invalidate(sid: string, table: string) {
+    // Mark stale so next fetch will go to network
     this.set(sid, table, { lastFetch: 0 });
+    // Background refresh — don't await, UI already has optimistic data
     void this.fetch(sid, table, true);
+  }
+
+  /** Push fresh data directly into the store — instant UI update, no network */
+  push(sid: string, table: string, data: any[]) {
+    this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
+  }
+
+  /** Apply optimistic update from cache — instant, no network */
+  applyFromCache(sid: string, table: string) {
+    const storeRef = (globalThis as any).__schofyStore;
+    if (!storeRef) return;
+    import('./database/SupabaseDataService').then(({ dataService }) => {
+      void dataService.getAll(sid, table).then(data => {
+        this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
+      });
+    }).catch(() => {});
   }
 
   /** Seed store from cache without triggering a network fetch */

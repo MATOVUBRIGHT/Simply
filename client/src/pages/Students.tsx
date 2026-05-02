@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award } from 'lucide-react';
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import type { Class, Student } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
@@ -14,6 +14,7 @@ import { addToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
+import { useConfirm } from '../components/ConfirmModal';
 
 const avatarColors = [
   'bg-rose-500',
@@ -52,6 +53,7 @@ function generateStudentId(firstName: string, lastName: string): string {
 export default function Students() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
+  const confirm = useConfirm();
   // All students from store — always up to date, used for stats cards
   const { data: allStudentsData } = useTableData(sid, 'students');
   const allStudents = allStudentsData as Student[];
@@ -285,40 +287,57 @@ export default function Students() {
     const id = schoolId || user?.id;
     if (!id) return;
     try {
-      addToast('Cleaning up orphaned records...', 'info');
-      const allStudents = await dataService.getAll(id, 'students');
-      const studentIds = new Set(allStudents.map((s: any) => s.id));
+      addToast('Cleaning up...', 'info');
+      const allStudentsRaw = await dataService.getAll(id, 'students');
+
+      // ── 1. Remove duplicate students (same firstName+lastName, keep oldest) ──
+      const seen = new Map<string, any>();
+      const duplicateIds: string[] = [];
+      // Sort oldest first so we keep the first-created record
+      const sorted = [...allStudentsRaw].sort((a, b) =>
+        new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+      );
+      for (const s of sorted) {
+        const key = `${(s.firstName || '').toLowerCase().trim()}::${(s.lastName || '').toLowerCase().trim()}`;
+        if (seen.has(key)) {
+          duplicateIds.push(s.id);
+        } else {
+          seen.set(key, s);
+        }
+      }
+      if (duplicateIds.length > 0) {
+        await dataService.batchDelete(id, 'students', duplicateIds);
+      }
+
+      // ── 2. Remove orphaned related records ────────────────────────────────
+      const validIds = new Set(allStudentsRaw.map((s: any) => s.id).filter((i: string) => !duplicateIds.includes(i)));
       let cleanedCount = 0;
-      
+
       const tablesToCheck = ['fees', 'payments', 'invoices', 'bursaries', 'transportAssignments', 'examResults'];
-      
       for (const table of tablesToCheck) {
         const records = await dataService.getAll(id, table);
         const orphanedIds = records
-          .filter(r => r.studentId && !studentIds.has(r.studentId))
+          .filter(r => r.studentId && !validIds.has(r.studentId))
           .map(r => r.id);
-        
         if (orphanedIds.length > 0) {
           await dataService.batchDelete(id, table, orphanedIds);
           cleanedCount += orphanedIds.length;
         }
       }
-      
+
       const attendanceRecords = await dataService.getAll(id, 'attendance');
       const orphanedAttendanceIds = attendanceRecords
-        .filter(r => r.entityType === 'student' && r.entityId && !studentIds.has(r.entityId))
+        .filter(r => r.entityType === 'student' && r.entityId && !validIds.has(r.entityId))
         .map(r => r.id);
-      
       if (orphanedAttendanceIds.length > 0) {
         await dataService.batchDelete(id, 'attendance', orphanedAttendanceIds);
         cleanedCount += orphanedAttendanceIds.length;
       }
-      
-      if (cleanedCount > 0) {
-        addToast(`Cleaned up ${cleanedCount} orphaned records`, 'success');
-      } else {
-        addToast('No orphaned records found', 'info');
-      }
+
+      const parts: string[] = [];
+      if (duplicateIds.length > 0) parts.push(`${duplicateIds.length} duplicate student${duplicateIds.length > 1 ? 's' : ''} removed`);
+      if (cleanedCount > 0) parts.push(`${cleanedCount} orphaned record${cleanedCount > 1 ? 's' : ''} removed`);
+      addToast(parts.length > 0 ? parts.join(', ') : 'Nothing to clean up', parts.length > 0 ? 'success' : 'info');
     } catch (error) {
       console.error('Cleanup error:', error);
       addToast('Failed to cleanup records', 'error');
@@ -356,43 +375,31 @@ export default function Students() {
   async function handleDelete(id: string) {
     const authId = schoolId || user?.id;
     if (!authId) return;
-    if (!confirm('Are you sure you want to delete this student? This action cannot be undone.')) {
-      return;
-    }
-    
+    const student = students.find(s => s.id === id);
+    const name = student ? `${student.firstName} ${student.lastName}` : 'this student';
+    const ok = await confirm({
+      title: 'Delete Student',
+      description: `This will permanently delete ${name} and move them to the recycle bin. This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
-      const student = students.find(s => s.id === id);
-      
-      // Delete the student directly - related records will be handled by sync
       const result = await dataService.delete(authId, 'students', id);
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to delete');
-      }
-      
-      // Update local state
+      if (!result.success) throw new Error(result.error || 'Failed to delete');
       setStudents(prev => prev.filter(s => s.id !== id));
       setTotalCount(prev => prev - 1);
-      
-      // Add to recycle bin
       if (student) {
-        try {
-          const recycleItem = {
-            id: `student-${Date.now()}`,
-            type: 'student' as const,
-            name: `${student.firstName} ${student.lastName}`,
-            data: student,
-            deletedAt: new Date().toISOString()
-          };
-          addToRecycleBin(authId, recycleItem);
-        } catch (e) {
-          console.error('Recycle bin error:', e);
-        }
+        addToRecycleBin(authId, {
+          id: `student-${Date.now()}`,
+          type: 'student' as const,
+          name: `${student.firstName} ${student.lastName}`,
+          data: student,
+          deletedAt: new Date().toISOString(),
+        });
       }
-      
       addToast('Student deleted', 'success');
     } catch (error) {
-      console.error('Delete error:', error);
       addToast('Failed to delete student', 'error');
     }
   }
@@ -401,10 +408,18 @@ export default function Students() {
     const id = schoolId || user?.id;
     if (!id) return;
     const newStatus = student.status === 'active' ? 'inactive' : 'active';
+    const action = newStatus === 'inactive' ? 'Deactivate' : 'Activate';
+    const ok = await confirm({
+      title: `${action} Student`,
+      description: `${action} ${student.firstName} ${student.lastName}? ${newStatus === 'inactive' ? 'They will no longer appear in active lists.' : 'They will be restored to active status.'}`,
+      confirmLabel: action,
+      variant: 'warning',
+    });
+    if (!ok) return;
     try {
       await dataService.update(id, 'students', student.id, { status: newStatus } as any);
       addToast(`Student ${newStatus === 'active' ? 'activated' : 'deactivated'}`, 'success');
-    } catch (error) {
+    } catch {
       addToast('Failed to update status', 'error');
     }
   }
@@ -441,16 +456,24 @@ export default function Students() {
   async function handleMarkCompleted(studentId: string) {
     const id = schoolId || user?.id;
     if (!id) return;
+    const student = students.find(s => s.id === studentId);
+    const name = student ? `${student.firstName} ${student.lastName}` : 'this student';
+    const ok = await confirm({
+      title: 'Mark as Completed',
+      description: `Mark ${name} as completed (graduated)? They will be moved to School Records and no longer appear in active lists.`,
+      confirmLabel: 'Mark Completed',
+      variant: 'info',
+    });
+    if (!ok) return;
     try {
-      const completedData = {
+      await dataService.update(id, 'students', studentId, {
         status: 'completed' as const,
         updatedAt: new Date().toISOString(),
         completedYear: new Date().getFullYear(),
-        completedTerm: 'Final'
-      };
-      await dataService.update(id, 'students', studentId, completedData as any);
+        completedTerm: 'Final',
+      } as any);
       addToast('Student marked as completed', 'success');
-    } catch (error) {
+    } catch {
       addToast('Failed to update status', 'error');
     }
   }
@@ -468,11 +491,17 @@ export default function Students() {
 
   async function handleSendEmail(studentId: string) {
     const student = students.find(s => s.id === studentId);
-    if (student?.guardianEmail) {
-      window.open(`mailto:${student.guardianEmail}`, '_blank');
-    } else {
+    if (!student?.guardianEmail) {
       addToast('No guardian email available', 'warning');
+      return;
     }
+    const ok = await confirm({
+      title: 'Send Email',
+      description: `Open email client to send a message to ${student.guardianName || 'guardian'} at ${student.guardianEmail}?`,
+      confirmLabel: 'Open Email',
+      variant: 'info',
+    });
+    if (ok) window.open(`mailto:${student.guardianEmail}`, '_blank');
   }
 
   function handleSelectAll() {
@@ -1062,7 +1091,19 @@ export default function Students() {
             <Users size={16} />
             <span className="hidden lg:inline">Check Classes</span>
           </button>
-          <button onClick={cleanupOrphanedRecords} className="btn btn-secondary text-amber-600 hover:text-amber-700 dark:text-amber-400" title="Clean orphaned records">
+          <button
+            onClick={async () => {
+              const ok = await confirm({
+                title: 'Clean Up Student Records',
+                description: 'This will remove duplicate students (keeping the oldest record) and delete any orphaned fees, payments, and attendance records that belong to deleted students.',
+                confirmLabel: 'Run Cleanup',
+                variant: 'warning',
+              });
+              if (ok) cleanupOrphanedRecords();
+            }}
+            className="btn btn-secondary text-amber-600 hover:text-amber-700 dark:text-amber-400"
+            title="Clean up duplicates and orphaned records"
+          >
             <Filter size={16} />
             <span className="hidden lg:inline">Cleanup</span>
           </button>
@@ -1434,11 +1475,12 @@ export default function Students() {
                     </button>
                   </th>}
                   <th>Student</th>
-                  <th>Admission No.</th>
+                  <th>ID Number</th>
                   <th>Class</th>
                   <th>Gender</th>
                   <th>Guardian</th>
-                  <th>Status</th>
+                  <th>Invoice Status</th>
+                  <th>Fees Balance</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -1541,35 +1583,30 @@ export default function Students() {
                         </div>
                       </td>
                       <td>
-                        <span className={`badge ${student.status === 'active' ? 'badge-success' : 'badge-gray'}`}>
-                          {student.status}
-                        </span>
+                        {(() => {
+                          const { status } = getStudentFinance(student.id);
+                          return (
+                            <span className={`badge text-xs ${
+                              status === 'paid'    ? 'badge-success' :
+                              status === 'partial' ? 'badge-warning' :
+                              status === 'pending' ? 'badge-danger'  :
+                              'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                            }`}>
+                              {status === 'none' ? 'No invoice' : status}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-2">
-                          {(() => {
-                            const { status, balance } = getStudentFinance(student.id);
-                            return (
-                              <>
-                                <span className={`badge text-xs ${
-                                  status === 'paid' ? 'badge-success' :
-                                  status === 'partial' ? 'badge-warning' :
-                                  status === 'pending' ? 'badge-danger' :
-                                  'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
-                                }`}>
-                                  {status === 'none' ? 'No invoice' : status}
-                                </span>
-                                {status !== 'none' && balance > 0 && (
-                                  <span className="text-xs font-semibold text-red-600 dark:text-red-400">
-                                    {formatMoney(balance)}
-                                  </span>
-                                )}
-                                {status === 'paid' && (
-                                  <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>
-                                )}
-                              </>
-                            );
-                          })()}
+                        {(() => {
+                          const { status, balance } = getStudentFinance(student.id);
+                          if (status === 'none') return <span className="text-xs text-slate-400">—</span>;
+                          if (balance <= 0) return <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>;
+                          return <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(balance)}</span>;
+                        })()}
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
                           <button
                             onClick={() => handleMarkCompleted(student.id)}
                             className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors"
@@ -1711,37 +1748,78 @@ export default function Students() {
         </div>
 
         {totalPages > 1 && viewFilter !== 'completed' && (
-          <div className="p-4 flex items-center justify-between border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+          <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span> to{' '}
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>–
               <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span> of{' '}
-              <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span>
+              <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                onClick={() => setCurrentPage(1)}
                 disabled={currentPage === 1}
-                className="btn btn-secondary p-2"
+                className="btn btn-secondary p-2 disabled:opacity-40"
+                title="First page"
+              >
+                <ChevronLeft size={14} />
+                <ChevronLeft size={14} className="-ml-2" />
+              </button>
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="btn btn-secondary p-2 disabled:opacity-40"
               >
                 <ChevronLeft size={16} />
               </button>
-              <span className="px-3 py-1.5 bg-white dark:bg-slate-700 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 shadow-sm">
-                {currentPage} / {totalPages}
-              </span>
+              {/* Page number buttons — show up to 5 around current page */}
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
+                .reduce<(number | '...')[]>((acc, p, i, arr) => {
+                  if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push('...');
+                  acc.push(p);
+                  return acc;
+                }, [])
+                .map((p, i) =>
+                  p === '...' ? (
+                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      onClick={() => setCurrentPage(p as number)}
+                      className={`min-w-[2rem] h-8 px-2 rounded-lg text-sm font-medium transition-colors ${
+                        currentPage === p
+                          ? 'text-white shadow-sm'
+                          : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600'
+                      }`}
+                      style={currentPage === p ? { backgroundColor: 'var(--primary-color)' } : {}}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
               <button
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
-                className="btn btn-secondary p-2"
+                className="btn btn-secondary p-2 disabled:opacity-40"
               >
                 <ChevronRight size={16} />
+              </button>
+              <button
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage === totalPages}
+                className="btn btn-secondary p-2 disabled:opacity-40"
+                title="Last page"
+              >
+                <ChevronRight size={14} />
+                <ChevronRight size={14} className="-ml-2" />
               </button>
             </div>
           </div>
         )}
       </div>
       {previewImage && (
-        <ImageModal 
-          src={previewImage.src} 
+        <ImageModal
+          src={previewImage.src}
           alt={previewImage.alt} 
           isOpen={!!previewImage}
           onClose={() => setPreviewImage(null)}

@@ -63,7 +63,7 @@ export default function Reports() {
       
       let y = 65;
       doc.setFontSize(10);
-      doc.text('Admission No.', 14, y);
+      doc.text('ID', 14, y);
       doc.text('Name', 55, y);
       doc.text('Class', 110, y);
       doc.text('Gender', 145, y);
@@ -231,7 +231,7 @@ export default function Reports() {
         status: s.status,
       }));
       exportToCSV(data, `${selectedReport}-report`, [
-        { key: 'admissionNo', label: 'Admission No' },
+        { key: 'admissionNo', label: 'ID' },
         { key: 'firstName', label: 'First Name' },
         { key: 'lastName', label: 'Last Name' },
         { key: 'class', label: 'Class' },
@@ -324,7 +324,7 @@ export default function Reports() {
         status: s.status,
       }));
       exportToExcel(data, `${selectedReport}-report`, [
-        { key: 'admissionNo', label: 'Admission No' },
+        { key: 'admissionNo', label: 'ID' },
         { key: 'firstName', label: 'First Name' },
         { key: 'lastName', label: 'Last Name' },
         { key: 'class', label: 'Class' },
@@ -483,4 +483,5 @@ export default function Reports() {
     </div>
   );
 }
+
 

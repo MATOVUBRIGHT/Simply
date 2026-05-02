@@ -133,7 +133,7 @@ export default function ReportCard() {
               </span>
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-xs font-black uppercase text-slate-700 whitespace-nowrap">Admission No:</span>
+              <span className="text-xs font-black uppercase text-slate-700 whitespace-nowrap">Student ID:</span>
               <span className="flex-1 px-3 py-1 text-sm" style={{ backgroundColor: '#d4eaea' }}>{student.admissionNo}</span>
             </div>
             <div className="flex items-center gap-3">
@@ -257,3 +257,4 @@ export default function ReportCard() {
     </div>
   );
 }
+

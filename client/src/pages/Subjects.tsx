@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
 const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
   'nursery': [
@@ -90,10 +91,10 @@ export default function Subjects() {
   }, [settingsData]);
 
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ name: '', code: '', classId: '', customSubject: false });
+  const [formData, setFormData] = useState({ name: '', code: '', customSubject: false });
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [selectedLevel, setSelectedLevel] = useState<string>('');
-  const { addToast } = useToast();
+  const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -108,6 +109,8 @@ export default function Subjects() {
   const clickTimeoutRef = useRef<number | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const confirm = useConfirm();
+  const { addToast } = useToast();
 
   const subjectExpectedFields = [
     { key: 'name', label: 'Subject Name', required: true },
@@ -195,7 +198,7 @@ export default function Subjects() {
     setShowForm(false);
     setSelectedLevel('');
     setSelectedClassIds([]);
-    setFormData({ name: '', code: '', classId: '', customSubject: false });
+    setFormData({ name: '', code: '', customSubject: false });
   }
 
   function toggleClassSelection(classId: string) {
@@ -257,93 +260,87 @@ export default function Subjects() {
 
   async function handleBulkDelete() {
     const id = schoolId || user?.id;
-    if (!id) return;
-    if (selectedSubjects.size === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedSubjects.size} subject(s)?`)) return;
-    
+    if (!id || selectedSubjects.size === 0) return;
+    const ok = await confirm({
+      title: `Delete ${selectedSubjects.size} Subject${selectedSubjects.size > 1 ? 's' : ''}`,
+      description: `This will delete ${selectedSubjects.size} subject entr${selectedSubjects.size > 1 ? 'ies' : 'y'} and move them to the recycle bin.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       const now = new Date().toISOString();
-      
       for (const idSubject of selectedSubjects) {
         const subject = subjects.find(s => s.id === idSubject);
         if (subject) {
           await dataService.delete(id, 'subjects', idSubject);
-          addToRecycleBin(id, {
-            id: `subject-${Date.now()}-${Math.random()}`,
-            type: 'subject',
-            name: subject.name,
-            data: subject,
-            deletedAt: now
-          });
+          addToRecycleBin(id, { id: `subject-${Date.now()}-${Math.random()}`, type: 'subject', name: subject.name, data: subject, deletedAt: now });
         }
       }
-      
       setSelectedSubjects(new Set());
       setSelectMode(false);
-      addToast(`${selectedSubjects.size} subjects moved to recycle bin`, 'success');
-    } catch (error) {
+      addToast(`${selectedSubjects.size} subjects deleted`, 'success');
+    } catch {
       addToast('Failed to delete subjects', 'error');
+    }
+  }
+
+  // Delete all entries for a subject group (all classes it's assigned to)
+  async function handleDeleteGroup(group: { name: string; ids: string[] }) {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    const ok = await confirm({
+      title: `Delete "${group.name}"`,
+      description: group.ids.length === 1
+        ? `Remove "${group.name}" from 1 class? This cannot be undone.`
+        : `Remove "${group.name}" from all ${group.ids.length} classes it's assigned to? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      const now = new Date().toISOString();
+      for (const idSubject of group.ids) {
+        const subject = subjects.find(s => s.id === idSubject);
+        await dataService.delete(id, 'subjects', idSubject);
+        if (subject) {
+          addToRecycleBin(id, { id: `subject-${Date.now()}-${Math.random()}`, type: 'subject', name: subject.name, data: subject, deletedAt: now });
+        }
+      }
+      addToast(`"${group.name}" deleted`, 'success');
+    } catch {
+      addToast('Failed to delete subject', 'error');
     }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!formData.name || !formData.code || selectedClassIds.length === 0 || !selectedLevel) {
-      addToast('Please fill all required fields', 'error');
-      return;
-    }
+    const name = formData.name.trim();
+    const code = formData.code.trim();
+    if (!name || !code) { addToast('Subject name and code are required', 'error'); return; }
+    if (selectedClassIds.length === 0) { addToast('Select at least one class', 'error'); return; }
     const id = schoolId || user?.id;
-    if (!id) return;
+    if (!id || submitting) return;
+    setSubmitting(true);
     try {
       const now = new Date().toISOString();
-      const existingKeys = new Set(subjects.map((subject) => `${subject.name.toLowerCase()}::${subject.classId}`));
+      const existingKeys = new Set(subjects.map(s => `${s.name.toLowerCase()}::${s.classId}`));
       const newSubjects = selectedClassIds
-        .filter((classId) => !existingKeys.has(`${formData.name.toLowerCase()}::${classId}`))
-        .map((classId) => ({
-          id: uuidv4(),
-          name: formData.name,
-          code: formData.code,
-          classId,
-          createdAt: now,
-        } satisfies Subject));
+        .filter(classId => !existingKeys.has(`${name.toLowerCase()}::${classId}`))
+        .map(classId => ({ id: uuidv4(), name, code, classId, createdAt: now } satisfies Subject));
 
       if (newSubjects.length === 0) {
-        addToast('Those subject entries already exist for the selected classes', 'warning');
+        addToast('Subject already exists for all selected classes', 'warning');
         return;
       }
-
-      for (const subject of newSubjects) {
-        await dataService.create(id, 'subjects', subject as any);
-      }
+      // Fire all creates in parallel — optimistic cache updates happen immediately
+      await Promise.all(newSubjects.map(s => dataService.create(id, 'subjects', s as any)));
       resetSubjectForm();
-      addToast(`Added ${newSubjects.length} subject entr${newSubjects.length === 1 ? 'y' : 'ies'} successfully`, 'success');
-    } catch (error) {
+      addToast(`Added "${name}" to ${newSubjects.length} class${newSubjects.length > 1 ? 'es' : ''}`, 'success');
+    } catch {
       addToast('Failed to add subject', 'error');
-    }
-  }
-
-  async function handleDelete(idSubject: string) {
-    const id = schoolId || user?.id;
-    if (confirm('Delete this subject?')) {
-      if (!id) return;
-      try {
-        const subject = subjects.find(s => s.id === idSubject);
-        await dataService.delete(id, 'subjects', idSubject);
-        
-        if (subject) {
-          addToRecycleBin(id, {
-            id: `subject-${Date.now()}`,
-            type: 'subject',
-            name: subject.name,
-            data: subject,
-            deletedAt: new Date().toISOString()
-          });
-        }
-        
-        addToast('Subject moved to recycle bin', 'success');
-      } catch (error) {
-        addToast('Failed to delete', 'error');
-      }
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -655,134 +652,138 @@ export default function Subjects() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-violet-200 dark:border-violet-800">
-          <div className="card-header bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-900/20 dark:to-purple-900/20">
-            <h3 className="font-bold text-violet-700 dark:text-violet-300 flex items-center gap-2">
-              <Plus size={20} />
-              Add New Subject
-            </h3>
-          </div>
-          <form onSubmit={handleSubmit} className="card-body grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <label className="form-label">Education Level <span className="text-xs text-slate-400">(from settings: {schoolType})</span></label>
-              <div className="flex flex-wrap gap-2">
-                {availableLevels.map(({ key, label }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => { setSelectedLevel(selectedLevel === key ? '' : key); setSelectedClassIds([]); }}
-                    className={`btn ${selectedLevel === key ? 'btn-primary' : 'btn-secondary'}`}
-                  >
-                    {label}
-                  </button>
-                ))}
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => resetSubjectForm()}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Modal header */}
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <Book size={18} className="text-white" />
+                <h3 className="font-bold text-white">Add Subject</h3>
               </div>
-              {availableLevels.length === 0 && (
-                <p className="text-xs text-amber-600">No school type set. Go to Settings to configure.</p>
-              )}
+              <button onClick={resetSubjectForm} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">✕</button>
             </div>
-            <div className="space-y-2">
-              <label className="form-label">Subject</label>
-              {selectedLevel ? (
-                <select
-                  value={formData.customSubject ? 'custom' : formData.name}
-                  onChange={e => {
-                    if (e.target.value === 'custom') {
-                      setFormData(prev => ({ ...prev, name: '', code: '', customSubject: true }));
-                    } else {
-                      const selected = ugandaSubjects[selectedLevel]?.find(s => s.name === e.target.value);
-                      if (selected) {
-                        setFormData(prev => ({ ...prev, name: selected.name, code: generateSubjectCode(selected.name) || selected.code, customSubject: false }));
-                      }
-                    }
-                  }}
-                  className="form-input"
-                >
-                  <option value="">Select Subject</option>
-                  {ugandaSubjects[selectedLevel]?.map(s => (
-                    <option key={s.name} value={s.name}>{s.name}</option>
-                  ))}
-                  <option value="custom">+ Custom Subject</option>
-                </select>
-              ) : (
-                <input className="form-input bg-slate-50 dark:bg-slate-800" disabled placeholder="Select level first" />
-              )}
-            </div>
-            <div className="space-y-2">
-              <label className="form-label">Subject Code</label>
-              <div className="relative">
-                <Hash size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                <input 
-                  value={formData.code} 
-                  onChange={e => setFormData(prev => ({ ...prev, code: e.target.value.toUpperCase() }))} 
-                  className="input-with-icon" 
-                  required 
-                  placeholder={formData.customSubject ? "e.g., CHEM" : "Auto-filled"} 
-                  maxLength={10}
-                />
-              </div>
-            </div>
-            {formData.customSubject && (
-              <div className="space-y-2">
-                <label className="form-label">Custom Subject Name</label>
-                <input 
-                  value={formData.name} 
-                  onChange={e => {
-                    const nextName = e.target.value;
-                    setFormData(prev => ({ ...prev, name: nextName, code: generateSubjectCode(nextName) }));
-                  }} 
-                  className="form-input" 
-                  required 
-                  placeholder="Enter custom subject name" 
-                />
-              </div>
-            )}
-            <div className="space-y-2 md:col-span-3">
-              <div className="flex items-center justify-between gap-3">
-                <label className="form-label mb-0">Classes</label>
-                {classesForSelectedLevel.length > 0 && (
-                  <button type="button" onClick={handleSelectAllClasses} className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
-                    {selectedClassIds.length === classesForSelectedLevel.length ? 'Clear all' : 'Select all classes'}
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {classesForSelectedLevel.length > 0 ? classesForSelectedLevel.map((classItem) => {
-                  const isSelected = selectedClassIds.includes(classItem.id);
-                  return (
-                    <button
-                      key={classItem.id}
-                      type="button"
-                      onClick={() => toggleClassSelection(classItem.id)}
-                      className={`flex items-center justify-between rounded-xl border px-3 py-2 text-sm transition-all ${
-                        isSelected
-                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-900/20 dark:text-indigo-300'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600'
-                      }`}
+
+            <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden">
+              <div className="p-5 space-y-5 overflow-y-auto">
+
+                {/* Subject name */}
+                <div>
+                  <label className="form-label">Subject Name *</label>
+                  {selectedLevel && ugandaSubjects[selectedLevel]?.length > 0 && !formData.customSubject ? (
+                    <select
+                      value={formData.name}
+                      onChange={e => {
+                        if (e.target.value === '__custom__') {
+                          setFormData(prev => ({ ...prev, name: '', code: '', customSubject: true }));
+                        } else {
+                          const s = ugandaSubjects[selectedLevel]?.find(x => x.name === e.target.value);
+                          setFormData(prev => ({ ...prev, name: e.target.value, code: s ? generateSubjectCode(s.name) || s.code : prev.code, customSubject: false }));
+                        }
+                      }}
+                      className="form-input"
                     >
-                      <span>{getClassDisplayName(classItem.id, classes)}</span>
-                      {isSelected && <Check size={14} />}
-                    </button>
-                  );
-                }) : (
-                  <div className="rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                    {selectedLevel ? 'No classes found for this level yet.' : 'Select a level first.'}
+                      <option value="">— Select subject —</option>
+                      {ugandaSubjects[selectedLevel].map(s => (
+                        <option key={s.name} value={s.name}>{s.name}</option>
+                      ))}
+                      <option value="__custom__">+ Custom subject...</option>
+                    </select>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        value={formData.name}
+                        onChange={e => {
+                          const n = e.target.value;
+                          setFormData(prev => ({ ...prev, name: n, code: generateSubjectCode(n) || prev.code }));
+                        }}
+                        className="form-input flex-1"
+                        placeholder="e.g. Mathematics"
+                        autoFocus
+                        required
+                      />
+                      {formData.customSubject && (
+                        <button type="button" onClick={() => setFormData(prev => ({ ...prev, name: '', code: '', customSubject: false }))}
+                          className="btn btn-secondary text-xs px-3">← Presets</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Code */}
+                <div>
+                  <label className="form-label">Subject Code *</label>
+                  <input
+                    value={formData.code}
+                    onChange={e => setFormData(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
+                    className="form-input font-mono"
+                    placeholder="e.g. MATH"
+                    maxLength={10}
+                    required
+                  />
+                </div>
+
+                {/* Level filter */}
+                <div>
+                  <label className="form-label">Filter by Level <span className="text-slate-400 font-normal text-xs">(optional)</span></label>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => { setSelectedLevel(''); setSelectedClassIds([]); }}
+                      className={`btn text-sm ${!selectedLevel ? 'btn-primary' : 'btn-secondary'}`}>All</button>
+                    {availableLevels.map(({ key, label }) => (
+                      <button key={key} type="button"
+                        onClick={() => { setSelectedLevel(selectedLevel === key ? '' : key); setSelectedClassIds([]); }}
+                        className={`btn text-sm ${selectedLevel === key ? 'btn-primary' : 'btn-secondary'}`}>
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                )}
+                </div>
+
+                {/* Class selection */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="form-label mb-0">Assign to Classes *</label>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setSelectedClassIds(classesForSelectedLevel.map(c => c.id))}
+                        className="text-xs text-primary-600 dark:text-primary-400 hover:underline">All</button>
+                      <span className="text-slate-300">·</span>
+                      <button type="button" onClick={() => setSelectedClassIds([])}
+                        className="text-xs text-slate-500 hover:underline">None</button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+                    {(selectedLevel ? classesForSelectedLevel : classes).map(cls => {
+                      const sel = selectedClassIds.includes(cls.id);
+                      return (
+                        <button key={cls.id} type="button" onClick={() => toggleClassSelection(cls.id)}
+                          className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-all ${
+                            sel ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                                : 'border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-500'
+                          }`}>
+                          <span className="truncate">{cls.name}</span>
+                          {sel && <Check size={13} className="shrink-0 ml-1" />}
+                        </button>
+                      );
+                    })}
+                    {(selectedLevel ? classesForSelectedLevel : classes).length === 0 && (
+                      <p className="col-span-3 text-sm text-slate-400 py-2">No classes found. Add classes first.</p>
+                    )}
+                  </div>
+                  {selectedClassIds.length > 0 && (
+                    <p className="text-xs text-slate-500 mt-2">{selectedClassIds.length} class{selectedClassIds.length > 1 ? 'es' : ''} selected</p>
+                  )}
+                </div>
               </div>
-              {selectedClassIds.length > 0 && (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {selectedClassIds.length} class{selectedClassIds.length === 1 ? '' : 'es'} selected. This subject will be added to each selected class.
-                </p>
-              )}
-            </div>
-            <div className="md:col-span-3 flex gap-2">
-              <button type="submit" className="btn btn-primary">
-                <Book size={16} /> Add Subject{selectedClassIds.length > 1 ? 's' : ''}
-              </button>
-              <button type="button" onClick={resetSubjectForm} className="btn btn-secondary">Cancel</button>
-            </div>
-          </form>
+
+              {/* Footer */}
+              <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex gap-2 justify-end shrink-0 bg-slate-50 dark:bg-slate-800/50">
+                <button type="button" onClick={resetSubjectForm} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={submitting || !formData.name || !formData.code || selectedClassIds.length === 0}
+                  className="btn btn-primary disabled:opacity-50">
+                  {submitting ? 'Saving...' : `Add to ${selectedClassIds.length || 0} Class${selectedClassIds.length !== 1 ? 'es' : ''}`}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -922,13 +923,9 @@ export default function Subjects() {
                     </td>
                     <td onClick={e => e.stopPropagation()}>
                       <button
-                        onClick={() => {
-                          if (confirm(`Delete "${group.name}" from all ${group.ids.length} class(es)?`)) {
-                            group.ids.forEach(id => handleDelete(id));
-                          }
-                        }}
+                        onClick={() => handleDeleteGroup(group)}
                         className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
-                        title={`Delete from ${group.ids.length} class(es)`}
+                        title={`Delete from ${group.ids.length} class${group.ids.length > 1 ? 'es' : ''}`}
                       >
                         <Trash2 size={16} />
                       </button>
@@ -942,7 +939,7 @@ export default function Subjects() {
       </div>
 
       {showImportModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">

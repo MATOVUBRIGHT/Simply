@@ -8,6 +8,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { SyncProvider } from './contexts/SyncContext';
 import { getQueryClient } from './lib/queryClient';
+import { ConfirmProvider } from './components/ConfirmModal';
 import './index.css';
 
 const queryClient = getQueryClient();
@@ -38,9 +39,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <ThemeProvider>
           <ToastProvider>
             <AuthProvider>
-              <SyncProvider>
-                <App />
-              </SyncProvider>
+              <ConfirmProvider>
+                <SyncProvider>
+                  <App />
+                </SyncProvider>
+              </ConfirmProvider>
             </AuthProvider>
           </ToastProvider>
         </ThemeProvider>
