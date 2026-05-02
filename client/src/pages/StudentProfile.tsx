@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Edit, Mail, Phone, MapPin, Calendar, User, DollarSign, GraduationCap, BookOpen } from 'lucide-react';
 import { Student, Class } from '@schofy/shared';
@@ -7,48 +7,25 @@ import DropdownModal from '../components/DropdownModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { useTableData } from '../lib/store';
 
 export default function StudentProfile() {
   const { id } = useParams();
   const { user, schoolId } = useAuth();
   const { addToast } = useToast();
-  const [student, setStudent] = useState<Student | null>(null);
-  const [loading, setLoading] = useState(true);
+  const sid = schoolId || user?.id || '';
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
-  const [classes, setClasses] = useState<Class[]>([]);
   const [showClassDropdown, setShowClassDropdown] = useState(false);
   const [updatingClass, setUpdatingClass] = useState(false);
 
-  useEffect(() => {
-    if (user?.id || schoolId) {
-      loadStudent();
-      loadClasses();
-    }
-  }, [id, user?.id, schoolId]);
+  const { data: studentsData, loading } = useTableData(sid, 'students');
+  const { data: classesData } = useTableData(sid, 'classes');
 
-  async function loadStudent() {
-    const authId = schoolId || user?.id;
-    if (!authId || !id) return;
-    try {
-      const data = await dataService.get(authId, 'students', id);
-      setStudent(data || null);
-    } catch (error) {
-      console.error('Failed to load student:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadClasses() {
-    const authId = schoolId || user?.id;
-    if (!authId) return;
-    try {
-      const data = await dataService.getAll(authId, 'classes');
-      setClasses(data);
-    } catch (error) {
-      console.error('Failed to load classes:', error);
-    }
-  }
+  const student = useMemo(() =>
+    (studentsData.find((s: any) => s.id === id) as Student) || null,
+    [studentsData, id]
+  );
+  const classes = classesData as Class[];
 
   async function handleClassChange(newClassId: string) {
     const authId = schoolId || user?.id;
@@ -61,7 +38,6 @@ export default function StudentProfile() {
     try {
       const now = new Date().toISOString();
       await dataService.update(authId, 'students', student.id, { classId: newClassId, updatedAt: now } as any);
-      setStudent({ ...student, classId: newClassId, updatedAt: now });
       window.dispatchEvent(new Event('studentsUpdated'));
       addToast('Class updated successfully', 'success');
     } catch (error) {

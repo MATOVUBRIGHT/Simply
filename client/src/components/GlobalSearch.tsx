@@ -4,6 +4,7 @@ import { Search, GraduationCap, Users, BookOpen, LayoutDashboard, Calendar, Rece
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { getClassDisplayName } from '../utils/classroom';
+import { store } from '../lib/store';
 
 interface SearchResult {
   id: string;
@@ -94,7 +95,6 @@ export default function GlobalSearch() {
       if (!tenantId) return;
 
       // Use store cache first (instant), fall back to direct fetch
-      const { store } = await import('../lib/store');
       const getStoreData = (table: string) => {
         const snap = store.getSnapshot(tenantId, table);
         return snap.data.length > 0 ? snap.data : null;

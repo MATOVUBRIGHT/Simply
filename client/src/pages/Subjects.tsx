@@ -8,6 +8,7 @@ import { getClassDisplayName } from '../utils/classroom';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
+import { useTableData } from '../lib/store';
 
 const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
   'nursery': [
@@ -70,14 +71,28 @@ const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
 
 export default function Subjects() {
   const { user, schoolId } = useAuth();
-  const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [classes, setClasses] = useState<Class[]>([]);
-  const [loading, setLoading] = useState(true);
+  const sid = schoolId || user?.id || '';
+  const { data: subjectsData, loading } = useTableData(sid, 'subjects');
+  const { data: classesData } = useTableData(sid, 'classes');
+  const { data: settingsData } = useTableData(sid, 'settings');
+
+  const subjects = useMemo(() =>
+    [...subjectsData].sort((a: any, b: any) =>
+      new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    ) as Subject[], [subjectsData]);
+
+  const classes = useMemo(() =>
+    [...classesData].sort((a: any, b: any) => a.name.localeCompare(b.name)) as Class[], [classesData]);
+
+  const schoolType = useMemo(() => {
+    const s = settingsData.find((s: any) => s.key === 'schoolType');
+    return (s?.value as string) || 'nursery_primary';
+  }, [settingsData]);
+
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ name: '', code: '', classId: '', customSubject: false });
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [selectedLevel, setSelectedLevel] = useState<string>('');
-  const [schoolType, setSchoolType] = useState<string>('nursery_primary');
   const { addToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -99,47 +114,6 @@ export default function Subjects() {
     { key: 'code', label: 'Code', required: true },
     { key: 'classId', label: 'Class', required: true },
   ];
-
-  useEffect(() => {
-    if (user?.id || schoolId) {
-      loadSubjects();
-      loadClasses();
-    }
-  }, [user?.id, schoolId]);
-
-  async function loadSubjects() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const data = await dataService.getAll(id, 'subjects');
-      const sorted = data.sort((a, b) => {
-        const dateA = new Date(a.createdAt || 0).getTime();
-        const dateB = new Date(b.createdAt || 0).getTime();
-        return dateB - dateA;
-      });
-      setSubjects(sorted);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadClasses() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const data = await dataService.getAll(id, 'classes');
-      setClasses(data.sort((left, right) => left.name.localeCompare(right.name)));
-      
-      const settingsData = await dataService.getAll(id, 'settings');
-      const schoolTypeSetting = settingsData.find((s: any) => s.key === 'schoolType');
-      const st = schoolTypeSetting?.value || 'nursery_primary';
-      setSchoolType(st);
-    } catch (error) {
-      console.error('Failed to load classes:', error);
-    }
-  }
 
   function getClassLevel(classId: string): string {
     const cls = classes.find(c => c.id === classId) as any;
@@ -304,7 +278,6 @@ export default function Subjects() {
         }
       }
       
-      setSubjects(prev => prev.filter(s => !selectedSubjects.has(s.id)));
       setSelectedSubjects(new Set());
       setSelectMode(false);
       addToast(`${selectedSubjects.size} subjects moved to recycle bin`, 'success');
@@ -342,7 +315,6 @@ export default function Subjects() {
       for (const subject of newSubjects) {
         await dataService.create(id, 'subjects', subject as any);
       }
-      setSubjects((prev) => [...newSubjects, ...prev]);
       resetSubjectForm();
       addToast(`Added ${newSubjects.length} subject entr${newSubjects.length === 1 ? 'y' : 'ies'} successfully`, 'success');
     } catch (error) {
@@ -368,7 +340,6 @@ export default function Subjects() {
           });
         }
         
-        setSubjects(prev => prev.filter(s => s.id !== idSubject));
         addToast('Subject moved to recycle bin', 'success');
       } catch (error) {
         addToast('Failed to delete', 'error');
@@ -514,7 +485,6 @@ export default function Subjects() {
         await dataService.create(id, 'subjects', subject as any);
         successCount++;
       }
-      await loadSubjects();
       addToast(`Successfully imported ${successCount} subjects`, 'success');
       closeImportModal();
     } catch (error) { addToast('Failed to import subjects', 'error'); }

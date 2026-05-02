@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class } from '@schofy/shared';
@@ -7,6 +7,7 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
+import { useTableData } from '../lib/store';
 
 const classColors = [
   { card: 'card-coral-light', gradient: 'from-orange-100 to-amber-100', text: 'text-orange-600' },
@@ -27,9 +28,26 @@ function getClassColor(index: number) {
 
 export default function Classes() {
   const { user, schoolId } = useAuth();
-  const [classes, setClasses] = useState<Class[]>([]);
-  const [classEnrollmentCounts, setClassEnrollmentCounts] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(true);
+  const sid = schoolId || user?.id || '';
+  const { data: classesData, loading } = useTableData(sid, 'classes');
+  const { data: allStudentsData } = useTableData(sid, 'students');
+
+  // Sort classes by level
+  const classes = useMemo(
+    () => [...classesData].sort((a: any, b: any) => a.level - b.level),
+    [classesData]
+  );
+
+  // Compute enrollment counts from store data
+  const classEnrollmentCounts = useMemo(() => {
+    return allStudentsData
+      .filter((student: any) => student.status !== 'completed')
+      .reduce<Record<string, number>>((counts: Record<string, number>, student: any) => {
+        counts[student.classId] = (counts[student.classId] || 0) + 1;
+        return counts;
+      }, {});
+  }, [allStudentsData]);
+
   const [showForm, setShowForm] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
   const [formData, setFormData] = useState({ name: '', level: 1, stream: '', capacity: 40 });
@@ -54,35 +72,6 @@ export default function Classes() {
     { key: 'stream', label: 'Stream', required: false },
     { key: 'capacity', label: 'Capacity', required: false },
   ];
-
-  const loadClasses = useCallback(async () => {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const [data, students] = await Promise.all([
-        dataService.getAll(id, 'classes'),
-        dataService.getAll(id, 'students'),
-      ]);
-      const sorted = data.sort((a: any, b: any) => a.level - b.level);
-      setClasses(sorted);
-      setClassEnrollmentCounts(
-        students
-          .filter((student: any) => student.status !== 'completed')
-          .reduce<Record<string, number>>((counts: Record<string, number>, student: any) => {
-            counts[student.classId] = (counts[student.classId] || 0) + 1;
-            return counts;
-          }, {}),
-      );
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id, schoolId]);
-
-  useEffect(() => { 
-    if (user?.id || schoolId) loadClasses(); 
-  }, [user?.id, schoolId, loadClasses]);
 
   function handleRowClick(classId: string) {
     if (clickTimeoutRef.current) {
@@ -150,7 +139,6 @@ export default function Classes() {
         }
       }
       
-      setClasses(prev => prev.filter(c => !selectedClasses.has(c.id)));
       setSelectedClasses(new Set());
       setSelectMode(false);
       addToast(`${selectedClasses.size} classes moved to recycle bin`, 'success');
@@ -174,12 +162,10 @@ export default function Classes() {
       const now = new Date().toISOString();
       if (editingClass) {
         await dataService.update(id, 'classes', editingClass.id, { ...editingClass, ...formData, updatedAt: now });
-        setClasses(prev => prev.map(c => c.id === editingClass.id ? { ...c, ...formData } : c));
         addToast('Class updated successfully', 'success');
       } else {
         const newClass: Class = { id: generateUUID(), schoolId: id, name: formData.name, level: formData.level, stream: formData.stream, capacity: formData.capacity, createdAt: now };
         await dataService.create(id, 'classes', newClass);
-        setClasses(prev => [...prev, newClass]);
         addToast('Class added successfully', 'success');
       }
       setShowForm(false);
@@ -208,7 +194,6 @@ export default function Classes() {
           });
         }
         
-        setClasses(prev => prev.filter(c => c.id !== id));
         addToast('Class moved to recycle bin', 'success');
       } catch (error) {
         addToast('Failed to delete', 'error');
@@ -361,7 +346,6 @@ export default function Classes() {
         await dataService.create(id, 'classes', classItem);
         successCount++;
       }
-      await loadClasses();
       addToast(`Successfully imported ${successCount} classes`, 'success');
       closeImportModal();
     } catch (error) { addToast('Failed to import classes', 'error'); }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { store } from '../lib/store';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 interface RealtimeSyncContextType { isConnected: boolean; }
 const RealtimeSyncContext = createContext<RealtimeSyncContextType>({ isConnected: false });
@@ -39,20 +40,44 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
 
-    // One channel, filter per table — much cheaper than 19 channels
-    let ch = supabase.channel('schofy-all');
-    for (const table of REALTIME_TABLES) {
-      ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
-        const sid = localStorage.getItem('schofy_current_school_id') || '';
-        if (sid) store.onRemoteChange(sid, localName(table));
-      }) as any;
-    }
-    ch.subscribe((status: string) => {
-      if (status === 'SUBSCRIBED') setIsConnected(true);
-    });
+    function connect() {
+      if (channelRef.current) {
+        try { supabase!.removeChannel(channelRef.current); } catch { /* ignore */ }
+      }
 
-    channelRef.current = ch;
-    return () => { if (supabase) supabase.removeChannel(ch); };
+      let ch = supabase!.channel('schofy-all');
+      for (const table of REALTIME_TABLES) {
+        ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+          const sid = localStorage.getItem('schofy_current_school_id') || '';
+          if (sid) store.onRemoteChange(sid, localName(table));
+        }) as any;
+      }
+      ch.subscribe((status: string) => {
+        if (status === 'SUBSCRIBED') setIsConnected(true);
+        else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsConnected(false);
+      });
+      channelRef.current = ch;
+    }
+
+    connect();
+
+    // Reconnect when coming back online
+    function onOnline() {
+      setIsConnected(false);
+      connect();
+      // Flush any offline queue
+      void dataService.flushOfflineQueue();
+      // Refresh all stale data
+      refreshStale();
+    }
+
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      if (supabase && channelRef.current) {
+        try { supabase.removeChannel(channelRef.current); } catch { /* ignore */ }
+      }
+    };
   }, []);
 
   // ── Polling fallback — only refreshes stale tables with active subscribers ──
@@ -75,14 +100,16 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
     }
     function onHidden() { lastActiveRef.current = Date.now(); stopPoll(); }
 
-    document.addEventListener('visibilitychange', () =>
-      document.visibilityState === 'visible' ? onVisible() : onHidden()
-    );
+    const onVisibilityChange = () =>
+      document.visibilityState === 'visible' ? onVisible() : onHidden();
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('focus', onVisible);
     startPoll();
 
     return () => {
       stopPoll();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('focus', onVisible);
     };
   }, []);

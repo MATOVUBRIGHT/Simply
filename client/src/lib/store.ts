@@ -67,6 +67,7 @@ class DataStore {
       this.set(sid, table, { loading: true, error: null });
       try {
         const data = await dataService.getAll(sid, table);
+        // Mark as fresh — if data came from cache, it's already fresh
         this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
       } catch (e: any) {
         this.set(sid, table, { loading: false, error: e.message });
@@ -83,6 +84,14 @@ class DataStore {
   invalidate(sid: string, table: string) {
     this.set(sid, table, { lastFetch: 0 });
     void this.fetch(sid, table, true);
+  }
+
+  /** Seed store from cache without triggering a network fetch */
+  seed(sid: string, table: string, data: any[]) {
+    const s = this.get(sid, table);
+    if (s.data.length === 0 && s.lastFetch === 0 && data.length > 0) {
+      this.set(sid, table, { data, loading: false, lastFetch: Date.now() - 4 * 60_000 }); // mark as slightly stale so it refreshes soon
+    }
   }
 
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -124,6 +133,9 @@ class DataStore {
 
 export const store = new DataStore();
 
+// Register globally so SupabaseDataService can call onRemoteChange without circular import
+(globalThis as any).__schofyStore = store;
+
 // ── React hook ────────────────────────────────────────────────────────────────
 
 export function useTableData(sid: string | null | undefined, table: string) {
@@ -132,6 +144,14 @@ export function useTableData(sid: string | null | undefined, table: string) {
   const subscribe = useCallback(
     (listener: Listener) => {
       if (!safeSid) return () => {};
+      // Seed from localStorage cache immediately (synchronous, no network)
+      const snap = store.getSnapshot(safeSid, table);
+      if (snap.data.length === 0 && snap.lastFetch === 0) {
+        void dataService.getAll(safeSid, table).then(data => {
+          store.seed(safeSid, table, data);
+        });
+      }
+      // Trigger background fetch (won't re-fetch if data is fresh)
       void store.fetch(safeSid, table);
       return store.subscribe(safeSid, table, listener);
     },

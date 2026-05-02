@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, ChevronLeft, ChevronRight, Edit, Trash2, Eye, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award } from 'lucide-react';
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import type { Class, Student } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
@@ -13,6 +13,7 @@ import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAs
 import { addToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
+import { useCurrency } from '../hooks/useCurrency';
 
 const avatarColors = [
   'bg-rose-500',
@@ -54,6 +55,23 @@ export default function Students() {
   // All students from store — always up to date, used for stats cards
   const { data: allStudentsData } = useTableData(sid, 'students');
   const allStudents = allStudentsData as Student[];
+  const { data: feesData } = useTableData(sid, 'fees');
+  const { data: paymentsData } = useTableData(sid, 'payments');
+  const { formatMoney } = useCurrency();
+
+  // Compute invoice status and balance per student
+  function getStudentFinance(studentId: string) {
+    const studentFees = feesData.filter((f: any) => f.studentId === studentId);
+    if (studentFees.length === 0) return { status: 'none', balance: 0, invoiced: 0 };
+    const invoiced = studentFees.reduce((s: number, f: any) => s + (f.amount || 0), 0);
+    const paid = studentFees.reduce((s: number, f: any) => {
+      const fp = paymentsData.filter((p: any) => p.feeId === f.id);
+      return s + fp.reduce((a: number, p: any) => a + (p.amount || 0), 0);
+    }, 0);
+    const balance = invoiced - paid;
+    const status = balance <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
+    return { status, balance, invoiced };
+  }
 
   const { loadPage, searchStudents } = useStudents();
   const [students, setStudents] = useState<Student[]>([]);
@@ -1528,21 +1546,30 @@ export default function Students() {
                         </span>
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <Link
-                            to={`/students/${student.id}`}
-                            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 dark:text-sky-400 rounded-lg transition-colors"
-                            title="View"
-                          >
-                            <Eye size={15} />
-                          </Link>
-                          <Link
-                            to={`/students/${student.id}/edit`}
-                            className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors"
-                            title="Edit"
-                          >
-                            <Edit size={15} />
-                          </Link>
+                        <div className="flex items-center gap-2">
+                          {(() => {
+                            const { status, balance } = getStudentFinance(student.id);
+                            return (
+                              <>
+                                <span className={`badge text-xs ${
+                                  status === 'paid' ? 'badge-success' :
+                                  status === 'partial' ? 'badge-warning' :
+                                  status === 'pending' ? 'badge-danger' :
+                                  'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                                }`}>
+                                  {status === 'none' ? 'No invoice' : status}
+                                </span>
+                                {status !== 'none' && balance > 0 && (
+                                  <span className="text-xs font-semibold text-red-600 dark:text-red-400">
+                                    {formatMoney(balance)}
+                                  </span>
+                                )}
+                                {status === 'paid' && (
+                                  <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>
+                                )}
+                              </>
+                            );
+                          })()}
                           <button
                             onClick={() => handleMarkCompleted(student.id)}
                             className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors"

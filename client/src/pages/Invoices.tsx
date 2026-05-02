@@ -8,6 +8,7 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { useTableData } from '../lib/store';
 import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor, generateInvoicesFromStructure } from '../utils/feeStructures';
 import { ClassOption } from '../utils/classroom';
 import DropdownModal from '../components/DropdownModal';
@@ -88,17 +89,22 @@ export default function Invoices() {
   const [newDiscount, setNewDiscount] = useState({ classId: '', amount: 0, type: 'fixed' as 'fixed' | 'percentage' });
   const [searchStudent, setSearchStudent] = useState('');
   const [filterBursaryClass, setFilterBursaryClass] = useState<string>('all');
-  const [fees, setFees] = useState<any[]>([]);
-  const [payments, setPayments] = useState<any[]>([]);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [termSettings, setTermSettings] = useState<Record<string, string>>({});
   const [showPromotionBanner, setShowPromotionBanner] = useState(false);
   const [expiredTerm, setExpiredTerm] = useState('');
 
   const students = useActiveStudents();
   const { students: allStudents } = useStudents();
+  const sid = schoolId || user?.id || '';
+  const { data: feesData, refresh: refreshFees } = useTableData(sid, 'fees');
+  const { data: paymentsData, refresh: refreshPayments } = useTableData(sid, 'payments');
+  const fees = feesData as any[];
+  const payments = paymentsData as any[];
 
-  // Computed: student invoice summary
+  function refreshInvoices() {
+    refreshFees();
+    refreshPayments();
+  }
   const studentInvoiceSummary = useMemo(() => {
     if (!allStudents || !fees || !payments) return [];
     
@@ -138,12 +144,6 @@ export default function Invoices() {
     return true;
   });
 
-  useEffect(() => {
-    if (user?.id || schoolId) {
-      loadFeesAndPayments();
-    }
-  }, [user, schoolId, refreshKey]);
-
   // Realtime: fee structures reload when class selection changes
   useEffect(() => {
     const reloadStructures = () => { if (selectedClassId) loadFeeStructures(); };
@@ -154,21 +154,6 @@ export default function Invoices() {
       window.removeEventListener('feeStructuresDataChanged', reloadStructures);
     };
   }, [selectedClassId]);
-
-  async function loadFeesAndPayments() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const [feesData, paymentsData] = await Promise.all([
-        dataService.getAll(id, 'fees'),
-        dataService.getAll(id, 'payments'),
-      ]);
-      setFees(feesData);
-      setPayments(paymentsData);
-    } catch (error) {
-      console.error('Failed to load fees and payments:', error);
-    }
-  }
 
   const invoices = useMemo(() => {
     if (!fees || !payments || !allStudents) return [];
@@ -410,7 +395,7 @@ export default function Invoices() {
       setShowCreateModal(false);
       setShowStructureModal(false);
       loadBursariesAndDiscounts();
-      setRefreshKey(k => k + 1);
+      refreshInvoices();
     } catch (error) {
       console.error('Failed to generate invoices:', error);
       addToast('Failed to generate invoices', 'error');
@@ -459,7 +444,7 @@ export default function Invoices() {
         }
       }
       addToast('Student invoiced successfully', 'success');
-      setRefreshKey(k => k + 1);
+      refreshInvoices();
     } catch { addToast('Failed to invoice student', 'error'); }
   }
 
@@ -482,7 +467,7 @@ export default function Invoices() {
         setShowStructureModal(true);
       } else {
         addToast(`Invoiced ${totalInvoiced} fees across ${classesProcessed} classes`, 'success');
-        setRefreshKey(k => k + 1);
+        refreshInvoices();
       }
     } catch { addToast('Bulk invoice failed', 'error'); }
     finally { (window as any).__bulkInvoicing = false; }
@@ -509,7 +494,7 @@ export default function Invoices() {
         createdAt: new Date().toISOString(),
       } as any);
       addToast('Payment recorded', 'success');
-      setRefreshKey(k => k + 1);
+      refreshInvoices();
     } catch (error) {
       addToast('Failed to record payment', 'error');
     }
@@ -658,7 +643,7 @@ export default function Invoices() {
       }
       addToast(`Successfully imported ${successCount} invoices`, 'success');
       closeImportModal();
-      setRefreshKey(k => k + 1);
+      refreshInvoices();
     } catch (error) { addToast('Failed to import invoices', 'error'); }
   }
 
@@ -1996,3 +1981,4 @@ export default function Invoices() {
     </div>
   );
 }
+

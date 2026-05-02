@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Plus, Bus, Trash2, User, MapPin, DollarSign, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,12 +9,13 @@ import { useCurrency } from '../hooks/useCurrency';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useStudents } from '../contexts/StudentsContext';
 import { addToRecycleBin } from '../utils/recycleBin';
+import { useTableData } from '../lib/store';
 
 export default function Transport() {
   const { user, schoolId } = useAuth();
-  const [routes, setRoutes] = useState<TransportRoute[]>([]);
-  const [assignments, setAssignments] = useState<TransportAssignment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const sid = schoolId || user?.id || '';
+  const { data: routes } = useTableData(sid, 'transportRoutes');
+  const { data: assignments, loading } = useTableData(sid, 'transportAssignments');
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ name: '', description: '', fee: 0 });
   const [selectedRoute, setSelectedRoute] = useState<string>('');
@@ -38,25 +39,6 @@ export default function Transport() {
     { key: 'fee', label: 'Monthly Fee', required: true },
   ];
 
-  useEffect(() => { if (user?.id || schoolId) loadData(); }, [user?.id, schoolId]);
-
-  async function loadData() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const [routesData, assignmentsData] = await Promise.all([
-        dataService.getAll(id, 'transportRoutes'),
-        dataService.getAll(id, 'transportAssignments'),
-      ]);
-      setRoutes(routesData);
-      setAssignments(assignmentsData);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function handleAddRoute(e: React.FormEvent) {
     e.preventDefault();
     const id = schoolId || user?.id;
@@ -64,7 +46,6 @@ export default function Transport() {
     try {
       const newRoute: TransportRoute = { id: uuidv4(), ...formData, createdAt: new Date().toISOString() };
       await dataService.create(id, 'transportRoutes', newRoute as any);
-      await loadData();
       setShowForm(false);
       setFormData({ name: '', description: '', fee: 0 });
       addToast('Route added successfully', 'success');
@@ -97,8 +78,6 @@ export default function Transport() {
           });
         }
         
-        setRoutes(prev => prev.filter(r => r.id !== idRoute));
-        setAssignments(prev => prev.filter(a => a.routeId !== idRoute));
         if (selectedRoute === idRoute) setSelectedRoute('');
         addToast('Route moved to recycle bin', 'success');
       } catch (error) {
@@ -258,7 +237,6 @@ export default function Transport() {
         await dataService.create(id, 'transportRoutes', route as any);
         successCount++;
       }
-      await loadData();
       addToast(`Successfully imported ${successCount} routes`, 'success');
       closeImportModal();
     } catch (error) { addToast('Failed to import routes', 'error'); }

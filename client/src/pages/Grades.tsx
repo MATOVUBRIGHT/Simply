@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, Upload, X, ArrowRight, Check, Filter } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -8,6 +8,7 @@ import { ExamResult } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
+import { useTableData } from '../lib/store';
 
 interface StudentGrade extends ExamResult {
   studentName: string;
@@ -36,6 +37,7 @@ function getGrade(score: number): { grade: string; remark: string; points: numbe
 
 export default function Grades() {
   const { user, schoolId } = useAuth();
+  const sid = schoolId || user?.id || '';
   const navigate = useNavigate();
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -60,35 +62,11 @@ export default function Grades() {
   const [invoiceDescription, setInvoiceDescription] = useState('Examination Fee');
   const [invoiceTerm, setInvoiceTerm] = useState('1');
 
-  const [examResults, setExamResults] = useState<ExamResult[]>([]);
-  const [subjects, setSubjects] = useState<any[]>([]);
-  const [, setLoading] = useState(true);
+  const { data: examResults } = useTableData(sid, 'examResults');
+  const { data: subjects } = useTableData(sid, 'subjects');
 
   const activeStudents = useActiveStudents();
   const { students: allStudents } = useStudents();
-
-  useEffect(() => {
-    if (user?.id || schoolId) {
-      loadData();
-    }
-  }, [user?.id, schoolId]);
-
-  async function loadData() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const [results, subs] = await Promise.all([
-        dataService.getAll(id, 'examResults'),
-        dataService.getAll(id, 'subjects'),
-      ]);
-      setExamResults(results);
-      setSubjects(subs);
-    } catch (error) {
-      console.error('Failed to load grades:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   const grades = useMemo(() => {
     if (!examResults || !allStudents || !subjects) return [];
@@ -152,7 +130,6 @@ export default function Grades() {
         year: new Date().getFullYear().toString(),
         examType: 'Mid-Term',
       });
-      loadData();
     } catch (error) {
       addToast('Failed to add grade', 'error');
     }
@@ -164,7 +141,6 @@ export default function Grades() {
     if (!confirm('Delete this grade?')) return;
     try {
       await dataService.delete(id, 'examResults', idResult);
-      loadData();
       addToast('Grade deleted successfully', 'success');
     } catch (error) {
       addToast('Failed to delete grade', 'error');

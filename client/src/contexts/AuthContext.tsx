@@ -94,6 +94,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (syncBootstrapError) {
       console.warn('Data sync bootstrap failed:', syncBootstrapError);
     }
+
+    // Apply persisted settings immediately so currency/schoolName are available
+    try {
+      const localKey = `schofy_settings_${userData.schoolId}`;
+      const raw = localStorage.getItem(localKey);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj.currency) {
+          localStorage.setItem('schofy_currency', obj.currency);
+          window.dispatchEvent(new Event('currencyChanged'));
+        }
+        if (obj.schoolName) {
+          window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: obj }));
+        }
+      }
+    } catch { /* ignore */ }
   }
 
   async function restoreSessionWithGuard(stale: () => boolean) {
@@ -152,6 +168,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
         await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+        // Initialize with cached data even offline
+        await initializeSyncForUser(savedUser).catch(() => {});
       }
     }
 

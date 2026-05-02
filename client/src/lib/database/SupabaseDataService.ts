@@ -174,7 +174,7 @@ const NO_SCHOOL_FILTER = new Set(['schools', 'users']);
 function applyScope(query: any, table: string, sid: string): any {
   if (table === 'schools') return query.eq('id', sid);
   if (NO_SCHOOL_FILTER.has(table)) return query;
-  return query.or(`school_id.eq.${sid},school_id.is.null`);
+  return query.eq('school_id', sid);
 }
 
 function recycleBinType(t: string): string | null {
@@ -291,7 +291,9 @@ function notifyUI(table: string) {
   // Invalidate store so all useTableData hooks re-render immediately
   const sid = localStorage.getItem('schofy_current_school_id') || '';
   if (sid) {
-    import('../store').then(({ store }) => store.onRemoteChange(sid, table)).catch(() => {});
+    // Use lazy reference to avoid circular import — store registers itself here
+    const storeRef = (globalThis as any).__schofyStore;
+    if (storeRef) storeRef.onRemoteChange(sid, table);
   }
   try {
     const qc = getQueryClient();
@@ -315,7 +317,28 @@ class SupabaseDataService {
 
   async bootstrapSession(userId: string, schoolId: string) {
     localStorage.setItem('schofy_current_user_id', userId);
-    localStorage.setItem('schofy_current_school_id', schoolId || userId);
+    const sid = schoolId || userId;
+    localStorage.setItem('schofy_current_school_id', sid);
+
+    // Prefetch all critical tables in parallel on login
+    // This fills the cache so every page renders instantly from cache
+    if (isOnline() && this.ok) {
+      const CRITICAL_TABLES = [
+        'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
+        'announcements', 'attendance', 'settings', 'feeStructures',
+        'exams', 'examResults', 'transportRoutes', 'salaryPayments',
+        'bursaries', 'discounts', 'notifications',
+      ];
+      // Fire all fetches concurrently — don't await, let them fill cache in background
+      // But await the most critical ones first so Dashboard renders fast
+      const critical = ['students', 'staff', 'classes', 'settings', 'announcements'];
+      const rest = CRITICAL_TABLES.filter(t => !critical.includes(t));
+
+      // Fetch critical tables first (await), then rest in background
+      await Promise.allSettled(critical.map(t => this.getAll(sid, t)));
+      // Background fetch the rest
+      void Promise.allSettled(rest.map(t => this.getAll(sid, t)));
+    }
   }
 
   startRealtimeSync(_: string) {}
@@ -524,16 +547,33 @@ class SupabaseDataService {
   }
 
   async batchDelete(userId: string, tableName: string, ids: string[]): Promise<SyncResult> {
-    if (!this.ok) return { success: false, syncedRemotely: false, savedLocally: false, error: 'Supabase not configured.' };
+    if (!ids.length) return { success: true, syncedRemotely: true, savedLocally: true };
+    const sid = this.sid(userId);
+
+    // Optimistic cache delete
+    const existing = cacheGet(sid, tableName) || [];
+    cacheSet(sid, tableName, existing.filter(r => !ids.includes(r.id)));
+    notifyUI(tableName);
+
+    if (!isOnline() || !this.ok) {
+      // Queue each delete individually
+      for (const id of ids) {
+        enqueue({ op: 'delete', userId, tableName, recordId: id });
+      }
+      return { success: true, syncedRemotely: false, savedLocally: true };
+    }
+
     const rt = getSupabaseTable(tableName);
     try {
       const { error } = await this.db.from(rt).delete().in('id', ids);
-      if (error) return { success: false, syncedRemotely: false, savedLocally: false, error: error.message };
-      cacheDel(this.sid(userId), tableName);
-      notifyUI(tableName);
+      if (error) {
+        for (const id of ids) enqueue({ op: 'delete', userId, tableName, recordId: id });
+        return { success: true, syncedRemotely: false, savedLocally: true };
+      }
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
-      return { success: false, syncedRemotely: false, savedLocally: false, error: e.message };
+      for (const id of ids) enqueue({ op: 'delete', userId, tableName, recordId: id });
+      return { success: false, syncedRemotely: false, savedLocally: true, error: e.message };
     }
   }
 
@@ -581,40 +621,67 @@ class SupabaseDataService {
   async cleanupDuplicates(_: string) { return {}; }
   async clear(_u: string, _t: string) {}
 
-  // ── Offline queue flush ───────────────────────────────────────────────────
+  // ── Offline queue flush with exponential backoff ─────────────────────────
   async flushOfflineQueue(): Promise<void> {
     if (!isOnline() || !this.ok) return;
     const queue = loadQueue();
     if (queue.length === 0) return;
     console.log(`[offline] Flushing ${queue.length} queued operations`);
+
+    const MAX_RETRIES = 3;
+
     for (const item of queue) {
-      try {
-        if (item.op === 'create' && item.data) {
-          const rt = getSupabaseTable(item.tableName);
-          const payload = toRemote(item.data, rt);
-          await this.db.from(rt).upsert(payload, { onConflict: 'id' });
-        } else if (item.op === 'update' && item.recordId && item.data) {
-          const rt = getSupabaseTable(item.tableName);
-          const payload = toRemote(item.data, rt);
-          delete payload.id; delete payload.created_at;
-          await this.db.from(rt).update(payload).eq('id', item.recordId);
-        } else if (item.op === 'delete' && item.recordId) {
-          const rt = getSupabaseTable(item.tableName);
-          await this.db.from(rt).delete().eq('id', item.recordId);
-        } else if (item.op === 'saveSettings' && item.settings) {
-          const sid = this.sid(item.userId);
-          const now = new Date().toISOString();
-          for (const [key, value] of Object.entries(item.settings)) {
-            await this.db.from('settings').upsert({ school_id: sid, key, value, updated_at: now, created_at: now }, { onConflict: 'school_id,key' });
-          }
+      let lastError: any = null;
+      let succeeded = false;
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+          // Exponential backoff: 500ms, 1000ms, 2000ms
+          await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
         }
+        try {
+          if (item.op === 'create' && item.data) {
+            const rt = getSupabaseTable(item.tableName);
+            const payload = toRemote(item.data, rt);
+            const { error } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
+            if (error) throw error;
+          } else if (item.op === 'update' && item.recordId && item.data) {
+            const rt = getSupabaseTable(item.tableName);
+            const payload = toRemote(item.data, rt);
+            delete payload.id; delete payload.created_at;
+            const { error } = await this.db.from(rt).update(payload).eq('id', item.recordId);
+            if (error) throw error;
+          } else if (item.op === 'delete' && item.recordId) {
+            const rt = getSupabaseTable(item.tableName);
+            const { error } = await this.db.from(rt).delete().eq('id', item.recordId);
+            if (error) throw error;
+          } else if (item.op === 'saveSettings' && item.settings) {
+            const sid = this.sid(item.userId);
+            const now = new Date().toISOString();
+            for (const [key, value] of Object.entries(item.settings)) {
+              const { error } = await this.db.from('settings').upsert(
+                { school_id: sid, key, value, updated_at: now, created_at: now },
+                { onConflict: 'school_id,key' }
+              );
+              if (error) throw error;
+            }
+          }
+          succeeded = true;
+          break;
+        } catch (e: any) {
+          lastError = e;
+          console.warn(`[offline] Attempt ${attempt + 1} failed for ${item.op} on ${item.tableName}:`, e.message);
+        }
+      }
+
+      if (succeeded) {
         dequeue(item.id);
-        // Bust cache so next read gets fresh data
         cacheDel(this.sid(item.userId), item.tableName);
-      } catch (e: any) {
-        console.error(`[offline] Failed to flush ${item.op} on ${item.tableName}:`, e.message);
+      } else {
+        console.error(`[offline] Permanently failed ${item.op} on ${item.tableName} after ${MAX_RETRIES} attempts:`, lastError?.message);
       }
     }
+
     // Notify UI after flush
     const tables = [...new Set(queue.map(i => i.tableName))];
     tables.forEach(t => notifyUI(t));

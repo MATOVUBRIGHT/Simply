@@ -11,6 +11,16 @@ import { dataService } from '../lib/database/SupabaseDataService';
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
   { code: 'UGX', symbol: 'USh', name: 'Ugandan Shilling' },
+  { code: 'KES', symbol: 'KSh', name: 'Kenyan Shilling' },
+  { code: 'TZS', symbol: 'TSh', name: 'Tanzanian Shilling' },
+  { code: 'GHS', symbol: 'GH₵', name: 'Ghanaian Cedi' },
+  { code: 'NGN', symbol: '₦', name: 'Nigerian Naira' },
+  { code: 'ZAR', symbol: 'R', name: 'South African Rand' },
+  { code: 'GBP', symbol: '£', name: 'British Pound' },
+  { code: 'EUR', symbol: '€', name: 'Euro' },
+  { code: 'RWF', symbol: 'RF', name: 'Rwandan Franc' },
+  { code: 'ETB', symbol: 'Br', name: 'Ethiopian Birr' },
+  { code: 'ZMW', symbol: 'ZK', name: 'Zambian Kwacha' },
 ];
 
 export default function Settings() {
@@ -59,14 +69,32 @@ export default function Settings() {
     const id = schoolId || user?.id;
     if (!id) return;
     try {
+      // Load from localStorage first (instant, works offline)
+      const localKey = `schofy_settings_${id}`;
+      const localRaw = localStorage.getItem(localKey);
+      if (localRaw) {
+        try {
+          const localObj = JSON.parse(localRaw);
+          setSettings(prev => ({ ...prev, ...localObj }));
+          if (localObj.currency) {
+            localStorage.setItem('schofy_currency', localObj.currency);
+            window.dispatchEvent(new Event('currencyChanged'));
+          }
+        } catch { /* ignore */ }
+      }
+
+      // Then fetch from Supabase to get latest
       const stored = await dataService.getAll(id, 'settings');
-      const settingsObj: Record<string, any> = {};
-      stored.forEach(s => { settingsObj[s.key] = s.value; });
-      setSettings(prev => ({ ...prev, ...settingsObj }));
-      // Apply currency immediately so all pages use the right symbol
-      if (settingsObj.currency && settingsObj.currency !== localStorage.getItem('schofy_currency')) {
-        localStorage.setItem('schofy_currency', settingsObj.currency);
-        window.dispatchEvent(new Event('currencyChanged'));
+      if (stored.length > 0) {
+        const settingsObj: Record<string, any> = {};
+        stored.forEach(s => { settingsObj[s.key] = s.value; });
+        setSettings(prev => ({ ...prev, ...settingsObj }));
+        // Persist to localStorage for next load
+        localStorage.setItem(localKey, JSON.stringify(settingsObj));
+        if (settingsObj.currency && settingsObj.currency !== localStorage.getItem('schofy_currency')) {
+          localStorage.setItem('schofy_currency', settingsObj.currency);
+          window.dispatchEvent(new Event('currencyChanged'));
+        }
       }
     } catch (error) {
       console.error(error);
@@ -84,6 +112,8 @@ export default function Settings() {
     setIsSaving(true);
     try {
       localStorage.setItem('schofy_currency', newSettings.currency || 'USD');
+      // Persist to localStorage immediately for next login
+      localStorage.setItem(`schofy_settings_${sid}`, JSON.stringify(newSettings));
       window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: newSettings }));
       await dataService.saveSettings(sid, newSettings);
       window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));

@@ -5,7 +5,6 @@ import { useCurrency } from '../hooks/useCurrency';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
-import { dataService } from '../lib/database/SupabaseDataService';
 import { 
   ResponsiveContainer,
   Cell,
