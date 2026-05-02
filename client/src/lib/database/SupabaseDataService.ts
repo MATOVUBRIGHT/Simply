@@ -1,5 +1,13 @@
 /**
- * SupabaseDataService — queries Supabase directly, no IndexedDB, no sync queue.
+ * SupabaseDataService — offline-first with conflict-safe sync.
+ *
+ * Strategy:
+ * - ALL reads return local cache immediately (works 100% offline)
+ * - Writes update local cache optimistically + queue for Supabase sync
+ * - When online: flush queue to Supabase, then pull remote changes and MERGE
+ *   (remote record only replaces local if remote updatedAt > local updatedAt
+ *    AND the record has no pending local queue entry)
+ * - On bootstrap: seed cache from Supabase without overriding pending local changes
  */
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { generateUUID } from '../../utils/uuid';
@@ -326,24 +334,84 @@ class SupabaseDataService {
     const sid = schoolId || userId;
     localStorage.setItem('schofy_current_school_id', sid);
 
-    // Prefetch all critical tables in parallel on login
-    // This fills the cache so every page renders instantly from cache
-    if (isOnline() && this.ok) {
-      const CRITICAL_TABLES = [
-        'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
-        'announcements', 'attendance', 'settings', 'feeStructures',
-        'exams', 'examResults', 'transportRoutes', 'salaryPayments',
-        'bursaries', 'discounts', 'notifications',
-      ];
-      // Fire all fetches concurrently — don't await, let them fill cache in background
-      // But await the most critical ones first so Dashboard renders fast
-      const critical = ['students', 'staff', 'classes', 'settings', 'announcements'];
-      const rest = CRITICAL_TABLES.filter(t => !critical.includes(t));
+    const ALL_TABLES = [
+      'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
+      'announcements', 'attendance', 'settings', 'feeStructures',
+      'exams', 'examResults', 'transportRoutes', 'salaryPayments',
+      'bursaries', 'discounts', 'notifications',
+    ];
 
-      // Fetch critical tables first (await), then rest in background
-      await Promise.allSettled(critical.map(t => this.getAll(sid, t)));
-      // Background fetch the rest
-      void Promise.allSettled(rest.map(t => this.getAll(sid, t)));
+    if (!isOnline() || !this.ok) {
+      // Offline — just use whatever is in localStorage cache already
+      console.log('[bootstrap] Offline — using cached data');
+      return;
+    }
+
+    // Online — seed/merge from Supabase without overriding pending local changes
+    // Critical tables first (await) so Dashboard renders fast
+    const critical = ['students', 'staff', 'classes', 'settings', 'announcements'];
+    const rest = ALL_TABLES.filter(t => !critical.includes(t));
+
+    await Promise.allSettled(critical.map(t => this._seedFromSupabase(sid, t)));
+    void Promise.allSettled(rest.map(t => this._seedFromSupabase(sid, t)));
+  }
+
+  /**
+   * Fetch a table from Supabase and merge into local cache.
+   * Used on bootstrap — seeds data for first-time use, doesn't override pending local changes.
+   */
+  private async _seedFromSupabase(sid: string, tableName: string): Promise<void> {
+    if (!isOnline() || !this.ok) return;
+    const rt = getSupabaseTable(tableName);
+    try {
+      let q = this.db.from(rt).select('*');
+      q = applyScope(q, rt, sid);
+      const { data, error } = await q;
+      if (error || !data) return;
+
+      const remoteRecords = data.map(mapToLocal);
+      const local = cacheGet(sid, tableName) || [];
+
+      if (local.length === 0) {
+        // No local data — just use remote directly
+        cacheSet(sid, tableName, remoteRecords);
+        notifyUI(tableName);
+        return;
+      }
+
+      // Has local data — merge carefully
+      const pendingIds = new Set(
+        loadQueue()
+          .filter(q => q.tableName === tableName)
+          .map(q => q.recordId || q.data?.id)
+          .filter(Boolean)
+      );
+
+      const localMap = new Map(local.map(r => [r.id, r]));
+      let changed = false;
+
+      for (const remote of remoteRecords) {
+        if (pendingIds.has(remote.id)) continue; // pending local change — don't overwrite
+        const localRecord = localMap.get(remote.id);
+        if (!localRecord) {
+          localMap.set(remote.id, remote);
+          changed = true;
+        } else {
+          const remoteTs = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
+          const localTs = new Date(localRecord.updatedAt || localRecord.createdAt || 0).getTime();
+          if (remoteTs > localTs) {
+            localMap.set(remote.id, remote);
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) {
+        cacheSet(sid, tableName, Array.from(localMap.values()));
+        notifyUI(tableName);
+      }
+    } catch (e: any) {
+      console.warn(`[seed] ${rt}:`, e.message);
     }
   }
 
@@ -351,16 +419,27 @@ class SupabaseDataService {
   restartRealtimeSync(_: string) {}
   stopRealtimeSync() {}
 
+  /** Public: merge a single table from Supabase into local cache (conflict-safe) */
+  async syncTable(sid: string, tableName: string): Promise<void> {
+    return this._seedFromSupabase(sid, tableName);
+  }
+
   // ── reads ─────────────────────────────────────────────────────────────────
 
   async getAll(userId: string, tableName: string): Promise<any[]> {
     const sid = this.sid(userId);
 
-    // Return cached data immediately (works offline too)
+    // Always return cached data immediately — works offline, instant UI
     const cached = cacheGet(sid, tableName);
-    if (cached) return cached;
+    if (cached) {
+      // If online, trigger a background merge from Supabase (non-blocking)
+      if (isOnline() && this.ok) {
+        void this._backgroundMerge(sid, tableName);
+      }
+      return cached;
+    }
 
-    // Offline with no cache — return empty
+    // No cache at all — if offline return empty, if online fetch and cache
     if (!isOnline() || !this.ok) return [];
 
     // Deduplicate concurrent requests for the same table
@@ -388,6 +467,88 @@ class SupabaseDataService {
 
     inflight.set(key, req);
     return req;
+  }
+
+  /**
+   * Fetch from Supabase and merge into local cache without overriding pending local changes.
+   * Remote record wins only if:
+   *   - remote updatedAt > local updatedAt  (remote is newer)
+   *   - AND the record has no pending queue entry (not modified locally while offline)
+   */
+  private _mergeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  private _backgroundMerge(sid: string, tableName: string): void {
+    const key = cacheKey(sid, tableName);
+    // Debounce — don't hammer Supabase on every getAll call
+    const existing = this._mergeTimers.get(key);
+    if (existing) return;
+
+    // Only merge if cache is older than 30s (avoid redundant fetches)
+    const entry = memCache.get(key);
+    if (entry && Date.now() - entry.ts < 30_000) return;
+
+    this._mergeTimers.set(key, setTimeout(async () => {
+      this._mergeTimers.delete(key);
+      if (!isOnline() || !this.ok) return;
+      const rt = getSupabaseTable(tableName);
+      try {
+        let q = this.db.from(rt).select('*');
+        q = applyScope(q, rt, sid);
+        const { data, error } = await q;
+        if (error || !data) return;
+
+        const remoteRecords = data.map(mapToLocal);
+        const local = cacheGet(sid, tableName) || [];
+
+        // Build set of IDs with pending local queue entries — don't overwrite these
+        const pendingIds = new Set(
+          loadQueue()
+            .filter(q => q.tableName === tableName && q.userId === sid)
+            .map(q => q.recordId || q.data?.id)
+            .filter(Boolean)
+        );
+
+        // Merge: for each remote record, update local only if remote is newer and not pending
+        const localMap = new Map(local.map(r => [r.id, r]));
+        let changed = false;
+
+        for (const remote of remoteRecords) {
+          if (pendingIds.has(remote.id)) continue; // local has pending changes — skip
+          const localRecord = localMap.get(remote.id);
+          if (!localRecord) {
+            // New record from remote — add it
+            localMap.set(remote.id, remote);
+            changed = true;
+          } else {
+            // Compare updatedAt — remote wins only if newer
+            const remoteTs = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
+            const localTs = new Date(localRecord.updatedAt || localRecord.createdAt || 0).getTime();
+            if (remoteTs > localTs) {
+              localMap.set(remote.id, remote);
+              changed = true;
+            }
+          }
+        }
+
+        // Also remove local records that were deleted remotely (not in remote AND not pending)
+        const remoteIds = new Set(remoteRecords.map(r => r.id));
+        for (const [id, localRecord] of localMap) {
+          if (!remoteIds.has(id) && !pendingIds.has(id)) {
+            // Record deleted remotely — remove from local cache
+            localMap.delete(id);
+            changed = true;
+          }
+        }
+
+        if (changed) {
+          const merged = Array.from(localMap.values());
+          cacheSet(sid, tableName, merged);
+          notifyUI(tableName);
+        }
+      } catch (e: any) {
+        console.warn(`[merge] ${rt}:`, e.message);
+      }
+    }, 100));
   }
 
   async get(userId: string, tableName: string, id: string): Promise<any | null> {
@@ -477,7 +638,7 @@ class SupabaseDataService {
         enqueue({ op: 'create', userId, tableName, data: record });
         return { success: true, syncedRemotely: false, savedLocally: true, record };
       }
-      cacheDel(sid, tableName); // bust so next read gets fresh data
+      // Don't bust cache — optimistic data is already correct, background merge will reconcile
       return { success: true, syncedRemotely: true, savedLocally: true, record };
     } catch (e: any) {
       enqueue({ op: 'create', userId, tableName, data: record });
@@ -682,7 +843,8 @@ class SupabaseDataService {
 
       if (succeeded) {
         dequeue(item.id);
-        cacheDel(this.sid(item.userId), item.tableName);
+        // After successful sync, merge fresh data from Supabase
+        void this._seedFromSupabase(this.sid(item.userId), item.tableName);
       } else {
         console.error(`[offline] Permanently failed ${item.op} on ${item.tableName} after ${MAX_RETRIES} attempts:`, lastError?.message);
       }

@@ -49,7 +49,11 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
       for (const table of REALTIME_TABLES) {
         ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
           const sid = localStorage.getItem('schofy_current_school_id') || '';
-          if (sid) store.onRemoteChange(sid, localName(table));
+          if (!sid) return;
+          const local = localName(table);
+          // Trigger a background merge — pulls remote changes and merges without overriding pending local
+          void dataService.syncTable(sid, local);
+          store.onRemoteChange(sid, local);
         }) as any;
       }
       ch.subscribe((status: string) => {
@@ -65,10 +69,16 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
     function onOnline() {
       setIsConnected(false);
       connect();
-      // Flush any offline queue
-      void dataService.flushOfflineQueue();
-      // Refresh all stale data
-      refreshStale();
+      // First flush pending local changes to Supabase
+      void dataService.flushOfflineQueue().then(() => {
+        // Then pull fresh data from Supabase and merge
+        const sid = localStorage.getItem('schofy_current_school_id') || '';
+        if (sid) {
+          void Promise.allSettled(
+            REALTIME_TABLES.map(t => dataService.syncTable(sid, localName(t)))
+          );
+        }
+      });
     }
 
     window.addEventListener('online', onOnline);
