@@ -64,26 +64,30 @@ export default function Grades() {
 
   const { data: examResults } = useTableData(sid, 'examResults');
   const { data: subjects } = useTableData(sid, 'subjects');
+  const { data: examsData } = useTableData(sid, 'exams');
+  const { data: allClassesData } = useTableData(sid, 'classes');
 
   const activeStudents = useActiveStudents();
   const { students: allStudents } = useStudents();
 
+  // All active students across all classes
+  const students = activeStudents;
+
   const grades = useMemo(() => {
-    if (!examResults || !allStudents || !subjects) return [];
-    
-    return examResults.map(g => {
+    return examResults.map((g: any) => {
       const student = allStudents.find(s => s.id === g.studentId);
-      const subject = subjects.find(s => s.id === g.subjectId);
+      const subject = subjects.find((s: any) => s.id === g.subjectId);
+      const exam = examsData.find((e: any) => e.id === g.examId) as any;
       return {
         ...g,
         studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
-        subjectName: subject ? subject.name : 'Unknown',
-        term: '1',
-        year: new Date().getFullYear().toString(),
-        examType: 'Mid-Term',
+        subjectName: subject ? (subject as any).name : (g.subjectName || 'Unknown'),
+        term: exam?.term || g.term || '1',
+        year: exam?.year || g.year || new Date().getFullYear().toString(),
+        examType: g.examType || 'Exam',
       } as StudentGrade;
     });
-  }, [examResults, allStudents, subjects]);
+  }, [examResults, allStudents, subjects, examsData]);
 
   const gradeExpectedFields = [
     { key: 'studentId', label: 'Student ID', required: true },
@@ -92,47 +96,121 @@ export default function Grades() {
     { key: 'maxScore', label: 'Max Score', required: true },
   ];
 
-  const [formData, setFormData] = useState({
+  // Bulk entry form state
+  const [bulkForm, setBulkForm] = useState({
+    classId: '',
     studentId: '',
-    subjectId: '',
-    score: '',
-    maxScore: '100',
+    examType: 'Mid-Term',
     term: '1',
     year: new Date().getFullYear().toString(),
-    examType: 'Mid-Term',
+    maxScore: '100',
   });
+  // scores keyed by subjectId
+  const [bulkScores, setBulkScores] = useState<Record<string, string>>({});
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
-  const students = activeStudents.filter(s => s.classId?.startsWith('ss-'));
+  // Students for selected class
+  const studentsForBulkClass = useMemo(() => {
+    if (!bulkForm.classId) return [];
+    return [...activeStudents]
+      .filter(s => s.classId === bulkForm.classId)
+      .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
+  }, [bulkForm.classId, activeStudents]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  // Subjects for selected class
+  const subjectsForBulkClass = useMemo(() => {
+    if (!bulkForm.classId) return [];
+    return (subjects as any[]).filter(s => s.classId === bulkForm.classId);
+  }, [bulkForm.classId, subjects]);
+
+  // Pre-fill existing scores when student changes
+  function handleBulkStudentChange(studentId: string) {
+    setBulkForm(p => ({ ...p, studentId }));
+    if (!studentId) { setBulkScores({}); return; }
+    // Find existing results for this student/exam/term/year
+    const existingExam = (examsData as any[]).find(ex =>
+      ex.examType === bulkForm.examType &&
+      String(ex.term) === bulkForm.term &&
+      String(ex.year) === bulkForm.year
+    );
+    if (!existingExam) { setBulkScores({}); return; }
+    const existing: Record<string, string> = {};
+    (examResults as any[])
+      .filter(r => r.studentId === studentId && r.examId === existingExam.id)
+      .forEach(r => { if (r.subjectId) existing[r.subjectId] = String(r.score); });
+    setBulkScores(existing);
+  }
+
+  async function handleBulkSubmit(e: React.FormEvent) {
     e.preventDefault();
     const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const newGrade: ExamResult = {
-        id: uuidv4(),
-        examId: uuidv4(),
-        studentId: formData.studentId,
-        subjectId: formData.subjectId,
-        score: parseFloat(formData.score),
-        maxScore: parseFloat(formData.maxScore),
-        createdAt: new Date().toISOString(),
-      };
-      await dataService.create(id, 'examResults', newGrade as any);
-      addToast('Grade added successfully', 'success');
-      setShowForm(false);
-      setFormData({
-        studentId: '',
-        subjectId: '',
-        score: '',
-        maxScore: '100',
-        term: '1',
-        year: new Date().getFullYear().toString(),
-        examType: 'Mid-Term',
-      });
-    } catch (error) {
-      addToast('Failed to add grade', 'error');
+    if (!id || !bulkForm.studentId || !bulkForm.classId) {
+      addToast('Select a class and student', 'error'); return;
     }
+    const entries = Object.entries(bulkScores).filter(([, v]) => v.trim() !== '');
+    if (entries.length === 0) { addToast('Enter at least one score', 'error'); return; }
+    setBulkSubmitting(true);
+    try {
+      const now = new Date().toISOString();
+      // Find or create exam
+      let existingExam = (examsData as any[]).find(ex =>
+        ex.examType === bulkForm.examType &&
+        String(ex.term) === bulkForm.term &&
+        String(ex.year) === bulkForm.year
+      ) as any;
+      let examId = existingExam?.id;
+      if (!examId) {
+        const newExam = {
+          id: uuidv4(),
+          name: `${bulkForm.examType} - Term ${bulkForm.term} ${bulkForm.year}`,
+          term: bulkForm.term,
+          year: parseInt(bulkForm.year),
+          examType: bulkForm.examType,
+          createdAt: now,
+        };
+        const res = await dataService.create(id, 'exams', newExam as any);
+        examId = res.record?.id || newExam.id;
+      }
+      const student = allStudents.find(s => s.id === bulkForm.studentId);
+      const maxScore = parseFloat(bulkForm.maxScore) || 100;
+      let saved = 0;
+      for (const [subjectId, scoreStr] of entries) {
+        const score = parseFloat(scoreStr);
+        if (isNaN(score)) continue;
+        const sub = (subjects as any[]).find(s => s.id === subjectId);
+        const pct = Math.round((score / maxScore) * 100);
+        const gradeInfo = getGrade(pct);
+        // Check if result already exists for this student/exam/subject
+        const existing = (examResults as any[]).find(r =>
+          r.studentId === bulkForm.studentId && r.examId === examId && r.subjectId === subjectId
+        );
+        if (existing) {
+          await dataService.update(id, 'examResults', existing.id, {
+            ...existing, score, maxScore, grade: gradeInfo.grade, remarks: gradeInfo.remark, updatedAt: now,
+          } as any);
+        } else {
+          await dataService.create(id, 'examResults', {
+            id: uuidv4(), examId,
+            studentId: bulkForm.studentId,
+            subjectId,
+            subjectName: sub?.name,
+            studentName: student ? `${student.firstName} ${student.lastName}` : undefined,
+            classId: bulkForm.classId,
+            score, maxScore,
+            grade: gradeInfo.grade,
+            remarks: gradeInfo.remark,
+            examType: bulkForm.examType,
+            createdAt: now,
+          } as any);
+        }
+        saved++;
+      }
+      addToast(`Saved ${saved} subject score${saved !== 1 ? 's' : ''} for ${student?.firstName}`, 'success');
+      setBulkScores({});
+      setBulkForm(p => ({ ...p, studentId: '' }));
+      setShowForm(false);
+    } catch { addToast('Failed to save grades', 'error'); }
+    finally { setBulkSubmitting(false); }
   }
 
   async function handleDelete(idResult: string) {
@@ -360,10 +438,27 @@ export default function Grades() {
     } catch (error) { addToast('Failed to import grades', 'error'); }
   }
 
+  // Sort students by class level (lowest first)
+  const sortedStudents = useMemo(() => {
+    return [...students].sort((a, b) => {
+      const ca = allClassesData.find((c: any) => c.id === a.classId) as any;
+      const cb = allClassesData.find((c: any) => c.id === b.classId) as any;
+      return (ca?.level ?? 999) - (cb?.level ?? 999);
+    });
+  }, [students, allClassesData]);
+
+  // Subjects filtered by selected student's class
+  const subjectsForSelectedStudent = useMemo(() => {
+    if (!formData.studentId) return subjects as any[];
+    const student = allStudents.find(s => s.id === formData.studentId);
+    if (!student?.classId) return subjects as any[];
+    return (subjects as any[]).filter(s => s.classId === student.classId);
+  }, [formData.studentId, subjects, allStudents]);
+
   const filteredGrades = grades.filter(g => {
     if (filterTerm !== 'all' && g.term !== filterTerm) return false;
     if (filterClass !== 'all') {
-      const student = students.find(s => s.id === g.studentId);
+      const student = allStudents.find(s => s.id === g.studentId);
       if (student?.classId !== filterClass) return false;
     }
     if (searchTerm) {
@@ -545,50 +640,30 @@ export default function Grades() {
                 >
                   <Filter size={16} />
                   <span className="hidden sm:inline">
-                    {filterClass === 'all' ? 'All Classes' : filterClass.toUpperCase().replace('-', ' ')}
+                    {filterClass === 'all' ? 'All Classes' : (allClassesData.find((c: any) => c.id === filterClass) as any)?.name || filterClass}
                   </span>
                   <span className="sm:hidden">Class</span>
                   <ChevronDown size={14} className={`transition-transform duration-300 ${showClassFilter ? 'rotate-180' : ''}`} />
                 </button>
                 {showClassFilter && (
-                  <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden animate-dropdown-in">
+                  <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden animate-dropdown-in max-h-64 overflow-y-auto">
                     <div className="py-1">
                       <button
                         onClick={() => { setFilterClass('all'); setShowClassFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterClass === 'all' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${filterClass === 'all' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
                       >
                         All Classes
                         {filterClass === 'all' && <Check size={14} className="ml-auto" />}
                       </button>
-                      <button
-                        onClick={() => { setFilterClass('ss-1'); setShowClassFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterClass === 'ss-1' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        SS 1
-                        {filterClass === 'ss-1' && <Check size={14} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterClass('ss-2'); setShowClassFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterClass === 'ss-2' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        SS 2
-                        {filterClass === 'ss-2' && <Check size={14} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterClass('ss-3'); setShowClassFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterClass === 'ss-3' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        SS 3
-                        {filterClass === 'ss-3' && <Check size={14} className="ml-auto" />}
-                      </button>
+                      {[...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)).map((cls: any) => (
+                        <button key={cls.id}
+                          onClick={() => { setFilterClass(cls.id); setShowClassFilter(false); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${filterClass === cls.id ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+                        >
+                          {cls.name}
+                          {filterClass === cls.id && <Check size={14} className="ml-auto" />}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -657,9 +732,11 @@ export default function Grades() {
             <thead>
               <tr>
                 <th>Student</th>
+                <th>Class</th>
                 <th>Subject</th>
+                <th>Code</th>
                 <th>Score</th>
-                <th>Percentage</th>
+                <th>%</th>
                 <th>Grade</th>
                 <th>Term</th>
                 <th>Exam</th>
@@ -669,13 +746,13 @@ export default function Grades() {
             <tbody>
               {!examResults || !subjects || !allStudents ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12">
+                  <td colSpan={10} className="text-center py-12">
                     <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-200 border-t-primary-500 mx-auto"></div>
                   </td>
                 </tr>
               ) : filteredGrades.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12">
+                  <td colSpan={10} className="text-center py-12">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                         <Award size={32} className="text-violet-400" />
@@ -704,7 +781,9 @@ export default function Grades() {
                 return (
                   <tr key={grade.id}>
                     <td className="font-medium">{grade.studentName}</td>
+                    <td className="text-xs text-slate-500">{(allClassesData.find((c: any) => c.id === (allStudents.find(s => s.id === grade.studentId) as any)?.classId) as any)?.name || '—'}</td>
                     <td>{grade.subjectName}</td>
+                    <td className="font-mono text-xs text-slate-500">{(subjects as any[]).find(s => s.id === grade.subjectId)?.code || '—'}</td>
                     <td className="font-semibold">{grade.score}/{grade.maxScore}</td>
                     <td className="font-semibold">{percentage}%</td>
                     <td>
@@ -728,47 +807,51 @@ export default function Grades() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-lg w-full animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
-            <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-              <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                <Award size={24} className="text-violet-500" />
-                Add Grade
-              </h2>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <Award size={18} className="text-white" />
+                <h2 className="font-bold text-white">Add Grades — All Subjects</h2>
+              </div>
+              <button onClick={() => setShowForm(false)} className="p-1 hover:bg-white/20 rounded-lg text-white text-lg leading-none">✕</button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="form-label">Student</label>
-                <select value={formData.studentId} onChange={e => setFormData(prev => ({ ...prev, studentId: e.target.value }))} className="form-input" required>
-                  <option value="">Select Student</option>
-                  {students.map(s => (
-                    <option key={s.id} value={s.id}>{s.firstName} {s.lastName} ({s.admissionNo})</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="form-label">Subject</label>
-                <select value={formData.subjectId} onChange={e => setFormData(prev => ({ ...prev, subjectId: e.target.value }))} className="form-input" required>
-                  <option value="">Select Subject</option>
-                  {(subjects || []).map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+            <form onSubmit={handleBulkSubmit} className="flex flex-col overflow-hidden">
+              {/* Top controls */}
+              <div className="p-5 border-b border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:grid-cols-3 gap-3 shrink-0">
                 <div>
-                  <label className="form-label">Score</label>
-                  <input type="number" value={formData.score} onChange={e => setFormData(prev => ({ ...prev, score: e.target.value }))} className="form-input" required min="0" />
+                  <label className="form-label">Class *</label>
+                  <select value={bulkForm.classId}
+                    onChange={e => { setBulkForm(p => ({ ...p, classId: e.target.value, studentId: '' })); setBulkScores({}); }}
+                    className="form-input" required>
+                    <option value="">— Select Class —</option>
+                    {[...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)).map((c: any) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
-                  <label className="form-label">Max Score</label>
-                  <input type="number" value={formData.maxScore} onChange={e => setFormData(prev => ({ ...prev, maxScore: e.target.value }))} className="form-input" required min="1" />
+                  <label className="form-label">Student *</label>
+                  <select value={bulkForm.studentId} onChange={e => handleBulkStudentChange(e.target.value)}
+                    className="form-input" required disabled={!bulkForm.classId}>
+                    <option value="">— Select Student —</option>
+                    {studentsForBulkClass.map(s => (
+                      <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>
+                    ))}
+                  </select>
                 </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="form-label">Exam Type</label>
+                  <select value={bulkForm.examType} onChange={e => setBulkForm(p => ({ ...p, examType: e.target.value }))} className="form-input">
+                    <option value="Mid-Term">Mid-Term</option>
+                    <option value="End-Term">End-Term</option>
+                    <option value="CAT">CAT</option>
+                    <option value="Final">Final Exam</option>
+                  </select>
+                </div>
                 <div>
                   <label className="form-label">Term</label>
-                  <select value={formData.term} onChange={e => setFormData(prev => ({ ...prev, term: e.target.value }))} className="form-input">
+                  <select value={bulkForm.term} onChange={e => setBulkForm(p => ({ ...p, term: e.target.value }))} className="form-input">
                     <option value="1">Term 1</option>
                     <option value="2">Term 2</option>
                     <option value="3">Term 3</option>
@@ -776,37 +859,80 @@ export default function Grades() {
                 </div>
                 <div>
                   <label className="form-label">Year</label>
-                  <input type="number" value={formData.year} onChange={e => setFormData(prev => ({ ...prev, year: e.target.value }))} className="form-input" />
+                  <input type="number" value={bulkForm.year} onChange={e => setBulkForm(p => ({ ...p, year: e.target.value }))} className="form-input" />
                 </div>
                 <div>
-                  <label className="form-label">Exam Type</label>
-                  <select value={formData.examType} onChange={e => setFormData(prev => ({ ...prev, examType: e.target.value }))} className="form-input">
-                    <option value="Mid-Term">Mid-Term</option>
-                    <option value="End-Term">End-Term</option>
-                    <option value="CAT">CAT</option>
-                    <option value="Final">Final Exam</option>
-                  </select>
+                  <label className="form-label">Max Score</label>
+                  <input type="number" value={bulkForm.maxScore} onChange={e => setBulkForm(p => ({ ...p, maxScore: e.target.value }))} className="form-input" min="1" />
                 </div>
               </div>
-              {formData.score && formData.maxScore && (
-                <div className="p-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
-                  <p className="text-sm text-slate-500 mb-2">Preview</p>
-                  <div className="flex items-center gap-4">
-                    <span className="text-3xl font-bold text-slate-800 dark:text-white">
-                      {Math.round((parseFloat(formData.score) / parseFloat(formData.maxScore)) * 100)}%
-                    </span>
-                    <span className={`px-3 py-1 rounded-lg font-bold ${getGrade(Math.round((parseFloat(formData.score) / parseFloat(formData.maxScore)) * 100)).grade.startsWith('D') ? 'bg-emerald-100 text-emerald-700' : getGrade(Math.round((parseFloat(formData.score) / parseFloat(formData.maxScore)) * 100)).grade.startsWith('C') ? 'bg-blue-100 text-blue-700' : getGrade(Math.round((parseFloat(formData.score) / parseFloat(formData.maxScore)) * 100)).grade.startsWith('P') ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
-                      {getGrade(Math.round((parseFloat(formData.score) / parseFloat(formData.maxScore)) * 100)).grade}
-                    </span>
-                    <span className="text-sm text-slate-500">
-                      {getGrade(Math.round((parseFloat(formData.score) / parseFloat(formData.maxScore)) * 100)).remark}
-                    </span>
-                  </div>
+
+              {/* Subject score rows */}
+              <div className="flex-1 overflow-y-auto">
+                {!bulkForm.classId ? (
+                  <div className="p-8 text-center text-slate-400 text-sm">Select a class to see subjects</div>
+                ) : subjectsForBulkClass.length === 0 ? (
+                  <div className="p-8 text-center text-amber-600 text-sm">No subjects found for this class. Add subjects first.</div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-slate-50 dark:bg-slate-700/80 z-10">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300">Subject</th>
+                        <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 w-20">Code</th>
+                        <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 w-28">Score / {bulkForm.maxScore}</th>
+                        <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 w-20">Grade</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {subjectsForBulkClass.map((sub: any, i: number) => {
+                        const scoreStr = bulkScores[sub.id] ?? '';
+                        const score = parseFloat(scoreStr);
+                        const max = parseFloat(bulkForm.maxScore) || 100;
+                        const pct = !isNaN(score) && scoreStr !== '' ? Math.round((score / max) * 100) : null;
+                        const grade = pct !== null ? getGrade(pct) : null;
+                        const gradeClass = grade?.grade.startsWith('D') ? 'text-emerald-600 font-bold' :
+                          grade?.grade.startsWith('C') ? 'text-blue-600 font-semibold' :
+                          grade?.grade.startsWith('P') ? 'text-amber-600' :
+                          grade ? 'text-red-600 font-bold' : 'text-slate-400';
+                        return (
+                          <tr key={sub.id} className={i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                            <td className="px-4 py-2 font-medium text-slate-800 dark:text-white">{sub.name}</td>
+                            <td className="px-3 py-2 text-center font-mono text-xs text-slate-500">{sub.code || '—'}</td>
+                            <td className="px-3 py-2 text-center">
+                              <input
+                                type="number"
+                                value={scoreStr}
+                                onChange={e => setBulkScores(p => ({ ...p, [sub.id]: e.target.value }))}
+                                className="w-20 text-center form-input py-1 text-sm"
+                                min="0"
+                                max={bulkForm.maxScore}
+                                placeholder="—"
+                                disabled={!bulkForm.studentId}
+                              />
+                            </td>
+                            <td className={`px-3 py-2 text-center text-sm ${gradeClass}`}>
+                              {grade ? `${grade.grade}` : '—'}
+                              {pct !== null && <div className="text-[10px] text-slate-400 font-normal">{pct}%</div>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0 bg-slate-50 dark:bg-slate-800/50">
+                <p className="text-xs text-slate-500">
+                  {Object.values(bulkScores).filter(v => v.trim() !== '').length} of {subjectsForBulkClass.length} subjects filled
+                </p>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
+                  <button type="submit" disabled={bulkSubmitting || !bulkForm.studentId} className="btn btn-primary disabled:opacity-50">
+                    {bulkSubmitting ? 'Saving...' : 'Save Grades'}
+                  </button>
                 </div>
-              )}
-              <div className="flex justify-end gap-3 pt-4">
-                <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
-                <button type="submit" className="btn btn-primary">Add Grade</button>
               </div>
             </form>
           </div>
@@ -814,7 +940,7 @@ export default function Grades() {
       )}
 
       {showInvoiceModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) setShowInvoiceModal(false); }}>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowInvoiceModal(false); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
@@ -877,7 +1003,7 @@ export default function Grades() {
       )}
 
       {showImportModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
@@ -1010,7 +1136,6 @@ export default function Grades() {
                       </div>
                     )}
                   </div>
-
                   <div className="flex justify-between pt-2">
                     <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
                     <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
@@ -1021,10 +1146,11 @@ export default function Grades() {
               )}
             </div>
           </div>
-          </div>
-        )}
+        </div>
+      )}
     </div>
   );
 }
+
 
 

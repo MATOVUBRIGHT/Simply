@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -54,12 +54,16 @@ export default function Students() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
   const confirm = useConfirm();
-  // All students from store — always up to date, used for stats cards
-  const { data: allStudentsData } = useTableData(sid, 'students');
-  const allStudents = allStudentsData as Student[];
+
+  // All data from store — instant from cache, no separate fetch
+  const { data: allStudentsData, loading: studentsLoading } = useTableData(sid, 'students');
+  const { data: classesData } = useTableData(sid, 'classes');
   const { data: feesData } = useTableData(sid, 'fees');
   const { data: paymentsData } = useTableData(sid, 'payments');
   const { formatMoney } = useCurrency();
+
+  const allStudents = allStudentsData as Student[];
+  const classes = classesData as Class[];
 
   // Compute invoice status and balance per student
   function getStudentFinance(studentId: string) {
@@ -75,15 +79,13 @@ export default function Students() {
     return { status, balance, invoiced };
   }
 
-  const { loadPage, searchStudents } = useStudents();
-  const [students, setStudents] = useState<Student[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [classes, setClasses] = useState<Class[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { searchStudents } = useStudents();
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedClass, setSelectedClass] = useState('');
+  const [searchResults, setSearchResults] = useState<Student[] | null>(null); // null = not searching
+  const [isSearching, setIsSearching] = useState(false);
   const itemsPerPage = 10;
   const { addToast } = useToast();
   // ... rest of state stays same
@@ -109,7 +111,6 @@ export default function Students() {
   const navigate = useNavigate();
   const statusFilterRef = useRef<HTMLDivElement>(null);
   const classFilterRef = useRef<HTMLDivElement>(null);
-  const isReloadingRef = useRef(false);
 
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
@@ -122,59 +123,48 @@ export default function Students() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const loadClasses = useCallback(async () => {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const classesData = await dataService.getAll(id, 'classes');
-      setClasses(classesData);
-    } catch (error) {
-      console.error('Failed to load classes:', error);
-    }
-  }, [user?.id]);
-
-  const loadData = useCallback(async () => {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    setLoading(true);
-    try {
-      // Load classes first
-      await loadClasses();
-      
-      if (debouncedSearch) {
-        const results = await searchStudents(debouncedSearch);
-        // Apply class and view filters to search results
-        const filtered = results.filter(student => {
-          const matchesClass = !selectedClass || student.classId === selectedClass;
-          const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
-          return matchesClass && matchesView;
-        });
-        setStudents(filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
-        setTotalCount(filtered.length);
-      } else {
-        const filter = (student: Student) => {
-          const matchesClass = !selectedClass || student.classId === selectedClass;
-          const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
-          return matchesClass && matchesView;
-        };
-        const { items, total } = await loadPage(currentPage, itemsPerPage, filter);
-        setStudents(items);
-        setTotalCount(total);
-      }
-    } catch (error) {
-      console.error('Failed to load students:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id, schoolId, debouncedSearch, selectedClass, viewFilter, currentPage, loadPage, searchStudents, loadClasses]);
-
+  // Search via store (cache-based, instant)
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (!debouncedSearch) {
+      setSearchResults(null);
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    const q = debouncedSearch.toLowerCase();
+    const results = allStudents.filter(s =>
+      s.firstName?.toLowerCase().includes(q) ||
+      s.lastName?.toLowerCase().includes(q) ||
+      s.admissionNo?.toLowerCase().includes(q) ||
+      s.studentId?.toLowerCase().includes(q)
+    );
+    setSearchResults(results);
+    setIsSearching(false);
+  }, [debouncedSearch, allStudents]);
+
+  // Derive filtered students directly from store — no separate fetch
+  const filteredStudents = useMemo(() => {
+    const base = searchResults !== null ? searchResults : allStudents;
+    return base.filter(s => {
+      const matchesClass = !selectedClass || s.classId === selectedClass;
+      const matchesView =
+        viewFilter === 'all' ? s.status !== 'completed' :
+        viewFilter === 'active' ? s.status === 'active' :
+        viewFilter === 'deactivated' ? s.status === 'inactive' :
+        viewFilter === 'completed' ? s.status === 'completed' : true;
+      return matchesClass && matchesView;
+    });
+  }, [allStudents, searchResults, selectedClass, viewFilter]);
+
+  const totalCount = filteredStudents.length;
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
+  const students = filteredStudents.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const loading = studentsLoading && allStudents.length === 0;
+  const paginatedStudents = students;
 
   const availableClassIds = Array.from(new Set([
     ...classes.map((classItem) => classItem.id),
-    ...students.map((student) => student.classId).filter(Boolean),
+    ...allStudents.map((student) => student.classId).filter(Boolean),
   ]));
 
   const getCompletedStudents = () => {
@@ -230,58 +220,10 @@ export default function Students() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectMode]);
 
-  // Real-time updates for classes - with debounce to prevent infinite loops
+  // Classes update from store automatically — no manual reload needed
   useEffect(() => {
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    
-    const handleClassesUpdated = () => {
-      if (isReloadingRef.current) return;
-      console.log('🔄 Classes updated, reloading...');
-      isReloadingRef.current = true;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        loadClasses().finally(() => {
-          isReloadingRef.current = false;
-        });
-      }, 100);
-    };
-    const handleClassesDataChanged = () => {
-      if (isReloadingRef.current) return;
-      console.log('🔄 Classes data changed, reloading students...');
-      isReloadingRef.current = true;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(async () => {
-        await loadClasses();
-        await loadData();
-        isReloadingRef.current = false;
-      }, 100);
-    };
-    const handleDataRefresh = () => {
-      if (isReloadingRef.current) return;
-      console.log('🔄 General data refresh, reloading classes...');
-      isReloadingRef.current = true;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        loadClasses().finally(() => {
-          isReloadingRef.current = false;
-        });
-      }, 100);
-    };
-    
-    window.addEventListener('classesUpdated', handleClassesUpdated);
-    window.addEventListener('ClassesUpdated', handleClassesUpdated);
-    window.addEventListener('classesDataChanged', handleClassesDataChanged);
-    
-    return () => {
-      window.removeEventListener('classesUpdated', handleClassesUpdated);
-      window.removeEventListener('ClassesUpdated', handleClassesUpdated);
-      window.removeEventListener('classesDataChanged', handleClassesDataChanged);
-      if (debounceTimer) clearTimeout(debounceTimer);
-    };
-  }, [loadClasses, loadData]);
-
-  const totalPages = Math.ceil(totalCount / itemsPerPage);
-  const paginatedStudents = students;
+    return () => {}; // cleanup placeholder
+  }, []);
 
   async function cleanupOrphanedRecords() {
     const id = schoolId || user?.id;
@@ -386,8 +328,7 @@ export default function Students() {
     try {
       const result = await dataService.delete(authId, 'students', id);
       if (!result.success) throw new Error(result.error || 'Failed to delete');
-      setStudents(prev => prev.filter(s => s.id !== id));
-      setTotalCount(prev => prev - 1);
+      // Store updates automatically via notifyUI — no manual state update needed
       if (student) {
         addToRecycleBin(authId, {
           id: `student-${Date.now()}`,
@@ -1831,7 +1772,7 @@ export default function Students() {
       )}
 
       {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight } from 'lucide-react';
+import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,11 +28,21 @@ export default function Finance() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTerm, setFilterTerm] = useState('all');
   const [showTermFilter, setShowTermFilter] = useState(false);
+  // expanded rows: set of studentId
+  const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
+  const [expandedPayments, setExpandedPayments] = useState<Set<string>>(new Set());
 
   const students = useActiveStudents();
   const sid = schoolId || user?.id || '';
   const { data: fees } = useTableData(sid, 'fees');
   const { data: payments } = useTableData(sid, 'payments');
+
+  function toggleInvoice(id: string) {
+    setExpandedInvoices(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  function togglePayment(id: string) {
+    setExpandedPayments(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
 
   async function handleRecordPayment(feeId: string, studentId: string, _amount: number) {
     const id = schoolId || user?.id;
@@ -51,16 +61,10 @@ export default function Finance() {
     } catch { addToast('Failed to record payment', 'error'); }
   }
 
-  // -- Export helpers ----------------------------------------------------------
   function handleExportInvoicesCSV() {
     const data = fees.map(f => { const s = students.find(x => x.id === f.studentId); return { ...f, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A' }; });
     exportToCSV(data, 'invoices', [{ key: 'studentName' as any, label: 'Student' }, { key: 'description' as any, label: 'Description' }, { key: 'amount' as any, label: 'Amount' }, { key: 'term' as any, label: 'Term' }]);
     addToast('Exported CSV', 'success'); setShowExportMenu(false);
-  }
-  function handleExportInvoicesPDF() {
-    const data = fees.map(f => { const s = students.find(x => x.id === f.studentId); const paid = payments.filter(p => p.feeId === f.id).reduce((a, p) => a + p.amount, 0); return { ...f, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A', status: paid >= f.amount ? 'Paid' : paid > 0 ? 'Partial' : 'Pending' }; });
-    exportToPDF('Invoices Report', data, [{ key: 'studentName', label: 'Student' }, { key: 'description', label: 'Description' }, { key: 'amount', label: 'Amount' }, { key: 'status', label: 'Status' }], 'invoices');
-    addToast('Exported PDF', 'success'); setShowExportMenu(false);
   }
   function handleExportInvoicesExcel() {
     const data = fees.map(f => { const s = students.find(x => x.id === f.studentId); return { ...f, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A' }; });
@@ -68,22 +72,16 @@ export default function Finance() {
     addToast('Exported Excel', 'success'); setShowExportMenu(false);
   }
   function handleExportPaymentsCSV() {
-    const data = payments.map(p => { const s = students.find(x => x.id === p.studentId); return { ...p, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A' }; });
-    exportToCSV(data, 'payments', [{ key: 'studentName' as any, label: 'Student' }, { key: 'amount' as any, label: 'Amount' }, { key: 'method' as any, label: 'Method' }, { key: 'date' as any, label: 'Date' }]);
+    const data = payments.map(p => { const s = students.find(x => x.id === p.studentId); const fee = fees.find(f => f.id === p.feeId); return { ...p, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A', purpose: fee?.description || '' }; });
+    exportToCSV(data, 'payments', [{ key: 'studentName' as any, label: 'Student' }, { key: 'purpose' as any, label: 'Purpose' }, { key: 'amount' as any, label: 'Amount' }, { key: 'method' as any, label: 'Method' }, { key: 'date' as any, label: 'Date' }]);
     addToast('Exported CSV', 'success'); setShowExportMenu(false);
   }
-  function handleExportPaymentsPDF() {
-    const data = payments.map(p => { const s = students.find(x => x.id === p.studentId); return { ...p, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A', date: new Date(p.date).toLocaleDateString() }; });
-    exportToPDF('Payments Report', data, [{ key: 'studentName', label: 'Student' }, { key: 'amount', label: 'Amount' }, { key: 'method', label: 'Method' }, { key: 'date', label: 'Date' }], 'payments');
-    addToast('Exported PDF', 'success'); setShowExportMenu(false);
-  }
   function handleExportPaymentsExcel() {
-    const data = payments.map(p => { const s = students.find(x => x.id === p.studentId); return { ...p, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A' }; });
-    exportToExcel(data, 'payments', [{ key: 'studentName' as any, label: 'Student' }, { key: 'amount' as any, label: 'Amount' }, { key: 'method' as any, label: 'Method' }, { key: 'date' as any, label: 'Date' }]);
+    const data = payments.map(p => { const s = students.find(x => x.id === p.studentId); const fee = fees.find(f => f.id === p.feeId); return { ...p, studentName: s ? `${s.firstName} ${s.lastName}` : 'N/A', purpose: fee?.description || '' }; });
+    exportToExcel(data, 'payments', [{ key: 'studentName' as any, label: 'Student' }, { key: 'purpose' as any, label: 'Purpose' }, { key: 'amount' as any, label: 'Amount' }, { key: 'method' as any, label: 'Method' }, { key: 'date' as any, label: 'Date' }]);
     addToast('Exported Excel', 'success'); setShowExportMenu(false);
   }
 
-  // -- Import helpers ----------------------------------------------------------
   const paymentExpectedFields = [
     { key: 'studentName', label: 'Student Name', required: true },
     { key: 'amount', label: 'Amount', required: true },
@@ -160,27 +158,41 @@ export default function Finance() {
   const totalInvoiced = fees.reduce((s, f) => s + f.amount, 0);
   const totalPending = totalInvoiced - totalCollected;
 
-  const filteredFees = fees.filter(f => {
-    const s = students.find(x => x.id === f.studentId);
-    const q = searchTerm.toLowerCase();
-    return (!q || f.description.toLowerCase().includes(q) || (s ? `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) : false))
-      && (filterTerm === 'all' || f.term === filterTerm);
-  });
-
-  const filteredPayments = payments.filter(p => {
-    const s = students.find(x => x.id === p.studentId);
-    const q = searchTerm.toLowerCase();
-    return !q || (s ? `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) : false) || p.method.toLowerCase().includes(q);
-  });
-
   const studentFinanceSummary = students.map(student => {
     const sf = fees.filter(f => f.studentId === student.id);
     const inv = sf.reduce((a, f) => a + f.amount, 0);
     const paid = payments.filter(p => p.feeId ? sf.some(f => f.id === p.feeId) : p.studentId === student.id).reduce((a, p) => a + p.amount, 0);
     return { id: student.id, studentName: `${student.firstName} ${student.lastName}`, studentId: student.studentId, totalInvoiced: inv, totalPaid: paid, balance: inv - paid, invoiceCount: sf.length, isCleared: sf.length > 0 && inv - paid <= 0 };
-  }).filter(s => s.invoiceCount > 0 || filterTerm === 'all');
+  }).filter(s => filterTerm === 'all' ? s.invoiceCount > 0 : s.invoiceCount > 0);
 
   const filteredStudentFinance = studentFinanceSummary.filter(s => !searchTerm || s.studentName.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  // Group fees by student for Invoices tab
+  const invoicesByStudent = students.map(student => {
+    const sf = fees.filter(f => {
+      const q = searchTerm.toLowerCase();
+      const matchSearch = !q || `${student.firstName} ${student.lastName}`.toLowerCase().includes(q) || f.description.toLowerCase().includes(q);
+      const matchTerm = filterTerm === 'all' || f.term === filterTerm;
+      return f.studentId === student.id && matchSearch && matchTerm;
+    });
+    if (sf.length === 0) return null;
+    const totalInv = sf.reduce((a, f) => a + f.amount, 0);
+    const totalPaid = sf.reduce((a, f) => a + payments.filter(p => p.feeId === f.id).reduce((x, p) => x + p.amount, 0), 0);
+    return { student, fees: sf, totalInv, totalPaid, balance: totalInv - totalPaid };
+  }).filter(Boolean) as { student: any; fees: Fee[]; totalInv: number; totalPaid: number; balance: number }[];
+
+  // Group payments by student for Payments tab
+  const paymentsByStudent = students.map(student => {
+    const sp = payments.filter(p => {
+      const q = searchTerm.toLowerCase();
+      const matchSearch = !q || `${student.firstName} ${student.lastName}`.toLowerCase().includes(q) || p.method.toLowerCase().includes(q);
+      return p.studentId === student.id && matchSearch;
+    });
+    if (sp.length === 0) return null;
+    const total = sp.reduce((a, p) => a + p.amount, 0);
+    const sorted = [...sp].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return { student, payments: sorted, total };
+  }).filter(Boolean) as { student: any; payments: Payment[]; total: number }[];
 
   const tabs = [
     { id: 'students', label: 'Students', icon: Users },
@@ -197,40 +209,30 @@ export default function Finance() {
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Track fees, invoices, and payments</p>
         </div>
         <div className="flex items-center gap-2">
-          {activeTab === 'invoices' && (
+          {(activeTab === 'invoices' || activeTab === 'payments') && (
             <div className="relative" ref={exportMenuRef}>
               <button onClick={() => setShowExportMenu(!showExportMenu)} className="btn btn-secondary">
                 <Download size={16} /><span className="hidden sm:inline">Export</span>
                 <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
               </button>
               {showExportMenu && (
-                <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
-                  <button onClick={handleExportInvoicesPDF} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export PDF</button>
-                  <button onClick={handleExportInvoicesCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Download size={14} />Export CSV</button>
-                  <button onClick={handleExportInvoicesExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export Excel</button>
+                <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
+                  {activeTab === 'invoices' && <>
+                    <button onClick={handleExportInvoicesCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Download size={14} />Export CSV</button>
+                    <button onClick={handleExportInvoicesExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export Excel</button>
+                  </>}
+                  {activeTab === 'payments' && <>
+                    <button onClick={handleExportPaymentsCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Download size={14} />Export CSV</button>
+                    <button onClick={handleExportPaymentsExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export Excel</button>
+                  </>}
                 </div>
               )}
             </div>
           )}
           {activeTab === 'payments' && (
-            <>
-              <div className="relative" ref={exportMenuRef}>
-                <button onClick={() => setShowExportMenu(!showExportMenu)} className="btn btn-secondary">
-                  <Download size={16} /><span className="hidden sm:inline">Export</span>
-                  <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
-                </button>
-                {showExportMenu && (
-                  <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
-                    <button onClick={handleExportPaymentsPDF} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export PDF</button>
-                    <button onClick={handleExportPaymentsCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Download size={14} />Export CSV</button>
-                    <button onClick={handleExportPaymentsExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export Excel</button>
-                  </div>
-                )}
-              </div>
-              <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary">
-                <Upload size={16} /><span className="hidden sm:inline">Import</span>
-              </button>
-            </>
+            <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary">
+              <Upload size={16} /><span className="hidden sm:inline">Import</span>
+            </button>
           )}
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".csv" className="hidden" />
         </div>
@@ -277,25 +279,27 @@ export default function Finance() {
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <div className="relative" ref={termFilterRef}>
-                <button onClick={() => setShowTermFilter(!showTermFilter)}
-                  className={`btn btn-secondary flex items-center gap-2 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}>
-                  <Filter size={16} />
-                  <span className="hidden sm:inline">{filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}</span>
-                  <ChevronDown size={14} className={`transition-transform ${showTermFilter ? 'rotate-180' : ''}`} />
-                </button>
-                {showTermFilter && (
-                  <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden">
-                    {['all', '1', '2', '3'].map(t => (
-                      <button key={t} onClick={() => { setFilterTerm(t); setShowTermFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${filterTerm === t ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
-                        {t === 'all' ? 'All Terms' : `Term ${t}`}
-                        {filterTerm === t && <Check size={14} className="ml-auto" />}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {activeTab === 'invoices' && (
+                <div className="relative" ref={termFilterRef}>
+                  <button onClick={() => setShowTermFilter(!showTermFilter)}
+                    className="btn btn-secondary flex items-center gap-2">
+                    <Filter size={16} />
+                    <span className="hidden sm:inline">{filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}</span>
+                    <ChevronDown size={14} className={`transition-transform ${showTermFilter ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showTermFilter && (
+                    <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden">
+                      {['all', '1', '2', '3'].map(t => (
+                        <button key={t} onClick={() => { setFilterTerm(t); setShowTermFilter(false); }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${filterTerm === t ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+                          {t === 'all' ? 'All Terms' : `Term ${t}`}
+                          {filterTerm === t && <Check size={14} className="ml-auto" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="relative">
                 <Search size={18} className="search-input-icon" />
                 <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search..." className="search-input w-48" />
@@ -304,88 +308,147 @@ export default function Finance() {
           </div>
         </div>
 
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                {activeTab === 'students' && <><th>Student</th><th>Admission No</th><th>Invoices</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></>}
-                {activeTab === 'invoices' && <><th>Student</th><th>Description</th><th>Amount</th><th>Term</th><th>Status</th><th>Actions</th></>}
-                {activeTab === 'payments' && <><th>Date</th><th>Student</th><th>Amount</th><th>Method</th></>}
-              </tr>
-            </thead>
-            <tbody>
-              {activeTab === 'students' && filteredStudentFinance.length === 0 && (
-                <tr><td colSpan={7} className="text-center py-12">
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><Users size={24} className="text-violet-400" /></div>
-                    <p className="text-slate-500 font-medium">No invoiced students</p>
-                    <p className="text-slate-400 text-sm">Generate invoices from the Invoices page</p>
-                  </div>
-                </td></tr>
-              )}
-              {activeTab === 'invoices' && filteredFees.length === 0 && (
-                <tr><td colSpan={6} className="text-center py-12">
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><FileText size={24} className="text-violet-400" /></div>
-                    <p className="text-slate-500 font-medium">No invoices yet</p>
-                    <p className="text-slate-400 text-sm">Go to the Invoices page to generate invoices</p>
-                  </div>
-                </td></tr>
-              )}
-              {activeTab === 'payments' && filteredPayments.length === 0 && (
-                <tr><td colSpan={4} className="text-center py-12">
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center"><Receipt size={24} className="text-green-400" /></div>
-                    <p className="text-slate-500 font-medium">No payments recorded</p>
-                  </div>
-                </td></tr>
-              )}
-              {activeTab === 'students' && filteredStudentFinance.map(s => (
-                <tr key={s.id}>
-                  <td className="font-medium">{s.studentName}</td>
-                  <td className="text-slate-500">{s.studentId}</td>
-                  <td><span className="badge badge-info">{s.invoiceCount}</span></td>
-                  <td className="font-semibold">{formatMoney(s.totalInvoiced)}</td>
-                  <td className="text-emerald-600 font-semibold">{formatMoney(s.totalPaid)}</td>
-                  <td className={s.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>{formatMoney(s.balance)}</td>
-                  <td>{s.isCleared ? <span className="badge badge-success">Cleared</span> : s.balance > 0 ? <span className="badge badge-danger">Balance: {formatMoney(s.balance)}</span> : <span className="badge badge-warning">No Invoice</span>}</td>
-                </tr>
-              ))}
-              {activeTab === 'invoices' && filteredFees.map(fee => {
-                const s = students.find(x => x.id === fee.studentId);
-                const paid = payments.filter(p => p.feeId === fee.id).reduce((a, p) => a + p.amount, 0);
-                const status = paid >= fee.amount ? 'Paid' : paid > 0 ? 'Partial' : 'Pending';
-                const badge: Record<string, string> = { Paid: 'badge-success', Partial: 'badge-warning', Pending: 'badge-danger' };
-                return (
-                  <tr key={fee.id}>
-                    <td className="font-medium">{s ? `${s.firstName} ${s.lastName}` : <span className="text-slate-400">N/A</span>}</td>
-                    <td>{fee.description}</td>
-                    <td className="font-semibold">{formatMoney(fee.amount)}</td>
-                    <td><span className="badge badge-info">Term {fee.term}</span></td>
-                    <td><span className={`badge ${badge[status]}`}>{status}</span></td>
-                    <td>{status !== 'Paid' && <button onClick={() => handleRecordPayment(fee.id, fee.studentId!, fee.amount - paid)} className="btn btn-secondary text-xs py-1.5"><CreditCard size={12} /> Record</button>}</td>
+        {/* Students Tab */}
+        {activeTab === 'students' && (
+          <div className="table-container">
+            <table>
+              <thead><tr><th>Student</th><th>ID Number</th><th>Invoices</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></tr></thead>
+              <tbody>
+                {filteredStudentFinance.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-12">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><Users size={24} className="text-violet-400" /></div>
+                      <p className="text-slate-500 font-medium">No invoiced students</p>
+                    </div>
+                  </td></tr>
+                ) : filteredStudentFinance.map(s => (
+                  <tr key={s.id}>
+                    <td className="font-medium">{s.studentName}</td>
+                    <td className="text-slate-500">{s.studentId}</td>
+                    <td><span className="badge badge-info">{s.invoiceCount}</span></td>
+                    <td className="font-semibold">{formatMoney(s.totalInvoiced)}</td>
+                    <td className="text-emerald-600 font-semibold">{formatMoney(s.totalPaid)}</td>
+                    <td className={s.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>{formatMoney(s.balance)}</td>
+                    <td>{s.isCleared ? <span className="badge badge-success">Cleared</span> : s.balance > 0 ? <span className="badge badge-danger">Balance: {formatMoney(s.balance)}</span> : <span className="badge badge-warning">No Invoice</span>}</td>
                   </tr>
-                );
-              })}
-              {activeTab === 'payments' && filteredPayments.map(p => {
-                const s = students.find(x => x.id === p.studentId);
-                return (
-                  <tr key={p.id}>
-                    <td className="text-slate-500">{new Date(p.date).toLocaleDateString()}</td>
-                    <td className="font-medium">{s ? `${s.firstName} ${s.lastName}` : 'N/A'}</td>
-                    <td className="font-bold text-green-600 dark:text-green-400">{formatMoney(p.amount)}</td>
-                    <td><span className="badge badge-info capitalize">{p.method.replace('_', ' ')}</span></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Invoices Tab — one row per student, expandable fee history */}
+        {activeTab === 'invoices' && (
+          <div className="table-container">
+            <table>
+              <thead><tr><th style={{width:'32px'}}></th><th>Student</th><th>Invoices</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></tr></thead>
+              <tbody>
+                {invoicesByStudent.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-12">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><FileText size={24} className="text-violet-400" /></div>
+                      <p className="text-slate-500 font-medium">No invoices yet</p>
+                    </div>
+                  </td></tr>
+                ) : invoicesByStudent.map(({ student, fees: sf, totalInv, totalPaid, balance }) => {
+                  const isExpanded = expandedInvoices.has(student.id);
+                  const status = balance <= 0 ? 'Paid' : totalPaid > 0 ? 'Partial' : 'Pending';
+                  const badge: Record<string, string> = { Paid: 'badge-success', Partial: 'badge-warning', Pending: 'badge-danger' };
+                  return (
+                    <>
+                      <tr key={student.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40" onClick={() => toggleInvoice(student.id)}>
+                        <td><ChevronRight size={16} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} /></td>
+                        <td className="font-medium">{student.firstName} {student.lastName}</td>
+                        <td><span className="badge badge-info">{sf.length}</span></td>
+                        <td className="font-semibold">{formatMoney(totalInv)}</td>
+                        <td className="text-emerald-600 font-semibold">{formatMoney(totalPaid)}</td>
+                        <td className={balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>{formatMoney(balance)}</td>
+                        <td><span className={`badge ${badge[status]}`}>{status}</span></td>
+                      </tr>
+                      {isExpanded && sf.map(fee => {
+                        const paid = payments.filter(p => p.feeId === fee.id).reduce((a, p) => a + p.amount, 0);
+                        const feeStatus = paid >= fee.amount ? 'Paid' : paid > 0 ? 'Partial' : 'Pending';
+                        return (
+                          <tr key={fee.id} className="bg-slate-50/70 dark:bg-slate-800/30">
+                            <td></td>
+                            <td colSpan={2} className="pl-8 text-sm text-slate-600 dark:text-slate-300">
+                              <span className="text-slate-400 mr-2">↳</span>{fee.description}
+                              {fee.term && <span className="ml-2 badge badge-info text-[10px]">Term {fee.term}</span>}
+                            </td>
+                            <td className="text-sm">{formatMoney(fee.amount)}</td>
+                            <td className="text-sm text-emerald-600">{formatMoney(paid)}</td>
+                            <td className={`text-sm ${fee.amount - paid > 0 ? 'text-red-500' : 'text-emerald-600'}`}>{formatMoney(fee.amount - paid)}</td>
+                            <td>
+                              <div className="flex items-center gap-2">
+                                <span className={`badge ${badge[feeStatus]} text-[10px]`}>{feeStatus}</span>
+                                {feeStatus !== 'Paid' && <button onClick={e => { e.stopPropagation(); handleRecordPayment(fee.id, fee.studentId!, fee.amount - paid); }} className="btn btn-secondary text-xs py-1 px-2"><CreditCard size={11} /> Pay</button>}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Payments Tab — one row per student, expandable payment history */}
+        {activeTab === 'payments' && (
+          <div className="table-container">
+            <table>
+              <thead><tr><th style={{width:'32px'}}></th><th>Student</th><th>Payments</th><th>Total Paid</th><th>Last Payment</th></tr></thead>
+              <tbody>
+                {paymentsByStudent.length === 0 ? (
+                  <tr><td colSpan={5} className="text-center py-12">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center"><Receipt size={24} className="text-green-400" /></div>
+                      <p className="text-slate-500 font-medium">No payments recorded</p>
+                    </div>
+                  </td></tr>
+                ) : paymentsByStudent.map(({ student, payments: sp, total }) => {
+                  const isExpanded = expandedPayments.has(student.id);
+                  const last = sp[0];
+                  return (
+                    <>
+                      <tr key={student.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40" onClick={() => togglePayment(student.id)}>
+                        <td><ChevronRight size={16} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} /></td>
+                        <td className="font-medium">{student.firstName} {student.lastName}</td>
+                        <td><span className="badge badge-info">{sp.length}</span></td>
+                        <td className="font-bold text-emerald-600 dark:text-emerald-400">{formatMoney(total)}</td>
+                        <td className="text-slate-500 text-sm">{last ? new Date(last.date).toLocaleDateString() : '—'}</td>
+                      </tr>
+                      {isExpanded && sp.map(p => {
+                        const fee = fees.find(f => f.id === p.feeId);
+                        const dt = new Date(p.date);
+                        return (
+                          <tr key={p.id} className="bg-slate-50/70 dark:bg-slate-800/30">
+                            <td></td>
+                            <td colSpan={2} className="pl-8 text-sm text-slate-600 dark:text-slate-300">
+                              <span className="text-slate-400 mr-2">↳</span>
+                              <span className="font-medium">{dt.toLocaleDateString()}</span>
+                              <span className="text-slate-400 ml-1">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                              {fee && <span className="ml-2 text-slate-500">— {fee.description}</span>}
+                            </td>
+                            <td className="text-sm font-semibold text-emerald-600">{formatMoney(p.amount)}</td>
+                            <td><span className="badge badge-info capitalize text-[10px]">{p.method?.replace('_', ' ')}</span></td>
+                          </tr>
+                        );
+                      })}
+                    </>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Import Modal */}
+      {/* Import Modal — fixed inset-0 full-page blur */}
       {showImportModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={e => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2"><Upload size={18} className="text-white" /><h2 className="font-bold text-white">Import Payments</h2></div>
@@ -434,23 +497,24 @@ export default function Finance() {
                   <div className="flex items-center gap-1.5 text-xs text-slate-500">
                     <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 1</span><ArrowRight size={12} />
                     <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span><ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3 Preview</span>
                   </div>
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300"><strong>{importPreview.length}</strong> payments ready</p>
+                    <p className="text-sm text-emerald-700 dark:text-emerald-300"><strong>{importPreview.length}</strong> payments ready to import</p>
                   </div>
-                  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                  <div className="max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
-                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0"><tr><th className="px-2 py-1.5 text-left">#</th><th className="px-2 py-1.5 text-left">Name</th><th className="px-2 py-1.5 text-left">Amount</th></tr></thead>
+                      <thead><tr className="bg-slate-50 dark:bg-slate-700/50"><th className="px-3 py-2 text-left">Student</th><th className="px-3 py-2 text-left">Amount</th><th className="px-3 py-2 text-left">Date</th></tr></thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 5).map((r, i) => <tr key={i}><td className="px-2 py-1.5 text-slate-500">{i + 1}</td><td className="px-2 py-1.5">{r.studentName || '-'}</td><td className="px-2 py-1.5">{r.amount || '-'}</td></tr>)}
+                        {importPreview.slice(0, 10).map((r, i) => (
+                          <tr key={i}><td className="px-3 py-2">{r.studentName}</td><td className="px-3 py-2">{r.amount}</td><td className="px-3 py-2">{r.date}</td></tr>
+                        ))}
                       </tbody>
                     </table>
-                    {importPreview.length > 5 && <div className="p-2 text-center text-xs text-slate-500">... and {importPreview.length - 5} more</div>}
                   </div>
-                  <div className="flex justify-between pt-2">
+                  <div className="flex justify-end gap-2 pt-2">
                     <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1"><CheckIcon size={14} /> Import {importPreview.length}</button>
+                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1"><Check size={14} />Import</button>
                   </div>
                 </div>
               )}
@@ -461,4 +525,3 @@ export default function Finance() {
     </div>
   );
 }
-

@@ -75,7 +75,8 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
         const sid = localStorage.getItem('schofy_current_school_id') || '';
         if (sid) {
           void Promise.allSettled(
-            REALTIME_TABLES.map(t => dataService.syncTable(sid, localName(t)))
+            // Exclude settings — they have their own save path and must not be overwritten
+            REALTIME_TABLES.filter(t => t !== 'settings').map(t => dataService.syncTable(sid, localName(t)))
           );
         }
       });

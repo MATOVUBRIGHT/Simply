@@ -488,95 +488,103 @@ export default function Classes() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="card overflow-hidden">
         {loading ? (
-          <div className="col-span-full card p-12 text-center">
+          <div className="p-12 text-center">
             <div className="w-12 h-12 border-4 border-primary-200 border-t-primary-500 rounded-full animate-spin mx-auto"></div>
             <p className="text-slate-500 mt-4">Loading classes...</p>
           </div>
         ) : classes.length === 0 ? (
-          <div className="col-span-full card p-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-700">
+          <div className="p-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl">
             <div className="w-20 h-20 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto">
               <GraduationCap size={40} className="text-emerald-400" />
             </div>
             <p className="text-slate-500 font-medium mt-4">No classes yet</p>
             <p className="text-slate-400 text-sm mt-1">Add your first class to get started</p>
-            <button 
-              onClick={() => { 
-                setShowForm(true); 
-                setEditingClass(null); 
-                setFormData({ name: '', level: 1, stream: '', capacity: 40 }); 
-              }} 
+            <button
+              onClick={() => { setShowForm(true); setEditingClass(null); setFormData({ name: '', level: 1, stream: '', capacity: 40 }); }}
               className="btn btn-primary mt-4"
             >
               <Plus size={16} /> Add Class
             </button>
           </div>
-        ) : classes.map((c, index) => {
-          const colors = getClassColor(index);
-          const isSelected = selectedClasses.has(c.id);
-          const enrolled = classEnrollmentCounts[c.id] || 0;
-          return (
-            <div 
-              key={c.id} 
-              id={`class-card-${c.id}`}
-              className={`card ${colors.card} cursor-pointer transition-all ${isSelected ? 'ring-2 ring-indigo-500 dark:ring-indigo-400' : ''}`}
-              onClick={() => handleRowClick(c.id)}
-              onDoubleClick={() => { document.getElementById(`class-card-${c.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); handleEdit(c); }}
-            >
-              <div className="p-5">
-                <div className="flex justify-between items-start gap-3">
-                  <div className="flex items-start gap-3">
-                    {selectMode && (
-                      <div className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors mt-1 ${
-                        isSelected 
-                          ? 'bg-primary-600 border-primary-600' 
-                          : 'border-slate-300 dark:border-slate-600'
-                      }`}>
-                        {isSelected && <Check size={12} className="text-white" />}
-                      </div>
-                    )}
-                    {!selectMode && (
-                      <span className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs font-medium text-slate-400 mt-1">
-                        {index + 1}
-                      </span>
-                    )}
-                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${colors.gradient} flex items-center justify-center shadow-lg`}>
-                      <GraduationCap size={24} className="text-white" />
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-700">
+            {classes.map((c, index) => {
+              const isSelected = selectedClasses.has(c.id);
+              const enrolled = classEnrollmentCounts[c.id] || 0;
+              const pct = c.capacity > 0 ? Math.round((enrolled / c.capacity) * 100) : 0;
+              const full = enrolled >= c.capacity;
+              return (
+                <div
+                  key={c.id}
+                  id={`class-card-${c.id}`}
+                  className={`flex items-center gap-4 px-4 py-3 cursor-pointer transition-colors ${isSelected ? 'bg-primary-50 dark:bg-primary-900/10 hover:bg-primary-50 dark:hover:bg-primary-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
+                  onClick={() => handleRowClick(c.id)}
+                >
+                  {/* Select / index */}
+                  {selectMode ? (
+                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary-600 border-primary-600' : 'border-slate-300 dark:border-slate-600'}`}>
+                      {isSelected && <Check size={11} className="text-white" />}
                     </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-slate-800 dark:text-white">{c.name}</h3>
-                      <p className="text-sm text-slate-500 mt-1">
-                        Level {c.level} {c.stream && <span className="badge badge-info ml-1">Stream {c.stream}</span>}
-                      </p>
+                  ) : (
+                    <span className="w-6 text-xs text-slate-400 text-center shrink-0">{index + 1}</span>
+                  )}
+
+                  {/* Icon */}
+                  <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                    <GraduationCap size={18} className="text-slate-500 dark:text-slate-400" />
+                  </div>
+
+                  {/* Name + level */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-slate-800 dark:text-white">{c.name}</span>
+                      {c.stream && <span className="badge badge-info text-xs">Stream {c.stream}</span>}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">Level {c.level}</p>
+                  </div>
+
+                  {/* Enrollment bar */}
+                  <div className="hidden sm:flex flex-col items-end gap-1 w-32 shrink-0">
+                    <span className="text-xs text-slate-500">{enrolled}/{c.capacity} students</span>
+                    <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${full ? 'bg-red-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.min(100, pct)}%` }}
+                      />
                     </div>
                   </div>
+
+                  {/* Slots */}
+                  <span className={`hidden md:block text-xs font-medium w-20 text-right shrink-0 ${full ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                    {full ? 'Full' : `${c.capacity - enrolled} left`}
+                  </span>
+
+                  {/* Actions */}
                   {!selectMode && (
-                    <div className="flex gap-1">
-                      <button onClick={(e) => { e.stopPropagation(); document.getElementById(`class-card-${c.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => handleEdit(c), 300); }} className="p-2 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 rounded-lg transition-colors">
-                        <Edit size={16} />
+                    <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleEdit(c)}
+                        className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 rounded-lg transition-colors"
+                        title="Edit"
+                      >
+                        <Edit size={15} />
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors">
-                        <Trash2 size={16} />
+                      <button
+                        onClick={() => handleDelete(c.id)}
+                        className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 size={15} />
                       </button>
                     </div>
                   )}
                 </div>
-                <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700/50">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-slate-500">
-                      <Users size={14} className="inline mr-1" />
-                      {enrolled}/{c.capacity} students
-                    </span>
-                    <span className={`text-xs font-medium ${enrolled >= c.capacity ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                      {Math.max(0, c.capacity - enrolled)} slots left
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {selectMode && selectedClasses.size > 0 && (
@@ -608,7 +616,7 @@ export default function Classes() {
       )}
 
       {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">

@@ -57,6 +57,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
+  // Hard cap: never show spinner for more than 2 seconds
+  useEffect(() => {
+    const t = setTimeout(() => setLoading(false), 2000);
+    return () => clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     let active = true;
     const stale = () => !active;
@@ -90,7 +96,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      await dataService.bootstrapSession(userData.id, userData.schoolId);
+      // Don't await — bootstrap runs in background, store is seeded synchronously from cache
+      void dataService.bootstrapSession(userData.id, userData.schoolId);
     } catch (syncBootstrapError) {
       console.warn('Data sync bootstrap failed:', syncBootstrapError);
     }
@@ -120,56 +127,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (savedUser && !stale()) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
+        // Still initialize sync so cached data loads into store
+        await initializeSyncForUser(savedUser).catch(() => {});
       }
       if (!stale()) setLoading(false);
       return;
     }
 
-    if (savedUser && online) {
-      try {
-        const { data, error } = await usersApi.getById(savedUser.id);
-
-        if (stale()) return;
-
-        if (error) {
-          console.error('Session verify failed:', error);
-          setUser(savedUser);
-          setSchoolId(savedUser.schoolId);
-          await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
-        } else if (!data) {
-          clearSession();
-          setUser(null);
-          setSchoolId(null);
-        } else {
-          const userData: LocalUser = {
-            id: data.id,
-            schoolId: data.school_id || data.id,
-            email: data.email,
-            firstName: data.first_name,
-            lastName: data.last_name,
-            isActive: data.is_active,
-            createdAt: data.created_at,
-          };
-          setUser(userData);
-          setSchoolId(userData.schoolId);
-          saveSession(userData);
-
-          await userDBManager.openDatabase(userData.schoolId);
-          await initializeSyncForUser(userData);
-        }
-      } catch (err) {
-        if (stale()) return;
-        console.error('Failed to verify session with cloud:', err);
-        setUser(savedUser);
-        setSchoolId(savedUser.schoolId);
-      }
-    } else if (savedUser && !online) {
+    if (savedUser) {
+      // Restore session immediately from localStorage — don't wait for network
       if (!stale()) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
-        await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
-        // Initialize with cached data even offline
-        await initializeSyncForUser(savedUser).catch(() => {});
+      }
+      await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+      // Initialize sync (loads cache into store, flushes offline queue if online)
+      await initializeSyncForUser(savedUser).catch(() => {});
+
+      // Verify session with server in background (non-blocking)
+      if (online) {
+        usersApi.getById(savedUser.id).then(({ data, error }) => {
+          if (stale()) return;
+          if (!data && !error) {
+            // Account deleted — log out
+            clearSession();
+            setUser(null);
+            setSchoolId(null);
+          } else if (data) {
+            // Update session with latest server data
+            const userData: LocalUser = {
+              id: data.id,
+              schoolId: data.school_id || data.id,
+              email: data.email,
+              firstName: data.first_name,
+              lastName: data.last_name,
+              isActive: data.is_active,
+              createdAt: data.created_at,
+            };
+            saveSession(userData);
+            if (!stale()) {
+              setUser(userData);
+              setSchoolId(userData.schoolId);
+            }
+          }
+        }).catch(() => { /* network error — keep using cached session */ });
       }
     }
 

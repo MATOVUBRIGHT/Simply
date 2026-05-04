@@ -77,21 +77,43 @@ export default function StudentProfile() {
   const overallStatus: 'paid' | 'partial' | 'pending' | 'none' =
     feeRows.length === 0 ? 'none' : totalBalance <= 0 ? 'paid' : totalPaid > 0 ? 'partial' : 'pending';
 
-  // ── Exam results ────────────────────────────────────────────────────────────
+  // ── Exam results — grouped by term so same-term exams show as one report ──
   const studentResults = useMemo(() =>
     examResultsData.filter((r: any) => r.studentId === id),
     [examResultsData, id]);
 
   const examsWithResults = useMemo(() => {
-    const map = new Map<string, any>();
+    // Group by term+year — combine all exams in the same term into one report entry
+    const termMap = new Map<string, { term: string; year: string; exams: any[]; results: any[] }>();
+
     studentResults.forEach((r: any) => {
-      if (!map.has(r.examId)) {
-        const exam = examsData.find((e: any) => e.id === r.examId);
-        if (exam) map.set(r.examId, { exam, results: [] });
+      const exam = examsData.find((e: any) => e.id === r.examId) as any;
+      if (!exam) return;
+      const key = `${exam.term}:${exam.year}`;
+      if (!termMap.has(key)) {
+        termMap.set(key, { term: exam.term, year: exam.year, exams: [], results: [] });
       }
-      map.get(r.examId)?.results.push(r);
+      const entry = termMap.get(key)!;
+      if (!entry.exams.find((e: any) => e.id === exam.id)) entry.exams.push(exam);
+      entry.results.push(r);
     });
-    return Array.from(map.values());
+
+    return Array.from(termMap.values())
+      .sort((a, b) => {
+        if (String(b.year) !== String(a.year)) return String(b.year).localeCompare(String(a.year));
+        return String(b.term).localeCompare(String(a.term));
+      })
+      .map(entry => ({
+        // Use the first exam as the "primary" exam for the report card link
+        exam: entry.exams[0],
+        exams: entry.exams,
+        results: entry.results,
+        term: entry.term,
+        year: entry.year,
+        label: entry.exams.length === 1
+          ? entry.exams[0].name
+          : `Term ${entry.term} ${entry.year} (${entry.exams.length} exams)`,
+      }));
   }, [studentResults, examsData]);
 
   // ── Attendance ──────────────────────────────────────────────────────────────
@@ -430,16 +452,25 @@ export default function StudentProfile() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {examsWithResults.map(({ exam, results }) => {
-                    const avg = results.length > 0
-                      ? Math.round(results.reduce((s: number, r: any) => s + (r.score || 0), 0) / results.length) : 0;
+                  {examsWithResults.map(({ exam, exams: termExams, results, label, term, year }) => {
+                    const uniqueSubjects = new Set(results.map((r: any) => r.subjectId || r.subjectName)).size;
+                    const scored = results.filter((r: any) => r.score !== null && r.score !== undefined);
+                    const avg = scored.length > 0
+                      ? Math.round(scored.reduce((s: number, r: any) => s + (Number(r.score) || 0), 0) / scored.length) : 0;
                     return (
-                      <div key={exam.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                      <div key={`${term}:${year}`} className="flex items-center justify-between p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                         <div>
-                          <p className="font-semibold text-slate-800 dark:text-white">{exam.name}</p>
-                          <p className="text-xs text-slate-500 mt-0.5">Term {exam.term} · {results.length} subject{results.length !== 1 ? 's' : ''} · Avg: {avg}%</p>
+                          <p className="font-semibold text-slate-800 dark:text-white">{label}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Term {term} · {year} · {uniqueSubjects} subject{uniqueSubjects !== 1 ? 's' : ''} · Avg: {avg}%
+                          </p>
+                          {termExams.length > 1 && (
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              {termExams.map((e: any) => e.name).join(' + ')}
+                            </p>
+                          )}
                         </div>
-                        <Link to={`/report-card/${student.id}?exam=${exam.id}`} className="btn btn-primary text-sm flex items-center gap-2">
+                        <Link to={`/report-card/${student.id}?exam=${exam.id}`} className="btn btn-primary text-sm flex items-center gap-2 shrink-0">
                           <Printer size={15} /> View Report
                         </Link>
                       </div>

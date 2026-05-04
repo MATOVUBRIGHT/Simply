@@ -1,9 +1,12 @@
 /**
- * Global reactive data store — fast, minimal Supabase requests.
- * - One fetch per table, shared across all components
- * - 5-minute cache: no re-fetch unless data is stale or explicitly invalidated
- * - Writes invalidate only the affected table
- * - Realtime events invalidate only the changed table
+ * Global reactive data store — instant reads from cache, background sync from Supabase.
+ *
+ * Flow:
+ * 1. On module load: store is empty
+ * 2. bootstrapSession: synchronously pushes all memCache data into store (instant)
+ * 3. useTableData subscribe: if store has data → return immediately (no network)
+ *                            if store empty → fetch from Supabase
+ * 4. Background: _seedFromSupabase merges remote data without overriding pending writes
  */
 import { useSyncExternalStore, useCallback } from 'react';
 import { dataService } from './database/SupabaseDataService';
@@ -17,8 +20,7 @@ interface TableState {
   lastFetch: number;
 }
 
-const STALE_MS = 5 * 60_000; // 5 minutes — only re-fetch when truly stale
-const ACTIVE_STALE_MS = 2_000; // 2 seconds for tables with recent writes
+const STALE_MS = 30 * 60_000; // 30 minutes — realtime + background merge keeps data fresh
 
 class DataStore {
   private state = new Map<string, TableState>();
@@ -37,7 +39,8 @@ class DataStore {
 
   private set(sid: string, table: string, patch: Partial<TableState>) {
     const k = this.key(sid, table);
-    this.state.set(k, { ...this.get(sid, table), ...patch });
+    const next = { ...this.get(sid, table), ...patch };
+    this.state.set(k, next);
     this.listeners.get(k)?.forEach(l => l());
   }
 
@@ -57,19 +60,26 @@ class DataStore {
     const k = this.key(sid, table);
     const s = this.get(sid, table);
 
-    // Skip if fresh
-    if (!force && s.lastFetch > 0 && Date.now() - s.lastFetch < STALE_MS) return;
+    // Has fresh data — skip entirely (most common path after bootstrap)
+    if (!force && s.data.length > 0 && s.lastFetch > 0 && Date.now() - s.lastFetch < STALE_MS) return;
 
-    // Deduplicate concurrent fetches for the same table
+    // Deduplicate concurrent fetches
     const existing = this.fetching.get(k);
     if (existing) return existing;
 
     const req = (async () => {
-      this.set(sid, table, { loading: true, error: null });
+      // NEVER show loading if we already have any data — background refresh is silent
+      if (s.data.length === 0) {
+        this.set(sid, table, { loading: true, error: null });
+      }
       try {
         const data = await dataService.getAll(sid, table);
-        // Mark as fresh — if data came from cache, it's already fresh
-        this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
+        // Only update if we got real data back
+        if (data.length > 0 || s.data.length === 0) {
+          this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
+        } else {
+          this.set(sid, table, { loading: false, lastFetch: Date.now() });
+        }
       } catch (e: any) {
         this.set(sid, table, { loading: false, error: e.message });
       } finally {
@@ -81,44 +91,33 @@ class DataStore {
     return req;
   }
 
-  /** Called after a write — push cached data immediately, then refresh from network in background */
   invalidate(sid: string, table: string) {
-    // Mark stale so next fetch will go to network
     this.set(sid, table, { lastFetch: 0 });
-    // Background refresh — don't await, UI already has optimistic data
     void this.fetch(sid, table, true);
   }
 
-  /** Push fresh data directly into the store — instant UI update, no network */
   push(sid: string, table: string, data: any[]) {
     this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
   }
 
-  /** Apply optimistic update from cache — instant, no network */
-  applyFromCache(sid: string, table: string) {
-    const storeRef = (globalThis as any).__schofyStore;
-    if (!storeRef) return;
-    import('./database/SupabaseDataService').then(({ dataService }) => {
-      void dataService.getAll(sid, table).then(data => {
-        this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
-      });
-    }).catch(() => {});
+  /** Push with a specific timestamp — used by bootstrap to preserve cache age */
+  pushWithTs(sid: string, table: string, data: any[], ts: number) {
+    this.set(sid, table, { data, loading: false, lastFetch: ts });
   }
 
-  /** Seed store from cache without triggering a network fetch */
   seed(sid: string, table: string, data: any[]) {
     const s = this.get(sid, table);
-    if (s.data.length === 0 && s.lastFetch === 0 && data.length > 0) {
-      this.set(sid, table, { data, loading: false, lastFetch: Date.now() - 4 * 60_000 }); // mark as slightly stale so it refreshes soon
+    if (s.data.length === 0 && data.length > 0) {
+      // Seed with slightly stale timestamp so background fetch runs soon
+      this.set(sid, table, { data, loading: false, lastFetch: Date.now() - (STALE_MS - 30_000) });
     }
   }
 
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  /** Called by realtime — debounced to prevent duplicate fetches from rapid events */
   onRemoteChange(sid: string, table: string) {
     const age = Date.now() - this.get(sid, table).lastFetch;
-    if (age < 2000) return; // skip echo from own writes
+    if (age < 2000) return;
 
     const k = this.key(sid, table);
     const existing = this.debounceTimers.get(k);
@@ -128,19 +127,13 @@ class DataStore {
       this.debounceTimers.delete(k);
       this.set(sid, table, { lastFetch: 0 });
       void this.fetch(sid, table, true);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent(`${table}Updated`));
-        window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table } }));
-      }
     }, 300));
   }
 
-  /** Refresh only tables that are actually stale (used by polling) */
   refreshStale(sid: string, tables: string[]) {
     if (!sid) return;
     for (const table of tables) {
       const s = this.get(sid, table);
-      // Only re-fetch if data is older than 30s AND there are active subscribers
       const k = this.key(sid, table);
       const hasSubscribers = (this.listeners.get(k)?.size ?? 0) > 0;
       if (hasSubscribers && Date.now() - s.lastFetch > 30_000) {
@@ -151,8 +144,6 @@ class DataStore {
 }
 
 export const store = new DataStore();
-
-// Register globally so SupabaseDataService can call onRemoteChange without circular import
 (globalThis as any).__schofyStore = store;
 
 // ── React hook ────────────────────────────────────────────────────────────────
@@ -163,15 +154,12 @@ export function useTableData(sid: string | null | undefined, table: string) {
   const subscribe = useCallback(
     (listener: Listener) => {
       if (!safeSid) return () => {};
-      // Seed from localStorage cache immediately (synchronous, no network)
       const snap = store.getSnapshot(safeSid, table);
-      if (snap.data.length === 0 && snap.lastFetch === 0) {
-        void dataService.getAll(safeSid, table).then(data => {
-          store.seed(safeSid, table, data);
-        });
+      // Only fetch if store is completely empty — if we have data, it's good enough
+      // Background merge (via _backgroundMerge) handles keeping data fresh
+      if (snap.data.length === 0) {
+        void store.fetch(safeSid, table);
       }
-      // Trigger background fetch (won't re-fetch if data is fresh)
-      void store.fetch(safeSid, table);
       return store.subscribe(safeSid, table, listener);
     },
     [safeSid, table]

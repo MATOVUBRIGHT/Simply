@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash } from 'lucide-react';
+import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash, Pencil } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class, Subject } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -112,6 +112,13 @@ export default function Subjects() {
   const confirm = useConfirm();
   const { addToast } = useToast();
 
+  // Edit state
+  const [editGroup, setEditGroup] = useState<{ name: string; code: string; ids: string[]; classIds: string[] } | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', code: '' });
+  const [editClassIds, setEditClassIds] = useState<string[]>([]);
+  const [editLevel, setEditLevel] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
   const subjectExpectedFields = [
     { key: 'name', label: 'Subject Name', required: true },
     { key: 'code', label: 'Code', required: true },
@@ -177,7 +184,7 @@ export default function Subjects() {
       ? words[0].slice(0, 4)
       : words.map((word) => word[0]).join('').slice(0, 6);
 
-    const existingCodes = new Set(subjects.map((subject) => subject.code.toUpperCase()));
+    const existingCodes = new Set(subjects.map((subject) => (subject.code || '').toUpperCase()));
     if (!existingCodes.has(base)) {
       return base;
     }
@@ -310,6 +317,62 @@ export default function Subjects() {
       addToast(`"${group.name}" deleted`, 'success');
     } catch {
       addToast('Failed to delete subject', 'error');
+    }
+  }
+
+  function openEditGroup(group: { name: string; code: string; ids: string[]; classIds: string[] }) {
+    setEditGroup(group);
+    setEditForm({ name: group.name, code: group.code });
+    setEditClassIds([...group.classIds]);
+    setEditLevel('');
+  }
+
+  function closeEditGroup() {
+    setEditGroup(null);
+    setEditForm({ name: '', code: '' });
+    setEditClassIds([]);
+    setEditLevel('');
+  }
+
+  async function handleEditSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const id = schoolId || user?.id;
+    if (!id || !editGroup || editSubmitting) return;
+    const name = editForm.name.trim();
+    const code = editForm.code.trim();
+    if (!name || !code) { addToast('Name and code are required', 'error'); return; }
+    if (editClassIds.length === 0) { addToast('Select at least one class', 'error'); return; }
+    setEditSubmitting(true);
+    try {
+      const now = new Date().toISOString();
+      const prevClassIds = editGroup.classIds;
+      const toRemove = prevClassIds.filter(cid => !editClassIds.includes(cid));
+      const toAdd = editClassIds.filter(cid => !prevClassIds.includes(cid));
+      const toKeep = prevClassIds.filter(cid => editClassIds.includes(cid));
+
+      // Delete removed class entries
+      for (const cid of toRemove) {
+        const idx = editGroup.classIds.indexOf(cid);
+        if (idx !== -1) await dataService.delete(id, 'subjects', editGroup.ids[idx]);
+      }
+      // Update kept entries (name/code may have changed)
+      for (const cid of toKeep) {
+        const idx = editGroup.classIds.indexOf(cid);
+        if (idx !== -1) {
+          const subj = subjects.find(s => s.id === editGroup.ids[idx]);
+          if (subj) await dataService.update(id, 'subjects', editGroup.ids[idx], { ...subj, name, code } as any);
+        }
+      }
+      // Add new class entries
+      for (const cid of toAdd) {
+        await dataService.create(id, 'subjects', { id: uuidv4(), name, code, classId: cid, createdAt: now } as any);
+      }
+      addToast(`"${name}" updated`, 'success');
+      closeEditGroup();
+    } catch {
+      addToast('Failed to update subject', 'error');
+    } finally {
+      setEditSubmitting(false);
     }
   }
 
@@ -922,13 +985,22 @@ export default function Subjects() {
                       </div>
                     </td>
                     <td onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleDeleteGroup(group)}
-                        className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
-                        title={`Delete from ${group.ids.length} class${group.ids.length > 1 ? 'es' : ''}`}
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => openEditGroup(group)}
+                          className="p-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 text-indigo-600 rounded-lg transition-colors"
+                          title="Edit subject"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteGroup(group)}
+                          className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
+                          title={`Delete from ${group.ids.length} class${group.ids.length > 1 ? 'es' : ''}`}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -937,6 +1009,93 @@ export default function Subjects() {
           </table>
         </div>
       </div>
+
+      {/* Edit Subject Modal */}
+      {editGroup && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={closeEditGroup}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <Pencil size={18} className="text-white" />
+                <h3 className="font-bold text-white">Edit Subject — {editGroup.name}</h3>
+              </div>
+              <button onClick={closeEditGroup} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="flex flex-col overflow-hidden">
+              <div className="p-5 space-y-5 overflow-y-auto">
+                {/* Name */}
+                <div>
+                  <label className="form-label">Subject Name *</label>
+                  <input value={editForm.name} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
+                    className="form-input" placeholder="e.g. Mathematics" required autoFocus />
+                </div>
+                {/* Code */}
+                <div>
+                  <label className="form-label">Subject Code *</label>
+                  <input value={editForm.code} onChange={e => setEditForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
+                    className="form-input font-mono" placeholder="e.g. MATH" maxLength={10} required />
+                </div>
+                {/* Level filter */}
+                <div>
+                  <label className="form-label">Filter by Level <span className="text-slate-400 font-normal text-xs">(optional)</span></label>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => setEditLevel('')}
+                      className={`btn text-sm ${!editLevel ? 'btn-primary' : 'btn-secondary'}`}>All</button>
+                    {availableLevels.map(({ key, label }) => (
+                      <button key={key} type="button" onClick={() => setEditLevel(editLevel === key ? '' : key)}
+                        className={`btn text-sm ${editLevel === key ? 'btn-primary' : 'btn-secondary'}`}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+                {/* Class assignment */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="form-label mb-0">Assigned Classes *</label>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setEditClassIds(classes.map(c => c.id))}
+                        className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">All</button>
+                      <span className="text-slate-300">·</span>
+                      <button type="button" onClick={() => setEditClassIds([])}
+                        className="text-xs text-slate-500 hover:underline">None</button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-52 overflow-y-auto pr-1">
+                    {(editLevel ? classes.filter(c => getClassLevel(c.id) === editLevel) : classes)
+                      .sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0))
+                      .map(cls => {
+                        const sel = editClassIds.includes(cls.id);
+                        const isOriginal = editGroup.classIds.includes(cls.id);
+                        return (
+                          <button key={cls.id} type="button"
+                            onClick={() => setEditClassIds(prev => prev.includes(cls.id) ? prev.filter(id => id !== cls.id) : [...prev, cls.id])}
+                            className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-all ${
+                              sel ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300'
+                                  : 'border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                            }`}>
+                            <span className="truncate">{cls.name}</span>
+                            <div className="flex items-center gap-1 shrink-0 ml-1">
+                              {isOriginal && !sel && <span className="text-[9px] text-red-400">remove</span>}
+                              {!isOriginal && sel && <span className="text-[9px] text-emerald-500">new</span>}
+                              {sel && <Check size={12} />}
+                            </div>
+                          </button>
+                        );
+                      })}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">{editClassIds.length} class{editClassIds.length !== 1 ? 'es' : ''} selected</p>
+                </div>
+              </div>
+              <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex gap-2 justify-end shrink-0 bg-slate-50 dark:bg-slate-800/50">
+                <button type="button" onClick={closeEditGroup} className="btn btn-secondary">Cancel</button>
+                <button type="submit" disabled={editSubmitting || !editForm.name || !editForm.code || editClassIds.length === 0}
+                  className="btn btn-primary disabled:opacity-50">
+                  {editSubmitting ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {showImportModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -23,6 +23,7 @@ import {
   UserPlus,
   CreditCard,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
@@ -67,14 +68,38 @@ function Layout({ children }: LayoutProps) {
   const [deletedItemsCount, setDeletedItemsCount] = useState(0);
   const [showRenewPopup, setShowRenewPopup] = useState(false);
   const [subscriptionState, setSubscriptionState] = useState<SubscriptionAccessState | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, schoolId, logout, isOnline } = useAuth();
   const tenantId = schoolId || user?.id;
-  const { isSyncing, pendingChanges, isSyncEnabled } = useSync();
+  const { isSyncing } = useSync();
   const headerRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      const sid = schoolId || user?.id;
+      if (sid) {
+        const { store } = await import('../lib/store');
+        const { dataService } = await import('../lib/database/SupabaseDataService');
+        // Flush offline queue first, then sync all tables
+        await dataService.flushOfflineQueue();
+        const tables = [
+          'students','staff','classes','subjects','fees','payments',
+          'announcements','attendance','feeStructures','exams','examResults',
+          'transportRoutes','salaryPayments','bursaries','discounts','notifications',
+        ];
+        await Promise.allSettled(tables.map(t => dataService.syncTable(sid, t)));
+      }
+    } catch { /* ignore */ }
+    finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  }, [isRefreshing, schoolId, user?.id]);
 
   useEffect(() => {
     loadNotifications();
@@ -295,7 +320,7 @@ function Layout({ children }: LayoutProps) {
   const filteredMenuItems = user ? menuItems : [];
 
   return (
-    <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950">
+    <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950 overflow-x-hidden">
       {/* Sidebar */}
       <aside
         className={`fixed lg:sticky top-0 h-screen inset-y-0 left-0 z-40 w-64 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl transform transition-transform duration-200 ${
@@ -387,16 +412,15 @@ function Layout({ children }: LayoutProps) {
                 <RealtimeStatus />
               </div>
 
-              {/* Sync status — hidden on small */}
-              <div className="hidden md:flex flex-col items-end mr-1">
-                <span className={`text-[10px] font-bold uppercase tracking-widest ${isSyncing ? 'text-white' : 'text-white/80'}`}>
-                  {!isOnline ? 'Offline' : isSyncing ? 'Syncing...' : isSyncEnabled && pendingChanges > 0 ? `${pendingChanges} pending` : isSyncEnabled ? 'Up to date' : 'Local'}
-                </span>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <span className={`text-[10px] ${isOnline ? 'text-white/70' : 'text-white/50'}`}>{isOnline ? 'Online' : 'Offline'}</span>
-                  <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-white/30'}`} />
-                </div>
-              </div>
+              {/* Refresh button — replaces sync text */}
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all disabled:opacity-60"
+                title="Refresh all data"
+              >
+                <RefreshCw size={17} className={`text-white/90 ${isRefreshing ? 'animate-spin' : ''}`} />
+              </button>
 
               {/* Notifications */}
               <button
@@ -532,8 +556,8 @@ function Layout({ children }: LayoutProps) {
         )}
 
         {/* Page Content */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-[#f8fafc] dark:bg-slate-950">
-          <div className="max-w-[1600px] mx-auto">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto overflow-x-hidden bg-[#f8fafc] dark:bg-slate-950">
+          <div className="max-w-[1600px] mx-auto min-w-0">
             {children}
           </div>
         </main>

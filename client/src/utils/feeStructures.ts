@@ -144,16 +144,24 @@ export async function generateInvoicesFromStructure(
   const structures = await getFeeStructuresByClass(userId, classId, term, year);
   if (structures.length === 0) return { fees: [], studentsCount: 0 };
 
-  const [students, allBursaries, allDiscounts] = await Promise.all([
+  const [students, allBursaries, allDiscounts, existingFees] = await Promise.all([
     dataService.getAll(userId, 'students'),
     dataService.getAll(userId, 'bursaries'),
     dataService.getAll(userId, 'discounts'),
+    dataService.getAll(userId, 'fees'),
   ]);
 
   const isUUID = (v: any) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
+  // Build set of already-invoiced student IDs for this term/year
+  const alreadyInvoicedIds = new Set(
+    existingFees
+      .filter((f: any) => String(f.term) === String(term) && String(f.year) === String(year))
+      .map((f: any) => f.studentId)
+  );
+
   const active = students.filter(
-    (s: any) => s.classId === classId && s.status !== 'completed' && s.status !== 'graduated'
+    (s: any) => s.classId === classId && s.status !== 'completed' && s.status !== 'graduated' && !alreadyInvoicedIds.has(s.id)
   );
   if (active.length === 0) return { fees: [], studentsCount: 0 };
 

@@ -37,11 +37,9 @@ export default function Attendance() {
   const [loading, setLoading] = useState(false);
   const { addToast } = useToast();
 
-  // Default to first real class when classes load
+  // Default to "All Classes" — don't auto-select first class
   useEffect(() => {
-    if (classes.length > 0 && !selectedClass) {
-      setSelectedClass((classes[0] as any).id);
-    }
+    // intentionally empty — we start with selectedClass = '' (all classes)
   }, [classes]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -77,16 +75,19 @@ export default function Attendance() {
 
   async function loadData() {
     const id = schoolId || user?.id;
-    if (!id || !selectedClass) return;
+    if (!id) return;
     setLoading(true);
     try {
-      // Use getAll + filter — works offline via cache, no direct Supabase query
       const [allStudents, allRecords] = await Promise.all([
         dataService.getAll(id, 'students'),
         dataService.getAll(id, 'attendance'),
       ]);
 
-      const classStudents = allStudents.filter((s: any) => s.classId === selectedClass && s.status !== 'completed');
+      // If no class selected — show all active students across all classes
+      const classStudents = selectedClass
+        ? allStudents.filter((s: any) => s.classId === selectedClass && s.status !== 'completed')
+        : allStudents.filter((s: any) => s.status !== 'completed');
+
       const todayRecords = allRecords.filter((r: any) => r.date === selectedDate);
 
       setStudents(classStudents);
@@ -459,7 +460,7 @@ export default function Attendance() {
             Select Class
           </label>
           <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="form-input">
-            {classes.length === 0 && <option value="">No classes yet</option>}
+            <option value="">All Classes</option>
             {classes.map((c: any) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
@@ -475,7 +476,7 @@ export default function Attendance() {
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-800 dark:text-white">Student List</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{(classes.find((c: any) => c.id === selectedClass) as any)?.name || selectedClass} - {students.length} students</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{selectedClass ? (classes.find((c: any) => c.id === selectedClass) as any)?.name : 'All Classes'} — {students.length} students</p>
             </div>
           </div>
           {totalMarked > 0 && (
@@ -490,13 +491,14 @@ export default function Attendance() {
               <tr>
                 <th>Student</th>
                 <th>ID</th>
+                {!selectedClass && <th>Class</th>}
                 <th className="text-center">Attendance Status</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={3} className="text-center py-12">
+                  <td colSpan={selectedClass ? 3 : 4} className="text-center py-12">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-10 h-10 border-4 border-primary-200 border-t-primary-500 rounded-full animate-spin"></div>
                       <p className="text-slate-500">Loading...</p>
@@ -505,13 +507,13 @@ export default function Attendance() {
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="text-center py-12">
+                  <td colSpan={selectedClass ? 3 : 4} className="text-center py-12">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
                         <Users size={32} className="text-slate-400" />
                       </div>
-                      <p className="text-slate-500 font-medium">No students in this class</p>
-                      <p className="text-slate-400 text-sm">Add students to this class to mark attendance</p>
+                      <p className="text-slate-500 font-medium">No students found</p>
+                      <p className="text-slate-400 text-sm">{selectedClass ? 'Add students to this class to mark attendance' : 'No active students found'}</p>
                     </div>
                   </td>
                 </tr>
@@ -531,6 +533,13 @@ export default function Attendance() {
                   <td className="font-mono text-sm bg-slate-50 dark:bg-slate-800/50 px-3 py-1 rounded-lg">
                     {s.studentId || s.admissionNo}
                   </td>
+                  {!selectedClass && (
+                    <td>
+                      <span className="badge badge-info text-xs">
+                        {(classes.find((c: any) => c.id === s.classId) as any)?.name || s.classId || '—'}
+                      </span>
+                    </td>
+                  )}
                   <td>
                     <div className="flex items-center justify-center gap-2">
                       <button
@@ -576,7 +585,7 @@ export default function Attendance() {
       </div>
 
       {showImportModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">

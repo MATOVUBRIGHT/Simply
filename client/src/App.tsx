@@ -37,12 +37,12 @@ const RecycleBin = lazy(() => import('./pages/RecycleBin'));
 function FullScreenLoader({ label = 'Loading Schofy...' }: { label?: string }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4">
-      <div className="flex flex-col items-center gap-4 text-center">
-        <div className="h-14 w-14 animate-spin rounded-full border-4 border-primary-500/30 border-t-primary-500" />
-        <div>
-          <p className="text-lg font-semibold text-slate-800 dark:text-white">{label}</p>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Preparing your workspace</p>
+      <div className="flex flex-col items-center gap-3 text-center">
+        <div className="relative w-16 h-16">
+          <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800" />
+          <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-primary-500 animate-spin" />
         </div>
+        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
       </div>
     </div>
   );

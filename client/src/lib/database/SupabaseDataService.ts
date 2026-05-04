@@ -11,7 +11,6 @@
  */
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { generateUUID } from '../../utils/uuid';
-import { getQueryClient } from '../queryClient';
 import { addToRecycleBin } from '../../utils/recycleBin';
 
 export type SyncStatus = 'synced' | 'pending' | 'failed';
@@ -203,18 +202,32 @@ try {
   const saved = localStorage.getItem(PERSIST_KEY);
   if (saved) {
     const parsed: Record<string, CacheEntry> = JSON.parse(saved);
-    for (const [k, v] of Object.entries(parsed)) {
-      memCache.set(k, v); // keep even if stale — better than nothing offline
-    }
+    for (const [k, v] of Object.entries(parsed)) memCache.set(k, v);
   }
 } catch { /* ignore */ }
 
+// Debounced persist — write to localStorage at most once per 2 seconds
+let _persistTimer: ReturnType<typeof setTimeout> | null = null;
 function persistCache() {
+  if (_persistTimer) return;
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    _flushCache();
+  }, 2000);
+}
+
+function _flushCache() {
   try {
     const obj: Record<string, CacheEntry> = {};
     for (const [k, v] of memCache) obj[k] = v;
     localStorage.setItem(PERSIST_KEY, JSON.stringify(obj));
-  } catch { /* storage full — ignore */ }
+  } catch { /* storage full */ }
+}
+
+// Flush cache immediately on page unload so offline data is always saved
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', _flushCache);
+  window.addEventListener('pagehide', _flushCache);
 }
 
 const inflight = new Map<string, Promise<any[]>>();
@@ -224,10 +237,15 @@ function cacheKey(sid: string, table: string) { return `${sid}:${table}`; }
 function cacheGet(sid: string, table: string): any[] | null {
   const e = memCache.get(cacheKey(sid, table));
   if (!e) return null;
-  // Return stale data when offline — better than nothing
-  if (!isOnline() && e.data.length > 0) return e.data;
-  if (Date.now() - e.ts > CACHE_TTL) { memCache.delete(cacheKey(sid, table)); return null; }
+  // ALWAYS return cached data — never return null if we have data
+  // The store's STALE_MS controls when to re-fetch, not this function
   return e.data;
+}
+
+// Alias — same behavior, kept for clarity in offline paths
+function cacheGetAny(sid: string, table: string): any[] | null {
+  const e = memCache.get(cacheKey(sid, table));
+  return e ? e.data : null;
 }
 
 function cacheSet(sid: string, table: string, data: any[]) {
@@ -292,27 +310,19 @@ function cacheApplyDelete(sid: string, tableName: string, id: string) {
 }
 
 function notifyUI(table: string) {
-  const detail = { table };
-  window.dispatchEvent(new CustomEvent(`${table}Updated`, { detail }));
-  window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail }));
-  window.dispatchEvent(new CustomEvent('dataRefresh', { detail }));
-  // Push updated cache data directly into the store — instant UI update, no network round-trip
+  // Push updated cache data directly into the store — instant UI update
   const sid = localStorage.getItem('schofy_current_school_id') || '';
-  if (sid) {
-    const storeRef = (globalThis as any).__schofyStore;
-    if (storeRef) {
-      const cached = memCache.get(cacheKey(sid, table));
-      if (cached) {
-        storeRef.push(sid, table, cached.data);
-      } else {
-        storeRef.invalidate(sid, table);
-      }
+  const storeRef = (globalThis as any).__schofyStore;
+  if (sid && storeRef) {
+    const cached = memCache.get(cacheKey(sid, table));
+    if (cached) {
+      storeRef.push(sid, table, cached.data);
+    } else {
+      storeRef.invalidate(sid, table);
     }
   }
-  try {
-    const qc = getQueryClient();
-    void qc.invalidateQueries({ predicate: q => String(q.queryKey[0] ?? '').includes(table) });
-  } catch { /* ignore */ }
+  // Fire a single lightweight event for any legacy listeners
+  window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table } }));
 }
 
 // ── service ───────────────────────────────────────────────────────────────────
@@ -336,24 +346,34 @@ class SupabaseDataService {
 
     const ALL_TABLES = [
       'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
-      'announcements', 'attendance', 'settings', 'feeStructures',
+      'announcements', 'attendance', 'feeStructures',
       'exams', 'examResults', 'transportRoutes', 'salaryPayments',
       'bursaries', 'discounts', 'notifications',
     ];
 
+    // Step 1: Synchronously push ALL cached data into the store — instant, zero network
+    const storeRef = (globalThis as any).__schofyStore;
+    if (storeRef) {
+      for (const table of ALL_TABLES) {
+        const entry = memCache.get(cacheKey(sid, table));
+        if (entry && entry.data.length > 0) {
+          // Use the actual cache timestamp so staleness is correctly tracked
+          storeRef.pushWithTs(sid, table, entry.data, entry.ts);
+        }
+      }
+    }
+
     if (!isOnline() || !this.ok) {
-      // Offline — just use whatever is in localStorage cache already
       console.log('[bootstrap] Offline — using cached data');
       return;
     }
 
-    // Online — seed/merge from Supabase without overriding pending local changes
-    // Critical tables first (await) so Dashboard renders fast
-    const critical = ['students', 'staff', 'classes', 'settings', 'announcements'];
-    const rest = ALL_TABLES.filter(t => !critical.includes(t));
+    // Step 2: Flush offline queue (push local changes to Supabase)
+    void this.flushOfflineQueue();
 
-    await Promise.allSettled(critical.map(t => this._seedFromSupabase(sid, t)));
-    void Promise.allSettled(rest.map(t => this._seedFromSupabase(sid, t)));
+    // Step 3: Fetch ALL tables from Supabase in parallel — no sequential awaiting
+    // Use Promise.allSettled so one failure doesn't block others
+    void Promise.allSettled(ALL_TABLES.map(t => this._seedFromSupabase(sid, t)));
   }
 
   /**
@@ -364,22 +384,26 @@ class SupabaseDataService {
     if (!isOnline() || !this.ok) return;
     const rt = getSupabaseTable(tableName);
     try {
+      // Add a 10-second timeout so slow tables don't block the UI
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+
       let q = this.db.from(rt).select('*');
       q = applyScope(q, rt, sid);
       const { data, error } = await q;
+      clearTimeout(timeout);
+
       if (error || !data) return;
 
       const remoteRecords = data.map(mapToLocal);
-      const local = cacheGet(sid, tableName) || [];
+      const local = cacheGet(sid, tableName) || cacheGetAny(sid, tableName) || [];
 
       if (local.length === 0) {
-        // No local data — just use remote directly
         cacheSet(sid, tableName, remoteRecords);
         notifyUI(tableName);
         return;
       }
 
-      // Has local data — merge carefully
       const pendingIds = new Set(
         loadQueue()
           .filter(q => q.tableName === tableName)
@@ -391,7 +415,7 @@ class SupabaseDataService {
       let changed = false;
 
       for (const remote of remoteRecords) {
-        if (pendingIds.has(remote.id)) continue; // pending local change — don't overwrite
+        if (pendingIds.has(remote.id)) continue;
         const localRecord = localMap.get(remote.id);
         if (!localRecord) {
           localMap.set(remote.id, remote);
@@ -411,7 +435,9 @@ class SupabaseDataService {
         notifyUI(tableName);
       }
     } catch (e: any) {
-      console.warn(`[seed] ${rt}:`, e.message);
+      if (e.name !== 'AbortError') {
+        console.warn(`[seed] ${rt}:`, e.message);
+      }
     }
   }
 
@@ -429,20 +455,23 @@ class SupabaseDataService {
   async getAll(userId: string, tableName: string): Promise<any[]> {
     const sid = this.sid(userId);
 
-    // Always return cached data immediately — works offline, instant UI
+    // Always return cached data immediately — instant UI, works offline
     const cached = cacheGet(sid, tableName);
-    if (cached) {
-      // If online, trigger a background merge from Supabase (non-blocking)
+    if (cached && cached.length > 0) {
+      // Only trigger background merge if cache is older than 60s (not on every call)
       if (isOnline() && this.ok) {
-        void this._backgroundMerge(sid, tableName);
+        const entry = memCache.get(cacheKey(sid, tableName));
+        if (entry && Date.now() - entry.ts > 60_000) {
+          void this._backgroundMerge(sid, tableName);
+        }
       }
       return cached;
     }
 
-    // No cache at all — if offline return empty, if online fetch and cache
+    // No cache at all — if offline return empty array
     if (!isOnline() || !this.ok) return [];
 
-    // Deduplicate concurrent requests for the same table
+    // No cache and online — fetch from Supabase
     const key = cacheKey(sid, tableName);
     const existing = inflight.get(key);
     if (existing) return existing;
@@ -478,14 +507,17 @@ class SupabaseDataService {
   private _mergeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private _backgroundMerge(sid: string, tableName: string): void {
-    const key = cacheKey(sid, tableName);
-    // Debounce — don't hammer Supabase on every getAll call
-    const existing = this._mergeTimers.get(key);
-    if (existing) return;
+    // Settings have their own dedicated save path — skip background merge
+    if (tableName === 'settings') return;
 
-    // Only merge if cache is older than 30s (avoid redundant fetches)
+    const key = cacheKey(sid, tableName);
+
+    // Already scheduled or running — skip
+    if (this._mergeTimers.has(key)) return;
+
+    // Only merge if cache is older than 60 seconds
     const entry = memCache.get(key);
-    if (entry && Date.now() - entry.ts < 30_000) return;
+    if (entry && Date.now() - entry.ts < 60_000) return;
 
     this._mergeTimers.set(key, setTimeout(async () => {
       this._mergeTimers.delete(key);
@@ -585,13 +617,12 @@ class SupabaseDataService {
   }
 
   async where(userId: string, tableName: string, fieldName: string, value: any) {
-    // Offline: filter from cache
-    if (!isOnline() || !this.ok) {
-      const sid = this.sid(userId);
-      const cached = cacheGet(sid, tableName) || [];
-      return cached.filter(item => item[fieldName] === value || item[camelToSnake(fieldName)] === value);
-    }
     const sid = this.sid(userId);
+    // Always check cache first — works offline and is instant
+    const cached = cacheGet(sid, tableName) || [];
+    if (cached.length > 0 || !isOnline() || !this.ok) {
+      return cached.filter((item: any) => item[fieldName] === value || item[camelToSnake(fieldName)] === value);
+    }
     const rt = getSupabaseTable(tableName);
     const col = fieldName === 'schoolId' ? 'school_id' : camelToSnake(fieldName);
     try {
@@ -616,7 +647,22 @@ class SupabaseDataService {
     const sid = this.sid(userId);
     const now = new Date().toISOString();
     const id = isUUID(data.id) ? data.id : generateUUID();
-    const record = { ...data, id, schoolId: data.schoolId || sid, createdAt: now, updatedAt: now, syncStatus: 'pending' };
+
+    // Ensure required NOT NULL fields have defaults so queue items don't fail permanently
+    let safeData = { ...data };
+    if (tableName === 'fees') {
+      if (!safeData.dueDate && !safeData.due_date) {
+        const d = new Date(); d.setMonth(d.getMonth() + 1);
+        safeData.dueDate = d.toISOString().split('T')[0];
+      }
+      if (!safeData.year) safeData.year = new Date().getFullYear();
+    }
+    if (tableName === 'exams') {
+      if (!safeData.startDate && !safeData.start_date) safeData.startDate = now.split('T')[0];
+      if (!safeData.endDate && !safeData.end_date) safeData.endDate = now.split('T')[0];
+    }
+
+    const record = { ...safeData, id, schoolId: safeData.schoolId || sid, createdAt: now, updatedAt: now, syncStatus: 'pending' };
 
     // Always update cache optimistically
     cacheApplyCreate(sid, tableName, record);
@@ -797,13 +843,21 @@ class SupabaseDataService {
 
     const MAX_RETRIES = 3;
 
+    // Errors that will never succeed on retry — discard immediately
+    const isUnrecoverable = (msg: string) =>
+      msg.includes('violates not-null constraint') ||
+      msg.includes('violates foreign key constraint') ||
+      msg.includes('duplicate key value') ||
+      msg.includes('invalid input syntax') ||
+      msg.includes('column') && msg.includes('does not exist');
+
     for (const item of queue) {
       let lastError: any = null;
       let succeeded = false;
+      let unrecoverable = false;
 
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         if (attempt > 0) {
-          // Exponential backoff: 500ms, 1000ms, 2000ms
           await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
         }
         try {
@@ -837,16 +891,25 @@ class SupabaseDataService {
           break;
         } catch (e: any) {
           lastError = e;
-          console.warn(`[offline] Attempt ${attempt + 1} failed for ${item.op} on ${item.tableName}:`, e.message);
+          const msg = e.message || '';
+          if (isUnrecoverable(msg)) {
+            // No point retrying — discard this item
+            unrecoverable = true;
+            console.warn(`[offline] Discarding unrecoverable ${item.op} on ${item.tableName}:`, msg);
+            break;
+          }
+          console.warn(`[offline] Attempt ${attempt + 1} failed for ${item.op} on ${item.tableName}:`, msg);
         }
       }
 
-      if (succeeded) {
+      if (succeeded || unrecoverable) {
+        // Remove from queue — either it worked or it can never work
         dequeue(item.id);
-        // After successful sync, merge fresh data from Supabase
-        void this._seedFromSupabase(this.sid(item.userId), item.tableName);
+        if (succeeded) {
+          void this._seedFromSupabase(this.sid(item.userId), item.tableName);
+        }
       } else {
-        console.error(`[offline] Permanently failed ${item.op} on ${item.tableName} after ${MAX_RETRIES} attempts:`, lastError?.message);
+        console.error(`[offline] Will retry later: ${item.op} on ${item.tableName}:`, lastError?.message);
       }
     }
 

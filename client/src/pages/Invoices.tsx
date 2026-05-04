@@ -358,6 +358,14 @@ export default function Invoices() {
       const now = new Date().toISOString();
 
       for (const student of studentsInClass) {
+        // Skip if student already has an invoice for this term/year
+        const alreadyInvoiced = fees.some(
+          f => f.studentId === student.id &&
+               String(f.term) === String(selectedTerm) &&
+               String(f.year) === String(yearInt)
+        );
+        if (alreadyInvoiced) continue;
+
         const studentBursary = classBursaries.find(b => b.studentId === student.id);
         if (studentBursary) {
           await dataService.create(id, 'fees', {
@@ -421,6 +429,17 @@ export default function Invoices() {
       return;
     }
     try {
+      // Check if student already has an invoice for this term/year
+      const alreadyInvoiced = fees.some(
+        f => f.studentId === studentId &&
+             String(f.term) === String(selectedTerm) &&
+             String(f.year) === String(selectedYear)
+      );
+      if (alreadyInvoiced) {
+        addToast('Student already has an invoice for this term', 'warning');
+        return;
+      }
+
       const [allBursaries, allDiscounts] = await Promise.all([
         dataService.getAll(id, 'bursaries'),
         dataService.getAll(id, 'discounts'),
@@ -1211,7 +1230,7 @@ export default function Invoices() {
       </div>
 
       {showCreateModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
               <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -1321,7 +1340,7 @@ export default function Invoices() {
       )}
 
       {showImportModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
@@ -1466,7 +1485,7 @@ export default function Invoices() {
       )}
 
       {showStructureModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
@@ -1693,7 +1712,7 @@ export default function Invoices() {
       )}
 
       {showBursaryModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
@@ -1850,7 +1869,7 @@ export default function Invoices() {
       )}
 
       {showDiscountModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>

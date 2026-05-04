@@ -68,32 +68,45 @@ export default function Settings() {
   async function loadSettings() {
     const id = schoolId || user?.id;
     if (!id) return;
+    const localKey = `schofy_settings_${id}`;
+
     try {
-      // Load from localStorage first (instant, works offline)
-      const localKey = `schofy_settings_${id}`;
+      // 1. Load from localStorage immediately — this is the source of truth
       const localRaw = localStorage.getItem(localKey);
+      let localObj: Record<string, any> = {};
       if (localRaw) {
-        try {
-          const localObj = JSON.parse(localRaw);
-          setSettings(prev => ({ ...prev, ...localObj }));
-          if (localObj.currency) {
-            localStorage.setItem('schofy_currency', localObj.currency);
-            window.dispatchEvent(new Event('currencyChanged'));
-          }
-        } catch { /* ignore */ }
+        try { localObj = JSON.parse(localRaw); } catch { /* ignore */ }
       }
 
-      // Then fetch from Supabase to get latest
+      if (Object.keys(localObj).length > 0) {
+        // We have local settings — apply them immediately
+        setSettings(prev => ({ ...prev, ...localObj }));
+        if (localObj.currency) {
+          localStorage.setItem('schofy_currency', localObj.currency);
+          window.dispatchEvent(new Event('currencyChanged'));
+        }
+      }
+
+      // 2. Fetch from Supabase — only fill in keys that are missing locally (new device / first login)
       const stored = await dataService.getAll(id, 'settings');
       if (stored.length > 0) {
-        const settingsObj: Record<string, any> = {};
-        stored.forEach(s => { settingsObj[s.key] = s.value; });
-        setSettings(prev => ({ ...prev, ...settingsObj }));
-        // Persist to localStorage for next load
-        localStorage.setItem(localKey, JSON.stringify(settingsObj));
-        if (settingsObj.currency && settingsObj.currency !== localStorage.getItem('schofy_currency')) {
-          localStorage.setItem('schofy_currency', settingsObj.currency);
-          window.dispatchEvent(new Event('currencyChanged'));
+        const remoteObj: Record<string, any> = {};
+        stored.forEach((s: any) => { remoteObj[s.key] = s.value; });
+
+        // Only apply remote keys that don't exist locally yet
+        const missing: Record<string, any> = {};
+        for (const [k, v] of Object.entries(remoteObj)) {
+          if (!(k in localObj)) missing[k] = v;
+        }
+
+        if (Object.keys(missing).length > 0) {
+          const merged = { ...localObj, ...missing };
+          setSettings(prev => ({ ...prev, ...missing }));
+          localStorage.setItem(localKey, JSON.stringify(merged));
+          if (missing.currency) {
+            localStorage.setItem('schofy_currency', missing.currency);
+            window.dispatchEvent(new Event('currencyChanged'));
+          }
         }
       }
     } catch (error) {
@@ -884,7 +897,7 @@ export default function Settings() {
 
       {/* Promote Students Modal */}
       {showPromoteModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center gap-3 p-5 border-b border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/20">
               <GraduationCap size={22} className="text-amber-600" />
