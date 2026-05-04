@@ -438,23 +438,6 @@ export default function Grades() {
     } catch (error) { addToast('Failed to import grades', 'error'); }
   }
 
-  // Sort students by class level (lowest first)
-  const sortedStudents = useMemo(() => {
-    return [...students].sort((a, b) => {
-      const ca = allClassesData.find((c: any) => c.id === a.classId) as any;
-      const cb = allClassesData.find((c: any) => c.id === b.classId) as any;
-      return (ca?.level ?? 999) - (cb?.level ?? 999);
-    });
-  }, [students, allClassesData]);
-
-  // Subjects filtered by selected student's class
-  const subjectsForSelectedStudent = useMemo(() => {
-    if (!formData.studentId) return subjects as any[];
-    const student = allStudents.find(s => s.id === formData.studentId);
-    if (!student?.classId) return subjects as any[];
-    return (subjects as any[]).filter(s => s.classId === student.classId);
-  }, [formData.studentId, subjects, allStudents]);
-
   const filteredGrades = grades.filter(g => {
     if (filterTerm !== 'all' && g.term !== filterTerm) return false;
     if (filterClass !== 'all') {
