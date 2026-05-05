@@ -367,6 +367,26 @@ function dequeue(id: string) {
 }
 
 function isOnline() { return navigator.onLine; }
+// ── Cache helpers ─────────────────────────────────────────────────────────────
+function cacheKey(sid: string, table: string) { return `${sid}:${table}`; }
+
+function cacheGet(sid: string, table: string): any[] | null {
+  const e = memCache.get(cacheKey(sid, table));
+  return e ? e.data : null;
+}
+
+function cacheGetAny(sid: string, table: string): any[] | null {
+  return cacheGet(sid, table);
+}
+
+function cacheSet(sid: string, table: string, data: any[]) {
+  memCache.set(cacheKey(sid, table), { data, ts: Date.now() });
+  persistCache();
+}
+
+// In-flight deduplication for concurrent getAll calls
+const inflight = new Map<string, Promise<any[]>>();
+
 
 // Update in-memory cache optimistically for offline writes
 function cacheApplyCreate(sid: string, tableName: string, record: any) {
