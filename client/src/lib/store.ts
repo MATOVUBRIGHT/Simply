@@ -144,6 +144,8 @@ export const store = new DataStore();
 
 // ── Instant bootstrap from localStorage cache ─────────────────────────────────
 // Runs synchronously at module load — data is in store before first React render
+// ── Instant bootstrap from localStorage cache ─────────────────────────────────
+// Runs synchronously at module load — data is in store before first React render
 ;(() => {
   try {
     const session = localStorage.getItem('schofy_session');
@@ -157,18 +159,41 @@ export const store = new DataStore();
       localStorage.setItem('schofy_current_school_id', sid);
     }
 
+    // Try localStorage cache first (synchronous, instant)
     const PERSIST_KEY = 'schofy_data_cache';
     const raw = localStorage.getItem(PERSIST_KEY);
-    if (!raw) return;
-    const cache: Record<string, { data: any[]; ts: number }> = JSON.parse(raw);
-
-    for (const [key, entry] of Object.entries(cache)) {
-      if (!key.startsWith(sid + ':')) continue;
-      const table = key.slice(sid.length + 1);
-      if (entry.data.length > 0) {
-        store.pushWithTs(sid, table, entry.data, entry.ts);
+    if (raw) {
+      const cache: Record<string, { data: any[]; ts: number }> = JSON.parse(raw);
+      for (const [key, entry] of Object.entries(cache)) {
+        if (!key.startsWith(sid + ':')) continue;
+        const table = key.slice(sid.length + 1);
+        if (entry.data.length > 0) store.pushWithTs(sid, table, entry.data, entry.ts);
       }
+      return; // localStorage had data — done
     }
+
+    // Try IndexedDB (async — will update store when ready)
+    const IDB_DB_NAME = 'schofy_cache';
+    const IDB_STORE = 'data';
+    try {
+      const req = indexedDB.open(IDB_DB_NAME, 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const getReq = tx.objectStore(IDB_STORE).get(PERSIST_KEY);
+        getReq.onsuccess = () => {
+          const cache = getReq.result;
+          if (!cache) return;
+          for (const [key, entry] of Object.entries(cache as Record<string, { data: any[]; ts: number }>)) {
+            if (!key.startsWith(sid + ':')) continue;
+            const table = key.slice(sid.length + 1);
+            if ((entry as any).data?.length > 0) {
+              store.pushWithTs(sid, table, (entry as any).data, (entry as any).ts);
+            }
+          }
+        };
+      };
+    } catch { /* IndexedDB not available */ }
   } catch { /* ignore */ }
 })();
 

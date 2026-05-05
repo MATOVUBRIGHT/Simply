@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SupabaseDataService — offline-first with conflict-safe sync.
  *
  * Strategy:
@@ -235,31 +235,46 @@ function filterDeleted(sid: string, tableName: string, records: any[]): any[] {
   return records.filter(r => !deleted.has(r.id));
 }
 
-// ── Persistent cache (survives page reload for offline use) ──────────────────
+// ── Persistent cache — IndexedDB primary, localStorage fallback ──────────────
 const PERSIST_KEY = 'schofy_data_cache';
+const IDB_DB_NAME = 'schofy_cache';
+const IDB_STORE = 'data';
+const IDB_VERSION = 1;
 
 interface CacheEntry { data: any[]; ts: number; }
 const memCache = new Map<string, CacheEntry>();
 
-let resolveCacheReady: () => void;
-export const cacheReady = new Promise<void>(res => { resolveCacheReady = res; });
+// ── IndexedDB cache database ──────────────────────────────────────────────────
+let _cacheDB: IDBDatabase | null = null;
+let _cacheDBReady: Promise<IDBDatabase> | null = null;
 
 function getCacheDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('SchofyCacheDB', 1);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore('store');
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+  if (_cacheDB) return Promise.resolve(_cacheDB);
+  if (_cacheDBReady) return _cacheDBReady;
+  _cacheDBReady = new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(IDB_DB_NAME, IDB_VERSION);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(IDB_STORE)) {
+          req.result.createObjectStore(IDB_STORE);
+        }
+      };
+      req.onsuccess = () => { _cacheDB = req.result; resolve(_cacheDB); };
+      req.onerror = () => reject(req.error);
+    } catch (e) { reject(e); }
   });
+  return _cacheDBReady;
 }
 
-async function loadCache() {
+// ── Load persisted cache on startup (async, non-blocking) ────────────────────
+let resolveCacheReady: () => void;
+const cacheReady = new Promise<void>(r => { resolveCacheReady = r; });
+
+async function loadPersistedCache() {
   try {
     const db = await getCacheDB();
-    const tx = db.transaction('store', 'readonly');
-    const req = tx.objectStore('store').get(PERSIST_KEY);
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(PERSIST_KEY);
     req.onsuccess = () => {
       let parsed = req.result;
       if (!parsed) {
@@ -277,9 +292,9 @@ async function loadCache() {
       }
       resolveCacheReady();
     };
-    req.onerror = () => resolveCacheReady();
-  } catch (e) {
-    // Fallback
+    req.onerror = () => { resolveCacheReady(); };
+  } catch {
+    // Fallback to localStorage
     try {
       const saved = localStorage.getItem(PERSIST_KEY);
       if (saved) {
@@ -290,8 +305,7 @@ async function loadCache() {
     resolveCacheReady();
   }
 }
-
-void loadCache();
+void loadPersistedCache();
 
 // Debounced persist — write to IndexedDB at most once per 2 seconds
 let _persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -309,8 +323,8 @@ function _flushCache() {
     for (const [k, v] of memCache) obj[k] = v;
     
     getCacheDB().then(db => {
-      const tx = db.transaction('store', 'readwrite');
-      tx.objectStore('store').put(obj, PERSIST_KEY);
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(obj, PERSIST_KEY);
     }).catch(() => {
       try { localStorage.setItem(PERSIST_KEY, JSON.stringify(obj)); } catch {}
     });
@@ -322,35 +336,6 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', _flushCache);
   window.addEventListener('pagehide', _flushCache);
 }
-
-const inflight = new Map<string, Promise<any[]>>();
-
-function cacheKey(sid: string, table: string) { return `${sid}:${table}`; }
-
-function cacheGet(sid: string, table: string): any[] | null {
-  const e = memCache.get(cacheKey(sid, table));
-  if (!e) return null;
-  // ALWAYS return cached data — never return null if we have data
-  // The store's STALE_MS controls when to re-fetch, not this function
-  return e.data;
-}
-
-// Alias — same behavior, kept for clarity in offline paths
-function cacheGetAny(sid: string, table: string): any[] | null {
-  const e = memCache.get(cacheKey(sid, table));
-  return e ? e.data : null;
-}
-
-function cacheSet(sid: string, table: string, data: any[]) {
-  memCache.set(cacheKey(sid, table), { data, ts: Date.now() });
-  persistCache(); // persist to localStorage for offline use
-}
-
-function cacheDel(sid: string, table: string) {
-  memCache.delete(cacheKey(sid, table));
-  persistCache();
-}
-
 // ── Offline queue ─────────────────────────────────────────────────────────────
 const QUEUE_KEY = 'schofy_offline_queue';
 
