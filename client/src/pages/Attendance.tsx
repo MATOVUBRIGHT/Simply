@@ -115,7 +115,6 @@ export default function Attendance() {
         await dataService.create(id, 'attendance', record as any);
       }
       addToast('Attendance saved successfully', 'success');
-      loadData();
     } catch (error) {
       addToast('Failed to save attendance', 'error');
     } finally {

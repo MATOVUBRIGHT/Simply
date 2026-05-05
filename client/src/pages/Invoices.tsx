@@ -1959,7 +1959,6 @@ export default function Invoices() {
                         <button
                           onClick={async () => {
                             await dataService.delete(user!.id, 'discounts', d.id);
-                            setDiscounts(discounts.filter(disc => disc.id !== d.id));
                             addToast('Discount removed', 'success');
                           }}
                           className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"

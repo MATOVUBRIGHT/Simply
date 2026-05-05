@@ -303,7 +303,6 @@ export default function Students() {
         if (ok) {
           const result = await fixInvalidClassAssignments(id);
           addToast(result.message, result.fixed > 0 ? 'success' : 'info');
-          await loadData();
         }
       } else {
         addToast('All class assignments are valid', 'success');
