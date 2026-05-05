@@ -557,7 +557,7 @@ function Layout({ children }: LayoutProps) {
 
         {/* Page Content — scrolls vertically, allows horizontal scroll on small screens */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto overflow-x-auto bg-[#f8fafc] dark:bg-slate-950">
-          <div className="max-w-[1600px] mx-auto min-w-0">
+          <div className="w-full min-w-0">
             {children}
           </div>
         </main>
