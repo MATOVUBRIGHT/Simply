@@ -334,6 +334,10 @@ export default function Grades() {
   const [templateClassId, setTemplateClassId] = useState('');
   const [templateStudentIds, setTemplateStudentIds] = useState<Set<string>>(new Set());
   const [templateStep, setTemplateStep] = useState<'select' | 'ready'>('select');
+  // Exam config for import
+  const [importExamType, setImportExamType] = useState('Mid-Term');
+  const [importTerm, setImportTerm] = useState('1');
+  const [importYear, setImportYear] = useState(new Date().getFullYear().toString());
 
   const studentsForTemplateClass = useMemo(() => {
     if (!templateClassId) return [];
@@ -518,21 +522,67 @@ export default function Grades() {
     if (!id) return;
     try {
       const now = new Date().toISOString();
-      let successCount = 0;
-      for (const data of importPreview) {
-        const grade: ExamResult = {
+
+      // Find or create the exam for this import
+      let exam = (examsData as any[]).find(ex =>
+        ex.examType === importExamType &&
+        String(ex.term) === importTerm &&
+        String(ex.year) === importYear
+      );
+      let examId = exam?.id;
+      if (!examId) {
+        const newExam = {
           id: uuidv4(),
-          examId: uuidv4(),
-          studentId: (data.studentId as string) || '',
-          subjectId: (data.subjectId as string) || '',
-          score: (data.score as number) || 0,
-          maxScore: (data.maxScore as number) || 100,
+          name: `${importExamType} - Term ${importTerm} ${importYear}`,
+          term: importTerm,
+          year: parseInt(importYear),
+          examType: importExamType,
           createdAt: now,
         };
-        await dataService.create(id, 'examResults', grade as any);
+        const res = await dataService.create(id, 'exams', newExam as any);
+        examId = res.record?.id || newExam.id;
+      }
+
+      let successCount = 0;
+      for (const data of importPreview) {
+        const student = allStudents.find(s => s.id === (data as any).studentId);
+        const subject = (subjects as any[]).find(s => s.id === (data as any).subjectId);
+        const score = (data as any).score as number;
+        const maxScore = (data as any).maxScore as number || 100;
+        const pct = Math.round((score / maxScore) * 100);
+        const gradeInfo = getGrade(pct);
+
+        // Check if result already exists for this student/exam/subject — update if so
+        const existing = (examResults as any[]).find(r =>
+          r.studentId === (data as any).studentId &&
+          r.examId === examId &&
+          r.subjectId === (data as any).subjectId
+        );
+
+        if (existing) {
+          await dataService.update(id, 'examResults', existing.id, {
+            ...existing, score, maxScore, grade: gradeInfo.grade, remarks: gradeInfo.remark, updatedAt: now,
+          } as any);
+        } else {
+          await dataService.create(id, 'examResults', {
+            id: uuidv4(),
+            examId,
+            studentId: (data as any).studentId,
+            subjectId: (data as any).subjectId,
+            subjectName: subject?.name,
+            studentName: student ? `${student.firstName} ${student.lastName}` : undefined,
+            classId: student?.classId,
+            score,
+            maxScore,
+            grade: gradeInfo.grade,
+            remarks: gradeInfo.remark,
+            examType: importExamType,
+            createdAt: now,
+          } as any);
+        }
         successCount++;
       }
-      addToast(`Successfully imported ${successCount} grades`, 'success');
+      addToast(`Imported ${successCount} grade${successCount !== 1 ? 's' : ''} for ${importExamType} Term ${importTerm} ${importYear}`, 'success');
       closeImportModal();
     } catch (error) { addToast('Failed to import grades', 'error'); }
   }
@@ -1214,6 +1264,31 @@ export default function Grades() {
                     </select>
                   </div>
 
+                  {/* Exam config */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="form-label">Exam Type</label>
+                      <select value={importExamType} onChange={e => setImportExamType(e.target.value)} className="form-input">
+                        <option value="Mid-Term">Mid-Term</option>
+                        <option value="End-Term">End-Term</option>
+                        <option value="CAT">CAT</option>
+                        <option value="Final">Final Exam</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Term</label>
+                      <select value={importTerm} onChange={e => setImportTerm(e.target.value)} className="form-input">
+                        <option value="1">Term 1</option>
+                        <option value="2">Term 2</option>
+                        <option value="3">Term 3</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label">Year</label>
+                      <input type="number" value={importYear} onChange={e => setImportYear(e.target.value)} className="form-input" />
+                    </div>
+                  </div>
+
                   {/* Student selector */}
                   {templateClassId && (
                     <div>
@@ -1327,40 +1402,58 @@ export default function Grades() {
               {/* ── Step 3: Preview ── */}
               {importStep === 'preview' && (
                 <div className="space-y-3">
-                  <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                      <strong>{importPreview.length}</strong> grade entr{importPreview.length !== 1 ? 'ies' : 'y'} ready to import
+                  <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 space-y-1">
+                    <p className="text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+                      ✓ {importPreview.length} grade entr{importPreview.length !== 1 ? 'ies' : 'y'} ready to import
+                    </p>
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                      Exam: <strong>{importExamType}</strong> · Term <strong>{importTerm}</strong> · <strong>{importYear}</strong>
                     </p>
                   </div>
-                  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-52 overflow-y-auto">
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
                         <tr>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Student</th>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Subject</th>
-                          <th className="px-2 py-1.5 text-center font-medium text-slate-600 dark:text-slate-300">Score</th>
+                          <th className="px-2 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">#</th>
+                          <th className="px-2 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Student</th>
+                          <th className="px-2 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Subject</th>
+                          <th className="px-2 py-2 text-center font-semibold text-slate-600 dark:text-slate-300">Score</th>
+                          <th className="px-2 py-2 text-center font-semibold text-slate-600 dark:text-slate-300">%</th>
+                          <th className="px-2 py-2 text-center font-semibold text-slate-600 dark:text-slate-300">Grade</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 10).map((g: any, i) => {
+                        {importPreview.map((g: any, i) => {
                           const student = allStudents.find(s => s.id === g.studentId);
                           const subject = (subjects as any[]).find(s => s.id === g.subjectId);
+                          const score = g.score as number;
+                          const maxScore = (g.maxScore as number) || 100;
+                          const pct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+                          const gi = getGrade(pct);
+                          const gradeColor = gi.grade.startsWith('D') ? 'text-emerald-600 font-bold' :
+                            gi.grade.startsWith('C') ? 'text-blue-600 font-semibold' :
+                            gi.grade.startsWith('P') ? 'text-amber-600' : 'text-red-600 font-bold';
                           return (
-                            <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                              <td className="px-2 py-1.5">{student ? `${student.firstName} ${student.lastName}` : g.studentId?.slice(0, 8)}</td>
-                              <td className="px-2 py-1.5">{subject?.name || g.subjectId?.slice(0, 8)}</td>
-                              <td className="px-2 py-1.5 text-center font-semibold">{g.score}/{g.maxScore}</td>
+                            <tr key={i} className={i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                              <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
+                              <td className="px-2 py-1.5 font-medium text-slate-700 dark:text-slate-200">
+                                {student ? `${student.firstName} ${student.lastName}` : <span className="text-red-500">Not found</span>}
+                              </td>
+                              <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
+                                {subject?.name || <span className="text-red-500">Not found</span>}
+                              </td>
+                              <td className="px-2 py-1.5 text-center font-semibold">{score}/{maxScore}</td>
+                              <td className="px-2 py-1.5 text-center">{pct}%</td>
+                              <td className={`px-2 py-1.5 text-center ${gradeColor}`}>{gi.grade}</td>
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
-                    {importPreview.length > 10 && (
-                      <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">
-                        ... and {importPreview.length - 10} more
-                      </div>
-                    )}
                   </div>
+                  {importPreview.some((g: any) => !allStudents.find(s => s.id === g.studentId) || !(subjects as any[]).find(s => s.id === g.subjectId)) && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">⚠ Some entries show "Not found" — they will be skipped during import.</p>
+                  )}
                   <div className="flex justify-between pt-2">
                     <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
                     <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
