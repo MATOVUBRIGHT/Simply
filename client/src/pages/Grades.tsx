@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect } from 'react';
+﻿import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -330,22 +330,66 @@ export default function Grades() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  function downloadTemplate() {
-    const headers = gradeExpectedFields.map(f => f.label);
-    const sampleRow = ['student-uuid-1', 'subject-uuid-1', '85', '100'];
-    const csv = [headers.join(','), sampleRow.join(',')].join('\n');
+  // Smart template state — class/student selection before download
+  const [templateClassId, setTemplateClassId] = useState('');
+  const [templateStudentIds, setTemplateStudentIds] = useState<Set<string>>(new Set());
+  const [templateStep, setTemplateStep] = useState<'select' | 'ready'>('select');
+
+  const studentsForTemplateClass = useMemo(() => {
+    if (!templateClassId) return [];
+    return [...activeStudents]
+      .filter(s => s.classId === templateClassId)
+      .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
+  }, [templateClassId, activeStudents]);
+
+  const subjectsForTemplateClass = useMemo(() => {
+    if (!templateClassId) return [];
+    return (subjects as any[]).filter(s => s.classId === templateClassId);
+  }, [templateClassId, subjects]);
+
+  function downloadSmartTemplate() {
+    const classStudents = studentsForTemplateClass.filter(s =>
+      templateStudentIds.size === 0 || templateStudentIds.has(s.id)
+    );
+    const classSubjects = subjectsForTemplateClass;
+    if (classStudents.length === 0) { addToast('No students found for selected class', 'error'); return; }
+    if (classSubjects.length === 0) { addToast('No subjects found for selected class. Add subjects first.', 'error'); return; }
+
+    // Header: Student Name, Student ID, Subject1, Subject2, ...
+    const subjectHeaders = classSubjects.map((s: any) => `${s.name}${s.code ? ` (${s.code})` : ''}`);
+    const headers = ['Student Name', 'Student ID', ...subjectHeaders];
+
+    // One row per student — scores left blank for user to fill
+    const rows = classStudents.map(s => [
+      `${s.firstName} ${s.lastName}`,
+      s.studentId || s.admissionNo || s.id,
+      ...classSubjects.map(() => ''), // blank score columns
+    ]);
+
+    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
+    const cls = (allClassesData as any[]).find(c => c.id === templateClassId);
     link.href = URL.createObjectURL(blob);
-    link.download = 'grade-import-template.csv';
+    link.download = `grades-template-${cls?.name || 'class'}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
-    addToast('Template downloaded', 'success');
+    addToast(`Template downloaded for ${classStudents.length} students, ${classSubjects.length} subjects`, 'success');
+  }
+
+  function downloadTemplate() {
+    // Legacy fallback — open smart template selector instead
+    setTemplateStep('select');
+    setTemplateClassId('');
+    setTemplateStudentIds(new Set());
   }
 
   function closeImportModal() {
     setShowImportModal(false);
     setImportStep('upload');
+    setTemplateStep('select');
+    setTemplateClassId('');
+    setTemplateStudentIds(new Set());
     setCsvHeaders([]);
     setCsvData([]);
     setFieldMapping({});
@@ -364,12 +408,6 @@ export default function Grades() {
       const data = lines.slice(1).map(line => parseCSVLine(line));
       setCsvHeaders(headers);
       setCsvData(data);
-      const autoMapping: Record<string, string> = {};
-      gradeExpectedFields.forEach(field => {
-        const matchingHeader = headers.find(h => h.toLowerCase() === field.label.toLowerCase() || h.toLowerCase().includes(field.key.toLowerCase()));
-        if (matchingHeader) autoMapping[field.key] = matchingHeader;
-      });
-      setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
     } catch (error) { addToast('Failed to read CSV file', 'error'); }
@@ -391,7 +429,55 @@ export default function Grades() {
   }
 
   function processMapping() {
-    const mappedData: Partial<ExamResult>[] = [];
+    // Smart template: "Student Name", "Student ID", "Subject1", "Subject2", ...
+    const isSmartTemplate = csvHeaders.length >= 3 &&
+      csvHeaders[0].toLowerCase().replace(/"/g, '').includes('student') &&
+      csvHeaders[1].toLowerCase().replace(/"/g, '').includes('id');
+
+    if (isSmartTemplate) {
+      const subjectCols = csvHeaders.slice(2);
+      const mappedData: Partial<ExamResult>[] = [];
+
+      for (const row of csvData) {
+        const studentIdVal = row[1]?.replace(/"/g, '').trim();
+        const studentNameVal = row[0]?.replace(/"/g, '').trim();
+        if (!studentIdVal && !studentNameVal) continue;
+
+        const student = allStudents.find(s =>
+          s.studentId === studentIdVal ||
+          s.admissionNo === studentIdVal ||
+          `${s.firstName} ${s.lastName}`.toLowerCase() === studentNameVal?.toLowerCase()
+        );
+        if (!student) continue;
+
+        for (let i = 0; i < subjectCols.length; i++) {
+          const scoreStr = row[i + 2]?.replace(/"/g, '').trim();
+          if (!scoreStr) continue;
+          const score = parseFloat(scoreStr);
+          if (isNaN(score)) continue;
+
+          const colName = subjectCols[i].replace(/"/g, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+          const subject = (subjects as any[]).find(s =>
+            s.classId === student.classId &&
+            s.name.toLowerCase() === colName.toLowerCase()
+          );
+          if (!subject) continue;
+
+          mappedData.push({ studentId: student.id, subjectId: subject.id, score, maxScore: 100 } as any);
+        }
+      }
+
+      if (mappedData.length === 0) {
+        addToast('No matching students or subjects found. Check the CSV matches your class data.', 'error');
+        return;
+      }
+      setImportPreview(mappedData);
+      setImportStep('preview');
+      return;
+    }
+
+    // Legacy format: studentId, subjectId, score, maxScore
+    const legacyData: Partial<ExamResult>[] = [];
     for (const row of csvData) {
       const grade: Partial<ExamResult> = {};
       gradeExpectedFields.forEach(field => {
@@ -407,9 +493,9 @@ export default function Grades() {
           }
         }
       });
-      if (grade.studentId && grade.subjectId) mappedData.push(grade);
+      if (grade.studentId && grade.subjectId) legacyData.push(grade);
     }
-    setImportPreview(mappedData);
+    setImportPreview(legacyData);
     setImportStep('preview');
   }
 
@@ -552,7 +638,7 @@ export default function Grades() {
               </div>
             )}
           </div>
-          <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary" title="Import CSV">
+          <button onClick={() => { setShowImportModal(true); setImportStep('upload'); setTemplateStep('select'); }} className="btn btn-secondary" title="Import CSV">
             <Upload size={16} />
             <span className="hidden sm:inline">Import</span>
           </button>
@@ -1063,7 +1149,7 @@ export default function Grades() {
 
       {showImportModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
@@ -1074,76 +1160,150 @@ export default function Grades() {
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
+            <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)] space-y-4">
+
+              {/* Step indicator */}
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                {[
+                  { n: 1, label: 'Select & Download' },
+                  { n: 2, label: 'Upload CSV' },
+                  { n: 3, label: 'Preview' },
+                ].map((s, i) => {
+                  const stepNum = importStep === 'upload' ? 1 : importStep === 'map' ? 2 : 3;
+                  const done = stepNum > s.n;
+                  const active = stepNum === s.n;
+                  return (
+                    <div key={s.n} className="flex items-center gap-1.5">
+                      {i > 0 && <ArrowRight size={10} className="text-slate-300" />}
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${done ? 'bg-emerald-500 text-white' : active ? 'bg-indigo-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>
+                        {done ? '✓' : s.n} {s.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* ── Step 1: Select class + students, download template ── */}
               {importStep === 'upload' && (
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <button onClick={downloadTemplate} className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-lg transition-colors text-sm font-medium">
-                      <Download size={14} />
-                      Download Template
-                    </button>
-                  </div>
-
-                  <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors cursor-pointer text-center"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
-                    <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
-                  </div>
-
-                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-                    <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-2 text-sm">Expected Fields:</h4>
-                    <div className="grid grid-cols-2 gap-1.5 text-xs">
-                      {gradeExpectedFields.map(field => (
-                        <div key={field.key} className="flex items-center gap-1.5">
-                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${field.required ? 'bg-red-500' : 'bg-slate-400'}`} />
-                          <span className="text-slate-600 dark:text-slate-300 truncate">{field.label}</span>
-                        </div>
+                  {/* Class selector */}
+                  <div>
+                    <label className="form-label">Select Class *</label>
+                    <select
+                      value={templateClassId}
+                      onChange={e => { setTemplateClassId(e.target.value); setTemplateStudentIds(new Set()); }}
+                      className="form-input"
+                    >
+                      <option value="">— Choose a class —</option>
+                      {[...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)).map((c: any) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
+                    </select>
+                  </div>
+
+                  {/* Student selector */}
+                  {templateClassId && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="form-label mb-0">Select Students</label>
+                        <div className="flex gap-2 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setTemplateStudentIds(new Set(studentsForTemplateClass.map(s => s.id)))}
+                            className="text-indigo-600 dark:text-indigo-400 hover:underline"
+                          >
+                            All ({studentsForTemplateClass.length})
+                          </button>
+                          <span className="text-slate-300">·</span>
+                          <button
+                            type="button"
+                            onClick={() => setTemplateStudentIds(new Set())}
+                            className="text-slate-500 hover:underline"
+                          >
+                            None
+                          </button>
+                        </div>
+                      </div>
+                      {studentsForTemplateClass.length === 0 ? (
+                        <p className="text-sm text-amber-600 dark:text-amber-400 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                          No active students in this class.
+                        </p>
+                      ) : (
+                        <div className="max-h-44 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700">
+                          {studentsForTemplateClass.map(s => {
+                            const sel = templateStudentIds.size === 0 || templateStudentIds.has(s.id);
+                            return (
+                              <label key={s.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                <input
+                                  type="checkbox"
+                                  checked={sel}
+                                  onChange={() => {
+                                    const next = new Set(
+                                      templateStudentIds.size === 0
+                                        ? studentsForTemplateClass.map(x => x.id)
+                                        : templateStudentIds
+                                    );
+                                    if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
+                                    setTemplateStudentIds(next);
+                                  }}
+                                  className="w-4 h-4 rounded border-slate-300 text-indigo-600"
+                                />
+                                <span className="text-sm text-slate-700 dark:text-slate-200 flex-1">{s.firstName} {s.lastName}</span>
+                                <span className="text-xs text-slate-400 font-mono">{s.studentId || s.admissionNo}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {subjectsForTemplateClass.length > 0 && (
+                        <p className="text-xs text-slate-500 mt-1.5">
+                          Template will include {subjectsForTemplateClass.length} subject{subjectsForTemplateClass.length !== 1 ? 's' : ''}: {subjectsForTemplateClass.map((s: any) => s.name).join(', ')}
+                        </p>
+                      )}
+                      {subjectsForTemplateClass.length === 0 && (
+                        <p className="text-xs text-amber-600 mt-1.5">No subjects found for this class. Add subjects first.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Download button */}
+                  {templateClassId && studentsForTemplateClass.length > 0 && subjectsForTemplateClass.length > 0 && (
+                    <button
+                      onClick={downloadSmartTemplate}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium transition-colors"
+                    >
+                      <Download size={16} />
+                      Download Template ({templateStudentIds.size > 0 ? templateStudentIds.size : studentsForTemplateClass.length} students × {subjectsForTemplateClass.length} subjects)
+                    </button>
+                  )}
+
+                  <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
+                    <p className="text-xs text-slate-500 mb-3">After filling in the scores, upload the CSV:</p>
+                    <div
+                      className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-5 hover:border-indigo-400 transition-colors cursor-pointer text-center"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Upload size={24} className="mx-auto text-slate-400 mb-2" />
+                      <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload filled CSV</p>
+                      <p className="text-xs text-slate-400 mt-1">Student Name, Student ID, Subject scores...</p>
                     </div>
                   </div>
                 </div>
               )}
 
+              {/* ── Step 2: Map (auto-mapped for smart template) ── */}
               {importStep === 'map' && (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded">1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">2 Map</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-500 rounded">3</span>
+                  <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3">
+                    <p className="text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+                      ✓ Smart template detected — {csvHeaders.length - 2} subject column{csvHeaders.length - 2 !== 1 ? 's' : ''} found
+                    </p>
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      Columns: {csvHeaders.slice(2).join(', ')}
+                    </p>
                   </div>
-
-                  <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
-                    <table className="w-full text-xs">
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {gradeExpectedFields.filter(f => f.required).map(field => (
-                          <tr key={field.key}>
-                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">
-                              {field.label}*
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <select
-                                value={fieldMapping[field.key] || ''}
-                                onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
-                                className="w-full form-input py-1 px-2 text-xs"
-                              >
-                                <option value="">-- Skip --</option>
-                                {csvHeaders.map(header => (
-                                  <option key={header} value={header}>{header}</option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
                   <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={closeImportModal} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
+                    <button onClick={() => setImportStep('upload')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
                     <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
                       Preview <ArrowRight size={14} />
                     </button>
@@ -1151,47 +1311,40 @@ export default function Grades() {
                 </div>
               )}
 
+              {/* ── Step 3: Preview ── */}
               {importStep === 'preview' && (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
-                  </div>
-
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
                     <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                      <strong>{importPreview.length}</strong> grades ready to import
+                      <strong>{importPreview.length}</strong> grade entr{importPreview.length !== 1 ? 'ies' : 'y'} ready to import
                     </p>
                   </div>
-
-                  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-52 overflow-y-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
                         <tr>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">#</th>
                           <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Student</th>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Score</th>
+                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Subject</th>
+                          <th className="px-2 py-1.5 text-center font-medium text-slate-600 dark:text-slate-300">Score</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 5).map((grade, index) => {
-                          const student = students.find(s => s.id === grade.studentId);
+                        {importPreview.slice(0, 10).map((g: any, i) => {
+                          const student = allStudents.find(s => s.id === g.studentId);
+                          const subject = (subjects as any[]).find(s => s.id === g.subjectId);
                           return (
-                            <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                              <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
-                              <td className="px-2 py-1.5">{student ? `${student.firstName} ${student.lastName}` : (grade.studentId as string)?.slice(0, 8) || '-'}</td>
-                              <td className="px-2 py-1.5">{grade.score as number}/{grade.maxScore as number}</td>
+                            <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                              <td className="px-2 py-1.5">{student ? `${student.firstName} ${student.lastName}` : g.studentId?.slice(0, 8)}</td>
+                              <td className="px-2 py-1.5">{subject?.name || g.subjectId?.slice(0, 8)}</td>
+                              <td className="px-2 py-1.5 text-center font-semibold">{g.score}/{g.maxScore}</td>
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
-                    {importPreview.length > 5 && (
+                    {importPreview.length > 10 && (
                       <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">
-                        ... and {importPreview.length - 5} more
+                        ... and {importPreview.length - 10} more
                       </div>
                     )}
                   </div>
