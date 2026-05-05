@@ -1,6 +1,6 @@
 ﻿import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen } from 'lucide-react';
+import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen, Pencil } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
 import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
 interface StudentGrade extends ExamResult {
   studentName: string;
@@ -39,7 +40,10 @@ export default function Grades() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
+  // Edit grade state
+  const [editGrade, setEditGrade] = useState<{ id: string; studentName: string; subjectName: string; score: string; maxScore: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('all');
   const [filterTerm, setFilterTerm] = useState('all');
@@ -209,6 +213,10 @@ export default function Grades() {
       setBulkScores({});
       setBulkForm(p => ({ ...p, studentId: '' }));
       setShowForm(false);
+      // Keep the class expanded so user sees the updated grades immediately
+      if (bulkForm.classId) {
+        setExpandedClasses(prev => { const n = new Set(prev); n.add(bulkForm.classId); return n; });
+      }
     } catch { addToast('Failed to save grades', 'error'); }
     finally { setBulkSubmitting(false); }
   }
@@ -216,13 +224,32 @@ export default function Grades() {
   async function handleDelete(idResult: string) {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (!window.confirm('Delete this grade?')) return;
+    const ok = await confirm({ title: 'Delete Grade', description: 'Remove this grade entry?', confirmLabel: 'Delete', variant: 'danger' });
+    if (!ok) return;
     try {
       await dataService.delete(id, 'examResults', idResult);
-      addToast('Grade deleted successfully', 'success');
+      addToast('Grade deleted', 'success');
     } catch (error) {
       addToast('Failed to delete grade', 'error');
     }
+  }
+
+  async function handleEditSave() {
+    if (!editGrade) return;
+    const id = schoolId || user?.id;
+    if (!id) return;
+    const score = parseFloat(editGrade.score);
+    const maxScore = parseFloat(editGrade.maxScore);
+    if (isNaN(score) || isNaN(maxScore) || maxScore <= 0) { addToast('Enter valid score and max score', 'error'); return; }
+    const pct = Math.round((score / maxScore) * 100);
+    const gradeInfo = getGrade(pct);
+    try {
+      await dataService.update(id, 'examResults', editGrade.id, {
+        score, maxScore, grade: gradeInfo.grade, remarks: gradeInfo.remark, updatedAt: new Date().toISOString(),
+      } as any);
+      addToast('Grade updated', 'success');
+      setEditGrade(null);
+    } catch { addToast('Failed to update grade', 'error'); }
   }
 
   // Get unique students who have grades
@@ -987,9 +1014,16 @@ export default function Grades() {
                                   <div className="flex flex-col items-center gap-0.5">
                                     <span className="font-semibold text-slate-700 dark:text-slate-200">{g.score}/{g.maxScore}</span>
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${gradeColors[gi.grade] || 'bg-slate-100 text-slate-600'}`}>{gi.grade}</span>
-                                    <button onClick={() => handleDelete(g.id)} className="text-red-400 hover:text-red-600 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete">
-                                      <Trash2 size={11} />
-                                    </button>
+                                    <div className="flex items-center gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={() => setEditGrade({ id: g.id, studentName: student.studentName, subjectName: sub.name, score: String(g.score), maxScore: String(g.maxScore) })}
+                                        className="text-indigo-400 hover:text-indigo-600" title="Edit">
+                                        <Pencil size={11} />
+                                      </button>
+                                      <button onClick={() => handleDelete(g.id)} className="text-red-400 hover:text-red-600" title="Delete">
+                                        <Trash2 size={11} />
+                                      </button>
+                                    </div>
                                   </div>
                                 </td>
                               );
@@ -1204,6 +1238,55 @@ export default function Grades() {
                 <button onClick={handleCreateExamFeeInvoice} className="btn btn-primary">
                   Create Invoices
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Grade Modal */}
+      {editGrade && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setEditGrade(null); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <Pencil size={16} className="text-white" />
+                <h2 className="font-bold text-white">Edit Grade</h2>
+              </div>
+              <button onClick={() => setEditGrade(null)} className="p-1 hover:bg-white/20 rounded-lg"><X size={18} className="text-white" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 text-sm">
+                <p className="font-medium text-slate-700 dark:text-slate-200">{editGrade.studentName}</p>
+                <p className="text-slate-500 text-xs mt-0.5">{editGrade.subjectName}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label">Score *</label>
+                  <input type="number" value={editGrade.score}
+                    onChange={e => setEditGrade(p => p ? { ...p, score: e.target.value } : null)}
+                    className="form-input" min="0" autoFocus />
+                </div>
+                <div>
+                  <label className="form-label">Max Score</label>
+                  <input type="number" value={editGrade.maxScore}
+                    onChange={e => setEditGrade(p => p ? { ...p, maxScore: e.target.value } : null)}
+                    className="form-input" min="1" />
+                </div>
+              </div>
+              {editGrade.score && editGrade.maxScore && parseFloat(editGrade.maxScore) > 0 && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg flex items-center gap-3">
+                  {(() => {
+                    const pct = Math.round((parseFloat(editGrade.score) / parseFloat(editGrade.maxScore)) * 100);
+                    const gi = getGrade(pct);
+                    const cls = gi.grade.startsWith('D') ? 'bg-emerald-100 text-emerald-700' : gi.grade.startsWith('C') ? 'bg-blue-100 text-blue-700' : gi.grade.startsWith('P') ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
+                    return <><span className="text-xl font-bold text-slate-700 dark:text-slate-200">{pct}%</span><span className={`px-2 py-0.5 rounded font-bold text-sm ${cls}`}>{gi.grade}</span><span className="text-sm text-slate-500">{gi.remark}</span></>;
+                  })()}
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={() => setEditGrade(null)} className="btn btn-secondary">Cancel</button>
+                <button onClick={handleEditSave} className="btn btn-primary">Save Changes</button>
               </div>
             </div>
           </div>
