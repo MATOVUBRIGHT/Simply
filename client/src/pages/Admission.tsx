@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, User, Users, FileText, ClipboardCheck, Loader2, Save, Plus, Settings, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Check, User, Users, FileText, Loader2, Save, Plus, Settings, Sparkles, X } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Student, Gender } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -9,13 +9,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, IdFormat } from '../utils/idFormat';
-
-const steps = [
-  { id: 1, label: 'Student Info', icon: User },
-  { id: 2, label: 'Guardian', icon: Users },
-  { id: 3, label: 'Documents', icon: FileText },
-  { id: 4, label: 'Review', icon: ClipboardCheck },
-];
 
 const commonRequirements = [
   'Birth Certificate', 'Transfer Letter', 'Report Card',
@@ -27,7 +20,6 @@ export default function Admission() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
   const { addToast } = useToast();
-  const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [newRequirement, setNewRequirement] = useState('');
@@ -81,7 +73,8 @@ export default function Admission() {
     try {
       const students = await dataService.getAll(id, 'students');
       const existing = students.flatMap((s: any) => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
-      setForm(p => ({ ...p, admissionNo: generateStudentId(form.firstName || 'ST', form.lastName || 'UD', existing) }));
+      const newId = generateStudentId(form.firstName || 'ST', form.lastName || 'UD', existing);
+      setForm(p => ({ ...p, admissionNo: newId }));
     } catch {}
   }
 
@@ -107,16 +100,13 @@ export default function Admission() {
     setForm(p => ({ ...p, requirements: p.requirements.includes(req) ? p.requirements.filter(r => r !== req) : [...p.requirements, req] }));
   }
 
-  function isStepValid() {
-    if (step === 1) return !!(form.firstName.trim() && form.lastName.trim() && form.classId);
-    if (step === 2) return !!(form.guardianName.trim() && form.guardianPhone.trim());
-    return true;
-  }
-
-  function next() { if (isStepValid()) setStep(s => Math.min(s + 1, 4)); }
-  function prev() { setStep(s => Math.max(s - 1, 1)); }
-
-  async function handleSubmit() {
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.firstName.trim()) { addToast('First name is required', 'error'); return; }
+    if (!form.lastName.trim()) { addToast('Last name is required', 'error'); return; }
+    if (!form.classId) { addToast('Class is required', 'error'); return; }
+    if (!form.guardianName.trim()) { addToast('Guardian name is required', 'error'); return; }
+    if (!form.guardianPhone.trim()) { addToast('Guardian phone is required', 'error'); return; }
     const id = schoolId || user?.id;
     if (!id) return;
     setLoading(true);
@@ -151,11 +141,8 @@ export default function Admission() {
     finally { setLoading(false); }
   }
 
-  const selectedClass = classes.find(c => c.id === form.classId);
-
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Header */}
+    <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/students')} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
           <ArrowLeft size={20} />
@@ -166,44 +153,14 @@ export default function Admission() {
         </div>
       </div>
 
-      {/* Step indicator */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
-        <div className="flex items-center justify-between">
-          {steps.map((s, idx) => {
-            const Icon = s.icon;
-            const isActive = step === s.id;
-            const isDone = step > s.id;
-            return (
-              <React.Fragment key={s.id}>
-                <div className="flex flex-col items-center gap-1.5">
-                  <div className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-                    isDone ? 'bg-emerald-500 text-white' :
-                    isActive ? 'text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'
-                  }`} style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}>
-                    {isDone ? <Check size={20} /> : <Icon size={20} />}
-                  </div>
-                  <span className={`text-xs font-medium hidden sm:block ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`}>
-                    {s.label}
-                  </span>
-                </div>
-                {idx < steps.length - 1 && (
-                  <div className={`flex-1 h-1 mx-2 rounded transition-all ${step > s.id ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`} />
-                )}
-              </React.Fragment>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Step content */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-
-        {/* Step 1: Student Info */}
-        {step === 1 && (
-          <div className="p-6 space-y-5">
-            <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-              <User size={20} className="text-indigo-500" /> Student Information
-            </h2>
+      <form onSubmit={handleSubmit}>
+        <div className="card">
+          {/* Student Info */}
+          <div className="card-header flex items-center gap-2">
+            <User size={18} className="text-indigo-500" />
+            <h2 className="font-semibold text-slate-800 dark:text-white">Student Information</h2>
+          </div>
+          <div className="card-body space-y-5">
             <div className="flex flex-col sm:flex-row gap-5">
               <ImageUpload label="Photo" value={form.photoUrl}
                 onChange={(b64) => setForm(p => ({ ...p, photoUrl: b64 as string }))}
@@ -214,7 +171,7 @@ export default function Admission() {
                   <div className="flex gap-2">
                     <input type="text" name="admissionNo" value={form.admissionNo}
                       onChange={e => setForm(p => ({ ...p, admissionNo: e.target.value.toUpperCase() }))}
-                      className="form-input font-mono flex-1" placeholder={generateExampleId()} />
+                      className="form-input font-mono flex-1" placeholder={generateExampleId()} required />
                     <button type="button" onClick={regenerateId} className="btn btn-secondary" title="Generate"><Sparkles size={16} /></button>
                     <button type="button" onClick={() => setShowIdFormatModal(true)} className="btn btn-secondary" title="Format"><Settings size={16} /></button>
                   </div>
@@ -238,15 +195,15 @@ export default function Admission() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="form-label">First Name *</label>
-                <input type="text" name="firstName" value={form.firstName} onChange={handleChange} className="form-input" placeholder="First name" />
+                <input type="text" name="firstName" value={form.firstName} onChange={handleChange} className="form-input" placeholder="First name" required />
               </div>
               <div>
                 <label className="form-label">Last Name *</label>
-                <input type="text" name="lastName" value={form.lastName} onChange={handleChange} className="form-input" placeholder="Last name" />
+                <input type="text" name="lastName" value={form.lastName} onChange={handleChange} className="form-input" placeholder="Last name" required />
               </div>
               <div>
                 <label className="form-label">Class *</label>
-                <select name="classId" value={form.classId} onChange={handleChange} className="form-input">
+                <select name="classId" value={form.classId} onChange={handleChange} className="form-input" required>
                   <option value="">Select Class</option>
                   {classes.map(c => (
                     <option key={c.id} value={c.id} disabled={c.isFull}>
@@ -261,21 +218,17 @@ export default function Admission() {
               </div>
             </div>
           </div>
-        )}
 
-        {/* Step 2: Guardian */}
-        {step === 2 && (
-          <div className="p-6 space-y-5">
-            <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-              <Users size={20} className="text-violet-500" /> Guardian / Parent
-            </h2>
-            <div className="p-3 bg-violet-50 dark:bg-violet-900/20 rounded-xl border border-violet-100 dark:border-violet-800 text-sm text-violet-700 dark:text-violet-300">
-              Guardian information is required for emergency contact and communication.
-            </div>
+          {/* Guardian */}
+          <div className="border-t border-slate-200 dark:border-slate-700 px-5 pt-5 pb-1 flex items-center gap-2">
+            <Users size={18} className="text-violet-500" />
+            <h2 className="font-semibold text-slate-800 dark:text-white">Guardian / Parent</h2>
+          </div>
+          <div className="px-5 pb-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="form-label">Guardian Name *</label>
-                <input type="text" name="guardianName" value={form.guardianName} onChange={handleChange} className="form-input" placeholder="Full name" />
+                <input type="text" name="guardianName" value={form.guardianName} onChange={handleChange} className="form-input" placeholder="Full name" required />
               </div>
               <div>
                 <label className="form-label">Relationship</label>
@@ -285,7 +238,7 @@ export default function Admission() {
               </div>
               <div>
                 <label className="form-label">Phone *</label>
-                <input type="tel" name="guardianPhone" value={form.guardianPhone} onChange={handleChange} className="form-input" placeholder="Phone number" />
+                <input type="tel" name="guardianPhone" value={form.guardianPhone} onChange={handleChange} className="form-input" placeholder="Phone number" required />
               </div>
               <div>
                 <label className="form-label">Email</label>
@@ -301,14 +254,14 @@ export default function Admission() {
               </div>
             </div>
           </div>
-        )}
 
-        {/* Step 3: Documents & Fees */}
-        {step === 3 && (
-          <div className="p-6 space-y-5">
-            <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-              <FileText size={20} className="text-emerald-500" /> Documents, Fees & Previous School
-            </h2>
+          {/* Documents & Fees */}
+          <div className="border-t border-slate-200 dark:border-slate-700 px-5 pt-5 pb-1 flex items-center gap-2">
+            <FileText size={18} className="text-emerald-500" />
+            <h2 className="font-semibold text-slate-800 dark:text-white">Documents, Fees & Previous School</h2>
+          </div>
+          <div className="px-5 pb-5 space-y-5">
+            {/* Fees */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="form-label">Tuition Fee/term</label>
@@ -319,17 +272,22 @@ export default function Admission() {
                 <input type="number" name="boardingFee" value={form.boardingFee} onChange={handleChange} className="form-input" placeholder="0" min="0" />
               </div>
             </div>
+
+            {/* Document checklist */}
             <div>
               <label className="form-label">Documents Submitted</label>
               <div className="flex flex-wrap gap-3">
                 {[{ f: 'birthCertificate', l: 'Birth Certificate' }, { f: 'transferLetter', l: 'Transfer Letter' }, { f: 'passportPhotos', l: 'Passport Photos' }].map(d => (
-                  <label key={d.f} className="flex items-center gap-2 cursor-pointer p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                    <input type="checkbox" name={d.f} checked={form[d.f as keyof typeof form] as boolean} onChange={handleChange} className="w-4 h-4 rounded border-slate-300 text-indigo-600" />
+                  <label key={d.f} className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name={d.f} checked={form[d.f as keyof typeof form] as boolean} onChange={handleChange}
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600" />
                     <span className="text-sm text-slate-700 dark:text-slate-300">{d.l}</span>
                   </label>
                 ))}
               </div>
             </div>
+
+            {/* Requirements */}
             <div>
               <label className="form-label">Additional Requirements</label>
               <div className="flex flex-wrap gap-2 mb-2">
@@ -350,6 +308,8 @@ export default function Admission() {
                 <button type="button" onClick={() => { if (newRequirement.trim()) { toggleReq(newRequirement.trim()); setNewRequirement(''); } }} className="btn btn-secondary"><Plus size={16} /></button>
               </div>
             </div>
+
+            {/* Previous school */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="form-label">Previous School</label>
@@ -361,84 +321,16 @@ export default function Admission() {
               </div>
             </div>
           </div>
-        )}
 
-        {/* Step 4: Review */}
-        {step === 4 && (
-          <div className="p-6 space-y-5">
-            <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-              <ClipboardCheck size={20} className="text-indigo-500" /> Review & Confirm
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 space-y-3">
-                <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2"><User size={16} className="text-indigo-500" /> Student</h3>
-                {[
-                  { label: 'ID', value: form.admissionNo || 'Will be generated' },
-                  { label: 'Name', value: `${form.firstName} ${form.lastName}` },
-                  { label: 'Gender', value: form.gender },
-                  { label: 'DOB', value: form.dob || '—' },
-                  { label: 'Class', value: selectedClass?.name || '—' },
-                  { label: 'Address', value: form.address || '—' },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex gap-2 text-sm">
-                    <span className="text-slate-400 w-16 shrink-0">{label}</span>
-                    <span className="font-medium text-slate-700 dark:text-slate-200">{value}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 space-y-3">
-                <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2"><Users size={16} className="text-violet-500" /> Guardian</h3>
-                {[
-                  { label: 'Name', value: form.guardianName },
-                  { label: 'Relation', value: form.guardianRelation },
-                  { label: 'Phone', value: form.guardianPhone },
-                  { label: 'Email', value: form.guardianEmail || '—' },
-                  { label: 'Occupation', value: form.guardianOccupation || '—' },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex gap-2 text-sm">
-                    <span className="text-slate-400 w-20 shrink-0">{label}</span>
-                    <span className="font-medium text-slate-700 dark:text-slate-200">{value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            {(form.requirements.length > 0 || form.birthCertificate || form.transferLetter || form.passportPhotos) && (
-              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4">
-                <h3 className="font-semibold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2"><FileText size={16} className="text-emerald-500" /> Documents</h3>
-                <div className="flex flex-wrap gap-2">
-                  {form.birthCertificate && <span className="badge badge-success">Birth Certificate</span>}
-                  {form.transferLetter && <span className="badge badge-success">Transfer Letter</span>}
-                  {form.passportPhotos && <span className="badge badge-success">Passport Photos</span>}
-                  {form.requirements.map(r => <span key={r} className="badge badge-info">{r}</span>)}
-                </div>
-              </div>
-            )}
-            <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-4 border border-indigo-100 dark:border-indigo-800 flex items-center gap-3">
-              <Check size={20} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <p className="text-sm text-indigo-700 dark:text-indigo-300">Ready to admit. Click <strong>Complete Admission</strong> to register this student.</p>
-            </div>
-          </div>
-        )}
-
-        {/* Navigation footer */}
-        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
-          <button onClick={prev} disabled={step === 1}
-            className={`btn ${step === 1 ? 'btn-ghost opacity-40 cursor-not-allowed' : 'btn-secondary'} flex items-center gap-2`}>
-            <ArrowLeft size={16} /> Previous
-          </button>
-          {step < 4 ? (
-            <button onClick={next} disabled={!isStepValid()}
-              className="btn btn-primary flex items-center gap-2 disabled:opacity-50">
-              Next <ArrowRight size={16} />
-            </button>
-          ) : (
-            <button onClick={handleSubmit} disabled={loading}
-              className="btn btn-primary px-8 flex items-center gap-2 disabled:opacity-60">
+          {/* Submit */}
+          <div className="border-t border-slate-200 dark:border-slate-700 px-5 py-4 flex items-center justify-end gap-3 bg-slate-50 dark:bg-slate-800/50 rounded-b-xl">
+            <button type="button" onClick={() => navigate('/students')} className="btn btn-secondary">Cancel</button>
+            <button type="submit" disabled={loading} className="btn btn-primary px-8 disabled:opacity-60">
               {loading ? <><Loader2 size={16} className="animate-spin" /> Processing...</> : <><Save size={16} /> Complete Admission</>}
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      </form>
 
       {/* ID Format Modal */}
       {showIdFormatModal && (
