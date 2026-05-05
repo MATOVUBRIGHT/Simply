@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
-import { dataService } from '../lib/database/SupabaseDataService';
+import { dataService, cacheReady } from '../lib/database/SupabaseDataService';
 import { usersApi } from '../services/apiService';
 import { syncService } from '../services/sync';
 import { generateUUID } from '../utils/uuid';
@@ -94,7 +94,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
 
     // Bootstrap runs in background — store already seeded from main.tsx
-    void dataService.bootstrapSession(userData.id, userData.schoolId).catch(() => {});
+    cacheReady.then(() => {
+      void dataService.bootstrapSession(userData.id, userData.schoolId).catch(() => {});
+    });
     prefetchCriticalTables(userData.schoolId || userData.id);
 
     // Apply persisted settings immediately

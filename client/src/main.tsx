@@ -46,15 +46,15 @@ window.addEventListener('online', () => {
 
 // ── Bootstrap cache into store BEFORE React renders ──────────────────────────
 // This runs synchronously at module load time — zero delay
-import('./lib/database/SupabaseDataService').then(({ dataService }) => {
+import('./lib/database/SupabaseDataService').then(({ dataService, cacheReady }) => {
   const session = localStorage.getItem('schofy_session');
   if (session) {
     try {
       const user = JSON.parse(session);
       const sid = user.schoolId || user.id;
       if (sid) {
-        // Push all cached data into store synchronously — pages render with data instantly
-        void dataService.bootstrapSession(user.id, sid);
+        // Push all cached data into store immediately after IndexedDB loads
+        cacheReady.then(() => dataService.bootstrapSession(user.id, sid));
       }
     } catch { /* ignore */ }
   }

@@ -241,16 +241,59 @@ const PERSIST_KEY = 'schofy_data_cache';
 interface CacheEntry { data: any[]; ts: number; }
 const memCache = new Map<string, CacheEntry>();
 
-// Load persisted cache on startup
-try {
-  const saved = localStorage.getItem(PERSIST_KEY);
-  if (saved) {
-    const parsed: Record<string, CacheEntry> = JSON.parse(saved);
-    for (const [k, v] of Object.entries(parsed)) memCache.set(k, v);
-  }
-} catch { /* ignore */ }
+let resolveCacheReady: () => void;
+export const cacheReady = new Promise<void>(res => { resolveCacheReady = res; });
 
-// Debounced persist — write to localStorage at most once per 2 seconds
+function getCacheDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('SchofyCacheDB', 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore('store');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function loadCache() {
+  try {
+    const db = await getCacheDB();
+    const tx = db.transaction('store', 'readonly');
+    const req = tx.objectStore('store').get(PERSIST_KEY);
+    req.onsuccess = () => {
+      let parsed = req.result;
+      if (!parsed) {
+        // Migrate from localStorage
+        const saved = localStorage.getItem(PERSIST_KEY);
+        if (saved) {
+          try { parsed = JSON.parse(saved); } catch {}
+          localStorage.removeItem(PERSIST_KEY);
+        }
+      }
+      if (parsed) {
+        for (const [k, v] of Object.entries(parsed)) {
+          memCache.set(k, v as CacheEntry);
+        }
+      }
+      resolveCacheReady();
+    };
+    req.onerror = () => resolveCacheReady();
+  } catch (e) {
+    // Fallback
+    try {
+      const saved = localStorage.getItem(PERSIST_KEY);
+      if (saved) {
+        const parsed: Record<string, CacheEntry> = JSON.parse(saved);
+        for (const [k, v] of Object.entries(parsed)) memCache.set(k, v);
+      }
+    } catch {}
+    resolveCacheReady();
+  }
+}
+
+void loadCache();
+
+// Debounced persist — write to IndexedDB at most once per 2 seconds
 let _persistTimer: ReturnType<typeof setTimeout> | null = null;
 function persistCache() {
   if (_persistTimer) return;
@@ -264,8 +307,14 @@ function _flushCache() {
   try {
     const obj: Record<string, CacheEntry> = {};
     for (const [k, v] of memCache) obj[k] = v;
-    localStorage.setItem(PERSIST_KEY, JSON.stringify(obj));
-  } catch { /* storage full */ }
+    
+    getCacheDB().then(db => {
+      const tx = db.transaction('store', 'readwrite');
+      tx.objectStore('store').put(obj, PERSIST_KEY);
+    }).catch(() => {
+      try { localStorage.setItem(PERSIST_KEY, JSON.stringify(obj)); } catch {}
+    });
+  } catch { /* error building obj */ }
 }
 
 // Flush cache immediately on page unload so offline data is always saved

@@ -52,7 +52,24 @@ self.addEventListener('fetch', event => {
   // Skip non-GET requests entirely
   if (req.method !== 'GET') return;
 
-  // Skip Supabase API — app handles data caching in localStorage/IndexedDB
+  // Cache Supabase storage public images (avatars, logos, etc.)
+  if (url.hostname.includes('supabase.co') && url.pathname.includes('/storage/v1/object/public/')) {
+    event.respondWith(
+      caches.match(req).then(cached => {
+        const networkFetch = fetch(req).then(res => {
+          if (res.ok && res.status === 200 && res.type !== 'opaque') {
+            const clone = res.clone();
+            caches.open(ASSET_CACHE).then(c => c.put(req, clone)).catch(() => {});
+          }
+          return res;
+        }).catch(() => cached);
+        return cached || networkFetch;
+      })
+    );
+    return;
+  }
+
+  // Skip Supabase API (database, auth, realtime) — app handles data caching in IndexedDB
   if (url.hostname.includes('supabase.co')) return;
 
   // Skip chrome-extension and other non-http(s) protocols
