@@ -56,8 +56,7 @@ export default defineConfig(({ mode }) => ({
           if (id.includes('recharts') || id.includes('d3-') || id.includes('victory')) return 'vendor-charts';
           if (id.includes('@supabase')) return 'vendor-supabase';
           if (id.includes('react-router')) return 'vendor-router';
-          if (id.includes('react-dom')) return 'vendor-react-dom';
-          if (id.includes('react') && !id.includes('react-dom') && !id.includes('react-router')) return 'vendor-react';
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/scheduler/')) return 'vendor-react';
           if (id.includes('@tanstack')) return 'vendor-query';
           if (id.includes('dexie')) return 'vendor-dexie';
           return 'vendor-misc';
