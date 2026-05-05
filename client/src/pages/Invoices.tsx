@@ -83,8 +83,6 @@ export default function Invoices() {
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [showBursaryModal, setShowBursaryModal] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
-  const [bursaries, setBursaries] = useState<Bursary[]>([]);
-  const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [newBursary, setNewBursary] = useState({ studentId: '', amount: 0 });
   const [newDiscount, setNewDiscount] = useState({ classId: '', amount: 0, type: 'fixed' as 'fixed' | 'percentage' });
   const [searchStudent, setSearchStudent] = useState('');
@@ -98,8 +96,13 @@ export default function Invoices() {
   const sid = schoolId || user?.id || '';
   const { data: feesData, refresh: refreshFees } = useTableData(sid, 'fees');
   const { data: paymentsData, refresh: refreshPayments } = useTableData(sid, 'payments');
+  const { data: bursariesData } = useTableData(sid, 'bursaries');
+  const { data: discountsData } = useTableData(sid, 'discounts');
+
   const fees = feesData as any[];
   const payments = paymentsData as any[];
+  const bursaries = bursariesData as any[];
+  const discounts = discountsData as any[];
 
   function refreshInvoices() {
     refreshFees();
@@ -222,18 +225,7 @@ export default function Invoices() {
   }, [selectedClassId, selectedTerm, selectedYear, user]);
 
   async function loadBursariesAndDiscounts() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const [bursaryData, discountData] = await Promise.all([
-        dataService.getAll(id, 'bursaries'),
-        dataService.getAll(id, 'discounts'),
-      ]);
-      setBursaries(bursaryData);
-      setDiscounts(discountData);
-    } catch (error) {
-      console.error('Failed to load bursaries and discounts:', error);
-    }
+    // Now using store — no-op kept for compatibility
   }
 
   async function loadTermSettings() {
@@ -440,10 +432,8 @@ export default function Invoices() {
         return;
       }
 
-      const [allBursaries, allDiscounts] = await Promise.all([
-        dataService.getAll(id, 'bursaries'),
-        dataService.getAll(id, 'discounts'),
-      ]);
+      const allBursaries = bursaries;
+      const allDiscounts = discounts;
       const bursary = allBursaries.find((b: any) => b.studentId === studentId && b.term === selectedTerm && b.year === selectedYear);
       const discount = allDiscounts.find((d: any) => d.classId === classId && d.term === selectedTerm && d.year === selectedYear);
       const applicable = structures.filter(s => s.isRequired || s.category === 'tuition' || s.category === 'boarding');
@@ -1811,7 +1801,6 @@ export default function Invoices() {
                       createdAt: new Date().toISOString(),
                     };
                     await dataService.create(user!.id, 'bursaries', bursary as any);
-                    setBursaries([...bursaries, bursary]);
                     setNewBursary({ studentId: '', amount: 0 });
                     addToast('Bursary added successfully', 'success');
                   }}
@@ -1842,7 +1831,6 @@ export default function Invoices() {
                         <button
                           onClick={async () => {
                             await dataService.delete(user!.id, 'bursaries', b.id);
-                            setBursaries(bursaries.filter(br => br.id !== b.id));
                             addToast('Bursary removed', 'success');
                           }}
                           className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
@@ -1939,7 +1927,6 @@ export default function Invoices() {
                       createdAt: new Date().toISOString(),
                     };
                     await dataService.create(user!.id, 'discounts', discount as any);
-                    setDiscounts([...discounts, discount]);
                     setNewDiscount({ classId: '', amount: 0, type: 'fixed' });
                     addToast('Discount added successfully', 'success');
                   }}

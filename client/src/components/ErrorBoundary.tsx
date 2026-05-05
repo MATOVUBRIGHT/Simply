@@ -1,8 +1,11 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  /** If true, shows a compact inline error instead of full-screen */
+  inline?: boolean;
 }
 
 interface State {
@@ -11,61 +14,74 @@ interface State {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  public state: State = {
-    hasError: false,
-    error: null,
-  };
+  public state: State = { hasError: false, error: null };
 
   public static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    // Silent in production — no raw crash dumps to console
+    if (import.meta.env.DEV) {
+      console.error('[ErrorBoundary]', error.message, errorInfo.componentStack?.slice(0, 300));
+    }
   }
 
-  public render() {
-    if (this.state.hasError) {
-      if (this.props.fallback) {
-        return this.props.fallback;
-      }
+  private reset = () => this.setState({ hasError: false, error: null });
 
+  public render() {
+    if (!this.state.hasError) return this.props.children;
+
+    if (this.props.fallback) return this.props.fallback;
+
+    // Inline compact error (for page-level boundaries)
+    if (this.props.inline) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
-          <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6 border border-slate-200 dark:border-slate-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                <svg className="w-5 h-5 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-slate-800 dark:text-white">Something went wrong</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">The app encountered an error</p>
-              </div>
-            </div>
-            {this.state.error && (
-              <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 mb-4">
-                <p className="text-xs text-slate-600 dark:text-slate-300 font-mono break-all">
-                  {this.state.error.message}
-                </p>
-              </div>
-            )}
-            <button
-              onClick={() => {
-                this.setState({ hasError: false, error: null });
-                window.location.reload();
-              }}
-              className="w-full px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium transition-colors"
-            >
-              Reload App
-            </button>
+        <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+          <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-3">
+            <AlertTriangle size={22} className="text-red-500" />
           </div>
+          <p className="text-slate-700 dark:text-slate-200 font-medium mb-1">Something went wrong</p>
+          <p className="text-sm text-slate-400 mb-4">
+            {import.meta.env.DEV ? this.state.error?.message : 'An unexpected error occurred'}
+          </p>
+          <button onClick={this.reset} className="btn btn-secondary flex items-center gap-2 text-sm">
+            <RefreshCw size={14} /> Try again
+          </button>
         </div>
       );
     }
 
-    return this.props.children;
+    // Full-screen error (app-level boundary)
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
+        <div className="max-w-sm w-full bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6 border border-slate-200 dark:border-slate-700 text-center">
+          <div className="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle size={26} className="text-red-500" />
+          </div>
+          <h2 className="text-lg font-bold text-slate-800 dark:text-white mb-1">Something went wrong</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+            {import.meta.env.DEV
+              ? this.state.error?.message
+              : 'The app ran into a problem. Reload to continue.'}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { this.reset(); window.location.href = '/'; }}
+              className="flex-1 btn btn-secondary flex items-center justify-center gap-2 text-sm"
+            >
+              <Home size={14} /> Home
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="flex-1 btn btn-primary flex items-center justify-center gap-2 text-sm"
+            >
+              <RefreshCw size={14} /> Reload
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 }
 

@@ -83,8 +83,8 @@ function MainApp() {
     }
   }, [location.pathname, location.search, location.hash]);
 
-  if (loading) {
-    return <FullScreenLoader label="Loading..." />;
+  if (!user && !localStorage.getItem('schofy_session')) {
+    return <Navigate to="/login" replace />;
   }
 
   return (
@@ -92,36 +92,36 @@ function MainApp() {
       <StudentsProvider>
         <RealtimeSyncProvider>
           <Layout>
-            <Suspense fallback={<FullScreenLoader />}>
+            <Suspense fallback={null}>
               <div className="page-shell page-shell-enter">
                 <Routes location={location}>
-                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/" element={<ErrorBoundary inline><Dashboard /></ErrorBoundary>} />
                   <Route path="/dashboard" element={<Navigate to="/" replace />} />
-                  <Route path="/students" element={<Students />} />
-                  <Route path="/students/new" element={<StudentForm />} />
-                  <Route path="/admission" element={<Admission />} />
-                  <Route path="/students/:id" element={<StudentProfile />} />
-                  <Route path="/students/:id/edit" element={<StudentForm />} />
-                  <Route path="/staff" element={<Staff />} />
-                  <Route path="/staff/new" element={<StaffForm />} />
-                  <Route path="/staff/:id/edit" element={<StaffForm />} />
-                  <Route path="/payroll" element={<Payroll />} />
-                  <Route path="/classes" element={<Classes />} />
-                  <Route path="/subjects" element={<Subjects />} />
-                  <Route path="/attendance" element={<Attendance />} />
-                  <Route path="/finance" element={<Finance />} />
-                  <Route path="/invoices" element={<Invoices />} />
-                  <Route path="/grades" element={<Grades />} />
-                  <Route path="/exam-marks" element={<ExamMarks />} />
-                  <Route path="/report-card/:id" element={<ReportCard />} />
-                  <Route path="/transport" element={<Transport />} />
-                  <Route path="/announcements" element={<Announcements />} />
-                  <Route path="/notifications" element={<Notifications />} />
-                  <Route path="/settings" element={<Settings />} />
-                  <Route path="/plans" element={<Plans />} />
-                  <Route path="/recycle-bin" element={<RecycleBin />} />
-                  <Route path="/reports" element={<Reports />} />
-                  <Route path="/about" element={<About />} />
+                  <Route path="/students" element={<ErrorBoundary inline><Students /></ErrorBoundary>} />
+                  <Route path="/students/new" element={<ErrorBoundary inline><StudentForm /></ErrorBoundary>} />
+                  <Route path="/admission" element={<ErrorBoundary inline><Admission /></ErrorBoundary>} />
+                  <Route path="/students/:id" element={<ErrorBoundary inline><StudentProfile /></ErrorBoundary>} />
+                  <Route path="/students/:id/edit" element={<ErrorBoundary inline><StudentForm /></ErrorBoundary>} />
+                  <Route path="/staff" element={<ErrorBoundary inline><Staff /></ErrorBoundary>} />
+                  <Route path="/staff/new" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
+                  <Route path="/staff/:id/edit" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
+                  <Route path="/payroll" element={<ErrorBoundary inline><Payroll /></ErrorBoundary>} />
+                  <Route path="/classes" element={<ErrorBoundary inline><Classes /></ErrorBoundary>} />
+                  <Route path="/subjects" element={<ErrorBoundary inline><Subjects /></ErrorBoundary>} />
+                  <Route path="/attendance" element={<ErrorBoundary inline><Attendance /></ErrorBoundary>} />
+                  <Route path="/finance" element={<ErrorBoundary inline><Finance /></ErrorBoundary>} />
+                  <Route path="/invoices" element={<ErrorBoundary inline><Invoices /></ErrorBoundary>} />
+                  <Route path="/grades" element={<ErrorBoundary inline><Grades /></ErrorBoundary>} />
+                  <Route path="/exam-marks" element={<ErrorBoundary inline><ExamMarks /></ErrorBoundary>} />
+                  <Route path="/report-card/:id" element={<ErrorBoundary inline><ReportCard /></ErrorBoundary>} />
+                  <Route path="/transport" element={<ErrorBoundary inline><Transport /></ErrorBoundary>} />
+                  <Route path="/announcements" element={<ErrorBoundary inline><Announcements /></ErrorBoundary>} />
+                  <Route path="/notifications" element={<ErrorBoundary inline><Notifications /></ErrorBoundary>} />
+                  <Route path="/settings" element={<ErrorBoundary inline><Settings /></ErrorBoundary>} />
+                  <Route path="/plans" element={<ErrorBoundary inline><Plans /></ErrorBoundary>} />
+                  <Route path="/recycle-bin" element={<ErrorBoundary inline><RecycleBin /></ErrorBoundary>} />
+                  <Route path="/reports" element={<ErrorBoundary inline><Reports /></ErrorBoundary>} />
+                  <Route path="/about" element={<ErrorBoundary inline><About /></ErrorBoundary>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </div>
@@ -135,12 +135,11 @@ function MainApp() {
 
 function App() {
   const { user, loading } = useAuth();
+  const hasSession = !!localStorage.getItem('schofy_session');
 
-  if (loading) {
-    return <FullScreenLoader label="Loading Schofy..." />;
-  }
-
-  if (!user) {
+  // No session at all — show login
+  if (!hasSession && !user) {
+    if (loading) return <FullScreenLoader label="Loading Schofy..." />;
     return (
       <Suspense fallback={<FullScreenLoader />}>
         <Routes>
@@ -151,10 +150,11 @@ function App() {
     );
   }
 
+  // Has session or user — render app (user may still be null for <100ms, MainApp handles it)
   return (
     <Suspense fallback={<FullScreenLoader />}>
       <Routes>
-        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/subscribe" element={<Subscription />} />
         <Route path="/*" element={<MainApp />} />
       </Routes>

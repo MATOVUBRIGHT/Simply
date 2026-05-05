@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Download, ArrowLeft, GraduationCap, Search, Check } from 'lucide-react';
+import { FileText, Download, ArrowLeft, GraduationCap, Search, Check, Maximize2, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useStudents } from '../contexts/StudentsContext';
@@ -31,6 +31,9 @@ function ordSuffix(n: number) {
   return s[(v - 20) % 10] || s[v] || s[0];
 }
 
+// Threshold: if more than this many columns, show "View Full" button
+const COMPACT_COL_LIMIT = 8;
+
 export default function ExamMarks() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
@@ -48,6 +51,7 @@ export default function ExamMarks() {
   const [searchStudent, setSearchStudent] = useState('');
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [fullViewClassId, setFullViewClassId] = useState<string | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const sortedClasses = useMemo(() =>
@@ -55,7 +59,6 @@ export default function ExamMarks() {
     [classes]
   );
 
-  // Exams matching active filters (for the Exam dropdown)
   const availableExams = useMemo(() => {
     return (exams as any[]).filter(e => {
       if (filterTerm && String(e.term) !== filterTerm) return false;
@@ -71,18 +74,14 @@ export default function ExamMarks() {
     });
   }, [exams, filterTerm, filterClass, allStudents, examResults]);
 
-  // The set of exam IDs to show (respects filterExam)
   const activeExamIds = useMemo(() => {
     const base = availableExams.map((e: any) => e.id);
     if (filterExam) return base.includes(filterExam) ? [filterExam] : [];
     return base;
   }, [availableExams, filterExam]);
 
-  // One group per class — all matching exams combined
   const classGroups = useMemo(() => {
     const activeSet = new Set(activeExamIds);
-
-    // Which classes have results for active exams?
     const classIdsWithResults = new Set<string>();
     for (const r of examResults as any[]) {
       if (!activeSet.has(r.examId)) continue;
@@ -102,7 +101,6 @@ export default function ExamMarks() {
       const cls = (classes as any[]).find(c => c.id === classId);
       const className = cls?.name || classId;
 
-      // Students in this class with results in active exams
       const studentIdsWithResults = new Set(
         (examResults as any[])
           .filter(r => activeSet.has(r.examId))
@@ -124,7 +122,6 @@ export default function ExamMarks() {
 
       if (classStudents.length === 0) return null;
 
-      // Exams that have results for this class
       const classExams = (exams as any[]).filter(e => {
         if (!activeSet.has(e.id)) return false;
         return (examResults as any[]).some(r => r.examId === e.id && studentIdsWithResults.has(r.studentId));
@@ -136,7 +133,6 @@ export default function ExamMarks() {
 
       if (classExams.length === 0) return null;
 
-      // Subjects for this class
       const classSubjects = (subjects as any[]).filter(s => s.classId === classId);
       const subjectIdsInResults = new Set(
         (examResults as any[])
@@ -153,11 +149,9 @@ export default function ExamMarks() {
       )].map(name => ({ id: `name:${name}`, name, code: '' }));
       const allSubjects = [...classSubjects, ...extraSubs, ...nameOnlySubs];
 
-      // Build matrix: one row per student
       const matrix = classStudents.map(student => {
         const row: any = { student, examTotals: {}, examAvgs: {}, examGrades: {} };
         let grandTotal = 0; let grandCount = 0;
-
         for (const exam of classExams) {
           const resultsForExam = (examResults as any[]).filter(r => r.examId === exam.id && r.studentId === student.id);
           let examTotal = 0; let examCount = 0;
@@ -173,7 +167,6 @@ export default function ExamMarks() {
           row.examAvgs[exam.id] = examCount > 0 ? Math.round(examTotal / examCount) : null;
           row.examGrades[exam.id] = examCount > 0 ? getGrade(Math.round(examTotal / examCount)) : '-';
         }
-
         row.grandTotal = grandCount > 0 ? grandTotal : null;
         row.grandAvg = grandCount > 0 ? Math.round(grandTotal / grandCount) : null;
         row.grade = row.grandAvg !== null ? getGrade(row.grandAvg) : '-';
@@ -182,10 +175,13 @@ export default function ExamMarks() {
 
       matrix.forEach((row, i) => { row.position = i + 1; });
 
-      return { classId, className, classExams, allSubjects, matrix };
+      // Pick the most recent exam for the Report button
+      const latestExam = classExams[classExams.length - 1];
+
+      return { classId, className, classExams, allSubjects, matrix, latestExam };
     }).filter(Boolean) as {
       classId: string; className: string;
-      classExams: any[]; allSubjects: any[]; matrix: any[];
+      classExams: any[]; allSubjects: any[]; matrix: any[]; latestExam: any;
     }[];
   }, [activeExamIds, examResults, allStudents, subjects, classes, exams, filterClass, searchStudent]);
 
@@ -205,7 +201,6 @@ export default function ExamMarks() {
   function toggleStudent(id: string) {
     setSelectedStudents(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
-
   function selectAll() {
     if (selectedStudents.size === allDisplayedStudents.length) setSelectedStudents(new Set());
     else setSelectedStudents(new Set(allDisplayedStudents.map(s => s.id)));
@@ -214,26 +209,18 @@ export default function ExamMarks() {
   function getExportData() {
     const rows: any[] = [];
     for (const g of classGroups) {
-      const toExport = selectedStudents.size > 0
-        ? g.matrix.filter(r => selectedStudents.has(r.student.id))
-        : g.matrix;
+      const toExport = selectedStudents.size > 0 ? g.matrix.filter(r => selectedStudents.has(r.student.id)) : g.matrix;
       for (const row of toExport) {
-        const base: any = {
-          Name: `${row.student.firstName} ${row.student.lastName}`,
-          ID: row.student.studentId || row.student.admissionNo,
-          Class: g.className,
-        };
+        const base: any = { Name: `${row.student.firstName} ${row.student.lastName}`, ID: row.student.studentId || row.student.admissionNo, Class: g.className };
         for (const exam of g.classExams) {
-          for (const sub of g.allSubjects) {
-            base[`${exam.name} - ${sub.name}`] = row[`${exam.id}::${sub.id}`] ?? '';
-          }
+          for (const sub of g.allSubjects) base[`${exam.name} - ${sub.name}`] = row[`${exam.id}::${sub.id}`] ?? '';
           base[`${exam.name} Total`] = row.examTotals[exam.id] ?? '';
           base[`${exam.name} Avg%`] = row.examAvgs[exam.id] ?? '';
         }
         base['Grand Total'] = row.grandTotal ?? '';
         base['Overall Avg%'] = row.grandAvg ?? '';
         base['Grade'] = row.grade;
-        base['Position'] = row.position ? `${row.position}${ordSuffix(row.position)}` : '';
+        base['Position'] = row.position ? `${row.position}${ordSuffix(row.position)} / ${g.matrix.length}` : '';
         rows.push(base);
       }
     }
@@ -241,22 +228,156 @@ export default function ExamMarks() {
   }
 
   function handleExportCSV() {
-    const data = getExportData();
-    if (!data.length) return;
+    const data = getExportData(); if (!data.length) return;
     const keys = Object.keys(data[0]);
     const csv = [keys.join(','), ...data.map(r => keys.map(k => `"${r[k] ?? ''}"`).join(','))].join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = 'exam-marks.csv'; a.click();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'exam-marks.csv'; a.click();
     setShowExportMenu(false);
   }
-
   function handleExportExcel() {
-    const data = getExportData();
-    if (!data.length) return;
+    const data = getExportData(); if (!data.length) return;
     const keys = Object.keys(data[0]);
     exportToExcel(data, 'exam-marks', keys.map(k => ({ key: k as any, label: k })));
     setShowExportMenu(false);
+  }
+
+  const fullViewGroup = fullViewClassId ? classGroups.find(g => g.classId === fullViewClassId) : null;
+
+  // Reusable table renderer
+  function renderTable(group: typeof classGroups[0], compact = false) {
+    const { classExams, allSubjects, matrix, latestExam } = group;
+    const visibleMatrix = selectedStudents.size > 0 && !compact
+      ? matrix.filter(r => selectedStudents.has(r.student.id))
+      : matrix;
+    if (visibleMatrix.length === 0) return null;
+
+    const fixedCols = compact ? 2 : 3; // checkbox(optional) + # + Student
+
+    return (
+      <div>
+        {/* ── Scrollable per-exam scores ── */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse"
+            style={{ minWidth: `${Math.max(400, (classExams.length * (allSubjects.length + 3) + fixedCols) * 52)}px` }}>
+            <thead>
+              <tr className="bg-teal-800 text-white">
+                {!compact && <th className="px-2 py-2 print:hidden" rowSpan={2} />}
+                <th className="px-3 py-2 text-left font-semibold" rowSpan={2}>#</th>
+                <th className="px-3 py-2 text-left font-semibold whitespace-nowrap" rowSpan={2}>Student</th>
+                {classExams.map(exam => (
+                  <th key={exam.id} colSpan={allSubjects.length + 3}
+                    className="px-3 py-1.5 text-center font-semibold border-l border-teal-600 text-xs whitespace-nowrap">
+                    {exam.name} · T{exam.term} {exam.year}
+                  </th>
+                ))}
+              </tr>
+              <tr className="bg-teal-700 text-white">
+                {classExams.map(exam => (
+                  <>
+                    {allSubjects.map((sub: any) => (
+                      <th key={`${exam.id}-${sub.id}`}
+                        className="px-2 py-1.5 text-center font-medium text-[11px] whitespace-nowrap border-l border-teal-600 min-w-[44px]">
+                        {sub.name}
+                        {sub.code && <div className="font-normal text-[9px] opacity-70">{sub.code}</div>}
+                      </th>
+                    ))}
+                    <th className="px-2 py-1.5 text-center font-semibold text-xs border-l border-teal-500 bg-teal-600">Tot</th>
+                    <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-600">Avg%</th>
+                    <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-600">Grd</th>
+                  </>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleMatrix.map((row, i) => (
+                <tr key={row.student.id}
+                  className={`${i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50 dark:bg-slate-800/50'} ${!compact && selectedStudents.has(row.student.id) ? 'ring-1 ring-inset ring-indigo-400' : ''}`}>
+                  {!compact && (
+                    <td className="px-2 py-2 text-center print:hidden">
+                      <div className={`w-4 h-4 rounded border-2 mx-auto flex items-center justify-center cursor-pointer ${selectedStudents.has(row.student.id) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}
+                        onClick={() => toggleStudent(row.student.id)}>
+                        {selectedStudents.has(row.student.id) && <Check size={10} className="text-white" />}
+                      </div>
+                    </td>
+                  )}
+                  <td className="px-3 py-2 text-slate-400 text-xs">{i + 1}</td>
+                  <td className="px-3 py-2 font-medium text-slate-800 dark:text-white whitespace-nowrap">
+                    {row.student.firstName} {row.student.lastName}
+                  </td>
+                  {classExams.map((exam: any) => (
+                    <>
+                      {allSubjects.map((sub: any) => {
+                        const score = row[`${exam.id}::${sub.id}`];
+                        return (
+                          <td key={`${exam.id}-${sub.id}`} className="px-2 py-2 text-center border-l border-slate-100 dark:border-slate-700">
+                            {score !== null && score !== undefined
+                              ? <span className="font-medium">{score}</span>
+                              : <span className="text-slate-300">—</span>}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-2 text-center font-semibold border-l border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 text-xs">{row.examTotals[exam.id] ?? '—'}</td>
+                      <td className="px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30">{row.examAvgs[exam.id] != null ? `${row.examAvgs[exam.id]}%` : '—'}</td>
+                      <td className={`px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30 ${gradeColor(row.examGrades[exam.id] ?? '-')}`}>{row.examGrades[exam.id] ?? '—'}</td>
+                    </>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ── Overall summary — fixed below, no horizontal scroll ── */}
+        <div className="border-t-2 border-teal-700 dark:border-teal-600">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="bg-teal-900 text-white">
+                {!compact && <th className="px-2 py-2 print:hidden w-8" />}
+                <th className="px-3 py-2 text-left font-semibold w-8">#</th>
+                <th className="px-3 py-2 text-left font-semibold">Student</th>
+                <th className="px-3 py-2 text-center font-semibold">Total</th>
+                <th className="px-3 py-2 text-center font-semibold">Avg %</th>
+                <th className="px-3 py-2 text-center font-semibold">Grade</th>
+                <th className="px-3 py-2 text-center font-semibold">Position</th>
+                <th className="px-3 py-2 text-center font-semibold print:hidden">Report</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleMatrix.map((row, i) => (
+                <tr key={`overall-${row.student.id}`}
+                  className={`${i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/60' : 'bg-white dark:bg-slate-800'} ${!compact && selectedStudents.has(row.student.id) ? 'ring-1 ring-inset ring-indigo-400' : ''}`}>
+                  {!compact && <td className="px-2 py-2 print:hidden" />}
+                  <td className="px-3 py-2 text-slate-400 text-xs">{i + 1}</td>
+                  <td className="px-3 py-2 font-medium text-slate-800 dark:text-white whitespace-nowrap">
+                    {row.student.firstName} {row.student.lastName}
+                  </td>
+                  <td className="px-3 py-2 text-center font-bold text-teal-700 dark:text-teal-300">
+                    {row.grandTotal ?? '—'}
+                  </td>
+                  <td className="px-3 py-2 text-center font-bold text-teal-700 dark:text-teal-300">
+                    {row.grandAvg != null ? `${row.grandAvg}%` : '—'}
+                  </td>
+                  <td className={`px-3 py-2 text-center font-bold ${gradeColor(row.grade)}`}>
+                    {row.grade}
+                  </td>
+                  <td className="px-3 py-2 text-center text-xs font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                    {row.position ? `${row.position}${ordSuffix(row.position)} / ${matrix.length}` : '—'}
+                  </td>
+                  <td className="px-3 py-2 text-center print:hidden">
+                    <button
+                      onClick={() => navigate(`/report-card/${row.student.id}${latestExam ? `?exam=${latestExam.id}` : ''}`)}
+                      className="text-xs px-2 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg inline-flex items-center gap-1 whitespace-nowrap"
+                    >
+                      <FileText size={11} /> Report
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -277,15 +398,9 @@ export default function ExamMarks() {
             </button>
             {showExportMenu && (
               <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden">
-                <button onClick={handleExportCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
-                  <FileText size={14} /> Export CSV
-                </button>
-                <button onClick={handleExportExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
-                  <FileText size={14} /> Export Excel
-                </button>
-                <button onClick={() => { window.print(); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
-                  <Download size={14} /> Print / PDF
-                </button>
+                <button onClick={handleExportCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><FileText size={14} /> Export CSV</button>
+                <button onClick={handleExportExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><FileText size={14} /> Export Excel</button>
+                <button onClick={() => { window.print(); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><Download size={14} /> Print / PDF</button>
               </div>
             )}
           </div>
@@ -314,17 +429,14 @@ export default function ExamMarks() {
           <label className="form-label">Exam</label>
           <select value={filterExam} onChange={e => setFilterExam(e.target.value)} className="form-input">
             <option value="">All Exams</option>
-            {availableExams.map((e: any) => (
-              <option key={e.id} value={e.id}>{e.name} · T{e.term} {e.year}</option>
-            ))}
+            {availableExams.map((e: any) => <option key={e.id} value={e.id}>{e.name} · T{e.term} {e.year}</option>)}
           </select>
         </div>
         <div>
           <label className="form-label">Search Student</label>
           <div className="relative">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input value={searchStudent} onChange={e => setSearchStudent(e.target.value)}
-              placeholder="Name or ID..." className="form-input pl-8" />
+            <input value={searchStudent} onChange={e => setSearchStudent(e.target.value)} placeholder="Name or ID..." className="form-input pl-8" />
           </div>
         </div>
       </div>
@@ -338,9 +450,7 @@ export default function ExamMarks() {
             </div>
             {selectedStudents.size > 0 ? `${selectedStudents.size} selected` : 'Select all'}
           </button>
-          {selectedStudents.size > 0 && (
-            <button onClick={() => setSelectedStudents(new Set())} className="text-xs text-slate-400 hover:text-slate-600">Clear</button>
-          )}
+          {selectedStudents.size > 0 && <button onClick={() => setSelectedStudents(new Set())} className="text-xs text-slate-400 hover:text-slate-600">Clear</button>}
         </div>
       )}
 
@@ -356,139 +466,50 @@ export default function ExamMarks() {
           <GraduationCap size={40} className="mx-auto text-slate-300 mb-3" />
           <p className="text-slate-500 font-medium">No results match the current filters</p>
         </div>
-      ) : (
-        /* One card per class */
-        classGroups.map(group => {
-          const { classId, className, classExams, allSubjects, matrix } = group;
-          const visibleMatrix = selectedStudents.size > 0
-            ? matrix.filter(r => selectedStudents.has(r.student.id))
-            : matrix;
-          if (visibleMatrix.length === 0) return null;
+      ) : classGroups.map(group => {
+        const { classId, className, classExams, allSubjects, matrix } = group;
+        const visibleMatrix = selectedStudents.size > 0 ? matrix.filter(r => selectedStudents.has(r.student.id)) : matrix;
+        if (visibleMatrix.length === 0) return null;
+        const totalCols = classExams.length * (allSubjects.length + 3) + 5;
+        const isWide = totalCols > COMPACT_COL_LIMIT;
 
-          // Total subject columns = exams × subjects + per-exam summary cols + grand summary
-          const totalCols = classExams.length * (allSubjects.length + 3) + 4; // +3 per exam (total/avg/grade), +4 grand
-
-          return (
-            <div key={classId} className="card overflow-hidden">
-              {/* Card header */}
-              <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <h2 className="font-bold text-slate-800 dark:text-white text-lg">{className}</h2>
-                  <p className="text-sm text-slate-500">
-                    {classExams.length} exam{classExams.length !== 1 ? 's' : ''} · {visibleMatrix.length} student{visibleMatrix.length !== 1 ? 's' : ''}
-                    {classExams.map(e => ` · ${e.name} T${e.term} ${e.year}`).join('')}
-                  </p>
-                </div>
+        return (
+          <div key={classId} className="card overflow-hidden">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h2 className="font-bold text-slate-800 dark:text-white text-lg">{className}</h2>
+                <p className="text-sm text-slate-500">
+                  {classExams.length} exam{classExams.length !== 1 ? 's' : ''} · {visibleMatrix.length} student{visibleMatrix.length !== 1 ? 's' : ''} · {allSubjects.length} subject{allSubjects.length !== 1 ? 's' : ''}
+                </p>
               </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse" style={{ minWidth: `${Math.max(600, totalCols * 60)}px` }}>
-                  <thead>
-                    {/* Row 1: exam group headers */}
-                    <tr className="bg-teal-800 text-white">
-                      <th className="px-2 py-2 print:hidden" rowSpan={2} />
-                      <th className="px-3 py-2 text-left font-semibold" rowSpan={2}>#</th>
-                      <th className="px-3 py-2 text-left font-semibold whitespace-nowrap" rowSpan={2}>Student</th>
-                      {classExams.map(exam => (
-                        <th key={exam.id}
-                          colSpan={allSubjects.length + 3}
-                          className="px-3 py-1.5 text-center font-semibold border-l border-teal-600 text-xs whitespace-nowrap">
-                          {exam.name} · T{exam.term} {exam.year}
-                        </th>
-                      ))}
-                      <th colSpan={4} className="px-3 py-1.5 text-center font-semibold border-l border-teal-600 text-xs">Overall</th>
-                    </tr>
-                    {/* Row 2: subject columns + summary per exam */}
-                    <tr className="bg-teal-700 text-white">
-                      {classExams.map(exam => (
-                        <>
-                          {allSubjects.map((sub: any) => (
-                            <th key={`${exam.id}-${sub.id}`}
-                              className="px-2 py-1.5 text-center font-medium text-[11px] whitespace-nowrap border-l border-teal-600 min-w-[48px]">
-                              {sub.name}
-                              {sub.code ? <div className="font-normal text-[9px] opacity-70">{sub.code}</div> : null}
-                            </th>
-                          ))}
-                          <th className="px-2 py-1.5 text-center font-semibold text-xs border-l border-teal-500 bg-teal-600">Tot</th>
-                          <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-600">Avg%</th>
-                          <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-600">Grd</th>
-                        </>
-                      ))}
-                      <th className="px-2 py-1.5 text-center font-semibold text-xs border-l border-teal-500 bg-teal-900">Total</th>
-                      <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-900">Avg%</th>
-                      <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-900">Grade</th>
-                      <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-900">Pos</th>
-                      <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-900 print:hidden">Report</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleMatrix.map((row, i) => (
-                      <tr key={row.student.id}
-                        className={`${i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50 dark:bg-slate-800/50'} ${selectedStudents.has(row.student.id) ? 'ring-1 ring-inset ring-indigo-400' : ''}`}>
-                        {/* Checkbox */}
-                        <td className="px-2 py-2 text-center print:hidden">
-                          <div className={`w-4 h-4 rounded border-2 mx-auto flex items-center justify-center cursor-pointer ${selectedStudents.has(row.student.id) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}
-                            onClick={() => toggleStudent(row.student.id)}>
-                            {selectedStudents.has(row.student.id) && <Check size={10} className="text-white" />}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-slate-400 text-xs">{i + 1}</td>
-                        <td className="px-3 py-2 font-medium text-slate-800 dark:text-white whitespace-nowrap">
-                          {row.student.firstName} {row.student.lastName}
-                        </td>
-                        {/* Per-exam subject scores + summary */}
-                        {classExams.map((exam: any) => (
-                          <>
-                            {allSubjects.map((sub: any) => {
-                              const score = row[`${exam.id}::${sub.id}`];
-                              return (
-                                <td key={`${exam.id}-${sub.id}`} className="px-2 py-2 text-center border-l border-slate-100 dark:border-slate-700">
-                                  {score !== null && score !== undefined
-                                    ? <span className="font-medium">{score}</span>
-                                    : <span className="text-slate-300">—</span>}
-                                </td>
-                              );
-                            })}
-                            <td className="px-2 py-2 text-center font-semibold border-l border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 text-xs">
-                              {row.examTotals[exam.id] ?? '—'}
-                            </td>
-                            <td className="px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30">
-                              {row.examAvgs[exam.id] !== null && row.examAvgs[exam.id] !== undefined ? `${row.examAvgs[exam.id]}%` : '—'}
-                            </td>
-                            <td className={`px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30 ${gradeColor(row.examGrades[exam.id] ?? '-')}`}>
-                              {row.examGrades[exam.id] ?? '—'}
-                            </td>
-                          </>
-                        ))}
-                        {/* Grand summary */}
-                        <td className="px-3 py-2 text-center font-bold border-l border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700/50">
-                          {row.grandTotal ?? '—'}
-                        </td>
-                        <td className="px-3 py-2 text-center font-bold bg-slate-100 dark:bg-slate-700/50">
-                          {row.grandAvg !== null ? `${row.grandAvg}%` : '—'}
-                        </td>
-                        <td className={`px-3 py-2 text-center bg-slate-100 dark:bg-slate-700/50 ${gradeColor(row.grade)}`}>
-                          {row.grade}
-                        </td>
-                        <td className="px-3 py-2 text-center text-xs font-semibold bg-slate-100 dark:bg-slate-700/50">
-                          {row.position ? `${row.position}${ordSuffix(row.position)}` : '—'}
-                        </td>
-                        <td className="px-3 py-2 text-center print:hidden bg-slate-100 dark:bg-slate-700/50">
-                          <button
-                            onClick={() => navigate(`/report-card/${row.student.id}`)}
-                            className="text-xs px-2 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg inline-flex items-center gap-1 whitespace-nowrap"
-                          >
-                            <FileText size={11} /> Report
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {isWide && (
+                <button onClick={() => setFullViewClassId(classId)}
+                  className="btn btn-secondary flex items-center gap-2 text-sm print:hidden">
+                  <Maximize2 size={15} /> View Full
+                </button>
+              )}
             </div>
-          );
-        })
+            {renderTable(group)}
+          </div>
+        );
+      })}
+
+      {/* Full-screen modal for wide tables */}
+      {fullViewGroup && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col print:hidden">
+          <div className="flex items-center justify-between px-5 py-3 bg-teal-800 text-white shrink-0">
+            <div>
+              <h2 className="font-bold text-lg">{fullViewGroup.className}</h2>
+              <p className="text-sm text-teal-200">{fullViewGroup.classExams.length} exam{fullViewGroup.classExams.length !== 1 ? 's' : ''} · {fullViewGroup.matrix.length} students · {fullViewGroup.allSubjects.length} subjects</p>
+            </div>
+            <button onClick={() => setFullViewClassId(null)} className="p-2 hover:bg-white/20 rounded-lg transition-colors">
+              <X size={22} className="text-white" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto bg-white dark:bg-slate-900 p-2">
+            {renderTable(fullViewGroup, true)}
+          </div>
+        </div>
       )}
 
       <style>{`

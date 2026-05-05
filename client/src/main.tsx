@@ -1,4 +1,3 @@
-import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -20,8 +19,21 @@ if ('serviceWorker' in navigator) {
       .then(reg => {
         // Check for updates every 30 minutes
         setInterval(() => reg.update(), 30 * 60 * 1000);
+
+        // After SW is active, tell it to cache all app routes
+        // so every page works offline even if never visited
+        navigator.serviceWorker.ready.then(sw => {
+          const appRoutes = [
+            '/', '/students', '/admission', '/staff', '/classes',
+            '/subjects', '/attendance', '/finance', '/invoices',
+            '/grades', '/exam-marks', '/transport', '/announcements',
+            '/notifications', '/settings', '/reports', '/plans',
+            '/recycle-bin', '/about',
+          ];
+          sw.active?.postMessage({ type: 'CACHE_URLS', urls: appRoutes });
+        });
       })
-      .catch(err => console.warn('SW registration failed:', err));
+      .catch(() => {/* SW not supported or blocked */});
   });
 }
 
@@ -32,22 +44,36 @@ window.addEventListener('online', () => {
   });
 });
 
+// ── Bootstrap cache into store BEFORE React renders ──────────────────────────
+// This runs synchronously at module load time — zero delay
+import('./lib/database/SupabaseDataService').then(({ dataService }) => {
+  const session = localStorage.getItem('schofy_session');
+  if (session) {
+    try {
+      const user = JSON.parse(session);
+      const sid = user.schoolId || user.id;
+      if (sid) {
+        // Push all cached data into store synchronously — pages render with data instantly
+        void dataService.bootstrapSession(user.id, sid);
+      }
+    } catch { /* ignore */ }
+  }
+});
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <ThemeProvider>
-          <ToastProvider>
-            <AuthProvider>
-              <ConfirmProvider>
-                <SyncProvider>
-                  <App />
-                </SyncProvider>
-              </ConfirmProvider>
-            </AuthProvider>
-          </ToastProvider>
-        </ThemeProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
-  </React.StrictMode>
+  <QueryClientProvider client={queryClient}>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <ThemeProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <ConfirmProvider>
+              <SyncProvider>
+                <App />
+              </SyncProvider>
+            </ConfirmProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </ThemeProvider>
+    </BrowserRouter>
+  </QueryClientProvider>
 );

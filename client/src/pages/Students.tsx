@@ -52,7 +52,8 @@ function generateStudentId(firstName: string, lastName: string): string {
 
 export default function Students() {
   const { user, schoolId } = useAuth();
-  const sid = schoolId || user?.id || '';
+  // Use localStorage fallback so students load before AuthContext sets user
+  const sid = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
   const confirm = useConfirm();
 
   // All data from store — instant from cache, no separate fetch
@@ -159,7 +160,7 @@ export default function Students() {
   const totalCount = filteredStudents.length;
   const totalPages = Math.ceil(totalCount / itemsPerPage);
   const students = filteredStudents.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-  const loading = studentsLoading && allStudents.length === 0;
+  const loading = studentsLoading && allStudents.length === 0 && !localStorage.getItem('schofy_data_cache');
   const paginatedStudents = students;
 
   const availableClassIds = Array.from(new Set([

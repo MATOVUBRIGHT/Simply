@@ -320,10 +320,10 @@ function Layout({ children }: LayoutProps) {
   const filteredMenuItems = user ? menuItems : [];
 
   return (
-    <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950 overflow-x-hidden">
-      {/* Sidebar */}
+    <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950">
+      {/* Sidebar — always fixed, never scrolls away */}
       <aside
-        className={`fixed lg:sticky top-0 h-screen inset-y-0 left-0 z-40 w-64 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl transform transition-transform duration-200 ${
+        className={`fixed top-0 h-screen inset-y-0 left-0 z-40 w-64 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl transform transition-transform duration-200 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
@@ -378,10 +378,10 @@ function Layout({ children }: LayoutProps) {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Header/Top Bar */}
-        <header ref={headerRef} className="relative shrink-0 z-30 border-b" style={{ backgroundColor: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}>
+      {/* Main Content — offset by sidebar width on large screens */}
+      <div className="flex-1 flex flex-col min-w-0 lg:ml-64">
+        {/* Header/Top Bar — sticky at top of main column */}
+        <header ref={headerRef} className="sticky top-0 shrink-0 z-30 border-b" style={{ backgroundColor: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}>
           {/* Main header row */}
           <div className="flex items-center gap-2 px-3 sm:px-6 h-16">
             {/* Hamburger */}
@@ -555,8 +555,8 @@ function Layout({ children }: LayoutProps) {
           </div>
         )}
 
-        {/* Page Content */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto overflow-x-hidden bg-[#f8fafc] dark:bg-slate-950">
+        {/* Page Content — scrolls vertically, allows horizontal scroll on small screens */}
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto overflow-x-auto bg-[#f8fafc] dark:bg-slate-950">
           <div className="max-w-[1600px] mx-auto min-w-0">
             {children}
           </div>

@@ -5,6 +5,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { usersApi } from '../services/apiService';
 import { syncService } from '../services/sync';
 import { generateUUID } from '../utils/uuid';
+import { prefetchCriticalTables } from '../lib/store';
 
 export interface LocalUser {
   id: string;
@@ -57,9 +58,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
-  // Hard cap: never show spinner for more than 2 seconds
+  // Hard cap: never show spinner for more than 300ms — cached session restores instantly
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 2000);
+    const t = setTimeout(() => setLoading(false), 300);
     return () => clearTimeout(t);
   }, []);
 
@@ -82,30 +83,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  async function initializeSyncForUser(userData: LocalUser): Promise<void> {
+  function initializeSyncForUser(userData: LocalUser): void {
+    // Everything is fire-and-forget — never block the UI
     try {
       syncService.configure({ supabaseClient: supabase! });
       syncService.setUserId(userData.id);
       syncService.setSchoolId(userData.schoolId);
       localStorage.setItem('schofy_sync_enabled', 'true');
-      if (navigator.onLine) {
-        syncService.enableSync();
-      }
-    } catch (syncError) {
-      console.warn('Failed to initialize sync service:', syncError);
-    }
+      if (navigator.onLine) syncService.enableSync();
+    } catch { /* ignore */ }
 
-    try {
-      // Don't await — bootstrap runs in background, store is seeded synchronously from cache
-      void dataService.bootstrapSession(userData.id, userData.schoolId);
-    } catch (syncBootstrapError) {
-      console.warn('Data sync bootstrap failed:', syncBootstrapError);
-    }
+    // Bootstrap runs in background — store already seeded from main.tsx
+    void dataService.bootstrapSession(userData.id, userData.schoolId).catch(() => {});
+    prefetchCriticalTables(userData.schoolId || userData.id);
 
-    // Apply persisted settings immediately so currency/schoolName are available
+    // Apply persisted settings immediately
     try {
-      const localKey = `schofy_settings_${userData.schoolId}`;
-      const raw = localStorage.getItem(localKey);
+      const raw = localStorage.getItem(`schofy_settings_${userData.schoolId}`);
       if (raw) {
         const obj = JSON.parse(raw);
         if (obj.currency) {
@@ -127,51 +121,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (savedUser && !stale()) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
-        // Still initialize sync so cached data loads into store
-        await initializeSyncForUser(savedUser).catch(() => {});
+        initializeSyncForUser(savedUser);
       }
       if (!stale()) setLoading(false);
       return;
     }
 
     if (savedUser) {
-      // Restore session immediately from localStorage — don't wait for network
+      // Set user state immediately — no waiting
       if (!stale()) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
+        setLoading(false); // Done — user is restored
       }
-      await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
-      // Initialize sync (loads cache into store, flushes offline queue if online)
-      await initializeSyncForUser(savedUser).catch(() => {});
+      // Everything else is background
+      void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+      initializeSyncForUser(savedUser);
 
       // Verify session with server in background (non-blocking)
       if (online) {
         usersApi.getById(savedUser.id).then(({ data, error }) => {
           if (stale()) return;
           if (!data && !error) {
-            // Account deleted — log out
-            clearSession();
-            setUser(null);
-            setSchoolId(null);
+            clearSession(); setUser(null); setSchoolId(null);
           } else if (data) {
-            // Update session with latest server data
             const userData: LocalUser = {
-              id: data.id,
-              schoolId: data.school_id || data.id,
-              email: data.email,
-              firstName: data.first_name,
-              lastName: data.last_name,
-              isActive: data.is_active,
+              id: data.id, schoolId: data.school_id || data.id,
+              email: data.email, firstName: data.first_name,
+              lastName: data.last_name, isActive: data.is_active,
               createdAt: data.created_at,
             };
             saveSession(userData);
-            if (!stale()) {
-              setUser(userData);
-              setSchoolId(userData.schoolId);
-            }
+            if (!stale()) { setUser(userData); setSchoolId(userData.schoolId); }
           }
-        }).catch(() => { /* network error — keep using cached session */ });
+        }).catch(() => {});
       }
+      return;
     }
 
     if (!stale()) setLoading(false);
@@ -187,7 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (savedUser && savedUser.email === email) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
-        await userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+        void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
         return { success: true };
       }
       return { success: false, error: 'You are offline. Please connect to login for the first time.' };
@@ -222,8 +207,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSchoolId(userData.schoolId);
       saveSession(userData);
 
-      await userDBManager.openDatabase(userData.schoolId);
-      await initializeSyncForUser(userData);
+      void userDBManager.openDatabase(userData.schoolId).catch(() => {});
+      initializeSyncForUser(userData);
 
       return { success: true };
     } catch (error: any) {
@@ -292,8 +277,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSchoolId(userData.schoolId);
       saveSession(userData);
 
-      await userDBManager.openDatabase(userData.schoolId);
-      await initializeSyncForUser(userData);
+      void userDBManager.openDatabase(userData.schoolId).catch(() => {});
+      initializeSyncForUser(userData);
 
       return { success: true };
     } catch (error: any) {

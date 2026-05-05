@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, Upload, X, ArrowRight, Check, Filter } from 'lucide-react';
+import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
@@ -466,6 +466,46 @@ export default function Grades() {
     };
   }).filter(s => s.subjectsCount > 0);
 
+  // Expanded class accordion state
+  const [expandedClasses, setExpandedClasses] = useState<Set<string>>(new Set());
+  function toggleClass(classId: string) {
+    setExpandedClasses(prev => { const n = new Set(prev); n.has(classId) ? n.delete(classId) : n.add(classId); return n; });
+  }
+
+  // Group filtered grades by class
+  const classesSorted = useMemo(() =>
+    [...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)) as any[],
+    [allClassesData]
+  );
+
+  const gradesByClass = useMemo(() => {
+    return classesSorted.map(cls => {
+      const classGrades = filteredGrades.filter(g => {
+        const student = allStudents.find(s => s.id === g.studentId);
+        return student?.classId === cls.id;
+      });
+      if (classGrades.length === 0) return null;
+
+      // Group by student
+      const studentMap = new Map<string, { studentName: string; grades: StudentGrade[] }>();
+      for (const g of classGrades) {
+        if (!studentMap.has(g.studentId)) {
+          studentMap.set(g.studentId, { studentName: g.studentName, grades: [] });
+        }
+        studentMap.get(g.studentId)!.grades.push(g);
+      }
+
+      const studentList = Array.from(studentMap.entries()).map(([studentId, { studentName, grades: sg }]) => {
+        const avg = sg.length > 0 ? Math.round(sg.reduce((s, g) => s + (g.score / g.maxScore) * 100, 0) / sg.length) : 0;
+        return { studentId, studentName, grades: sg, avg, grade: getGrade(avg) };
+      }).sort((a, b) => a.studentName.localeCompare(b.studentName));
+
+      const uniqueSubjects = [...new Map(classGrades.map(g => [g.subjectId || g.subjectName, { id: g.subjectId, name: g.subjectName, code: (subjects as any[]).find(s => s.id === g.subjectId)?.code || '' }])).values()];
+
+      return { cls, studentList, uniqueSubjects, totalGrades: classGrades.length };
+    }).filter(Boolean) as { cls: any; studentList: any[]; uniqueSubjects: any[]; totalGrades: number }[];
+  }, [classesSorted, filteredGrades, allStudents, subjects]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -710,83 +750,119 @@ export default function Grades() {
             </div>
           </div>
         </div>
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Class</th>
-                <th>Subject</th>
-                <th>Code</th>
-                <th>Score</th>
-                <th>%</th>
-                <th>Grade</th>
-                <th>Term</th>
-                <th>Exam</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!examResults || !subjects || !allStudents ? (
-                <tr>
-                  <td colSpan={10} className="text-center py-12">
-                    <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-200 border-t-primary-500 mx-auto"></div>
-                  </td>
-                </tr>
-              ) : filteredGrades.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="text-center py-12">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-                        <Award size={32} className="text-violet-400" />
-                      </div>
-                      <p className="text-slate-500 font-medium">No grades recorded</p>
-                      <button onClick={() => setShowForm(true)} className="text-primary-500 hover:text-primary-600 text-sm">
-                        Add your first grade
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ) : filteredGrades.map(grade => {
-                const percentage = Math.round((grade.score / grade.maxScore) * 100);
-                const gradeInfo = getGrade(percentage);
-                const gradeColors: Record<string, string> = {
-                  D1: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-                  D2: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-                  C3: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-                  C4: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-                  C5: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
-                  C6: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
-                  P7: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-                  P8: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
-                  F9: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-                };
-                return (
-                  <tr key={grade.id}>
-                    <td className="font-medium">{grade.studentName}</td>
-                    <td className="text-xs text-slate-500">{(allClassesData.find((c: any) => c.id === (allStudents.find(s => s.id === grade.studentId) as any)?.classId) as any)?.name || '—'}</td>
-                    <td>{grade.subjectName}</td>
-                    <td className="font-mono text-xs text-slate-500">{(subjects as any[]).find(s => s.id === grade.subjectId)?.code || '—'}</td>
-                    <td className="font-semibold">{grade.score}/{grade.maxScore}</td>
-                    <td className="font-semibold">{percentage}%</td>
-                    <td>
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-sm font-bold ${gradeColors[gradeInfo.grade] || 'bg-slate-100 text-slate-700'}`}>
-                        {gradeInfo.grade}
-                      </span>
-                    </td>
-                    <td><span className="badge badge-info">Term {grade.term}</span></td>
-                    <td className="text-slate-500 text-sm">{grade.examType}</td>
-                    <td>
-                      <button onClick={() => handleDelete(grade.id)} className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors">
-                        <Trash2 size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      </div>
+
+      {/* Class-grouped accordion */}
+      <div className="space-y-3">
+        {gradesByClass.length === 0 ? (
+          <div className="card p-12 text-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                <Award size={32} className="text-violet-400" />
+              </div>
+              <p className="text-slate-500 font-medium">No grades recorded</p>
+              <p className="text-slate-400 text-sm">Add grades using the "Add Grade" button above</p>
+              <button onClick={() => setShowForm(true)} className="btn btn-primary mt-1"><Plus size={15} /> Add Grade</button>
+            </div>
+          </div>
+        ) : gradesByClass.map(({ cls, studentList, uniqueSubjects, totalGrades }) => {
+          const isOpen = expandedClasses.has(cls.id);
+          const gradeColors: Record<string, string> = {
+            D1: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+            D2: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+            C3: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+            C4: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+            C5: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
+            C6: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
+            P7: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+            P8: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
+            F9: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+          };
+
+          return (
+            <div key={cls.id} className="card overflow-hidden">
+              {/* Class header — click to expand */}
+              <button
+                onClick={() => toggleClass(cls.id)}
+                className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors text-left"
+              >
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-transform ${isOpen ? 'rotate-0' : ''}`}
+                  style={{ backgroundColor: 'var(--primary-color)' }}>
+                  <BookOpen size={16} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-slate-800 dark:text-white">{cls.name}</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {studentList.length} student{studentList.length !== 1 ? 's' : ''} · {uniqueSubjects.length} subject{uniqueSubjects.length !== 1 ? 's' : ''} · {totalGrades} grade{totalGrades !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <ChevronRight size={18} className={`text-slate-400 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
+              </button>
+
+              {/* Expanded: student × subject table */}
+              {isOpen && (
+                <div className="border-t border-slate-200 dark:border-slate-700">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border-collapse" style={{ minWidth: `${Math.max(500, (uniqueSubjects.length + 3) * 100)}px` }}>
+                      <thead>
+                        <tr className="bg-slate-100 dark:bg-slate-700/60">
+                          <th className="px-4 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Student</th>
+                          {uniqueSubjects.map(sub => (
+                            <th key={sub.id || sub.name} className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap text-xs">
+                              {sub.name}
+                              {sub.code && <div className="font-normal text-[10px] text-slate-400">{sub.code}</div>}
+                            </th>
+                          ))}
+                          <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300">Avg%</th>
+                          <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300">Grade</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {studentList.map((student, si) => (
+                          <tr key={student.studentId}
+                            className={si % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/60 dark:bg-slate-800/50'}>
+                            <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-white whitespace-nowrap">
+                              {student.studentName}
+                            </td>
+                            {uniqueSubjects.map(sub => {
+                              const g = student.grades.find((gr: StudentGrade) =>
+                                sub.id ? gr.subjectId === sub.id : gr.subjectName === sub.name
+                              );
+                              if (!g) return (
+                                <td key={sub.id || sub.name} className="px-3 py-2.5 text-center text-slate-300 dark:text-slate-600">—</td>
+                              );
+                              const pct = Math.round((g.score / g.maxScore) * 100);
+                              const gi = getGrade(pct);
+                              return (
+                                <td key={sub.id || sub.name} className="px-3 py-2.5 text-center">
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className="font-semibold text-slate-700 dark:text-slate-200">{g.score}/{g.maxScore}</span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${gradeColors[gi.grade] || 'bg-slate-100 text-slate-600'}`}>{gi.grade}</span>
+                                    <button onClick={() => handleDelete(g.id)} className="text-red-400 hover:text-red-600 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete">
+                                      <Trash2 size={11} />
+                                    </button>
+                                  </div>
+                                </td>
+                              );
+                            })}
+                            <td className="px-3 py-2.5 text-center font-bold text-slate-700 dark:text-slate-200">
+                              {student.avg}%
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold ${gradeColors[student.grade.grade] || 'bg-slate-100 text-slate-700'}`}>
+                                {student.grade.grade}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {showForm && (

@@ -18,7 +18,8 @@ const StudentsContext = createContext<StudentsContextType | undefined>(undefined
 
 export function StudentsProvider({ children }: { children: React.ReactNode }) {
   const { user, schoolId } = useAuth();
-  const tenantId = schoolId || user?.id || '';
+  // Use localStorage fallback so students load before AuthContext fires
+  const tenantId = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
 
   // Use the global store — all students, always fresh, works offline
   const { data: allStudentsData, loading, error, refresh } = useTableData(tenantId, 'students');
@@ -70,15 +71,15 @@ export function useStudents() {
 
 export function useActiveStudents() {
   const { students } = useStudents();
-  return students.filter((s) => s.status === 'active');
+  return useMemo(() => students.filter(s => s.status === 'active'), [students]);
 }
 
 export function useCompletedStudents() {
   const { students } = useStudents();
-  return students.filter((s) => s.status === 'completed' || s.status === 'graduated');
+  return useMemo(() => students.filter(s => s.status === 'completed' || s.status === 'graduated'), [students]);
 }
 
 export function useInactiveStudents() {
   const { students } = useStudents();
-  return students.filter((s) => s.status === 'inactive');
+  return useMemo(() => students.filter(s => s.status === 'inactive'), [students]);
 }

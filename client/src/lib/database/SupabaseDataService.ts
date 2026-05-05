@@ -190,8 +190,52 @@ function recycleBinType(t: string): string | null {
     transportRoutes:'transport' } as any)[t] || null;
 }
 
+// ── Persistent deleted IDs registry ─────────────────────────────────────────
+// Tracks IDs deleted locally so they are NEVER re-added from remote sync.
+// Keyed by `${sid}:${tableName}` → Set of deleted IDs.
+const DELETED_KEY = 'schofy_deleted_ids';
+
+interface DeletedRegistry { [key: string]: string[] }
+
+function loadDeletedRegistry(): DeletedRegistry {
+  try { return JSON.parse(localStorage.getItem(DELETED_KEY) || '{}'); } catch { return {}; }
+}
+function saveDeletedRegistry(reg: DeletedRegistry) {
+  try { localStorage.setItem(DELETED_KEY, JSON.stringify(reg)); } catch {}
+}
+
+function markDeleted(sid: string, tableName: string, id: string) {
+  const reg = loadDeletedRegistry();
+  const key = `${sid}:${tableName}`;
+  if (!reg[key]) reg[key] = [];
+  if (!reg[key].includes(id)) reg[key].push(id);
+  saveDeletedRegistry(reg);
+}
+
+function markBatchDeleted(sid: string, tableName: string, ids: string[]) {
+  if (!ids.length) return;
+  const reg = loadDeletedRegistry();
+  const key = `${sid}:${tableName}`;
+  if (!reg[key]) reg[key] = [];
+  for (const id of ids) {
+    if (!reg[key].includes(id)) reg[key].push(id);
+  }
+  saveDeletedRegistry(reg);
+}
+
+function getDeletedIds(sid: string, tableName: string): Set<string> {
+  const reg = loadDeletedRegistry();
+  return new Set(reg[`${sid}:${tableName}`] || []);
+}
+
+// Filter out any records whose IDs are in the deleted registry
+function filterDeleted(sid: string, tableName: string, records: any[]): any[] {
+  const deleted = getDeletedIds(sid, tableName);
+  if (deleted.size === 0) return records;
+  return records.filter(r => !deleted.has(r.id));
+}
+
 // ── Persistent cache (survives page reload for offline use) ──────────────────
-const CACHE_TTL = 5 * 60_000; // 5 minutes
 const PERSIST_KEY = 'schofy_data_cache';
 
 interface CacheEntry { data: any[]; ts: number; }
@@ -395,7 +439,7 @@ class SupabaseDataService {
 
       if (error || !data) return;
 
-      const remoteRecords = data.map(mapToLocal);
+      const remoteRecords = filterDeleted(sid, tableName, data.map(mapToLocal));
       const local = cacheGet(sid, tableName) || cacheGetAny(sid, tableName) || [];
 
       if (local.length === 0) {
@@ -458,10 +502,10 @@ class SupabaseDataService {
     // Always return cached data immediately — instant UI, works offline
     const cached = cacheGet(sid, tableName);
     if (cached && cached.length > 0) {
-      // Only trigger background merge if cache is older than 60s (not on every call)
+      // Only trigger background merge if cache is older than 10 minutes
       if (isOnline() && this.ok) {
         const entry = memCache.get(cacheKey(sid, tableName));
-        if (entry && Date.now() - entry.ts > 60_000) {
+        if (entry && Date.now() - entry.ts > 10 * 60_000) {
           void this._backgroundMerge(sid, tableName);
         }
       }
@@ -515,9 +559,9 @@ class SupabaseDataService {
     // Already scheduled or running — skip
     if (this._mergeTimers.has(key)) return;
 
-    // Only merge if cache is older than 60 seconds
+    // Only merge if cache is older than 10 minutes
     const entry = memCache.get(key);
-    if (entry && Date.now() - entry.ts < 60_000) return;
+    if (entry && Date.now() - entry.ts < 10 * 60_000) return;
 
     this._mergeTimers.set(key, setTimeout(async () => {
       this._mergeTimers.delete(key);
@@ -529,7 +573,7 @@ class SupabaseDataService {
         const { data, error } = await q;
         if (error || !data) return;
 
-        const remoteRecords = data.map(mapToLocal);
+        const remoteRecords = filterDeleted(sid, tableName, data.map(mapToLocal));
         const local = cacheGet(sid, tableName) || [];
 
         // Build set of IDs with pending local queue entries — don't overwrite these

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Check, X, Clock, Save, Calendar, Users, BookOpen, Download, Upload, ChevronDown, FileText, ArrowRight, Check as CheckIcon } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,20 +27,16 @@ export default function Attendance() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
   const { data: classesData } = useTableData(sid, 'classes');
-  const classes = [...classesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0));
+  const { data: studentsData } = useTableData(sid, 'students');
+  const { data: attendanceData } = useTableData(sid, 'attendance');
+  const classes = useMemo(() => [...classesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)), [classesData]);
 
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedClass, setSelectedClass] = useState('');
-  const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({});
-  const [allAttendance, setAllAttendance] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const { addToast } = useToast();
 
-  // Default to "All Classes" — don't auto-select first class
-  useEffect(() => {
-    // intentionally empty — we start with selectedClass = '' (all classes)
-  }, [classes]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -57,11 +53,26 @@ export default function Attendance() {
     { key: 'status', label: 'Status', required: true },
   ];
 
-  useEffect(() => { 
-    if (user?.id || schoolId) {
-      loadData(); 
-    }
-  }, [selectedDate, selectedClass, user?.id, schoolId]);
+  // Derive students from store — instant, no fetch
+  const students = useMemo(() => {
+    const all = studentsData as Student[];
+    return selectedClass
+      ? all.filter(s => s.classId === selectedClass && s.status !== 'completed')
+      : all.filter(s => s.status !== 'completed');
+  }, [studentsData, selectedClass]);
+
+  // Derive today's attendance from store — instant, no fetch
+  const allAttendance = attendanceData as AttendanceRecord[];
+
+  // Sync attendance state when date/students/store data changes
+  useEffect(() => {
+    const todayRecords = allAttendance.filter(r => r.date === selectedDate);
+    const map: Record<string, AttendanceStatus> = {};
+    todayRecords.filter(r => r.entityType === EntityType.STUDENT).forEach(r => {
+      map[r.entityId] = r.status;
+    });
+    setAttendance(map);
+  }, [selectedDate, allAttendance]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -73,38 +84,6 @@ export default function Attendance() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  async function loadData() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    setLoading(true);
-    try {
-      const [allStudents, allRecords] = await Promise.all([
-        dataService.getAll(id, 'students'),
-        dataService.getAll(id, 'attendance'),
-      ]);
-
-      // If no class selected — show all active students across all classes
-      const classStudents = selectedClass
-        ? allStudents.filter((s: any) => s.classId === selectedClass && s.status !== 'completed')
-        : allStudents.filter((s: any) => s.status !== 'completed');
-
-      const todayRecords = allRecords.filter((r: any) => r.date === selectedDate);
-
-      setStudents(classStudents);
-      setAllAttendance(allRecords);
-
-      const attendanceMap: Record<string, AttendanceStatus> = {};
-      todayRecords.filter((r: any) => r.entityType === EntityType.STUDENT).forEach((r: any) => {
-        attendanceMap[r.entityId] = r.status;
-      });
-      setAttendance(attendanceMap);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   function handleStatusChange(studentId: string, status: AttendanceStatus) {
     setAttendance(prev => ({ ...prev, [studentId]: status }));
   }
@@ -115,8 +94,8 @@ export default function Attendance() {
     setLoading(true);
     try {
       const now = new Date().toISOString();
-      
-      const existingRecords = await dataService.where(id, 'attendance', 'date', selectedDate);
+      // Use store data — no network call needed
+      const existingRecords = allAttendance.filter(r => r.date === selectedDate);
       for (const record of existingRecords) {
         if (record.entityType === EntityType.STUDENT && students.some(s => s.id === record.entityId)) {
           await dataService.delete(id, 'attendance', record.id);
@@ -303,8 +282,8 @@ export default function Attendance() {
         const student = students.find(s => s.admissionNo === data.admissionNo);
         if (!student) continue;
 
-        const existing = await dataService.where(id, 'attendance', 'date', data.date);
-        const existingRecord = existing.find((a: any) => a.entityId === student.id);
+        // Use store data — no network call
+        const existingRecord = allAttendance.find(a => a.date === data.date && a.entityId === student.id);
 
         if (existingRecord) {
           await dataService.update(id, 'attendance', existingRecord.id, { status: data.status as AttendanceStatus } as any);
@@ -321,7 +300,6 @@ export default function Attendance() {
         }
         successCount++;
       }
-      await loadData();
       addToast(`Successfully imported ${successCount} attendance records`, 'success');
       closeImportModal();
     } catch (error) { addToast('Failed to import attendance', 'error'); }

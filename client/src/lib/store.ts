@@ -20,7 +20,7 @@ interface TableState {
   lastFetch: number;
 }
 
-const STALE_MS = 30 * 60_000; // 30 minutes — realtime + background merge keeps data fresh
+const STALE_MS = 4 * 60 * 60_000; // 4 hours — data loaded once stays loaded; realtime + manual refresh keeps it fresh
 
 class DataStore {
   private state = new Map<string, TableState>();
@@ -68,13 +68,9 @@ class DataStore {
     if (existing) return existing;
 
     const req = (async () => {
-      // NEVER show loading if we already have any data — background refresh is silent
-      if (s.data.length === 0) {
-        this.set(sid, table, { loading: true, error: null });
-      }
+      // NEVER show loading spinner — data either comes from cache instantly or loads silently
       try {
         const data = await dataService.getAll(sid, table);
-        // Only update if we got real data back
         if (data.length > 0 || s.data.length === 0) {
           this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
         } else {
@@ -146,17 +142,56 @@ class DataStore {
 export const store = new DataStore();
 (globalThis as any).__schofyStore = store;
 
+// ── Instant bootstrap from localStorage cache ─────────────────────────────────
+// Runs synchronously at module load — data is in store before first React render
+;(() => {
+  try {
+    const session = localStorage.getItem('schofy_session');
+    if (!session) return;
+    const user = JSON.parse(session);
+    const sid = user?.schoolId || user?.id;
+    if (!sid) return;
+
+    // Ensure current school ID is set so useTableData fallback works
+    if (!localStorage.getItem('schofy_current_school_id')) {
+      localStorage.setItem('schofy_current_school_id', sid);
+    }
+
+    const PERSIST_KEY = 'schofy_data_cache';
+    const raw = localStorage.getItem(PERSIST_KEY);
+    if (!raw) return;
+    const cache: Record<string, { data: any[]; ts: number }> = JSON.parse(raw);
+
+    for (const [key, entry] of Object.entries(cache)) {
+      if (!key.startsWith(sid + ':')) continue;
+      const table = key.slice(sid.length + 1);
+      if (entry.data.length > 0) {
+        store.pushWithTs(sid, table, entry.data, entry.ts);
+      }
+    }
+  } catch { /* ignore */ }
+})();
+
+// Prefetch critical tables as soon as the store is ready
+export function prefetchCriticalTables(sid: string) {
+  if (!sid) return;
+  const CRITICAL = ['students', 'classes', 'subjects', 'fees', 'payments', 'exams', 'examResults'];
+  for (const table of CRITICAL) {
+    const snap = store.getSnapshot(sid, table);
+    if (snap.data.length === 0) void store.fetch(sid, table);
+  }
+}
+
 // ── React hook ────────────────────────────────────────────────────────────────
 
 export function useTableData(sid: string | null | undefined, table: string) {
-  const safeSid = sid || '';
+  // Use localStorage sid as fallback so data is available before AuthContext sets schoolId
+  const safeSid = sid || localStorage.getItem('schofy_current_school_id') || '';
 
   const subscribe = useCallback(
     (listener: Listener) => {
       if (!safeSid) return () => {};
       const snap = store.getSnapshot(safeSid, table);
-      // Only fetch if store is completely empty — if we have data, it's good enough
-      // Background merge (via _backgroundMerge) handles keeping data fresh
       if (snap.data.length === 0) {
         void store.fetch(safeSid, table);
       }
@@ -170,6 +205,7 @@ export function useTableData(sid: string | null | undefined, table: string) {
     [safeSid, table]
   );
 
+  // Server snapshot = same as client (SSR not used, but required by useSyncExternalStore)
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const refresh = useCallback(() => {
