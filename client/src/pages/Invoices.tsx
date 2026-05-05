@@ -48,6 +48,7 @@ interface Discount {
   createdAt: string;
 }
 
+// Build: 2026-05-05
 export default function Invoices() {
   const { user, schoolId } = useAuth();
   const [showCreateModal, setShowCreateModal] = useState(false);

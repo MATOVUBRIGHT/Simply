@@ -50,6 +50,7 @@ function generateStudentId(firstName: string, lastName: string): string {
   return `${fn}${ln}${digits}`;
 }
 
+// Build: 2026-05-05
 export default function Students() {
   const { user, schoolId } = useAuth();
   // Use localStorage fallback so students load before AuthContext sets user

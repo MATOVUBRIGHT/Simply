@@ -23,6 +23,7 @@ function getAvatarColor(name: string) {
   return avatarColors[index];
 }
 
+// Build: 2026-05-05
 export default function Attendance() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
