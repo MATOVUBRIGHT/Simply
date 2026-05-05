@@ -268,7 +268,7 @@ function getCacheDB(): Promise<IDBDatabase> {
 
 // ── Load persisted cache on startup (async, non-blocking) ────────────────────
 let resolveCacheReady: () => void;
-const cacheReady = new Promise<void>(r => { resolveCacheReady = r; });
+export const cacheReady = new Promise<void>(r => { resolveCacheReady = r; });
 
 async function loadPersistedCache() {
   try {
