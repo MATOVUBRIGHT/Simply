@@ -355,26 +355,23 @@ export default function Grades() {
     if (classStudents.length === 0) { addToast('No students found for selected class', 'error'); return; }
     if (classSubjects.length === 0) { addToast('No subjects found for selected class. Add subjects first.', 'error'); return; }
 
-    // Header: Student Name, Student ID, Subject1, Subject2, ...
-    const subjectHeaders = classSubjects.map((s: any) => `${s.name}${s.code ? ` (${s.code})` : ''}`);
-    const headers = ['Student Name', 'Student ID', ...subjectHeaders];
-
-    // One row per student — scores left blank for user to fill
-    const rows = classStudents.map(s => [
-      `${s.firstName} ${s.lastName}`,
-      s.studentId || s.admissionNo || s.id,
-      ...classSubjects.map(() => ''), // blank score columns
-    ]);
-
-    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const cls = (allClassesData as any[]).find(c => c.id === templateClassId);
-    link.href = URL.createObjectURL(blob);
-    link.download = `grades-template-${cls?.name || 'class'}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-    addToast(`Template downloaded for ${classStudents.length} students, ${classSubjects.length} subjects`, 'success');
+    import('xlsx').then((XLSX) => {
+      const subjectHeaders = classSubjects.map((s: any) => `${s.name}${s.code ? ` (${s.code})` : ''}`);
+      const headers = ['Student Name', 'Student ID', ...subjectHeaders];
+      const rows = classStudents.map(s => [
+        `${s.firstName} ${s.lastName}`,
+        s.studentId || s.admissionNo || s.id,
+        ...classSubjects.map(() => ''),
+      ]);
+      const wsData = [headers, ...rows];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      ws['!cols'] = headers.map((h, i) => ({ wch: i < 2 ? 22 : Math.max(h.length + 2, 10) }));
+      const wb = XLSX.utils.book_new();
+      const cls = (allClassesData as any[]).find(c => c.id === templateClassId);
+      XLSX.utils.book_append_sheet(wb, ws, cls?.name || 'Grades');
+      XLSX.writeFile(wb, `grades-template-${cls?.name || 'class'}.xlsx`);
+      addToast(`Template downloaded for ${classStudents.length} students, ${classSubjects.length} subjects`, 'success');
+    });
   }
 
   function downloadTemplate() {
@@ -401,16 +398,32 @@ export default function Grades() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
-      const headers = parseCSVLine(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
-      setCsvHeaders(headers);
-      setCsvData(data);
-      setImportStep('map');
-      setShowImportModal(true);
-    } catch (error) { addToast('Failed to read CSV file', 'error'); }
+      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+      if (isExcel) {
+        const { read, utils } = await import('xlsx');
+        const buffer = await file.arrayBuffer();
+        const wb = read(buffer);
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+        if (rows.length < 2) { addToast('Excel file must have headers and at least one data row', 'error'); return; }
+        const headers = rows[0].map((h: any) => String(h ?? ''));
+        const data = rows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '')));
+        setCsvHeaders(headers);
+        setCsvData(data);
+        setImportStep('map');
+        setShowImportModal(true);
+      } else {
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+        if (lines.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+        const headers = parseCSVLine(lines[0]);
+        const data = lines.slice(1).map(line => parseCSVLine(line));
+        setCsvHeaders(headers);
+        setCsvData(data);
+        setImportStep('map');
+        setShowImportModal(true);
+      }
+    } catch (error) { addToast('Failed to read file', 'error'); }
     event.target.value = '';
   }
 
@@ -646,7 +659,7 @@ export default function Grades() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".csv"
+            accept=".xlsx,.xls,.csv"
             className="hidden"
           />
           <button 
@@ -1273,7 +1286,7 @@ export default function Grades() {
                       className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium transition-colors"
                     >
                       <Download size={16} />
-                      Download Template ({templateStudentIds.size > 0 ? templateStudentIds.size : studentsForTemplateClass.length} students × {subjectsForTemplateClass.length} subjects)
+                      Download Excel Template ({templateStudentIds.size > 0 ? templateStudentIds.size : studentsForTemplateClass.length} students × {subjectsForTemplateClass.length} subjects)
                     </button>
                   )}
 
@@ -1284,8 +1297,8 @@ export default function Grades() {
                       onClick={() => fileInputRef.current?.click()}
                     >
                       <Upload size={24} className="mx-auto text-slate-400 mb-2" />
-                      <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload filled CSV</p>
-                      <p className="text-xs text-slate-400 mt-1">Student Name, Student ID, Subject scores...</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload filled Excel (.xlsx)</p>
+                      <p className="text-xs text-slate-400 mt-1">Supports .xlsx (recommended) or .csv</p>
                     </div>
                   </div>
                 </div>
