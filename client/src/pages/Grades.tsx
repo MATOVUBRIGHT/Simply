@@ -1,4 +1,6 @@
 ﻿import { useState, useRef, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useNavigate } from 'react-router-dom';
 import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen, Pencil } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -1043,7 +1045,7 @@ export default function Grades() {
         })}
       </div>
 
-      {showForm && (
+      {showForm && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
           <div className="w-full max-w-2xl animate-modal-in max-h-[90vh] flex flex-col" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
             <form onSubmit={handleBulkSubmit} className="flex flex-col overflow-hidden flex-1">
@@ -1182,9 +1184,9 @@ export default function Grades() {
             </form>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showInvoiceModal && (
+      {showInvoiceModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowInvoiceModal(false); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1245,10 +1247,10 @@ export default function Grades() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* Edit Grade Modal */}
-      {editGrade && (
+      {editGrade && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setEditGrade(null); }}>
           <div className="w-full max-w-sm animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
             <div className="p-7">
@@ -1297,9 +1299,9 @@ export default function Grades() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showImportModal && (
+      {showImportModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1602,7 +1604,7 @@ export default function Grades() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

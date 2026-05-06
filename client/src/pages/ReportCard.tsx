@@ -1,4 +1,6 @@
 ﻿import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Download, Settings, Check, Building, Palette, Layout, FileText as FileTextIcon, Eye, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -427,7 +429,7 @@ export default function ReportCard() {
       </div>
 
       {/* ΓöÇΓöÇ Template Editor Modal ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */}
-      {showEditor && (
+      {showEditor && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 print:hidden" onClick={() => setShowEditor(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
 
@@ -626,7 +628,7 @@ export default function ReportCard() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       <style>{`
         @media print {

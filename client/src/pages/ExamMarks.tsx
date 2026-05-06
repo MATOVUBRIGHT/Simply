@@ -1,4 +1,6 @@
 ﻿import { useState, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useNavigate } from 'react-router-dom';
 import { FileText, Download, ArrowLeft, GraduationCap, Search, Check, Maximize2, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -512,7 +514,7 @@ export default function ExamMarks() {
       })}
 
       {/* Full-screen modal for wide tables */}
-      {fullViewGroup && (
+      {fullViewGroup && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col print:hidden">
           <div className="flex items-center justify-between px-5 py-3 bg-teal-800 text-white shrink-0">
             <div>
@@ -527,7 +529,7 @@ export default function ExamMarks() {
             {renderTable(fullViewGroup, true)}
           </div>
         </div>
-      )}
+      , document.body)}
 
       <style>{`
         @media print {

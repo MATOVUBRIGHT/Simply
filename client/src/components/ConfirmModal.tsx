@@ -1,9 +1,10 @@
 ﻿/**
- * Global full-page confirm modal ΓÇö blurs entire page, centered.
+ * Global full-page confirm modal — blurs entire page, centered.
  * Modern SaaS design: soft icon, clean typography, smooth animation.
  * Usage: const confirm = useConfirm(); await confirm({ title, description, confirmLabel, variant });
  */
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, Trash2, Info, CheckCircle } from 'lucide-react';
 
 export type ConfirmVariant = 'danger' | 'warning' | 'info' | 'success';
@@ -88,7 +89,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
-      {pending && (
+      {pending && createPortal(
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           style={{
@@ -146,7 +147,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </ConfirmContext.Provider>
   );

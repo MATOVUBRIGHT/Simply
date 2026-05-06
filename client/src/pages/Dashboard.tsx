@@ -1,4 +1,6 @@
 ﻿import { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useNavigate } from 'react-router-dom';
 import { DashboardStats } from '@schofy/shared';
 import { useCurrency } from '../hooks/useCurrency';
@@ -735,7 +737,7 @@ export default function Dashboard() {
         </div>
 
         {/* Day event popup */}
-        {selectedDay && (
+        {selectedDay && createPortal(
           <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setSelectedDay(null)}>
             <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
               <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -769,7 +771,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        )}
+        , document.body)}
 
         {/* School Performance & Growth */}
         <div className="lg:col-span-5 flex flex-col gap-6">

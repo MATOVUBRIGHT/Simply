@@ -1,4 +1,6 @@
 ﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+
 import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, ChevronRight, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash, Pencil, Search } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class, Subject } from '@schofy/shared';
@@ -766,7 +768,7 @@ export default function Subjects() {
         </div>
       </div>
 
-      {showForm && (
+      {showForm && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={() => resetSubjectForm()}>
           <div className="w-full max-w-lg animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
             <form onSubmit={handleSubmit} className="flex flex-col max-h-[90vh]">
@@ -904,7 +906,7 @@ export default function Subjects() {
             </form>
           </div>
         </div>
-      )}
+      , document.body)}
 
       <div className="card">
         <div className="card-header bg-gradient-to-r from-sky-50 to-cyan-50 dark:from-sky-900/20 dark:to-cyan-900/20">
@@ -1033,7 +1035,7 @@ export default function Subjects() {
       </div>
 
       {/* Edit Subject Modal */}
-      {editGroup && (
+      {editGroup && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={closeEditGroup}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1117,9 +1119,9 @@ export default function Subjects() {
             </form>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showImportModal && (
+      {showImportModal && createPortal(
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1271,7 +1273,7 @@ export default function Subjects() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

@@ -1,4 +1,6 @@
 ﻿import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+
 import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen, saveCurrentPlan } from '../utils/plans';
@@ -343,7 +345,7 @@ Powered by Schofy`;
         </div>
       </div>
 
-      {showPaymentModal && selectedPlan && (
+      {showPaymentModal && selectedPlan && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowPaymentModal(false); }}>
           <div className="animate-modal-in max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -424,9 +426,9 @@ Powered by Schofy`;
             )}
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showFAQModal && (
+      {showFAQModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowFAQModal(false); }}>
           <div className="animate-modal-in max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
@@ -446,9 +448,9 @@ Powered by Schofy`;
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showUpgradeModal && upgradeToPlan && (
+      {showUpgradeModal && upgradeToPlan && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowUpgradeModal(false); }}>
           <div className="animate-modal-in w-full max-w-sm rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -467,9 +469,9 @@ Powered by Schofy`;
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showIntroModal && (
+      {showIntroModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowIntroModal(false); }}>
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700">
@@ -494,9 +496,9 @@ Powered by Schofy`;
               </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showContinueModal && selectedPlan && latestReceipt && (
+      {showContinueModal && selectedPlan && latestReceipt && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowContinueModal(false); }}>
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700">
@@ -536,7 +538,7 @@ Powered by Schofy`;
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

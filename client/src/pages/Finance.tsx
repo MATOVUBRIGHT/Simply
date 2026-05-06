@@ -1,4 +1,6 @@
 ﻿import { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
+
 import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
@@ -486,7 +488,7 @@ export default function Finance() {
       </div>
 
       {/* Import Modal - fixed inset-0 full-page blur */}
-      {showImportModal && (
+      {showImportModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -565,10 +567,10 @@ export default function Finance() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* Record Payment Modal */}
-      {payModal && (
+      {payModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setPayModal(null); }}>
           <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -616,7 +618,7 @@ export default function Finance() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

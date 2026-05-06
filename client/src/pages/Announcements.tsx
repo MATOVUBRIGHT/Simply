@@ -1,4 +1,6 @@
 ﻿import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+
 import { Plus, Megaphone, Clock, Trash2, AlertCircle, CheckCircle, Info, Bell, Pin, Edit2, X, Download, FileText, ChevronDown, Check, Trash, Search } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Announcement, Priority } from '@schofy/shared';
@@ -348,7 +350,7 @@ export default function Announcements() {
         </div>
       </div>
 
-      {showForm && (
+      {showForm && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) handleCancelEdit(); }}>
           <div className="w-full max-w-lg animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
             <div className="p-7">
@@ -396,7 +398,7 @@ export default function Announcements() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       <div className="card">
         <div className="p-4">

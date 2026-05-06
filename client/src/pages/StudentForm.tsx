@@ -1,4 +1,6 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, User, Users, Shield, Sparkles, Settings, Plus, X, FileText, Paperclip, Trash2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -431,7 +433,7 @@ export default function StudentForm() {
       </form>
 
       {/* ID Format Modal */}
-      {showIdFormatModal && (
+      {showIdFormatModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowIdFormatModal(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -464,7 +466,7 @@ export default function StudentForm() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

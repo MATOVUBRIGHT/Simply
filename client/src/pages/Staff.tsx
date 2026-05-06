@@ -1,4 +1,6 @@
 ﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -882,7 +884,7 @@ export default function StaffPage() {
         />
       )}
 
-      {showImportModal && (
+      {showImportModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1016,10 +1018,10 @@ export default function StaffPage() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* Generate Payroll Modal */}
-      {showPayrollModal && (
+      {showPayrollModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-md max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1063,7 +1065,7 @@ export default function StaffPage() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* Mark as Paid Modal */}
       <DropdownModal

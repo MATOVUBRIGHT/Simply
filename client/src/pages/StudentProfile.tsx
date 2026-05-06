@@ -1,4 +1,6 @@
 ﻿import { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Edit, Mail, Phone, MapPin, Calendar, User,
   GraduationCap, BookOpen, CreditCard, FileText, CheckCircle, AlertCircle,
@@ -506,7 +508,7 @@ export default function StudentProfile() {
       )}
 
       {/* ── Pay Modal — full page blur, centered ────────────────────────────── */}
-      {showPayModal && (
+      {showPayModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowPayModal(null)}>
           <div className="modal-card w-full max-w-md" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -557,7 +559,7 @@ export default function StudentProfile() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {previewImage && (
         <ImageModal src={previewImage.src} alt={previewImage.alt} isOpen={!!previewImage} onClose={() => setPreviewImage(null)} />

@@ -1,4 +1,6 @@
 ﻿import { useEffect, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+
 import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
@@ -905,7 +907,7 @@ export default function Settings() {
       </form>
 
       {/* Promote Students Modal */}
-      {showPromoteModal && (
+      {showPromoteModal && createPortal(
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center gap-3 p-5 border-b border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/20">
@@ -946,7 +948,7 @@ export default function Settings() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

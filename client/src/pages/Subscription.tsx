@@ -1,4 +1,6 @@
 ﻿import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useNavigate } from 'react-router-dom';
 import { Check, CreditCard, Crown, Zap, Star, HelpCircle, Phone, X, MessageCircle, ChevronDown, ChevronUp, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -241,7 +243,7 @@ export default function Subscription() {
       </main>
 
       {/* Payment Modal */}
-      {showPaymentModal && selectedPlan && (
+      {showPaymentModal && selectedPlan && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
             <div className="p-5 border-b border-slate-200 flex items-center justify-between">
@@ -315,10 +317,10 @@ export default function Subscription() {
             )}
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* Continue Modal */}
-      {showContinueModal && selectedPlan && latestReceipt && (
+      {showContinueModal && selectedPlan && latestReceipt && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
             <div className="p-5 border-b border-slate-200">
@@ -351,7 +353,7 @@ export default function Subscription() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

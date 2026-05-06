@@ -1,4 +1,6 @@
 ﻿import { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useNavigate } from 'react-router-dom';
 import { 
   DollarSign, 
@@ -313,7 +315,7 @@ export default function Payroll() {
       </div>
 
       {/* Generate Payroll Modal */}
-      {showPayrollModal && (
+      {showPayrollModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-md max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -357,7 +359,7 @@ export default function Payroll() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* Mark as Paid Modal */}
       <DropdownModal

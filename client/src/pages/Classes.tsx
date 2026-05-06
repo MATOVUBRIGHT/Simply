@@ -1,4 +1,6 @@
 ﻿import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+
 import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash, Clock, Calendar } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class } from '@schofy/shared';
@@ -526,7 +528,7 @@ export default function Classes() {
         </div>
       </div>
 
-      {showForm && (
+      {showForm && createPortal(
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
@@ -602,7 +604,7 @@ export default function Classes() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       <div className="card overflow-hidden">
         {loading ? (
@@ -739,7 +741,7 @@ export default function Classes() {
       )}
 
       {/* Timetable Modal */}
-      {showTimetable && (
+      {showTimetable && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -840,9 +842,9 @@ export default function Classes() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showImportModal && (
+      {showImportModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -990,7 +992,7 @@ export default function Classes() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }
