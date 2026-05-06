@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, CreditCard } from 'lucide-react';
 import { Portal } from '../components/Portal';
@@ -984,7 +984,7 @@ export default function Students() {
     }
   }
 
-  // Stats use ALL students (not just current page) — always accurate
+  // Stats use ALL students (not just current page) � always accurate
   const activeCount = allStudents.filter(s => s.status === 'active').length;
   const deactivatedCount = allStudents.filter(s => s.status === 'inactive').length;
   const completedCount = allStudents.filter(s => s.status === 'completed').length;
@@ -1746,7 +1746,7 @@ export default function Students() {
                 }, [])
                 .map((p, i) =>
                   p === '...' ? (
-                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">GǪ</span>
+                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">GO</span>
                   ) : (
                     <button
                       key={p}
