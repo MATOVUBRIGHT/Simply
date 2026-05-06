@@ -2,7 +2,7 @@
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, User, Users, FileText, ClipboardCheck, Loader2, Save, Plus, Settings, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, User, Users, FileText, ClipboardCheck, Loader2, Save, Plus, Settings, Sparkles, X, AlertTriangle, CreditCard } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Student, Gender } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -11,6 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, IdFormat } from '../utils/idFormat';
+import { getSubscriptionAccessState } from '../utils/plans';
 
 const steps = [
   { id: 1, label: 'Student Info', icon: User },
@@ -123,6 +124,14 @@ export default function Admission() {
     if (!id) return;
     setLoading(true);
     try {
+      // Check plan limit before admitting
+      const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
+      if (access.plan && access.plan.studentLimit > 0 && access.remaining <= 0) {
+        addToast(`Plan limit reached (${access.used}/${access.plan.studentLimit} students). Upgrade your plan to admit more.`, 'error');
+        setLoading(false);
+        return;
+      }
+
       const cap = await getClassCapacityState(id, form.classId);
       if (cap?.isFull) { addToast(`${cap.name} is full. Choose another class.`, 'error'); setLoading(false); return; }
       const now = new Date().toISOString();

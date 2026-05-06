@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, extractFormatFromId, IdFormat } from '../utils/idFormat';
+import { getSubscriptionAccessState } from '../utils/plans';
 
 interface CustomField { id: string; label: string; value: string; }
 interface Attachment { id: string; name: string; file: string; type: string; }
@@ -160,10 +161,18 @@ export default function StudentForm() {
     const idAuth = schoolId || user?.id;
     if (!idAuth) { setLoading(false); return; }
     try {
+      // Check plan limit for new students only
+      if (!isEditing) {
+        const access = await getSubscriptionAccessState(idAuth, undefined, { authUserId: user?.id });
+        if (access.plan && access.plan.studentLimit > 0 && access.remaining <= 0) {
+          addToast(`Plan limit reached (${access.used}/${access.plan.studentLimit} students). Upgrade your plan to add more.`, 'error');
+          setLoading(false);
+          return;
+        }
+      }
       const now = new Date().toISOString();
       const finalId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', []);
-      if (isEditing) {
-        const cap = formData.classId ? await getClassCapacityState(idAuth, formData.classId, id) : null;
+      if (isEditing) {        const cap = formData.classId ? await getClassCapacityState(idAuth, formData.classId, id) : null;
         if (cap?.isFull) { addToast(`${cap.name} is full. Choose another class.`, 'error'); setLoading(false); return; }
         await dataService.update(idAuth, 'students', id!, { ...formData, admissionNo: finalId, studentId: finalId, updatedAt: now } as any);
         addToast('Student updated', 'success');
