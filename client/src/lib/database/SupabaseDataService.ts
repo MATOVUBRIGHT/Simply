@@ -825,6 +825,9 @@ class SupabaseDataService {
   async delete(userId: string, tableName: string, id: string): Promise<SyncResult> {
     const sid = this.sid(userId);
 
+    // Register as deleted FIRST — prevents re-appearing from any future sync
+    markDeleted(sid, tableName, id);
+
     // Optimistic cache delete
     const record = cacheGet(sid, tableName)?.find(r => r.id === id);
     const rtype = recycleBinType(tableName);
@@ -861,6 +864,9 @@ class SupabaseDataService {
   async batchDelete(userId: string, tableName: string, ids: string[]): Promise<SyncResult> {
     if (!ids.length) return { success: true, syncedRemotely: true, savedLocally: true };
     const sid = this.sid(userId);
+
+    // Register all as deleted FIRST — prevents re-appearing from any future sync
+    markBatchDeleted(sid, tableName, ids);
 
     // Optimistic cache delete
     const existing = cacheGet(sid, tableName) || [];
