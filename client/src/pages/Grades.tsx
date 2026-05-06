@@ -1044,20 +1044,26 @@ export default function Grades() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
-            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <Award size={18} className="text-white" />
-                <h2 className="font-bold text-white">Add Grades - All Subjects</h2>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
+          <div className="w-full max-w-2xl animate-modal-in max-h-[90vh] flex flex-col" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+            <form onSubmit={handleBulkSubmit} className="flex flex-col overflow-hidden flex-1">
+              {/* Header */}
+              <div className="shrink-0 px-7 pt-7 pb-0">
+                <div className="flex items-start gap-4 mb-6">
+                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#FEF3C7' }}>
+                    <Award size={20} className="text-amber-600" />
+                  </div>
+                  <div className="flex-1 min-w-0 pt-0.5">
+                    <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Add Grades — All Subjects</h3>
+                    <p className="text-[14px] text-slate-500 mt-1">Enter scores for each subject below.</p>
+                  </div>
+                  <button type="button" onClick={() => setShowForm(false)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
+                    <X size={16} className="text-slate-400" />
+                  </button>
+                </div>
               </div>
-              <button onClick={() => setShowForm(false)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
-            </div>
-            <form onSubmit={handleBulkSubmit} className="flex flex-col overflow-hidden">
               {/* Top controls */}
-              <div className="p-5 border-b border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:grid-cols-3 gap-3 shrink-0">
+              <div className="px-7 pb-4 border-b border-slate-200 grid grid-cols-2 sm:grid-cols-3 gap-3 shrink-0">
                 <div>
                   <label className="form-label">Class *</label>
                   <select value={bulkForm.classId}
@@ -1162,13 +1168,13 @@ export default function Grades() {
               </div>
 
               {/* Footer */}
-              <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0 bg-slate-50 dark:bg-slate-800/50">
+              <div className="px-7 py-5 border-t border-slate-200 flex items-center justify-between shrink-0">
                 <p className="text-xs text-slate-500">
                   {Object.values(bulkScores).filter(v => v.trim() !== '').length} of {subjectsForBulkClass.length} subjects filled
                 </p>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
-                  <button type="submit" disabled={bulkSubmitting || !bulkForm.studentId} className="btn btn-primary disabled:opacity-50">
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setShowForm(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Cancel</button>
+                  <button type="submit" disabled={bulkSubmitting || !bulkForm.studentId} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 disabled:opacity-50" style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}>
                     {bulkSubmitting ? 'Saving...' : 'Save Grades'}
                   </button>
                 </div>
@@ -1243,19 +1249,20 @@ export default function Grades() {
 
       {/* Edit Grade Modal */}
       {editGrade && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setEditGrade(null); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
-            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <Pencil size={16} className="text-white" />
-                <h2 className="font-bold text-white">Edit Grade</h2>
-              </div>
-              <button onClick={() => setEditGrade(null)} className="p-1 hover:bg-white/20 rounded-lg"><X size={18} className="text-white" /></button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 text-sm">
-                <p className="font-medium text-slate-700 dark:text-slate-200">{editGrade.studentName}</p>
-                <p className="text-slate-500 text-xs mt-0.5">{editGrade.subjectName}</p>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setEditGrade(null); }}>
+          <div className="w-full max-w-sm animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+            <div className="p-7">
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#EEF2FF' }}>
+                  <Pencil size={20} className="text-indigo-600" />
+                </div>
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Edit Grade</h3>
+                  <p className="text-[14px] text-slate-500 mt-1">{editGrade?.studentName} — {editGrade?.subjectName}</p>
+                </div>
+                <button onClick={() => setEditGrade(null)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
+                  <X size={16} className="text-slate-400" />
+                </button>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1272,18 +1279,18 @@ export default function Grades() {
                 </div>
               </div>
               {editGrade.score && editGrade.maxScore && parseFloat(editGrade.maxScore) > 0 && (
-                <div className="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg flex items-center gap-3">
+                <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3 mt-3">
                   {(() => {
                     const pct = Math.round((parseFloat(editGrade.score) / parseFloat(editGrade.maxScore)) * 100);
                     const gi = getGrade(pct);
                     const cls = gi.grade.startsWith('D') ? 'bg-emerald-100 text-emerald-700' : gi.grade.startsWith('C') ? 'bg-blue-100 text-blue-700' : gi.grade.startsWith('P') ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
-                    return <><span className="text-xl font-bold text-slate-700 dark:text-slate-200">{pct}%</span><span className={`px-2 py-0.5 rounded font-bold text-sm ${cls}`}>{gi.grade}</span><span className="text-sm text-slate-500">{gi.remark}</span></>;
+                    return <><span className="text-xl font-bold text-slate-700">{pct}%</span><span className={`px-2 py-0.5 rounded font-bold text-sm ${cls}`}>{gi.grade}</span><span className="text-sm text-slate-500">{gi.remark}</span></>;
                   })()}
                 </div>
               )}
-              <div className="flex justify-end gap-2 pt-1">
-                <button onClick={() => setEditGrade(null)} className="btn btn-secondary" disabled={isSavingEdit}>Cancel</button>
-                <button onClick={handleEditSave} disabled={isSavingEdit} className="btn btn-primary flex items-center gap-2 disabled:opacity-70">
+              <div className="flex gap-3 justify-end pt-4">
+                <button onClick={() => setEditGrade(null)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')} disabled={isSavingEdit}>Cancel</button>
+                <button onClick={handleEditSave} disabled={isSavingEdit} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 disabled:opacity-70" style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}>
                   {isSavingEdit ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : 'Save Changes'}
                 </button>
               </div>

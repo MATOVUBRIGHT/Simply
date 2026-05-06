@@ -349,46 +349,51 @@ export default function Announcements() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) handleCancelEdit(); }}>
-          <div className="modal-card w-full max-w-lg" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <h3 className="font-bold text-white flex items-center gap-2">
-                {editingId ? <Edit2 size={20} /> : <Plus size={20} />}
-                {editingId ? 'Edit Announcement' : 'Create Announcement'}
-              </h3>
-              <button onClick={handleCancelEdit} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="p-5 space-y-4">
-              <div className="space-y-2">
-                <label className="form-label">Title</label>
-                <input value={formData.title} onChange={e => setFormData(prev => ({ ...prev, title: e.target.value }))} className="form-input" required placeholder="Enter announcement title" />
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Content</label>
-                <textarea value={formData.content} onChange={e => setFormData(prev => ({ ...prev, content: e.target.value }))} className="form-input" rows={4} required placeholder="Write your announcement..." />
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Priority</label>
-                <select value={formData.priority} onChange={e => setFormData(prev => ({ ...prev, priority: e.target.value as Priority }))} className="form-input">
-                  <option value={Priority.LOW}>Low - General info</option>
-                  <option value={Priority.MEDIUM}>Medium - Important</option>
-                  <option value={Priority.HIGH}>High - Urgent attention</option>
-                  <option value={Priority.URGENT}>Urgent - Immediate action</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Event Date <span className="text-slate-400 font-normal text-xs">(optional — shows on calendar)</span></label>
-                <input type="date" value={formData.eventDate} onChange={e => setFormData(prev => ({ ...prev, eventDate: e.target.value }))} className="form-input" />
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button type="submit" className="btn btn-primary flex-1">
-                  {editingId ? <><Edit2 size={16} /> Update</> : <><Megaphone size={16} /> Publish</>}
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) handleCancelEdit(); }}>
+          <div className="w-full max-w-lg animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+            <div className="p-7">
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#EEF2FF' }}>
+                  {editingId ? <Edit2 size={20} className="text-indigo-600" /> : <Megaphone size={20} className="text-indigo-600" />}
+                </div>
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <h3 className="font-bold text-slate-900 text-[17px] leading-snug">{editingId ? 'Edit Announcement' : 'Create Announcement'}</h3>
+                  <p className="text-[14px] text-slate-500 mt-1">{editingId ? 'Update the announcement details.' : 'Publish a new announcement to the school.'}</p>
+                </div>
+                <button onClick={handleCancelEdit} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
+                  <X size={16} className="text-slate-400" />
                 </button>
-                <button type="button" onClick={handleCancelEdit} className="btn btn-secondary">Cancel</button>
               </div>
-            </form>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="form-label">Title</label>
+                  <input value={formData.title} onChange={e => setFormData(prev => ({ ...prev, title: e.target.value }))} className="form-input" required placeholder="Enter announcement title" />
+                </div>
+                <div className="space-y-2">
+                  <label className="form-label">Content</label>
+                  <textarea value={formData.content} onChange={e => setFormData(prev => ({ ...prev, content: e.target.value }))} className="form-input" rows={4} required placeholder="Write your announcement..." />
+                </div>
+                <div className="space-y-2">
+                  <label className="form-label">Priority</label>
+                  <select value={formData.priority} onChange={e => setFormData(prev => ({ ...prev, priority: e.target.value as Priority }))} className="form-input">
+                    <option value={Priority.LOW}>Low - General info</option>
+                    <option value={Priority.MEDIUM}>Medium - Important</option>
+                    <option value={Priority.HIGH}>High - Urgent attention</option>
+                    <option value={Priority.URGENT}>Urgent - Immediate action</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="form-label">Event Date <span className="text-slate-400 font-normal text-xs">(optional — shows on calendar)</span></label>
+                  <input type="date" value={formData.eventDate} onChange={e => setFormData(prev => ({ ...prev, eventDate: e.target.value }))} className="form-input" />
+                </div>
+                <div className="flex gap-3 justify-end pt-2">
+                  <button type="button" onClick={handleCancelEdit} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Cancel</button>
+                  <button type="submit" className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2" style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}>
+                    {editingId ? 'Update' : 'Publish'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}

@@ -369,30 +369,40 @@ export default function Transport() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
-          <div className="modal-card w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <h3 className="font-bold text-white flex items-center gap-2"><Plus size={18} /> Add New Route</h3>
-              <button onClick={() => setShowForm(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
+          <div className="w-full max-w-md animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+            <div className="p-7">
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#E0F2FE' }}>
+                  <Bus size={20} className="text-sky-600" />
+                </div>
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Add New Route</h3>
+                  <p className="text-[14px] text-slate-500 mt-1">Configure a new transport route.</p>
+                </div>
+                <button onClick={() => setShowForm(false)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
+                  <X size={16} className="text-slate-400" />
+                </button>
+              </div>
+              <form onSubmit={handleAddRoute} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="form-label">Route Name</label>
+                  <input value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="form-input" required placeholder="Route A" />
+                </div>
+                <div className="space-y-2">
+                  <label className="form-label">Description</label>
+                  <input value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} className="form-input" placeholder="Area covered" />
+                </div>
+                <div className="space-y-2">
+                  <label className="form-label">Monthly Fee</label>
+                  <input type="number" value={formData.fee} onChange={e => setFormData(prev => ({ ...prev, fee: parseFloat(e.target.value) }))} className="form-input" />
+                </div>
+                <div className="flex gap-3 justify-end pt-2">
+                  <button type="button" onClick={() => setShowForm(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Cancel</button>
+                  <button type="submit" className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2" style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}>Save Route</button>
+                </div>
+              </form>
             </div>
-            <form onSubmit={handleAddRoute} className="p-5 grid grid-cols-1 gap-4">
-              <div className="space-y-2">
-                <label className="form-label">Route Name</label>
-                <input value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="form-input" required placeholder="Route A" />
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Description</label>
-                <input value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} className="form-input" placeholder="Area covered" />
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Monthly Fee</label>
-                <input type="number" value={formData.fee} onChange={e => setFormData(prev => ({ ...prev, fee: parseFloat(e.target.value) }))} className="form-input" />
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button type="submit" className="btn btn-primary flex-1">Save Route</button>
-                <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
-              </div>
-            </form>
           </div>
         </div>
       )}

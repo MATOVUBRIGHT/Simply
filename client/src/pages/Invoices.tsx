@@ -1733,21 +1733,26 @@ export default function Invoices() {
       )}
 
       {showBursaryModal && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <Award size={20} className="text-white" />
-                <div>
-                  <h2 className="text-lg font-bold text-white">Bursary / Scholarship</h2>
-                  <p className="text-xs text-white/70">Grant a bursary to a student - reduces their invoice</p>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
+          <div className="w-full max-w-2xl animate-modal-in max-h-[90vh] flex flex-col" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+            {/* Header */}
+            <div className="shrink-0 px-7 pt-7 pb-0">
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#D1FAE5' }}>
+                  <Award size={20} className="text-emerald-600" />
                 </div>
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Bursary / Scholarship</h3>
+                  <p className="text-[14px] text-slate-500 mt-1">Grant a bursary to a student — reduces their invoice.</p>
+                </div>
+                <button onClick={() => setShowBursaryModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
+                  <X size={16} className="text-slate-400" />
+                </button>
               </div>
-              <button onClick={() => setShowBursaryModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg text-white"><X size={18} /></button>
             </div>
 
             {/* Bursary add form */}
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 space-y-3">
+            <div className="px-7 py-4 border-b border-slate-100 bg-slate-50 space-y-3 shrink-0">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="form-label">Class Filter</label>
@@ -1808,20 +1813,20 @@ export default function Invoices() {
               </button>
             </div>
 
-            <div className="p-5 max-h-[35vh] overflow-y-auto">
+            <div className="px-7 py-4 flex-1 overflow-y-auto">
               {bursaries.length === 0 ? (
                 <div className="text-center py-8 text-slate-400"><Award size={36} className="mx-auto mb-2 opacity-40" /><p className="text-sm">No bursaries yet</p></div>
               ) : (
                 <div className="space-y-2">
                   {bursaries.map(b => (
-                    <div key={b.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                    <div key={b.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:bg-slate-50">
                       <div>
-                        <p className="font-medium text-slate-800 dark:text-white">{b.studentName}</p>
+                        <p className="font-medium text-slate-800">{b.studentName}</p>
                         <p className="text-xs text-slate-500">Term {b.term} {b.year}{(b as any).reason ? ` - ${(b as any).reason}` : ''}</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-amber-600">{formatMoney(b.amount)}</span>
-                        <button onClick={async () => { await dataService.delete(user!.id, 'bursaries', b.id); addToast('Bursary removed', 'success'); }} className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><Trash2 size={14} /></button>
+                        <button onClick={async () => { await dataService.delete(user!.id, 'bursaries', b.id); addToast('Bursary removed', 'success'); }} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
                       </div>
                     </div>
                   ))}
@@ -1829,30 +1834,35 @@ export default function Invoices() {
               )}
             </div>
 
-            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
-              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Total: <span className="text-amber-600 font-bold">{formatMoney(bursaries.reduce((s, b) => s + b.amount, 0))}</span></p>
-              <button onClick={() => setShowBursaryModal(false)} className="btn btn-secondary">Close</button>
+            <div className="px-7 py-4 border-t border-slate-200 flex justify-between items-center shrink-0">
+              <p className="text-sm font-medium text-slate-600">Total: <span className="text-amber-600 font-bold">{formatMoney(bursaries.reduce((s, b) => s + b.amount, 0))}</span></p>
+              <button onClick={() => setShowBursaryModal(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Close</button>
             </div>
           </div>
         </div>
       )}
 
       {showDiscountModal && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <Percent size={20} className="text-white" />
-                <div>
-                  <h2 className="text-lg font-bold text-white">Student Discount</h2>
-                  <p className="text-xs text-white/70">Apply a discount to a student - updates their invoice</p>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
+          <div className="w-full max-w-2xl animate-modal-in max-h-[90vh] flex flex-col" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+            {/* Header */}
+            <div className="shrink-0 px-7 pt-7 pb-0">
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#CFFAFE' }}>
+                  <Percent size={20} className="text-cyan-600" />
                 </div>
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Student Discount</h3>
+                  <p className="text-[14px] text-slate-500 mt-1">Apply a discount to a student — updates their invoice.</p>
+                </div>
+                <button onClick={() => setShowDiscountModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
+                  <X size={16} className="text-slate-400" />
+                </button>
               </div>
-              <button onClick={() => setShowDiscountModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg text-white"><X size={18} /></button>
             </div>
 
             {/* Discount add form */}
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 space-y-3">
+            <div className="px-7 py-4 border-b border-slate-100 bg-slate-50 space-y-3 shrink-0">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="form-label">Class Filter</label>
@@ -1918,20 +1928,20 @@ export default function Invoices() {
               </button>
             </div>
 
-            <div className="p-5 max-h-[35vh] overflow-y-auto">
+            <div className="px-7 py-4 flex-1 overflow-y-auto">
               {discounts.length === 0 ? (
                 <div className="text-center py-8 text-slate-400"><Percent size={36} className="mx-auto mb-2 opacity-40" /><p className="text-sm">No discounts yet</p></div>
               ) : (
                 <div className="space-y-2">
                   {discounts.map(d => (
-                    <div key={d.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                    <div key={d.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:bg-slate-50">
                       <div>
-                        <p className="font-medium text-slate-800 dark:text-white">{(d as any).studentName || d.className || '-'}</p>
+                        <p className="font-medium text-slate-800">{(d as any).studentName || d.className || '-'}</p>
                         <p className="text-xs text-slate-500">Term {d.term} {d.year}</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-cyan-600">{d.type === 'percentage' ? `${d.amount}%` : formatMoney(d.amount)}</span>
-                        <button onClick={async () => { await dataService.delete(user!.id, 'discounts', d.id); addToast('Discount removed', 'success'); }} className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><Trash2 size={14} /></button>
+                        <button onClick={async () => { await dataService.delete(user!.id, 'discounts', d.id); addToast('Discount removed', 'success'); }} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
                       </div>
                     </div>
                   ))}
@@ -1939,9 +1949,9 @@ export default function Invoices() {
               )}
             </div>
 
-            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
-              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Total fixed: <span className="text-cyan-600 font-bold">{formatMoney(discounts.reduce((s, d) => d.type === 'percentage' ? s : s + d.amount, 0))}</span></p>
-              <button onClick={() => setShowDiscountModal(false)} className="btn btn-secondary">Close</button>
+            <div className="px-7 py-4 border-t border-slate-200 flex justify-between items-center shrink-0">
+              <p className="text-sm font-medium text-slate-600">Total fixed: <span className="text-cyan-600 font-bold">{formatMoney(discounts.reduce((s, d) => d.type === 'percentage' ? s : s + d.amount, 0))}</span></p>
+              <button onClick={() => setShowDiscountModal(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Close</button>
             </div>
           </div>
         </div>

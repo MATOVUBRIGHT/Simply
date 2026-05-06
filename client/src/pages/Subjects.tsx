@@ -767,21 +767,23 @@ export default function Subjects() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => resetSubjectForm()}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            {/* Modal header */}
-            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <Book size={18} className="text-white" />
-                <h3 className="font-bold text-white">Add Subject</h3>
-              </div>
-              <button onClick={resetSubjectForm} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden">
-              <div className="p-5 space-y-5 overflow-y-auto">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={() => resetSubjectForm()}>
+          <div className="w-full max-w-lg animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+            <form onSubmit={handleSubmit} className="flex flex-col max-h-[90vh]">
+              <div className="p-7 overflow-y-auto flex-1">
+                <div className="flex items-start gap-4 mb-6">
+                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#EEF2FF' }}>
+                    <Book size={20} className="text-indigo-600" />
+                  </div>
+                  <div className="flex-1 min-w-0 pt-0.5">
+                    <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Add Subject</h3>
+                    <p className="text-[14px] text-slate-500 mt-1">Fill in the subject details below.</p>
+                  </div>
+                  <button type="button" onClick={resetSubjectForm} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
+                    <X size={16} className="text-slate-400" />
+                  </button>
+                </div>
+                <div className="space-y-5">
 
                 {/* Subject name */}
                 <div>
@@ -889,15 +891,15 @@ export default function Subjects() {
                     <p className="text-xs text-slate-500 mt-2">{selectedClassIds.length} class{selectedClassIds.length > 1 ? 'es' : ''} selected</p>
                   )}
                 </div>
-              </div>
-
-              {/* Footer */}
-              <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex gap-2 justify-end shrink-0 bg-slate-50 dark:bg-slate-800/50">
-                <button type="button" onClick={resetSubjectForm} className="btn btn-secondary">Cancel</button>
-                <button type="submit" disabled={submitting || !formData.name || !formData.code || selectedClassIds.length === 0}
-                  className="btn btn-primary disabled:opacity-50">
-                  {submitting ? 'Saving...' : `Add to ${selectedClassIds.length || 0} Class${selectedClassIds.length !== 1 ? 'es' : ''}`}
-                </button>
+                </div>
+                {/* Footer */}
+                <div className="flex gap-3 justify-end pt-4">
+                  <button type="button" onClick={resetSubjectForm} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Cancel</button>
+                  <button type="submit" disabled={submitting || !formData.name || !formData.code || selectedClassIds.length === 0}
+                    className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 disabled:opacity-50" style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}>
+                    {submitting ? 'Saving...' : 'Save Subject'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
