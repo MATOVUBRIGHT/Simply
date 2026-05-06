@@ -10,11 +10,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor, generateInvoicesFromStructure } from '../utils/feeStructures';
-import { Portal } from '../components/Portal';
+import { ClassOption } from '../utils/classroom';
+import DropdownModal from '../components/DropdownModal';
 
-    param($m)
-    $m.Value
-  
 interface Invoice {
   id: string;
   studentId: string;
@@ -1249,7 +1247,6 @@ export default function Invoices() {
       </div>
 
       {showCreateModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
@@ -1360,7 +1357,6 @@ export default function Invoices() {
       )}
 
       {showImportModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1372,7 +1368,6 @@ export default function Invoices() {
                 <X size={18} className="text-white" />
               </button>
             </div>
-
 
             <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
               {importStep === 'upload' && (
@@ -1511,7 +1506,6 @@ export default function Invoices() {
       )}
 
       {showStructureModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -1526,7 +1520,6 @@ export default function Invoices() {
                 <X size={20} />
               </button>
             </div>
-            
             
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
               <div className="flex flex-wrap gap-4 items-end">
@@ -1740,7 +1733,6 @@ export default function Invoices() {
       )}
 
       {showBursaryModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
           <div className="w-full max-w-2xl animate-modal-in max-h-[90vh] flex flex-col" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
             {/* Header */}
@@ -1758,7 +1750,6 @@ export default function Invoices() {
                 </button>
               </div>
             </div>
-
 
             {/* Bursary add form */}
             <div className="px-7 py-4 border-b border-slate-100 bg-slate-50 space-y-3 shrink-0">
@@ -1852,7 +1843,6 @@ export default function Invoices() {
       )}
 
       {showDiscountModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
           <div className="w-full max-w-2xl animate-modal-in max-h-[90vh] flex flex-col" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
             {/* Header */}
@@ -1870,7 +1860,6 @@ export default function Invoices() {
                 </button>
               </div>
             </div>
-
 
             {/* Discount add form */}
             <div className="px-7 py-4 border-b border-slate-100 bg-slate-50 space-y-3 shrink-0">
@@ -1970,7 +1959,6 @@ export default function Invoices() {
 
       {/* Invoice Payment Modal */}
       {invoicePayModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setInvoicePayModal(null); }}>
           <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>

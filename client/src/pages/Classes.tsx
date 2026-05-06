@@ -7,11 +7,9 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
-import { Portal } from '../components/Portal';
+import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
-    param($m)
-    $m.Value
-  
 const classColors = [
   { card: 'card-coral-light', gradient: 'from-orange-100 to-amber-100', text: 'text-orange-600' },
   { card: 'card-teal-light', gradient: 'from-teal-100 to-cyan-100', text: 'text-teal-600' },
@@ -529,7 +527,6 @@ export default function Classes() {
       </div>
 
       {showForm && (
-        <Portal>
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
@@ -605,7 +602,6 @@ export default function Classes() {
             </div>
           </div>
         </div>
-        </Portal>
       )}
 
       <div className="card overflow-hidden">
@@ -744,7 +740,6 @@ export default function Classes() {
 
       {/* Timetable Modal */}
       {showTimetable && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -756,7 +751,6 @@ export default function Classes() {
               </div>
               <button onClick={() => setShowTimetable(false)} className="p-1 hover:bg-white/20 rounded-lg text-white"><X size={18} /></button>
             </div>
-
 
             {/* Add period form */}
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 shrink-0">
@@ -849,7 +843,6 @@ export default function Classes() {
       )}
 
       {showImportModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>

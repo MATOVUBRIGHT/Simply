@@ -7,11 +7,9 @@ import { v4 as uuidv4 } from 'uuid';
 import ImageUpload from '../components/ImageUpload';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
-import { Portal } from '../components/Portal';
+import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
+import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, IdFormat } from '../utils/idFormat';
 
-    param($m)
-    $m.Value
-  
 const steps = [
   { id: 1, label: 'Student Info', icon: User },
   { id: 2, label: 'Guardian', icon: Users },
@@ -444,7 +442,6 @@ export default function Admission() {
 
       {/* ID Format Modal */}
       {showIdFormatModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowIdFormatModal(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>

@@ -14,11 +14,9 @@ import { addToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
-import { Portal } from '../components/Portal';
+import { useConfirm } from '../components/ConfirmModal';
+import { getSubscriptionAccessState, PLAN_DEFINITIONS } from '../utils/plans';
 
-    param($m)
-    $m.Value
-  
 const avatarColors = [
   'bg-rose-500',
   'bg-teal-500',
@@ -1778,7 +1776,6 @@ export default function Students() {
       )}
 
       {showImportModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1792,7 +1789,6 @@ export default function Students() {
                 <X size={18} className="text-white" />
               </button>
             </div>
-
 
             <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
               {importStep === 'upload' && (

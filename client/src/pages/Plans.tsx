@@ -1,10 +1,8 @@
 ﻿import { useState, useEffect } from 'react';
 import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
-import { Portal } from '../components/Portal';
+import { useAuth } from '../contexts/AuthContext';
+import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen, saveCurrentPlan } from '../utils/plans';
 
-    param($m)
-    $m.Value
-  
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
   { q: 'Can I switch plans?', a: 'Yes, upgrades are immediate, downgrades should only be used when your enrolled students fit the lower limit.' },
@@ -102,7 +100,7 @@ Powered by Schofy`;
     <div className="relative space-y-4 text-slate-900 dark:text-white">
       <div className="rounded-xl border p-4 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800">
         <p className="text-sm font-semibold text-slate-900 dark:text-white">
-          🎉 Your account is now fully unlocked! Schofy is now free to use with no student limits and real-time cloud sync across all your devices.
+          ≡ƒÄë Your account is now fully unlocked! Schofy is now free to use with no student limits and real-time cloud sync across all your devices.
         </p>
       </div>
 
@@ -149,7 +147,7 @@ Powered by Schofy`;
               <p className="text-sm text-green-700 dark:text-green-300 mt-1">
                 {accessState.status === 'active' ? 'Active' : 
                  accessState.status === 'expiring' ? `Expires in ${accessState.daysRemaining} days` :
-                 accessState.status === 'expired' ? 'Expired' : 'Unknown'} • 
+                 accessState.status === 'expired' ? 'Expired' : 'Unknown'} ΓÇó 
                 {currentCycle === 'monthly' ? ' Monthly' : 
                  currentCycle === 'yearly' ? ' Yearly' : ' Term'} billing
               </p>
@@ -346,7 +344,6 @@ Powered by Schofy`;
       </div>
 
       {showPaymentModal && selectedPlan && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowPaymentModal(false); }}>
           <div className="animate-modal-in max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -413,7 +410,7 @@ Powered by Schofy`;
                 {latestReceipt && (
                   <div className="mb-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-3 text-left">
                     <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">Receipt saved</p>
-                    <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{latestReceipt.planName} • ${latestReceipt.amount} • {latestReceipt.billingCycle}</p>
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{latestReceipt.planName} ΓÇó ${latestReceipt.amount} ΓÇó {latestReceipt.billingCycle}</p>
                     <p className="text-xs text-emerald-700 dark:text-emerald-300">Expires {new Date(latestReceipt.expiresAt).toLocaleDateString()}</p>
                   </div>
                 )}
@@ -430,7 +427,6 @@ Powered by Schofy`;
       )}
 
       {showFAQModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowFAQModal(false); }}>
           <div className="animate-modal-in max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
@@ -453,7 +449,6 @@ Powered by Schofy`;
       )}
 
       {showUpgradeModal && upgradeToPlan && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowUpgradeModal(false); }}>
           <div className="animate-modal-in w-full max-w-sm rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -475,7 +470,6 @@ Powered by Schofy`;
       )}
 
       {showIntroModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowIntroModal(false); }}>
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700">
@@ -500,11 +494,9 @@ Powered by Schofy`;
               </div>
           </div>
         </div>
-        </Portal>
       )}
 
       {showContinueModal && selectedPlan && latestReceipt && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowContinueModal(false); }}>
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700">
@@ -544,7 +536,6 @@ Powered by Schofy`;
             </div>
           </div>
         </div>
-        </Portal>
       )}
     </div>
   );

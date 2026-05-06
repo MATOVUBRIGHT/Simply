@@ -6,7 +6,6 @@ import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { 
-import { Portal } from '../components/Portal';
   ResponsiveContainer,
   Cell,
   PieChart,
@@ -20,10 +19,9 @@ import { Portal } from '../components/Portal';
   Tooltip,
   CartesianGrid
 } from 'recharts';
+import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, Megaphone, Calendar as CalendarIcon, Clock, X } from 'lucide-react';
+import { Announcement } from '@schofy/shared';
 
-    param($m)
-    $m.Value
-  
 // Uganda public holidays (month is 0-indexed)
 const UGANDA_HOLIDAYS: { month: number; day: number; name: string }[] = [
   { month: 0, day: 1, name: "New Year's Day" },
@@ -738,7 +736,6 @@ export default function Dashboard() {
 
         {/* Day event popup */}
         {selectedDay && (
-          <Portal>
           <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setSelectedDay(null)}>
             <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
               <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>

@@ -12,11 +12,9 @@ import { generateUUID } from '../utils/uuid';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
-import { Portal } from '../components/Portal';
+import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
-    param($m)
-    $m.Value
-  
 const avatarColors = [
   'bg-violet-500',
   'bg-teal-500',
@@ -885,7 +883,6 @@ export default function StaffPage() {
       )}
 
       {showImportModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1023,7 +1020,6 @@ export default function StaffPage() {
 
       {/* Generate Payroll Modal */}
       {showPayrollModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-md max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>

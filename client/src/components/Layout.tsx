@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -77,7 +77,7 @@ function Layout({ children }: LayoutProps) {
   const headerRef = useRef<HTMLDivElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
-  // Reactive school name + logo from settings store — updates instantly when settings change
+  // Reactive school name + logo from settings store ΓÇö updates instantly when settings change
   const { data: settingsRows } = useTableData(tenantId || '', 'settings');
   const schoolName = settingsRows.find((s: any) => s.key === 'schoolName')?.value || 'My School';
   const schoolLogo = settingsRows.find((s: any) => s.key === 'schoolLogo')?.value || null;
@@ -165,7 +165,7 @@ function Layout({ children }: LayoutProps) {
   }, [user?.id, schoolId]);
 
   async function loadSchoolName() {
-    // No longer needed — school name comes from useTableData reactively
+    // No longer needed ΓÇö school name comes from useTableData reactively
   }
 
   useEffect(() => {
@@ -325,7 +325,7 @@ function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950">
-      {/* Sidebar — always fixed, never scrolls away */}
+      {/* Sidebar ΓÇö always fixed, never scrolls away */}
       <aside
         className={`fixed top-0 h-screen inset-y-0 left-0 z-40 w-64 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl transform transition-transform duration-200 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
@@ -390,9 +390,9 @@ function Layout({ children }: LayoutProps) {
         </div>
       </aside>
 
-      {/* Main Content — offset by sidebar width on large screens */}
+      {/* Main Content ΓÇö offset by sidebar width on large screens */}
       <div className="flex-1 flex flex-col min-w-0 lg:ml-64">
-        {/* Header/Top Bar — sticky at top of main column */}
+        {/* Header/Top Bar ΓÇö sticky at top of main column */}
         <header ref={headerRef} className="sticky top-0 shrink-0 z-30 border-b" style={{ backgroundColor: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}>
           {/* Main header row */}
           <div className="flex items-center gap-2 px-3 sm:px-6 h-16">
@@ -404,14 +404,14 @@ function Layout({ children }: LayoutProps) {
               <Menu size={22} className="text-white" />
             </button>
 
-            {/* Search — always visible, grows to fill space */}
+            {/* Search ΓÇö always visible, grows to fill space */}
             <div className="flex-1 min-w-0">
               <GlobalSearch />
             </div>
 
             {/* Right side actions */}
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-              {/* Time — hidden on small screens */}
+              {/* Time ΓÇö hidden on small screens */}
               <div className="hidden xl:flex items-center gap-4 text-white/80 mr-2">
                 <div className="text-right">
                   <p className="text-base font-bold text-white leading-none">{formatTime(currentTime)}</p>
@@ -419,12 +419,12 @@ function Layout({ children }: LayoutProps) {
                 </div>
               </div>
 
-              {/* Realtime status — hidden on small */}
+              {/* Realtime status ΓÇö hidden on small */}
               <div className="hidden lg:block">
                 <RealtimeStatus />
               </div>
 
-              {/* Refresh button — replaces sync text */}
+              {/* Refresh button ΓÇö replaces sync text */}
               <button
                 onClick={handleRefresh}
                 disabled={isRefreshing}
@@ -509,7 +509,7 @@ function Layout({ children }: LayoutProps) {
                 </div>
                 <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-100 dark:border-slate-700 flex justify-between">
                   <button onClick={() => { clearAllNotifications(); setNotifOpen(false); }} className="text-xs text-red-500 font-medium flex items-center gap-1"><Trash2 size={12} />Clear all</button>
-                  <button onClick={() => { setNotifOpen(false); navigate('/notifications'); }} className="text-xs font-medium" style={{ color: 'var(--primary-color)' }}>View all →</button>
+                  <button onClick={() => { setNotifOpen(false); navigate('/notifications'); }} className="text-xs font-medium" style={{ color: 'var(--primary-color)' }}>View all ΓåÆ</button>
                 </div>
               </div>
             </div>
@@ -569,13 +569,13 @@ function Layout({ children }: LayoutProps) {
             className="shrink-0 text-center text-sm font-medium py-2.5 px-4 bg-amber-400 text-amber-950 border-b border-amber-500/30"
             role="status"
           >
-            Offline — you can keep working. Changes stay on this device and sync automatically when the connection returns.
+            Offline ΓÇö you can keep working. Changes stay on this device and sync automatically when the connection returns.
           </div>
         )}
 
         {/* Page Content — scrolls vertically, allows horizontal scroll on small screens */}
-        <main className="flex-1 min-h-0 bg-[#f8fafc] dark:bg-slate-950">
-          <div className="h-full overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 min-h-0 bg-[#f8fafc] dark:bg-slate-950" style={{ isolation: 'auto' }}>
+          <div className="h-full overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
             <div className="w-full min-w-0">
               {children}
             </div>

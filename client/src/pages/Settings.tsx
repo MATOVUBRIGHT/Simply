@@ -5,11 +5,9 @@ import { useToast } from '../contexts/ToastContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSync } from '../contexts/SyncContext';
 import { useAuth } from '../contexts/AuthContext';
-import { Portal } from '../components/Portal';
+import { supabase } from '../lib/supabase';
+import { dataService } from '../lib/database/SupabaseDataService';
 
-    param($m)
-    $m.Value
-  
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
   { code: 'UGX', symbol: 'USh', name: 'Ugandan Shilling' },
@@ -850,7 +848,6 @@ export default function Settings() {
             </p>
             
             {showDeleteConfirm ? (
-              <Portal>
               <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                 <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-3 px-5 py-4 border-b border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
@@ -909,7 +906,6 @@ export default function Settings() {
 
       {/* Promote Students Modal */}
       {showPromoteModal && (
-        <Portal>
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center gap-3 p-5 border-b border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/20">

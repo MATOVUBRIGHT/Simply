@@ -1,11 +1,9 @@
 ﻿import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, CreditCard, Crown, Zap, Star, HelpCircle, Phone, X, MessageCircle, ChevronDown, ChevronUp, LogOut } from 'lucide-react';
-import { Portal } from '../components/Portal';
+import { useAuth } from '../contexts/AuthContext';
+import { PLAN_DEFINITIONS, PlanDefinition, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen, saveCurrentPlan } from '../utils/plans';
 
-    param($m)
-    $m.Value
-  
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
   { q: 'Can I switch plans?', a: 'Yes, upgrades are immediate, downgrades should only be used when your enrolled students fit the lower limit.' },
@@ -244,7 +242,6 @@ export default function Subscription() {
 
       {/* Payment Modal */}
       {showPaymentModal && selectedPlan && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
             <div className="p-5 border-b border-slate-200 flex items-center justify-between">
@@ -318,12 +315,10 @@ export default function Subscription() {
             )}
           </div>
         </div>
-        </Portal>
       )}
 
       {/* Continue Modal */}
       {showContinueModal && selectedPlan && latestReceipt && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
             <div className="p-5 border-b border-slate-200">
@@ -356,7 +351,6 @@ export default function Subscription() {
             </div>
           </div>
         </div>
-        </Portal>
       )}
     </div>
   );

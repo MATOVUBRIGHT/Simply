@@ -4,12 +4,10 @@ import { ArrowLeft, Download, Settings, Check, Building, Palette, Layout, FileTe
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useStudents } from '../contexts/StudentsContext';
-import { Portal } from '../components/Portal';
+import { dataService } from '../lib/database/SupabaseDataService';
+import { useToast } from '../contexts/ToastContext';
 
-    param($m)
-    $m.Value
-  
-// ── Grade helpers ─────────────────────────────────────────────────────────────
+// ΓöÇΓöÇ Grade helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function getGrade(score: number): string {
   if (score >= 90) return 'D1';
   if (score >= 85) return 'D2';
@@ -34,7 +32,7 @@ function ordinal(n: number): string {
   return s[(v - 20) % 10] || s[v] || s[0];
 }
 
-// ── Template ──────────────────────────────────────────────────────────────────
+// ΓöÇΓöÇ Template ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 const TEMPLATE_KEY = 'schofy_report_template';
 
 interface ReportTemplate {
@@ -72,7 +70,7 @@ const DEFAULT_TEMPLATE: ReportTemplate = {
   schoolPhone: '',
   schoolEmail: '',
   schoolMotto: '',
-  schoolLogo: '🎓',
+  schoolLogo: '≡ƒÄô',
   headerColor: '#1a5f5f',
   accentColor: '#7ecece',
   showBehavior: true,
@@ -186,8 +184,8 @@ export default function ReportCard() {
       const score = result ? Number(result.score) : null;
       const maxScore = result ? Number(result.maxScore || 100) : 100;
       const pct = score !== null ? Math.round((score / maxScore) * 100) : null;
-      const grade = pct !== null ? getGrade(pct) : '—';
-      rows.push({ subject: (sub as any).name, code: (sub as any).code || '', score, maxScore, pct, grade, remark: pct !== null ? getRemark(grade) : '—', remarks: result?.remarks || '' });
+      const grade = pct !== null ? getGrade(pct) : 'ΓÇö';
+      rows.push({ subject: (sub as any).name, code: (sub as any).code || '', score, maxScore, pct, grade, remark: pct !== null ? getRemark(grade) : 'ΓÇö', remarks: result?.remarks || '' });
       if (result) usedKeys.add((sub as any).id);
     }
 
@@ -210,7 +208,7 @@ export default function ReportCard() {
   const overallPct = totalMax > 0 ? Math.round((totalScore / totalMax) * 100) : 0;
   const overallGrade = getGrade(overallPct);
 
-  // Calculate position in class — rank all class students by total score for same term/year
+  // Calculate position in class ΓÇö rank all class students by total score for same term/year
   const classPosition = useMemo(() => {
     if (!studentId || !student?.classId) return null;
     const targetTerm = exam?.term;
@@ -288,7 +286,7 @@ export default function ReportCard() {
         </button>
       </div>
 
-      {/* ── Report Card ──────────────────────────────────────────────────── */}
+      {/* ΓöÇΓöÇ Report Card ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */}
       <div id="report-card-print" className="bg-white mx-auto max-w-2xl shadow-xl print:shadow-none print:max-w-full" style={{ fontFamily: 'Arial, sans-serif' }}>
 
         {/* Header */}
@@ -298,9 +296,9 @@ export default function ReportCard() {
               <h1 className="text-2xl font-black text-white uppercase tracking-wide">{displaySchoolName}</h1>
               {template.schoolMotto && <p className="text-sm italic mt-0.5" style={{ color: acc }}>"{template.schoolMotto}"</p>}
               <div className="flex flex-wrap gap-3 mt-1.5 text-xs" style={{ color: `${acc}cc` }}>
-                {displayAddress && <span>📍 {displayAddress}</span>}
-                {displayPhone && <span>📞 {displayPhone}</span>}
-                {displayEmail && <span>✉ {displayEmail}</span>}
+                {displayAddress && <span>≡ƒôì {displayAddress}</span>}
+                {displayPhone && <span>≡ƒô₧ {displayPhone}</span>}
+                {displayEmail && <span>Γ£ë {displayEmail}</span>}
               </div>
               <h2 className="text-lg font-bold mt-2" style={{ color: acc }}>STUDENT REPORT CARD</h2>
             </div>
@@ -318,8 +316,8 @@ export default function ReportCard() {
               { label: 'Student ID:', value: student.studentId || student.admissionNo },
               { label: 'Class:', value: className },
               { label: 'Academic Year:', value: academicYear },
-              { label: 'Exam:', value: exam?.name || '—' },
-              { label: 'Term:', value: `Term ${exam?.term} · ${exam?.year}` },
+              { label: 'Exam:', value: exam?.name || 'ΓÇö' },
+              { label: 'Term:', value: `Term ${exam?.term} ┬╖ ${exam?.year}` },
               ...(classPosition ? [{ label: 'Position:', value: `${classPosition.position}${ordinal(classPosition.position)} out of ${classPosition.outOf}` }] : []),
             ].map(({ label, value }) => (
               <div key={label} className="flex items-center gap-2">
@@ -350,9 +348,9 @@ export default function ReportCard() {
               ) : studentResults.map((r, i) => (
                 <tr key={i} style={{ backgroundColor: i % 2 === 0 ? `${acc}18` : 'white' }}>
                   <td className="px-2 py-1.5 font-medium uppercase text-slate-700">{r.subject}</td>
-                  <td className="px-2 py-1.5 text-center text-slate-700">{r.score ?? '—'}</td>
+                  <td className="px-2 py-1.5 text-center text-slate-700">{r.score ?? 'ΓÇö'}</td>
                   <td className="px-2 py-1.5 text-center text-slate-500">{r.maxScore}</td>
-                  <td className="px-2 py-1.5 text-center text-slate-700">{r.pct ?? '—'}</td>
+                  <td className="px-2 py-1.5 text-center text-slate-700">{r.pct ?? 'ΓÇö'}</td>
                   <td className="px-2 py-1.5 text-center font-bold" style={{ color: r.grade.startsWith('D') ? '#059669' : r.grade.startsWith('F') ? '#dc2626' : hdr }}>
                     {r.grade}
                   </td>
@@ -401,7 +399,7 @@ export default function ReportCard() {
                   <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>Behavior Assessment</div>
                   {template.behaviorItems.map(b => (
                     <div key={b} className="flex items-center gap-2 py-0.5 border-b border-slate-100">
-                      <div className="w-6 border-b border-slate-400 text-center text-[10px]">✓</div>
+                      <div className="w-6 border-b border-slate-400 text-center text-[10px]">Γ£ô</div>
                       <span className="text-[10px] uppercase text-slate-600">{b}</span>
                     </div>
                   ))}
@@ -412,7 +410,7 @@ export default function ReportCard() {
                   <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>Grading System</div>
                   {template.gradingScale.map(({ grade, min, max, remark }) => (
                     <div key={grade} className="py-0.5 border-b border-slate-100">
-                      <span className="text-[10px] font-bold text-slate-700">{grade} ({min}–{max}%): </span>
+                      <span className="text-[10px] font-bold text-slate-700">{grade} ({min}ΓÇô{max}%): </span>
                       <span className="text-[10px] text-slate-600">{remark}</span>
                     </div>
                   ))}
@@ -428,9 +426,8 @@ export default function ReportCard() {
         <div className="h-6 mt-1" style={{ backgroundColor: acc }} />
       </div>
 
-      {/* ── Template Editor Modal ─────────────────────────────────────────── */}
+      {/* ΓöÇΓöÇ Template Editor Modal ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */}
       {showEditor && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 print:hidden" onClick={() => setShowEditor(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
 
@@ -441,7 +438,6 @@ export default function ReportCard() {
                 <X size={18} className="text-white" />
               </button>
             </div>
-
 
             {/* Tabs */}
             <div className="flex border-b border-slate-200 dark:border-slate-700 shrink-0 overflow-x-auto">
@@ -463,7 +459,7 @@ export default function ReportCard() {
             {/* Tab content */}
             <div className="p-5 overflow-y-auto flex-1 space-y-4">
 
-              {/* ── School Info ── */}
+              {/* ΓöÇΓöÇ School Info ΓöÇΓöÇ */}
               {editorTab === 'school' && (
                 <>
                   <p className="text-xs text-slate-500">These override the school settings for the report card only. Leave blank to use Settings values.</p>
@@ -490,13 +486,13 @@ export default function ReportCard() {
                     </div>
                     <div>
                       <label className="form-label">Logo (emoji or URL)</label>
-                      <input value={draft.schoolLogo} onChange={e => setDraft(p => ({ ...p, schoolLogo: e.target.value }))} className="form-input" placeholder="🎓 or https://..." />
+                      <input value={draft.schoolLogo} onChange={e => setDraft(p => ({ ...p, schoolLogo: e.target.value }))} className="form-input" placeholder="≡ƒÄô or https://..." />
                     </div>
                   </div>
                 </>
               )}
 
-              {/* ── Design ── */}
+              {/* ΓöÇΓöÇ Design ΓöÇΓöÇ */}
               {editorTab === 'design' && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
@@ -552,7 +548,7 @@ export default function ReportCard() {
                 </>
               )}
 
-              {/* ── Sections ── */}
+              {/* ΓöÇΓöÇ Sections ΓöÇΓöÇ */}
               {editorTab === 'sections' && (
                 <>
                   <div className="space-y-3">
@@ -598,7 +594,7 @@ export default function ReportCard() {
                 </>
               )}
 
-              {/* ── Grading ── */}
+              {/* ΓöÇΓöÇ Grading ΓöÇΓöÇ */}
               {editorTab === 'grading' && (
                 <>
                   <p className="text-xs text-slate-500">Edit the grading scale shown on the report card.</p>

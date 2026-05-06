@@ -3,7 +3,6 @@ import { Check, X, Clock, Save, Calendar, Users, BookOpen, Download, Upload, Che
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { AttendanceStatus, EntityType } from '@schofy/shared';
-import { Portal } from '../components/Portal';
 import type { Attendance as AttendanceRecord, Student } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
@@ -571,7 +570,6 @@ export default function Attendance() {
       </div>
 
       {showImportModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -718,7 +716,6 @@ export default function Attendance() {
             </div>
           </div>
         </div>
-      </Portal>
       )}
     </div>
   );

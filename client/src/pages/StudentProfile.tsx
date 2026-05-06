@@ -10,11 +10,9 @@ import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
-import { Portal } from '../components/Portal';
+import { useCurrency } from '../hooks/useCurrency';
+import { v4 as uuidv4 } from 'uuid';
 
-    param($m)
-    $m.Value
-  
 const PAYMENT_METHODS = [
   { value: 'cash', label: 'Cash' },
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -509,7 +507,6 @@ export default function StudentProfile() {
 
       {/* ── Pay Modal — full page blur, centered ────────────────────────────── */}
       {showPayModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowPayModal(null)}>
           <div className="modal-card w-full max-w-md" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>

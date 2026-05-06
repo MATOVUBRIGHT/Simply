@@ -8,11 +8,9 @@ import { ExamResult } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
-import { Portal } from '../components/Portal';
+import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
-    param($m)
-    $m.Value
-  
 interface StudentGrade extends ExamResult {
   studentName: string;
   subjectName: string;
@@ -1046,7 +1044,6 @@ export default function Grades() {
       </div>
 
       {showForm && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
           <div className="w-full max-w-2xl animate-modal-in max-h-[90vh] flex flex-col" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
             <form onSubmit={handleBulkSubmit} className="flex flex-col overflow-hidden flex-1">
@@ -1188,7 +1185,6 @@ export default function Grades() {
       )}
 
       {showInvoiceModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowInvoiceModal(false); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1253,7 +1249,6 @@ export default function Grades() {
 
       {/* Edit Grade Modal */}
       {editGrade && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setEditGrade(null); }}>
           <div className="w-full max-w-sm animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
             <div className="p-7">
@@ -1305,7 +1300,6 @@ export default function Grades() {
       )}
 
       {showImportModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1317,7 +1311,6 @@ export default function Grades() {
                 <X size={18} className="text-white" />
               </button>
             </div>
-
 
             <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)] space-y-4">
 

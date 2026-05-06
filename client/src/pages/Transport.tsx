@@ -9,11 +9,9 @@ import { useCurrency } from '../hooks/useCurrency';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useStudents } from '../contexts/StudentsContext';
 import { addToRecycleBin } from '../utils/recycleBin';
-import { Portal } from '../components/Portal';
+import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
-    param($m)
-    $m.Value
-  
 export default function Transport() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
@@ -371,7 +369,6 @@ export default function Transport() {
       </div>
 
       {showForm && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
           <div className="w-full max-w-md animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
             <div className="p-7">
@@ -563,7 +560,6 @@ export default function Transport() {
       </div>
 
       {showImportModal && (
-        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -575,7 +571,6 @@ export default function Transport() {
                 <X size={18} className="text-white" />
               </button>
             </div>
-
 
             <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
               {importStep === 'upload' && (
