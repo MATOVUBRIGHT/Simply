@@ -1,7 +1,6 @@
-﻿import { useState, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-
+import { useState, useRef, useEffect } from 'react';
 import { Plus, Bus, Trash2, User, MapPin, DollarSign, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check } from 'lucide-react';
+import { Portal } from '../components/Portal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
@@ -370,44 +369,46 @@ export default function Transport() {
         </div>
       </div>
 
-      {showForm && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
-          <div className="w-full max-w-md animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
-            <div className="p-7">
-              <div className="flex items-start gap-4 mb-6">
-                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#E0F2FE' }}>
-                  <Bus size={20} className="text-sky-600" />
+      {showForm && (
+        <Portal>
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
+            <div className="w-full max-w-md animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+              <div className="p-7">
+                <div className="flex items-start gap-4 mb-6">
+                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#E0F2FE' }}>
+                    <Bus size={20} className="text-sky-600" />
+                  </div>
+                  <div className="flex-1 min-w-0 pt-0.5">
+                    <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Add New Route</h3>
+                    <p className="text-[14px] text-slate-500 mt-1">Configure a new transport route.</p>
+                  </div>
+                  <button onClick={() => setShowForm(false)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
+                    <X size={16} className="text-slate-400" />
+                  </button>
                 </div>
-                <div className="flex-1 min-w-0 pt-0.5">
-                  <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Add New Route</h3>
-                  <p className="text-[14px] text-slate-500 mt-1">Configure a new transport route.</p>
-                </div>
-                <button onClick={() => setShowForm(false)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
-                  <X size={16} className="text-slate-400" />
-                </button>
+                <form onSubmit={handleAddRoute} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="form-label">Route Name</label>
+                    <input value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="form-input" required placeholder="Route A" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="form-label">Description</label>
+                    <input value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} className="form-input" placeholder="Area covered" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="form-label">Monthly Fee</label>
+                    <input type="number" value={formData.fee} onChange={e => setFormData(prev => ({ ...prev, fee: parseFloat(e.target.value) }))} className="form-input" />
+                  </div>
+                  <div className="flex gap-3 justify-end pt-2">
+                    <button type="button" onClick={() => setShowForm(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Cancel</button>
+                    <button type="submit" className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2" style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}>Save Route</button>
+                  </div>
+                </form>
               </div>
-              <form onSubmit={handleAddRoute} className="space-y-4">
-                <div className="space-y-2">
-                  <label className="form-label">Route Name</label>
-                  <input value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="form-input" required placeholder="Route A" />
-                </div>
-                <div className="space-y-2">
-                  <label className="form-label">Description</label>
-                  <input value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} className="form-input" placeholder="Area covered" />
-                </div>
-                <div className="space-y-2">
-                  <label className="form-label">Monthly Fee</label>
-                  <input type="number" value={formData.fee} onChange={e => setFormData(prev => ({ ...prev, fee: parseFloat(e.target.value) }))} className="form-input" />
-                </div>
-                <div className="flex gap-3 justify-end pt-2">
-                  <button type="button" onClick={() => setShowForm(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Cancel</button>
-                  <button type="submit" className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2" style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}>Save Route</button>
-                </div>
-              </form>
             </div>
           </div>
-        </div>
-      , document.body)}
+        </Portal>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card">
@@ -422,7 +423,7 @@ export default function Transport() {
               </div>
             </div>
           </div>
-          <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
+          <div className="divide-y divide-slate-100 dark:divide-slate-700/50 overflow-x-auto">
             {loading ? (
               <div className="p-8 text-center">
                 <div className="w-10 h-10 border-4 border-primary-200 border-t-primary-500 rounded-full animate-spin mx-auto"></div>
@@ -505,7 +506,7 @@ export default function Transport() {
             
             {selectedRoute ? (
               routeStudents.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-3 overflow-x-auto">
                   {routeStudents.map(a => {
                     const student = students.find(s => s.id === a.studentId);
                     const route = routes.find(r => r.id === selectedRoute);
@@ -561,173 +562,175 @@ export default function Transport() {
         </div>
       </div>
 
-      {showImportModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
-            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <Upload size={18} className="text-white" />
-                <h2 className="font-bold text-white">Import Transport Routes</h2>
+      {showImportModal && (
+        <Portal>
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
+              <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+                <div className="flex items-center gap-2">
+                  <Upload size={18} className="text-white" />
+                  <h2 className="font-bold text-white">Import Transport Routes</h2>
+                </div>
+                <button onClick={closeImportModal} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+                  <X size={18} className="text-white" />
+                </button>
               </div>
-              <button onClick={closeImportModal} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
-            </div>
 
-            <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
-              {importStep === 'upload' && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <button onClick={downloadTemplate} className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-lg transition-colors text-sm font-medium">
-                      <Download size={14} />
-                      Download Template
-                    </button>
-                  </div>
+              <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
+                {importStep === 'upload' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 mb-4">
+                      <button onClick={downloadTemplate} className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-lg transition-colors text-sm font-medium">
+                        <Download size={14} />
+                        Download Template
+                      </button>
+                    </div>
 
-                  <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors cursor-pointer text-center"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
-                    <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
-                  </div>
+                    <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors cursor-pointer text-center"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Upload size={28} className="mx-auto text-slate-400 mb-2" />
+                      <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
+                      <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
+                    </div>
 
-                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
-                    <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-2 text-sm">Expected Fields:</h4>
-                    <div className="grid grid-cols-2 gap-1.5 text-xs">
-                      {transportExpectedFields.map(field => (
-                        <div key={field.key} className="flex items-center gap-1.5">
-                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${field.required ? 'bg-red-500' : 'bg-slate-400'}`} />
-                          <span className="text-slate-600 dark:text-slate-300 truncate">{field.label}</span>
-                        </div>
-                      ))}
+                    <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
+                      <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-2 text-sm">Expected Fields:</h4>
+                      <div className="grid grid-cols-2 gap-1.5 text-xs">
+                        {transportExpectedFields.map(field => (
+                          <div key={field.key} className="flex items-center gap-1.5">
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${field.required ? 'bg-red-500' : 'bg-slate-400'}`} />
+                            <span className="text-slate-600 dark:text-slate-300 truncate">{field.label}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {importStep === 'map' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded">1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">2 Map</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-500 rounded">3</span>
-                  </div>
+                {importStep === 'map' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded">1</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">2 Map</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-500 rounded">3</span>
+                    </div>
 
-                  <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
-                    <table className="w-full text-xs">
-                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {csvHeaders.map((header, idx) => {
-                          const sample = csvData[0]?.[idx] || '';
-                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
-                          return (
-                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
-                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
-                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
-                              <td className="px-3 py-2">
-                                <select
-                                  value={currentMapping}
-                                  onChange={e => {
-                                    const newKey = e.target.value;
-                                    setFieldMapping(prev => {
-                                      const next = { ...prev };
-                                      Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; });
-                                      if (newKey) next[newKey] = header;
-                                      return next;
-                                    });
-                                  }}
-                                  className="w-full form-input py-1 px-2 text-xs"
-                                >
-                                  <option value="">Skip</option>
-                                  {transportExpectedFields.map(f => (
-                                    <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
-                                  ))}
-                                </select>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={closeImportModal} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
-                    <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
-                      Preview <ArrowRight size={14} />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {importStep === 'preview' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
-                  </div>
-
-                  <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                      <strong>{importPreview.length}</strong> routes ready to import
-                    </p>
-                  </div>
-
-                  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
-                    <table className="w-full text-xs">
-                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
-                        <tr>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">#</th>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Route</th>
-                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Fee</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 5).map((route, index) => (
-                          <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                            <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
-                            <td className="px-2 py-1.5">{(route as any).name || '-'}</td>
-                            <td className="px-2 py-1.5">{formatMoney((route as any).fee || 0)}</td>
+                    <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
+                            <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
+                            <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {importPreview.length > 5 && (
-                      <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">
-                        ... and {importPreview.length - 5} more
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                          {csvHeaders.map((header, idx) => {
+                            const sample = csvData[0]?.[idx] || '';
+                            const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
+                            return (
+                              <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                                <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
+                                <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
+                                <td className="px-3 py-2">
+                                  <select
+                                    value={currentMapping}
+                                    onChange={e => {
+                                      const newKey = e.target.value;
+                                      setFieldMapping(prev => {
+                                        const next = { ...prev };
+                                        Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; });
+                                        if (newKey) next[newKey] = header;
+                                        return next;
+                                      });
+                                    }}
+                                    className="w-full form-input py-1 px-2 text-xs"
+                                  >
+                                    <option value="">Skip</option>
+                                    {transportExpectedFields.map(f => (
+                                      <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button onClick={closeImportModal} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
+                      <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
+                        Preview <ArrowRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {importStep === 'preview' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                    </div>
+
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
+                      <p className="text-sm text-emerald-700 dark:text-emerald-300">
+                        <strong>{importPreview.length}</strong> routes ready to import
+                      </p>
+                    </div>
+
+                    <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                          <tr>
+                            <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">#</th>
+                            <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Route</th>
+                            <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Fee</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                          {importPreview.slice(0, 5).map((route, index) => (
+                            <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                              <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
+                              <td className="px-2 py-1.5">{(route as any).name || '-'}</td>
+                              <td className="px-2 py-1.5">{formatMoney((route as any).fee || 0)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {importPreview.length > 5 && (
+                        <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">
+                          ... and {importPreview.length - 5} more
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex justify-between pt-2">
+                      <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
+                      <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                        {isImporting ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={14} /> Import {importPreview.length}</>}
+                      </button>
+                    </div>
+                    {isImporting && (
+                      <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-2">
+                        <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
                       </div>
                     )}
                   </div>
-
-                  <div className="flex justify-between pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
-                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
-                      {isImporting ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={14} /> Import {importPreview.length}</>}
-                    </button>
-                  </div>
-                  {isImporting && (
-                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-2">
-                      <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      , document.body)}
+        </Portal>
+      )}
     </div>
   );
 }

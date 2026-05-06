@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Link, useNavigate } from 'react-router-dom';
@@ -288,9 +288,15 @@ export default function StaffPage() {
     if (staffMember) {
       addToRecycleBin(authId, { id: `staff-${Date.now()}`, type: 'staff', name: `${staffMember.firstName} ${staffMember.lastName}`, data: staffMember, deletedAt: new Date().toISOString() });
     }
+    
+    // Execute delete without awaiting for instant feedback
+    dataService.delete(authId, 'staff', id).then(result => {
+      if (!result.success) {
+        addToast('Failed to sync deletion, will retry in background', 'warning');
+      }
+    });
+    
     addToast('Staff member moved to recycle bin', 'success');
-    const result = await dataService.delete(authId, 'staff', id);
-    if (!result.success) addToast('Failed to delete: ' + result.error, 'error');
   }
 
   const staffCSVColumns = [

@@ -459,11 +459,20 @@ html {
   @apply w-full overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700;
   background: var(--bg-primary);
   -webkit-overflow-scrolling: touch;
+  /* Ensure scrollbar is visible on mobile */
+  scrollbar-width: thin;
+}
+
+/* Mobile list scroll — any list that might overflow on small screens */
+.list-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
 table {
   @apply w-full border-collapse;
-  min-width: 600px; /* ensures horizontal scroll on small screens */
+  min-width: 500px; /* ensures horizontal scroll on small screens */
 }
 
 th {

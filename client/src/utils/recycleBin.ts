@@ -41,6 +41,22 @@ export function addToRecycleBin(userId: string, item: Omit<DeletedItem, 'userId'
   setRecycleBin(userId, items);
 }
 
+export function addBatchToRecycleBin(userId: string, newItems: Omit<DeletedItem, 'userId'>[]): void {
+  if (!newItems.length) return;
+  const items = getRecycleBin(userId);
+  
+  for (const item of newItems) {
+    const originalId = item.data?.id;
+    if (originalId) {
+      const alreadyExists = items.some(existing => existing.data?.id === originalId && existing.type === item.type);
+      if (alreadyExists) continue;
+    }
+    items.push({ ...item, userId } as DeletedItem);
+  }
+  
+  setRecycleBin(userId, items);
+}
+
 export function removeFromRecycleBin(userId: string, itemId: string): void {
   const items = getRecycleBin(userId);
   const filtered = items.filter(i => i.id !== itemId);

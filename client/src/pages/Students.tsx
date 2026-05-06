@@ -1,8 +1,7 @@
 ﻿import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, CreditCard } from 'lucide-react';
+import { Portal } from '../components/Portal';
 import { useToast } from '../contexts/ToastContext';
 import type { Class, Student } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
@@ -12,7 +11,7 @@ import { useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments } from '../utils/classroom';
-import { addToRecycleBin } from '../utils/recycleBin';
+import { addToRecycleBin, addBatchToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
@@ -40,10 +39,14 @@ const expectedFields = [
   { key: 'gender', label: 'Gender (male/female)', required: true },
   { key: 'dob', label: 'Date of Birth (YYYY-MM-DD)', required: false },
   { key: 'classId', label: 'Class', required: true },
+  { key: 'admissionNo', label: 'Admission Number', required: false },
   { key: 'address', label: 'Address', required: false },
   { key: 'guardianName', label: 'Guardian Name', required: false },
   { key: 'guardianPhone', label: 'Guardian Phone', required: false },
   { key: 'guardianEmail', label: 'Guardian Email', required: false },
+  { key: 'medicalInfo', label: 'Medical Info', required: false },
+  { key: 'tuitionFee', label: 'Tuition Fee', required: false },
+  { key: 'boardingFee', label: 'Boarding Fee', required: false },
 ];
 
 function generateStudentId(firstName: string, lastName: string): string {
@@ -332,9 +335,7 @@ export default function Students() {
     });
     if (!ok) return;
     try {
-      const result = await dataService.delete(authId, 'students', id);
-      if (!result.success) throw new Error(result.error || 'Failed to delete');
-      // Store updates automatically via notifyUI G-- no manual state update needed
+      // Add to recycle bin immediately
       if (student) {
         addToRecycleBin(authId, {
           id: `student-${Date.now()}`,
@@ -344,6 +345,14 @@ export default function Students() {
           deletedAt: new Date().toISOString(),
         });
       }
+
+      // Execute delete without awaiting for instant feedback
+      dataService.delete(authId, 'students', id).then(result => {
+        if (!result.success) {
+          addToast('Failed to sync deletion, will retry in background', 'warning');
+        }
+      });
+      
       addToast('Student deleted', 'success');
     } catch (error) {
       addToast('Failed to delete student', 'error');
@@ -471,37 +480,37 @@ export default function Students() {
     
     try {
       const now = new Date().toISOString();
-      let deletedCount = 0;
+      const idsToDelete = Array.from(selectedStudents);
+      const studentsToDelete = idsToDelete.map(id => students.find(s => s.id === id)).filter(Boolean);
       
-      for (const studentId of selectedStudents) {
-        const student = students.find(s => s.id === studentId);
-        const result = await dataService.delete(id, 'students', studentId);
-        
-        if (result.success && student) {
-          deletedCount++;
-          addToRecycleBin(id, {
-            id: `student-${Date.now()}-${Math.random()}`,
-            type: 'student',
-            name: `${student.firstName} ${student.lastName}`,
-            data: student,
-            deletedAt: now
-          });
-        }
-      }
-      
-      if (deletedCount > 0) {
-        window.dispatchEvent(new Event('studentsUpdated'));
-      }
-      
+      // Clear selection and close mode immediately for instant UI feedback
       setSelectedStudents(new Set());
       setSelectMode(false);
-      addToast(`${deletedCount} students deleted`, 'success');
+
+      // Add to recycle bin in batch
+      if (studentsToDelete.length > 0) {
+        addBatchToRecycleBin(id, studentsToDelete.map(student => ({
+          id: `student-${Date.now()}-${Math.random()}`,
+          type: 'student',
+          name: `${student!.firstName} ${student!.lastName}`,
+          data: student,
+          deletedAt: now,
+        })));
+      }
+
+      // Execute delete without awaiting for instant feedback
+      dataService.batchDelete(id, 'students', idsToDelete).then(result => {
+        if (!result.success) {
+          addToast('Failed to sync some deletions, will retry in background', 'warning');
+        }
+      });
+      
+      addToast(`${idsToDelete.length} students deleted`, 'success');
     } catch (error) {
       console.error('Bulk delete error:', error);
       addToast('Failed to delete students', 'error');
     }
   }
-
   async function handleBulkMarkCompleted() {
     const id = schoolId || user?.id;
     if (!id) return;
@@ -667,15 +676,17 @@ export default function Students() {
     import('xlsx').then(({ utils, writeFile }) => {
       const headers = expectedFields.map(f => f.label);
       const sampleRows = [
-        ['John', 'Doe', 'male', '2010-01-15', 'P.4', '123 Main Street', 'Jane Doe', '0771234567', 'jane@example.com'],
-        ['Mary', 'Smith', 'female', '2011-03-20', 'P.3', '45 Park Avenue', 'Peter Smith', '0782345678', ''],
+        ['John', 'Doe', 'male', '2010-01-15', 'P.4', 'ADM-001', '123 Main Street', 'Jane Doe', '0771234567', 'jane@example.com', '', '500000', ''],
+        ['Mary', 'Smith', 'female', '2011-03-20', 'P.3', 'ADM-002', '45 Park Avenue', 'Peter Smith', '0782345678', '', 'Asthma - has inhaler', '450000', '200000'],
+        ['James', 'Okello', 'male', '2009-07-10', 'S.1', '', '', 'Grace Okello', '0753456789', 'grace@email.com', '', '800000', '600000'],
       ];
       const ws = utils.aoa_to_sheet([
-        ['// Fill in student details below. Class must match exactly (e.g. P.4, S.1, Baby). Gender: male or female. Date format: YYYY-MM-DD'],
+        ['// STUDENT IMPORT TEMPLATE - Fill in all required fields (marked *)'],
+        ['// Class: must match exactly (e.g. P.4, S.1, Baby, Nursery). Gender: male or female. Date: YYYY-MM-DD. Fees: numbers only (no currency symbol).'],
         headers,
         ...sampleRows,
       ]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 16) }));
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 18) }));
       const wb = utils.book_new();
       utils.book_append_sheet(wb, ws, 'Students');
       writeFile(wb, 'student-import-template.xlsx');
@@ -947,6 +958,9 @@ export default function Students() {
             guardianName: (data.guardianName as string) || '',
             guardianPhone: (data.guardianPhone as string) || '',
             guardianEmail: data.guardianEmail as string | undefined,
+            medicalInfo: (data as any).medicalInfo as string | undefined,
+            tuitionFee: (data as any).tuitionFee ? parseFloat(String((data as any).tuitionFee)) || undefined : undefined,
+            boardingFee: (data as any).boardingFee ? parseFloat(String((data as any).boardingFee)) || undefined : undefined,
             status: importStatus as any,
             completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
             completedTerm: importStatus === 'completed' ? 'Final' : undefined,
@@ -970,7 +984,7 @@ export default function Students() {
     }
   }
 
-  // Stats use ALL students (not just current page) G-- always accurate
+  // Stats use ALL students (not just current page) — always accurate
   const activeCount = allStudents.filter(s => s.status === 'active').length;
   const deactivatedCount = allStudents.filter(s => s.status === 'inactive').length;
   const completedCount = allStudents.filter(s => s.status === 'completed').length;
@@ -1238,7 +1252,7 @@ export default function Students() {
                 </button>
                 {showClassFilter && (
                   <div 
-                    className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden" z-[9999]
+                    className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden"
                     style={{ 
                       animationDuration: '400ms',
                       animationTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
@@ -1777,8 +1791,9 @@ export default function Students() {
         />
       )}
 
-      {showImportModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
+      {showImportModal && (
+        <Portal>
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
@@ -2049,7 +2064,8 @@ export default function Students() {
             </div>
           </div>
         </div>
-      , document.body)}
+      </Portal>
+      )}
     </div>
   );
 }
