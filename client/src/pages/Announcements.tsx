@@ -350,7 +350,7 @@ export default function Announcements() {
 
       {showForm && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) handleCancelEdit(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="modal-card w-full max-w-lg" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <h3 className="font-bold text-white flex items-center gap-2">
                 {editingId ? <Edit2 size={20} /> : <Plus size={20} />}

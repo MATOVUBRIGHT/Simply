@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+﻿import { useEffect, useState, useRef, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -615,7 +615,7 @@ export default function StaffPage() {
         </div>
       </div>
 
-      {/* Teachers Panel � only shown when Teachers card is clicked */}
+      {/* Teachers Panel - only shown when Teachers card is clicked */}
       {showTeachersPanel && (
         <div className="card">
           <div className="card-header flex items-center justify-between">
@@ -884,7 +884,7 @@ export default function StaffPage() {
 
       {showImportModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+          <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
@@ -949,7 +949,7 @@ export default function StaffPage() {
                               <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                               <td className="px-3 py-2">
                                 <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">� Skip �</option>
+                                  <option value="">- Skip -</option>
                                   {staffExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
                                 </select>
                               </td>
@@ -1021,7 +1021,7 @@ export default function StaffPage() {
       {/* Generate Payroll Modal */}
       {showPayrollModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+          <div className="modal-card w-full max-w-md max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Settings size={18} className="text-white" />

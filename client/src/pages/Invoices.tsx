@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+﻿import { useEffect, useState, useRef, useMemo } from 'react';
 import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, Fee, FeeStructure, FeeCategory } from '@schofy/shared';
@@ -233,7 +233,7 @@ export default function Invoices() {
   }, [selectedClassId, selectedTerm, selectedYear, user]);
 
   async function loadBursariesAndDiscounts() {
-    // Now using store � no-op kept for compatibility
+    // Now using store - no-op kept for compatibility
   }
 
   async function loadTermSettings() {
@@ -422,7 +422,7 @@ export default function Invoices() {
     if (!id || !classId) { addToast('Student has no class assigned', 'error'); return; }
     const structures = await getFeeStructuresByClass(id, classId, selectedTerm, selectedYear);
     if (structures.length === 0) {
-      // No fee structures � open the structure modal for this class
+      // No fee structures - open the structure modal for this class
       setSelectedClassId(classId);
       setShowStructureModal(true);
       addToast('No fee structures found. Please set up fees for this class first.', 'info');
@@ -712,7 +712,7 @@ export default function Invoices() {
 
   return (
     <div className="space-y-6">
-      {/* Term ended � class promotion banner */}
+      {/* Term ended - class promotion banner */}
       {showPromotionBanner && (
         <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl">
           <GraduationCap size={20} className="text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
@@ -1358,7 +1358,7 @@ export default function Invoices() {
 
       {showImportModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
@@ -1430,7 +1430,7 @@ export default function Invoices() {
                               <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                               <td className="px-3 py-2">
                                 <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">� Skip �</option>
+                                  <option value="">- Skip -</option>
                                   {invoiceExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
                                 </select>
                               </td>
@@ -1740,7 +1740,7 @@ export default function Invoices() {
                 <Award size={20} className="text-white" />
                 <div>
                   <h2 className="text-lg font-bold text-white">Bursary / Scholarship</h2>
-                  <p className="text-xs text-white/70">Grant a bursary to a student � reduces their invoice</p>
+                  <p className="text-xs text-white/70">Grant a bursary to a student - reduces their invoice</p>
                 </div>
               </div>
               <button onClick={() => setShowBursaryModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg text-white"><X size={18} /></button>
@@ -1768,12 +1768,12 @@ export default function Invoices() {
                 <div>
                   <label className="form-label">Student *</label>
                   <select value={newBursary.studentId} onChange={e => setNewBursary({ ...newBursary, studentId: e.target.value })} className="form-input">
-                    <option value="">� Select student �</option>
+                    <option value="">- Select student -</option>
                     {students.filter(s => {
                       if (filterBursaryClass !== 'all' && s.classId !== filterBursaryClass) return false;
                       if (searchStudent) { const q = searchStudent.toLowerCase(); return `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || (s.studentId || s.admissionNo || '').toLowerCase().includes(q); }
                       return true;
-                    }).slice(0, 30).map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName} � {s.studentId || s.admissionNo}</option>)}
+                    }).slice(0, 30).map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName} - {s.studentId || s.admissionNo}</option>)}
                   </select>
                 </div>
                 <div>
@@ -1798,7 +1798,7 @@ export default function Invoices() {
                   if (studentFee) {
                     const newAmt = Math.max(0, studentFee.amount - newBursary.amount);
                     await dataService.update(id, 'fees', studentFee.id, { amount: newAmt, description: (studentFee.description || 'School Fees') + ` (Bursary: ${formatMoney(newBursary.amount)})` } as any);
-                    addToast(`Bursary applied � invoice updated to ${formatMoney(newAmt)}`, 'success');
+                    addToast(`Bursary applied - invoice updated to ${formatMoney(newAmt)}`, 'success');
                   } else { addToast('Bursary saved. Will apply when invoice is created.', 'success'); }
                   setNewBursary({ studentId: '', amount: 0, reason: '' });
                 }}
@@ -1817,7 +1817,7 @@ export default function Invoices() {
                     <div key={b.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                       <div>
                         <p className="font-medium text-slate-800 dark:text-white">{b.studentName}</p>
-                        <p className="text-xs text-slate-500">Term {b.term} {b.year}{(b as any).reason ? ` � ${(b as any).reason}` : ''}</p>
+                        <p className="text-xs text-slate-500">Term {b.term} {b.year}{(b as any).reason ? ` - ${(b as any).reason}` : ''}</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-amber-600">{formatMoney(b.amount)}</span>
@@ -1845,7 +1845,7 @@ export default function Invoices() {
                 <Percent size={20} className="text-white" />
                 <div>
                   <h2 className="text-lg font-bold text-white">Student Discount</h2>
-                  <p className="text-xs text-white/70">Apply a discount to a student � updates their invoice</p>
+                  <p className="text-xs text-white/70">Apply a discount to a student - updates their invoice</p>
                 </div>
               </div>
               <button onClick={() => setShowDiscountModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg text-white"><X size={18} /></button>
@@ -1873,12 +1873,12 @@ export default function Invoices() {
                 <div>
                   <label className="form-label">Student *</label>
                   <select value={newDiscount.studentId} onChange={e => setNewDiscount({ ...newDiscount, studentId: e.target.value })} className="form-input">
-                    <option value="">� Select student �</option>
+                    <option value="">- Select student -</option>
                     {students.filter(s => {
                       if (filterBursaryClass !== 'all' && s.classId !== filterBursaryClass) return false;
                       if (searchStudent) { const q = searchStudent.toLowerCase(); return `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || (s.studentId || s.admissionNo || '').toLowerCase().includes(q); }
                       return true;
-                    }).slice(0, 30).map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName} � {s.studentId || s.admissionNo}</option>)}
+                    }).slice(0, 30).map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName} - {s.studentId || s.admissionNo}</option>)}
                   </select>
                 </div>
                 <div>
@@ -1908,7 +1908,7 @@ export default function Invoices() {
                     const newAmt = Math.max(0, studentFee.amount - discAmt);
                     const label = newDiscount.type === 'percentage' ? `${newDiscount.amount}% off` : formatMoney(discAmt);
                     await dataService.update(id, 'fees', studentFee.id, { amount: newAmt, description: (studentFee.description || 'School Fees') + ` (Discount: ${label})` } as any);
-                    addToast(`Discount applied � invoice updated to ${formatMoney(newAmt)}`, 'success');
+                    addToast(`Discount applied - invoice updated to ${formatMoney(newAmt)}`, 'success');
                   } else { addToast('Discount saved. Will apply when invoice is created.', 'success'); }
                   setNewDiscount({ studentId: '', amount: 0, type: 'fixed' });
                 }}
@@ -1926,7 +1926,7 @@ export default function Invoices() {
                   {discounts.map(d => (
                     <div key={d.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                       <div>
-                        <p className="font-medium text-slate-800 dark:text-white">{(d as any).studentName || d.className || '�'}</p>
+                        <p className="font-medium text-slate-800 dark:text-white">{(d as any).studentName || d.className || '-'}</p>
                         <p className="text-xs text-slate-500">Term {d.term} {d.year}</p>
                       </div>
                       <div className="flex items-center gap-3">
@@ -1950,7 +1950,7 @@ export default function Invoices() {
       {/* Invoice Payment Modal */}
       {invoicePayModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setInvoicePayModal(null); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <h3 className="font-bold text-white flex items-center gap-2">
                 <CheckIcon size={18} /> Record Payment

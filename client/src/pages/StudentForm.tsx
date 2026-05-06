@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, User, Users, Shield, Sparkles, Settings, Plus, X, FileText, Paperclip, Trash2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -433,7 +433,7 @@ export default function StudentForm() {
       {/* ID Format Modal */}
       {showIdFormatModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowIdFormatModal(false)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <h3 className="font-bold text-white">ID Format Settings</h3>
               <button onClick={() => setShowIdFormatModal(false)} className="p-1 hover:bg-white/20 rounded-lg"><X size={18} className="text-white" /></button>

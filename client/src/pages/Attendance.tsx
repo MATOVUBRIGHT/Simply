@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+﻿import { useEffect, useState, useRef, useMemo } from 'react';
 import { Check, X, Clock, Save, Calendar, Users, BookOpen, Download, Upload, ChevronDown, FileText, ArrowRight, Check as CheckIcon } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -54,7 +54,7 @@ export default function Attendance() {
     { key: 'status', label: 'Status', required: true },
   ];
 
-  // Derive students from store � instant, no fetch
+  // Derive students from store - instant, no fetch
   const students = useMemo(() => {
     const all = studentsData as Student[];
     return selectedClass
@@ -62,7 +62,7 @@ export default function Attendance() {
       : all.filter(s => s.status !== 'completed');
   }, [studentsData, selectedClass]);
 
-  // Derive today's attendance from store � instant, no fetch
+  // Derive today's attendance from store - instant, no fetch
   const allAttendance = attendanceData as AttendanceRecord[];
 
   // Sync attendance state when date/students/store data changes
@@ -95,7 +95,7 @@ export default function Attendance() {
     setLoading(true);
     try {
       const now = new Date().toISOString();
-      // Use store data � no network call needed
+      // Use store data - no network call needed
       const existingRecords = allAttendance.filter(r => r.date === selectedDate);
       for (const record of existingRecords) {
         if (record.entityType === EntityType.STUDENT && students.some(s => s.id === record.entityId)) {
@@ -289,7 +289,7 @@ export default function Attendance() {
         const student = students.find(s => s.admissionNo === data.admissionNo);
         if (!student) continue;
 
-        // Use store data � no network call
+        // Use store data - no network call
         const existingRecord = allAttendance.find(a => a.date === data.date && a.entityId === student.id);
 
         if (existingRecord) {
@@ -461,7 +461,7 @@ export default function Attendance() {
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-800 dark:text-white">Student List</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{selectedClass ? (classes.find((c: any) => c.id === selectedClass) as any)?.name : 'All Classes'} � {students.length} students</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{selectedClass ? (classes.find((c: any) => c.id === selectedClass) as any)?.name : 'All Classes'} - {students.length} students</p>
             </div>
           </div>
           {totalMarked > 0 && (
@@ -521,7 +521,7 @@ export default function Attendance() {
                   {!selectedClass && (
                     <td>
                       <span className="badge badge-info text-xs">
-                        {(classes.find((c: any) => c.id === s.classId) as any)?.name || s.classId || '�'}
+                        {(classes.find((c: any) => c.id === s.classId) as any)?.name || s.classId || '-'}
                       </span>
                     </td>
                   )}
@@ -571,7 +571,7 @@ export default function Attendance() {
 
       {showImportModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, CreditCard, Crown, Zap, Star, HelpCircle, Phone, X, MessageCircle, ChevronDown, ChevronUp, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -243,7 +243,7 @@ export default function Subscription() {
       {/* Payment Modal */}
       {showPaymentModal && selectedPlan && (
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
             <div className="p-5 border-b border-slate-200 flex items-center justify-between">
               <h2 className="text-xl font-bold text-slate-900">Subscribe to {selectedPlan.name}</h2>
               <button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
@@ -320,7 +320,7 @@ export default function Subscription() {
       {/* Continue Modal */}
       {showContinueModal && selectedPlan && latestReceipt && (
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
             <div className="p-5 border-b border-slate-200">
               <h2 className="text-xl font-bold text-slate-900">Continue Subscription?</h2>
             </div>

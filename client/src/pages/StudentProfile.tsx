@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+﻿import { useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Edit, Mail, Phone, MapPin, Calendar, User,
   GraduationCap, BookOpen, CreditCard, FileText, CheckCircle, AlertCircle,
@@ -508,7 +508,7 @@ export default function StudentProfile() {
       {/* ── Pay Modal — full page blur, centered ────────────────────────────── */}
       {showPayModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowPayModal(null)}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="modal-card w-full max-w-md" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2"><CreditCard size={18} className="text-white" /><h3 className="font-bold text-white">Record Payment</h3></div>
               <button onClick={() => setShowPayModal(null)} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">✕</button>

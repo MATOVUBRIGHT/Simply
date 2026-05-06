@@ -1245,6 +1245,49 @@ textarea.form-input {
   @apply max-w-lg w-full mx-4 max-h-[90vh] overflow-auto animate-modal-in;
 }
 
+/* Standard modal card — matches reference design */
+.modal-card {
+  background: #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07);
+  border: 1px solid rgba(0,0,0,0.05);
+  overflow: hidden;
+  animation: modalIn 280ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.dark .modal-card {
+  background: #1e293b;
+  border-color: rgba(255,255,255,0.08);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 4px 20px rgba(0,0,0,0.3);
+}
+
+/* Modal header with colored bar (legacy — keep for import modals) */
+.modal-header-colored {
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--primary-color);
+}
+
+/* Modal header clean (for confirm-style modals) */
+.modal-header-clean {
+  padding: 24px 24px 0;
+}
+
+/* Modal body */
+.modal-body {
+  padding: 20px 24px 24px;
+}
+
+/* Modal footer */
+.modal-footer {
+  padding: 0 24px 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 /* Toast Styles */
 .toast-container {
   @apply fixed top-4 right-4 z-[9999] flex flex-col gap-3 max-w-sm;

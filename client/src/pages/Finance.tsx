@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+﻿import { useEffect, useState, useRef } from 'react';
 import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
@@ -376,7 +376,7 @@ export default function Finance() {
           </div>
         )}
 
-        {/* Invoices Tab � one row per student, expandable fee history */}
+        {/* Invoices Tab - one row per student, expandable fee history */}
         {activeTab === 'invoices' && (
           <div className="table-container">
             <table>
@@ -434,7 +434,7 @@ export default function Finance() {
           </div>
         )}
 
-        {/* Payments Tab � one row per student, expandable payment history */}
+        {/* Payments Tab - one row per student, expandable payment history */}
         {activeTab === 'payments' && (
           <div className="table-container">
             <table>
@@ -457,7 +457,7 @@ export default function Finance() {
                         <td className="font-medium">{student.firstName} {student.lastName}</td>
                         <td><span className="badge badge-info">{sp.length}</span></td>
                         <td className="font-bold text-emerald-600 dark:text-emerald-400">{formatMoney(total)}</td>
-                        <td className="text-slate-500 text-sm">{last ? new Date(last.date).toLocaleDateString() : '�'}</td>
+                        <td className="text-slate-500 text-sm">{last ? new Date(last.date).toLocaleDateString() : '-'}</td>
                       </tr>
                       {isExpanded && sp.map(p => {
                         const fee = fees.find(f => f.id === p.feeId);
@@ -469,7 +469,7 @@ export default function Finance() {
                               <span className="text-slate-400 mr-2">?</span>
                               <span className="font-medium">{dt.toLocaleDateString()}</span>
                               <span className="text-slate-400 ml-1">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                              {fee && <span className="ml-2 text-slate-500">� {fee.description}</span>}
+                              {fee && <span className="ml-2 text-slate-500">- {fee.description}</span>}
                             </td>
                             <td className="text-sm font-semibold text-emerald-600">{formatMoney(p.amount)}</td>
                             <td><span className="badge badge-info capitalize text-[10px]">{p.method?.replace('_', ' ')}</span></td>
@@ -485,10 +485,10 @@ export default function Finance() {
         )}
       </div>
 
-      {/* Import Modal � fixed inset-0 full-page blur */}
+      {/* Import Modal - fixed inset-0 full-page blur */}
       {showImportModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) closeImportModal(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2"><Upload size={18} className="text-white" /><h2 className="font-bold text-white">Import Payments</h2></div>
               <button onClick={closeImportModal} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>
@@ -570,7 +570,7 @@ export default function Finance() {
       {/* Record Payment Modal */}
       {payModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setPayModal(null); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <h3 className="font-bold text-white flex items-center gap-2"><CreditCard size={18} /> Record Payment</h3>
               <button onClick={() => setPayModal(null)} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>

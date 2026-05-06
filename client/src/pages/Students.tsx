@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+﻿import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, CreditCard } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -58,7 +58,7 @@ export default function Students() {
   const sid = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
   const confirm = useConfirm();
 
-  // All data from store G�� instant from cache, no separate fetch
+  // All data from store G-- instant from cache, no separate fetch
   const { data: allStudentsData, loading: studentsLoading } = useTableData(sid, 'students');
   const { data: classesData } = useTableData(sid, 'classes');
   const { data: feesData } = useTableData(sid, 'fees');
@@ -147,7 +147,7 @@ export default function Students() {
     setIsSearching(false);
   }, [debouncedSearch, allStudents]);
 
-  // Derive filtered students directly from store G�� no separate fetch
+  // Derive filtered students directly from store G-- no separate fetch
   const filteredStudents = useMemo(() => {
     const base = searchResults !== null ? searchResults : allStudents;
     return base.filter(s => {
@@ -225,7 +225,7 @@ export default function Students() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectMode]);
 
-  // Classes update from store automatically G�� no manual reload needed
+  // Classes update from store automatically G-- no manual reload needed
   useEffect(() => {
     return () => {}; // cleanup placeholder
   }, []);
@@ -237,7 +237,7 @@ export default function Students() {
       addToast('Cleaning up...', 'info');
       const allStudentsRaw = await dataService.getAll(id, 'students');
 
-      // G��G�� 1. Remove duplicate students (same firstName+lastName, keep oldest) G��G��
+      // G--G-- 1. Remove duplicate students (same firstName+lastName, keep oldest) G--G--
       const seen = new Map<string, any>();
       const duplicateIds: string[] = [];
       // Sort oldest first so we keep the first-created record
@@ -256,7 +256,7 @@ export default function Students() {
         await dataService.batchDelete(id, 'students', duplicateIds);
       }
 
-      // G��G�� 2. Remove orphaned related records G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��
+      // G--G-- 2. Remove orphaned related records G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--
       const validIds = new Set(allStudentsRaw.map((s: any) => s.id).filter((i: string) => !duplicateIds.includes(i)));
       let cleanedCount = 0;
 
@@ -332,7 +332,7 @@ export default function Students() {
     try {
       const result = await dataService.delete(authId, 'students', id);
       if (!result.success) throw new Error(result.error || 'Failed to delete');
-      // Store updates automatically via notifyUI G�� no manual state update needed
+      // Store updates automatically via notifyUI G-- no manual state update needed
       if (student) {
         addToRecycleBin(authId, {
           id: `student-${Date.now()}`,
@@ -823,7 +823,7 @@ export default function Students() {
             setPlanLimitMessage(`${remaining} slot${remaining !== 1 ? 's' : ''} remaining on your ${access.plan.name} plan. Importing ${newStudentsOnly} student${newStudentsOnly !== 1 ? 's' : ''}.`);
           }
         }
-      } catch { /* silent � plan check is non-blocking */ }
+      } catch { /* silent - plan check is non-blocking */ }
     }
 
     setImportStep('preview');
@@ -864,7 +864,7 @@ export default function Students() {
       };
       const importStatus = getImportStatus();
 
-      // Close modal immediately � import runs in background
+      // Close modal immediately - import runs in background
       const previewSnapshot = [...importPreview];
       const flaggedSnapshot = { ...flaggedItems };
       closeImportModal();
@@ -968,7 +968,7 @@ export default function Students() {
     }
   }
 
-  // Stats use ALL students (not just current page) G�� always accurate
+  // Stats use ALL students (not just current page) G-- always accurate
   const activeCount = allStudents.filter(s => s.status === 'active').length;
   const deactivatedCount = allStudents.filter(s => s.status === 'inactive').length;
   const completedCount = allStudents.filter(s => s.status === 'completed').length;
@@ -1549,7 +1549,7 @@ export default function Students() {
                       <td onClick={(e) => e.stopPropagation()}>
                         {(() => {
                           const { status, balance } = getStudentFinance(student.id);
-                          if (status === 'none') return <span className="text-xs text-slate-400">G��</span>;
+                          if (status === 'none') return <span className="text-xs text-slate-400">G--</span>;
                           if (balance <= 0) return <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>;
                           return <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(balance)}</span>;
                         })()}
@@ -1699,7 +1699,7 @@ export default function Students() {
         {totalPages > 1 && viewFilter !== 'completed' && (
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>G��
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>G--
               <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span> of{' '}
               <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students
             </p>
@@ -1720,7 +1720,7 @@ export default function Students() {
               >
                 <ChevronLeft size={16} />
               </button>
-              {/* Page number buttons G�� show up to 5 around current page */}
+              {/* Page number buttons G-- show up to 5 around current page */}
               {Array.from({ length: totalPages }, (_, i) => i + 1)
                 .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
                 .reduce<(number | '...')[]>((acc, p, i, arr) => {
@@ -1777,7 +1777,7 @@ export default function Students() {
 
       {showImportModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+          <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
@@ -1910,7 +1910,7 @@ export default function Students() {
 
                   {importLimitInfo && (
                     <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+                      <div className="modal-card w-full max-w-sm">
                         <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-red-50 dark:bg-red-900/20">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">

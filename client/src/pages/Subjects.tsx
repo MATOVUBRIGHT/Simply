@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+﻿import { useEffect, useState, useRef, useMemo } from 'react';
 import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, ChevronRight, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash, Pencil, Search } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class, Subject } from '@schofy/shared';
@@ -167,12 +167,12 @@ export default function Subjects() {
     if (schoolType.includes('nursery')) levels.push({ key: 'nursery', label: 'Nursery' });
     if (schoolType.includes('primary') || schoolType === 'nursery_primary') levels.push({ key: 'primary', label: 'Primary' });
     if (schoolType.includes('secondary') || schoolType === 'primary_secondary') {
-      levels.push({ key: 'jss', label: 'S.1G��S.4 (JSS)' });
-      levels.push({ key: 'ss', label: 'S.5G��S.6 (SS)' });
+      levels.push({ key: 'jss', label: 'S.1G--S.4 (JSS)' });
+      levels.push({ key: 'ss', label: 'S.5G--S.6 (SS)' });
     }
     if (schoolType === 'all') {
-      levels.push({ key: 'jss', label: 'S.1G��S.4 (JSS)' });
-      levels.push({ key: 'ss', label: 'S.5G��S.6 (SS)' });
+      levels.push({ key: 'jss', label: 'S.1G--S.4 (JSS)' });
+      levels.push({ key: 'ss', label: 'S.5G--S.6 (SS)' });
     }
     return levels;
   })();
@@ -398,7 +398,7 @@ export default function Subjects() {
         addToast('Subject already exists for all selected classes', 'warning');
         return;
       }
-      // Fire all creates in parallel G�� optimistic cache updates happen immediately
+      // Fire all creates in parallel G-- optimistic cache updates happen immediately
       await Promise.all(newSubjects.map(s => dataService.create(id, 'subjects', s as any)));
       resetSubjectForm();
       addToast(`Added "${name}" to ${newSubjects.length} class${newSubjects.length > 1 ? 'es' : ''}`, 'success');
@@ -595,7 +595,7 @@ export default function Subjects() {
   const primaryCount = [...new Set(subjects.filter(s => getClassLevel(s.classId) === 'primary').map(s => s.name))].length;
   const secondaryCount = [...new Set(subjects.filter(s => ['jss','ss'].includes(getClassLevel(s.classId))).map(s => s.name))].length;
 
-  // Group subjects by name G�� one row per subject, showing all assigned classes
+  // Group subjects by name G-- one row per subject, showing all assigned classes
   const groupedSubjects = useMemo(() => {
     const map = new Map<string, { name: string; code: string; ids: string[]; classIds: string[] }>();
     for (const s of subjects) {
@@ -775,7 +775,7 @@ export default function Subjects() {
                 <Book size={18} className="text-white" />
                 <h3 className="font-bold text-white">Add Subject</h3>
               </div>
-              <button onClick={resetSubjectForm} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">G��</button>
+              <button onClick={resetSubjectForm} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">G--</button>
             </div>
 
             <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden">
@@ -797,7 +797,7 @@ export default function Subjects() {
                       }}
                       className="form-input"
                     >
-                      <option value="">G�� Select subject G��</option>
+                      <option value="">G-- Select subject G--</option>
                       {ugandaSubjects[selectedLevel].map(s => (
                         <option key={s.name} value={s.name}>{s.name}</option>
                       ))}
@@ -818,7 +818,7 @@ export default function Subjects() {
                       />
                       {formData.customSubject && (
                         <button type="button" onClick={() => setFormData(prev => ({ ...prev, name: '', code: '', customSubject: false }))}
-                          className="btn btn-secondary text-xs px-3">G�� Presets</button>
+                          className="btn btn-secondary text-xs px-3">G-- Presets</button>
                       )}
                     </div>
                   )}
@@ -1035,7 +1035,7 @@ export default function Subjects() {
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Pencil size={18} className="text-white" />
-                <h3 className="font-bold text-white">Edit Subject G�� {editGroup.name}</h3>
+                <h3 className="font-bold text-white">Edit Subject G-- {editGroup.name}</h3>
               </div>
               <button onClick={closeEditGroup} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>
             </div>
@@ -1117,7 +1117,7 @@ export default function Subjects() {
 
       {showImportModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
