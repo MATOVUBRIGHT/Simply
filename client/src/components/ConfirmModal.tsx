@@ -1,11 +1,12 @@
-﻿/**
+/**
  * Global full-page confirm modal — blurs entire page, centered.
  * Modern SaaS design: soft icon, clean typography, smooth animation.
  * Usage: const confirm = useConfirm(); await confirm({ title, description, confirmLabel, variant });
  */
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Trash2, Info, CheckCircle } from 'lucide-react';
+import { Portal } from './Portal';
+import { AlertTriangle, Info, CheckCircle, X } from 'lucide-react';
 
 export type ConfirmVariant = 'danger' | 'warning' | 'info' | 'success';
 
@@ -89,66 +90,67 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
-      {pending && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-          style={{
-            backgroundColor: visible ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0)',
-            backdropFilter: visible ? 'blur(4px)' : 'blur(0px)',
-            transition: 'background-color 0.2s ease, backdrop-filter 0.2s ease',
-          }}
-          onClick={handleCancel}
-        >
+      {pending && (
+        <Portal>
           <div
-            className="bg-white dark:bg-slate-800 w-full max-w-[420px] overflow-hidden"
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
             style={{
-              borderRadius: '20px',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.15), 0 4px 16px rgba(0,0,0,0.08)',
-              border: '1px solid rgba(0,0,0,0.06)',
-              transform: visible ? 'scale(1) translateY(0)' : 'scale(0.94) translateY(16px)',
-              opacity: visible ? 1 : 0,
-              transition: 'transform 0.22s cubic-bezier(0.34,1.56,0.64,1), opacity 0.18s ease',
+              backgroundColor: visible ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0)',
+              backdropFilter: visible ? 'blur(4px)' : 'blur(0px)',
+              transition: 'background-color 0.2s ease, backdrop-filter 0.2s ease',
             }}
-            onClick={e => e.stopPropagation()}
+            onClick={handleCancel}
           >
-            <div className="p-7">
-              {/* Icon + Title */}
-              <div className="flex items-start gap-4 mb-4">
-                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${cfg.bg}`}>
-                  {cfg.icon}
+            <div
+              className="bg-white dark:bg-slate-800 w-full max-w-[420px] overflow-hidden"
+              style={{
+                borderRadius: '20px',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.15), 0 4px 16px rgba(0,0,0,0.08)',
+                border: '1px solid rgba(0,0,0,0.06)',
+                transform: visible ? 'scale(1) translateY(0)' : 'scale(0.94) translateY(16px)',
+                opacity: visible ? 1 : 0,
+                transition: 'transform 0.22s cubic-bezier(0.34,1.56,0.64,1), opacity 0.18s ease',
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-7">
+                {/* Icon + Title */}
+                <div className="flex items-start gap-4 mb-4">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${cfg.bg}`}>
+                    {cfg.icon}
+                  </div>
+                  <div className="flex-1 min-w-0 pt-0.5">
+                    <h3 className="font-bold text-slate-900 dark:text-white text-[17px] leading-snug">
+                      {pending.title}
+                    </h3>
+                    <p className="text-[14px] text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
+                      {pending.description}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0 pt-0.5">
-                  <h3 className="font-bold text-slate-900 dark:text-white text-[17px] leading-snug">
-                    {pending.title}
-                  </h3>
-                  <p className="text-[14px] text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
-                    {pending.description}
-                  </p>
-                </div>
-              </div>
 
-              {/* Actions */}
-              <div className="flex gap-3 justify-end mt-6">
-                <button
-                  onClick={handleCancel}
-                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-200 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
-                  style={{ background: '#F3F4F6' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')}
-                  onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}
-                >
-                  {pending.cancelLabel ?? 'Cancel'}
-                </button>
-                <button
-                  onClick={handleConfirm}
-                  className={`px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] ${cfg.btn}`}
-                >
-                  {pending.confirmLabel ?? 'Confirm'}
-                </button>
+                {/* Actions */}
+                <div className="flex gap-3 justify-end mt-6">
+                  <button
+                    onClick={handleCancel}
+                    className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-200 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
+                    style={{ background: '#F3F4F6' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')}
+                    onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}
+                  >
+                    {pending.cancelLabel ?? 'Cancel'}
+                  </button>
+                  <button
+                    onClick={handleConfirm}
+                    className={`px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] ${cfg.btn}`}
+                  >
+                    {pending.confirmLabel ?? 'Confirm'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>,
-        document.body
+        </Portal>
       )}
     </ConfirmContext.Provider>
   );
