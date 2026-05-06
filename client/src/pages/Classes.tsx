@@ -438,7 +438,7 @@ export default function Classes() {
         };
         await dataService.create(id, 'classes', classItem);
         successCount++;
-        setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
+        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
       }
       addToast(`Successfully imported ${successCount} class${successCount !== 1 ? 'es' : ''}`, 'success');
     } catch (error) { addToast('Failed to import classes', 'error'); }
