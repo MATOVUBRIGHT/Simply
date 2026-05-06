@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useMemo, useEffect } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
@@ -12,6 +12,7 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 interface StudentGrade extends ExamResult {
   studentName: string;
@@ -47,6 +48,7 @@ export default function Grades() {
   const [editGrade, setEditGrade] = useState<{ id: string; studentName: string; subjectName: string; score: string; maxScore: string } | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isImportingGrades, setIsImportingGrades] = useState(false);
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('all');
@@ -605,10 +607,13 @@ export default function Grades() {
         }
         successCount++;
       }
-      addToast(`Imported ${successCount} grade${successCount !== 1 ? 's' : ''} for ${importExamType} Term ${importTerm} ${importYear}`, 'success');
+      setIsImportingGrades(false);
       closeImportModal();
-    } catch (error) { addToast('Failed to import grades', 'error'); }
-    finally { setIsImportingGrades(false); }
+      setShowImportSuccess(true);
+    } catch (error) {
+      setIsImportingGrades(false);
+      addToast('Failed to import grades', 'error');
+    }
   }
 
   const filteredGrades = grades.filter(g => {
@@ -1605,6 +1610,14 @@ export default function Grades() {
           </div>
         </div>
       , document.body)}
+
+      {showImportSuccess && (
+        <SuccessPopup 
+          message="Import Complete!" 
+          subMessage="Student grades have been updated."
+          onClose={() => setShowImportSuccess(false)}
+        />
+      )}
     </div>
   );
 }

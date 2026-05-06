@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate, useParams } from 'react-router-dom';
@@ -13,6 +13,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, extractFormatFromId, IdFormat } from '../utils/idFormat';
 import { getSubscriptionAccessState } from '../utils/plans';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 interface CustomField { id: string; label: string; value: string; }
 interface Attachment { id: string; name: string; file: string; type: string; }
@@ -45,6 +46,7 @@ export default function StudentForm() {
   const [idFormat, setIdFormat] = useState<IdFormat>(getSavedIdFormat());
   const [customPattern, setCustomPattern] = useState(getSavedIdFormat().pattern);
   const [loading, setLoading] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [newCustomField, setNewCustomField] = useState({ label: '', value: '' });
   const [newRequirement, setNewRequirement] = useState('');
   const [tempId] = useState(uuidv4());
@@ -172,10 +174,10 @@ export default function StudentForm() {
       }
       const now = new Date().toISOString();
       const finalId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', []);
-      if (isEditing) {        const cap = formData.classId ? await getClassCapacityState(idAuth, formData.classId, id) : null;
+      if (isEditing) {
+        const cap = formData.classId ? await getClassCapacityState(idAuth, formData.classId, id) : null;
         if (cap?.isFull) { addToast(`${cap.name} is full. Choose another class.`, 'error'); setLoading(false); return; }
         await dataService.update(idAuth, 'students', id!, { ...formData, admissionNo: finalId, studentId: finalId, updatedAt: now } as any);
-        addToast('Student updated', 'success');
       } else {
         const cap = formData.classId ? await getClassCapacityState(idAuth, formData.classId) : null;
         if (cap?.isFull) { addToast(`${cap.name} is full. Choose another class.`, 'error'); setLoading(false); return; }
@@ -193,12 +195,17 @@ export default function StudentForm() {
           attachments: formData.attachments || [], createdAt: now, updatedAt: now,
         };
         await dataService.create(idAuth, 'students', newStudent as any);
-        addToast('Student admitted successfully', 'success');
       }
       window.dispatchEvent(new Event('studentsUpdated'));
+      setShowSuccess(true);
+      await new Promise(resolve => setTimeout(resolve, 1500));
       navigate('/students');
-    } catch { addToast('Failed to save student', 'error'); }
-    finally { setLoading(false); }
+    } catch (error) {
+      console.error('Save error:', error);
+      addToast('Failed to save student', 'error');
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (loadingData) {
@@ -476,6 +483,13 @@ export default function StudentForm() {
           </div>
         </div>
       , document.body)}
+
+      {showSuccess && (
+        <SuccessPopup 
+          message={id ? "Student Updated!" : "Student Admitted!"} 
+          subMessage="Returning to student list..."
+        />
+      )}
     </div>
   );
 }

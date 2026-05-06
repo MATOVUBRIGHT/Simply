@@ -11,6 +11,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, IdFormat } from '../utils/idFormat';
 import { getSubscriptionAccessState } from '../utils/plans';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 const steps = [
   { id: 1, label: 'Student Info', icon: User },
@@ -31,6 +32,7 @@ export default function Admission() {
   const { addToast } = useToast();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [newRequirement, setNewRequirement] = useState('');
   const [showIdFormatModal, setShowIdFormatModal] = useState(false);
@@ -155,10 +157,16 @@ export default function Admission() {
       };
       await dataService.create(id, 'students', newStudent as any);
       window.dispatchEvent(new Event('studentsUpdated'));
-      addToast(`${form.firstName} admitted! ID: ${admissionNo}`, 'success');
+      
+      setShowSuccess(true);
+      await new Promise(resolve => setTimeout(resolve, 1500));
       navigate('/students');
-    } catch { addToast('Failed to complete admission', 'error'); }
-    finally { setLoading(false); }
+    } catch (error) {
+      console.error('Admission error:', error);
+      addToast('Failed to complete admission', 'error');
+    } finally {
+      setLoading(false);
+    }
   }
 
   const selectedClass = classes.find(c => c.id === form.classId);
@@ -485,6 +493,13 @@ export default function Admission() {
             </div>
           </div>
         </Portal>
+      )}
+
+      {showSuccess && (
+        <SuccessPopup 
+          message="Admission Complete!" 
+          subMessage={`${form.firstName} is now registered.`}
+        />
       )}
     </div>
   );

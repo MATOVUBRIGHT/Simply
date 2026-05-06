@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, ChevronRight, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash, Pencil, Search } from 'lucide-react';
@@ -12,6 +12,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
   'nursery': [
@@ -72,6 +73,75 @@ const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
   ],
 };
 
+const subjectColors = [
+  'from-blue-500 to-indigo-600',
+  'from-emerald-500 to-teal-600',
+  'from-violet-500 to-purple-600',
+  'from-amber-500 to-orange-600',
+  'from-rose-500 to-pink-600',
+  'from-sky-500 to-blue-600',
+  'from-fuchsia-500 to-purple-600',
+  'from-lime-500 to-emerald-600',
+];
+
+function getSubjectColor(name: string) {
+  const index = name.charCodeAt(0) % subjectColors.length;
+  return subjectColors[index];
+}
+
+const SubjectRow = memo(({
+  sub,
+  i,
+  group,
+  onEdit,
+  onDelete
+}: {
+  sub: any;
+  i: number;
+  group: any;
+  onEdit: (group: any) => void;
+  onDelete: (payload: { name: string; ids: string[] }) => void;
+}) => {
+  return (
+    <tr key={sub.id} className={i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+      <td className="px-4 py-2.5 text-xs text-slate-400">{i + 1}</td>
+      <td className="px-4 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${getSubjectColor(sub.name)} flex items-center justify-center shrink-0`}>
+            <Book size={13} className="text-white" />
+          </div>
+          <span className="font-medium text-slate-800 dark:text-white">{sub.name}</span>
+        </div>
+      </td>
+      <td className="px-4 py-2.5">
+        <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 font-mono text-xs font-semibold text-slate-600 dark:text-slate-300">
+          {sub.code || <span className="text-slate-400 font-normal italic">no code</span>}
+        </span>
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <div className="flex items-center justify-end gap-1">
+          {group && (
+            <button
+              onClick={() => onEdit(group)}
+              className="p-1.5 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 text-indigo-600 rounded-lg transition-colors"
+              title="Edit subject"
+            >
+              <Pencil size={14} />
+            </button>
+          )}
+          <button
+            onClick={() => onDelete({ name: sub.name, ids: [sub.id] })}
+            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 rounded-lg transition-colors"
+            title="Remove from this class"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 export default function Subjects() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
@@ -101,6 +171,7 @@ export default function Subjects() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
@@ -558,8 +629,7 @@ export default function Subjects() {
       const now = new Date().toISOString();
       let successCount = 0;
       const previewSnapshot = [...importPreview];
-      closeImportModal();
-      addToast(`Importing ${previewSnapshot.length} subject${previewSnapshot.length !== 1 ? 's' : ''}... completing in background`, 'info');
+      
       for (let i = 0; i < previewSnapshot.length; i++) {
         const data = previewSnapshot[i];
         const subject: Subject = {
@@ -573,24 +643,14 @@ export default function Subjects() {
         successCount++;
         setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
       }
-      addToast(`Successfully imported ${successCount} subject${successCount !== 1 ? 's' : ''}`, 'success');
-    } catch (error) { addToast('Failed to import subjects', 'error'); }
-    finally { setIsImporting(false); setImportProgress(0); }
-  }
-
-  const subjectColors = [
-    'from-coral-400 to-orange-400',
-    'from-teal-400 to-cyan-400',
-    'from-violet-400 to-purple-400',
-    'from-emerald-400 to-green-400',
-    'from-rose-400 to-pink-400',
-    'from-sky-400 to-blue-400',
-    'from-amber-400 to-yellow-400',
-  ];
-
-  function getSubjectColor(name: string) {
-    const index = name.charCodeAt(0) % subjectColors.length;
-    return subjectColors[index];
+      
+      setIsImporting(false);
+      closeImportModal();
+      setShowImportSuccess(true);
+    } catch (error) {
+      setIsImporting(false);
+      addToast('Failed to import subjects', 'error');
+    }
   }
 
   const uniqueSubjects = [...new Set(subjects.map(s => s.name))];
@@ -982,47 +1042,16 @@ export default function Subjects() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                          {classSubjects.map((sub: any, i: number) => {
-                            const group = groupedSubjects.find(g => g.name.toLowerCase() === sub.name.toLowerCase());
-                            return (
-                              <tr key={sub.id} className={i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
-                                <td className="px-4 py-2.5 text-xs text-slate-400">{i + 1}</td>
-                                <td className="px-4 py-2.5">
-                                  <div className="flex items-center gap-2.5">
-                                    <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${getSubjectColor(sub.name)} flex items-center justify-center shrink-0`}>
-                                      <Book size={13} className="text-white" />
-                                    </div>
-                                    <span className="font-medium text-slate-800 dark:text-white">{sub.name}</span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5">
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 font-mono text-xs font-semibold text-slate-600 dark:text-slate-300">
-                                    {sub.code || <span className="text-slate-400 font-normal italic">no code</span>}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-2.5 text-right">
-                                  <div className="flex items-center justify-end gap-1">
-                                    {group && (
-                                      <button
-                                        onClick={() => openEditGroup(group)}
-                                        className="p-1.5 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 text-indigo-600 rounded-lg transition-colors"
-                                        title="Edit subject"
-                                      >
-                                        <Pencil size={14} />
-                                      </button>
-                                    )}
-                                    <button
-                                      onClick={() => handleDeleteGroup({ name: sub.name, ids: [sub.id] })}
-                                      className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 rounded-lg transition-colors"
-                                      title="Remove from this class"
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {classSubjects.map((sub: any, i: number) => (
+                            <SubjectRow
+                              key={sub.id}
+                              sub={sub}
+                              i={i}
+                              group={groupedSubjects.find(g => g.name.toLowerCase() === sub.name.toLowerCase())}
+                              onEdit={openEditGroup}
+                              onDelete={handleDeleteGroup}
+                            />
+                          ))}
                         </tbody>
                       </table>
                     </div>
@@ -1274,6 +1303,14 @@ export default function Subjects() {
           </div>
         </div>
       , document.body)}
+
+      {showImportSuccess && (
+        <SuccessPopup 
+          message="Import Complete!" 
+          subMessage="Subject records have been updated."
+          onClose={() => setShowImportSuccess(false)}
+        />
+      )}
     </div>
   );
 }

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen, saveCurrentPlan } from '../utils/plans';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
@@ -23,6 +24,8 @@ export default function Plans() {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeToPlan, setUpgradeToPlan] = useState<PlanDefinition | null>(null);
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
+  const [isSubmitting, setIsRefreshing] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [transactionId, setTransactionId] = useState('');
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
   const [accessState, setAccessState] = useState<SubscriptionAccessState | null>(null);
@@ -390,18 +393,28 @@ Powered by Schofy`;
                       const authId = schoolId || user?.id;
                       if (!authId) return;
 
-                      const usage = await saveCurrentPlan(authId, selectedPlan.id, billingCycle, {
-                        authUserId: user?.id,
-                      });
-                      setCurrentPlanId(usage.selectedPlanId);
-                      setStudentCount(usage.used);
-                      setAccessState(usage);
-                      setLatestReceipt(await getLatestReceipt(authId));
-                      setPaymentSubmitted(true);
+                      setIsRefreshing(true);
+                      try {
+                        const usage = await saveCurrentPlan(authId, selectedPlan.id, billingCycle, {
+                          authUserId: user?.id,
+                        });
+                        setCurrentPlanId(usage.selectedPlanId);
+                        setStudentCount(usage.used);
+                        setAccessState(usage);
+                        setLatestReceipt(await getLatestReceipt(authId));
+                        setPaymentSubmitted(true);
+                        setShowSuccess(true);
+                      } catch (error) {
+                        console.error('Payment error:', error);
+                      } finally {
+                        setIsRefreshing(false);
+                      }
                     }}
-                    className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1"
+                    disabled={isSubmitting}
+                    className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 disabled:opacity-50"
                   >
-                    <Check size={12} /> Submit
+                    {isSubmitting ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                    Submit
                   </button>
                 </div>
               </div>
@@ -540,6 +553,14 @@ Powered by Schofy`;
           </div>
         </div>
       , document.body)}
+
+      {showSuccess && (
+        <SuccessPopup 
+          message="Payment Received!" 
+          subMessage="Your plan will be updated within 24 hours."
+          onClose={() => setShowSuccess(false)}
+        />
+      )}
     </div>
   );
 }

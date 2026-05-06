@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash, Clock, Calendar } from 'lucide-react';
@@ -11,6 +11,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 const classColors = [
   { card: 'card-coral-light', gradient: 'from-orange-100 to-amber-100', text: 'text-orange-600' },
@@ -28,6 +29,105 @@ const classColors = [
 function getClassColor(index: number) {
   return classColors[index % classColors.length];
 }
+
+const ClassRow = memo(({
+  classItem: c,
+  index,
+  isSelected,
+  selectMode,
+  enrolled,
+  onClick,
+  onTimetable,
+  onEdit,
+  onDelete
+}: {
+  classItem: Class;
+  index: number;
+  isSelected: boolean;
+  selectMode: boolean;
+  enrolled: number;
+  onClick: (id: string) => void;
+  onTimetable: (id: string) => void;
+  onEdit: (c: Class) => void;
+  onDelete: (id: string) => void;
+}) => {
+  const pct = c.capacity > 0 ? Math.round((enrolled / c.capacity) * 100) : 0;
+  const full = enrolled >= c.capacity;
+  
+  return (
+    <div
+      id={`class-card-${c.id}`}
+      className={`flex items-center gap-4 px-4 py-3 cursor-pointer transition-colors ${isSelected ? 'bg-primary-50 dark:bg-primary-900/10 hover:bg-primary-50 dark:hover:bg-primary-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
+      onClick={() => onClick(c.id)}
+    >
+      {/* Select / index */}
+      {selectMode ? (
+        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary-600 border-primary-600' : 'border-slate-300 dark:border-slate-600'}`}>
+          {isSelected && <Check size={11} className="text-white" />}
+        </div>
+      ) : (
+        <span className="w-6 text-xs text-slate-400 text-center shrink-0">{index + 1}</span>
+      )}
+
+      {/* Icon */}
+      <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center shrink-0">
+        <GraduationCap size={18} className="text-slate-500 dark:text-slate-400" />
+      </div>
+
+      {/* Name + level */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-slate-800 dark:text-white">{c.name}</span>
+          {c.stream && <span className="badge badge-info text-xs">Stream {c.stream}</span>}
+        </div>
+        <p className="text-xs text-slate-400 mt-0.5">Level {c.level}</p>
+      </div>
+
+      {/* Enrollment bar */}
+      <div className="hidden sm:flex flex-col items-end gap-1 w-32 shrink-0">
+        <span className="text-xs text-slate-500">{enrolled}/{c.capacity} students</span>
+        <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${full ? 'bg-red-500' : 'bg-emerald-500'}`}
+            style={{ width: `${Math.min(100, pct)}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Slots */}
+      <span className={`hidden md:block text-xs font-medium w-20 text-right shrink-0 ${full ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
+        {full ? 'Full' : `${c.capacity - enrolled} left`}
+      </span>
+
+      {/* Actions */}
+      {!selectMode && (
+        <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={() => onTimetable(c.id)}
+            className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 rounded-lg transition-colors"
+            title="Timetable"
+          >
+            <Clock size={15} />
+          </button>
+          <button
+            onClick={() => onEdit(c)}
+            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 rounded-lg transition-colors"
+            title="Edit"
+          >
+            <Edit size={15} />
+          </button>
+          <button
+            onClick={() => onDelete(c.id)}
+            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+});
 
 export default function Classes() {
   const { user, schoolId } = useAuth();
@@ -53,6 +153,8 @@ export default function Classes() {
   }, [allStudentsData]);
 
   const [showForm, setShowForm] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
   const [formData, setFormData] = useState({ name: '', level: 1, stream: '', capacity: 40 });
   const { addToast } = useToast();
@@ -233,13 +335,12 @@ export default function Classes() {
       const now = new Date().toISOString();
       if (editingClass) {
         await dataService.update(id, 'classes', editingClass.id, { ...editingClass, ...formData, updatedAt: now });
-        addToast('Class updated successfully', 'success');
       } else {
         const newClass: Class = { id: generateUUID(), schoolId: id, name: formData.name, level: formData.level, stream: formData.stream, capacity: formData.capacity, createdAt: now };
         await dataService.create(id, 'classes', newClass);
-        addToast('Class added successfully', 'success');
       }
       setShowForm(false);
+      setShowSuccess(true);
       setEditingClass(null);
       setFormData({ name: '', level: 1, stream: '', capacity: 40 });
     } catch (error) {
@@ -424,10 +525,8 @@ export default function Classes() {
     try {
       const now = new Date().toISOString();
       let successCount = 0;
-      // Snapshot preview before closing modal (closeImportModal resets importPreview to [])
       const snap = [...importPreview];
-      closeImportModal();
-      addToast(`Importing ${snap.length} class${snap.length !== 1 ? 'es' : ''}... completing in background`, 'info');
+      
       for (let i = 0; i < snap.length; i++) {
         const data = snap[i];
         const classItem: Class = {
@@ -443,9 +542,13 @@ export default function Classes() {
         successCount++;
         setImportProgress(Math.round(((i + 1) / snap.length) * 100));
       }
-      addToast(`Successfully imported ${successCount} class${successCount !== 1 ? 'es' : ''}`, 'success');
-    } catch (error) { addToast('Failed to import classes', 'error'); }
-    finally { setIsImporting(false); setImportProgress(0); }
+      setIsImporting(false);
+      closeImportModal();
+      setShowImportSuccess(true);
+    } catch (error) {
+      setIsImporting(false);
+      addToast('Failed to import classes', 'error');
+    }
   }
 
   const totalEnrolled = classes.reduce((sum, classItem) => sum + (classEnrollmentCounts[classItem.id] || 0), 0);
@@ -628,86 +731,20 @@ export default function Classes() {
           </div>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-700">
-            {classes.map((c, index) => {
-              const isSelected = selectedClasses.has(c.id);
-              const enrolled = classEnrollmentCounts[c.id] || 0;
-              const pct = c.capacity > 0 ? Math.round((enrolled / c.capacity) * 100) : 0;
-              const full = enrolled >= c.capacity;
-              return (
-                <div
-                  key={c.id}
-                  id={`class-card-${c.id}`}
-                  className={`flex items-center gap-4 px-4 py-3 cursor-pointer transition-colors ${isSelected ? 'bg-primary-50 dark:bg-primary-900/10 hover:bg-primary-50 dark:hover:bg-primary-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
-                  onClick={() => handleRowClick(c.id)}
-                >
-                  {/* Select / index */}
-                  {selectMode ? (
-                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary-600 border-primary-600' : 'border-slate-300 dark:border-slate-600'}`}>
-                      {isSelected && <Check size={11} className="text-white" />}
-                    </div>
-                  ) : (
-                    <span className="w-6 text-xs text-slate-400 text-center shrink-0">{index + 1}</span>
-                  )}
-
-                  {/* Icon */}
-                  <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center shrink-0">
-                    <GraduationCap size={18} className="text-slate-500 dark:text-slate-400" />
-                  </div>
-
-                  {/* Name + level */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-slate-800 dark:text-white">{c.name}</span>
-                      {c.stream && <span className="badge badge-info text-xs">Stream {c.stream}</span>}
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">Level {c.level}</p>
-                  </div>
-
-                  {/* Enrollment bar */}
-                  <div className="hidden sm:flex flex-col items-end gap-1 w-32 shrink-0">
-                    <span className="text-xs text-slate-500">{enrolled}/{c.capacity} students</span>
-                    <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${full ? 'bg-red-500' : 'bg-emerald-500'}`}
-                        style={{ width: `${Math.min(100, pct)}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Slots */}
-                  <span className={`hidden md:block text-xs font-medium w-20 text-right shrink-0 ${full ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                    {full ? 'Full' : `${c.capacity - enrolled} left`}
-                  </span>
-
-                  {/* Actions */}
-                  {!selectMode && (
-                    <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={() => { setTimetableClassId(c.id); setShowTimetable(true); }}
-                        className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 rounded-lg transition-colors"
-                        title="Timetable"
-                      >
-                        <Clock size={15} />
-                      </button>
-                      <button
-                        onClick={() => handleEdit(c)}
-                        className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 rounded-lg transition-colors"
-                        title="Edit"
-                      >
-                        <Edit size={15} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(c.id)}
-                        className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {classes.map((c, index) => (
+              <ClassRow
+                key={c.id}
+                classItem={c}
+                index={index}
+                isSelected={selectedClasses.has(c.id)}
+                selectMode={selectMode}
+                enrolled={classEnrollmentCounts[c.id] || 0}
+                onClick={handleRowClick}
+                onTimetable={(id: string) => { setTimetableClassId(id); setShowTimetable(true); }}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -993,6 +1030,14 @@ export default function Classes() {
           </div>
         </div>
       , document.body)}
+
+      {(showSuccess || showImportSuccess) && (
+        <SuccessPopup 
+          message={showImportSuccess ? "Import Complete!" : (editingClass ? "Class Updated!" : "Class Added!")} 
+          subMessage={showImportSuccess ? "Class records have been updated." : undefined}
+          onClose={() => { setShowSuccess(false); setShowImportSuccess(false); }}
+        />
+      )}
     </div>
   );
 }

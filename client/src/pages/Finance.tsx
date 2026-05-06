@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight } from 'lucide-react';
@@ -11,6 +11,7 @@ import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 export default function Finance() {
   const { user, schoolId } = useAuth();
@@ -27,9 +28,11 @@ export default function Finance() {
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTerm, setFilterTerm] = useState('all');
   const [showTermFilter, setShowTermFilter] = useState(false);
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
   const [expandedPayments, setExpandedPayments] = useState<Set<string>>(new Set());
   // Payment modal state
@@ -174,15 +177,23 @@ export default function Finance() {
   async function executeImport() {
     const id = schoolId || user?.id;
     if (!importPreview.length || !id) { addToast('No valid records', 'error'); return; }
-    let count = 0;
-    const now = new Date().toISOString();
-    for (const d of importPreview) {
-      const s = students.find(x => `${x.firstName} ${x.lastName}` === d.studentName);
-      if (!s) continue;
-      await dataService.create(id, 'payments', { id: uuidv4(), feeId: '', studentId: s.id, amount: parseFloat(d.amount), method: (d.method as PaymentMethod) || PaymentMethod.CASH, date: d.date || now, createdAt: now } as any);
-      count++;
+    setIsImporting(true);
+    try {
+      let count = 0;
+      const now = new Date().toISOString();
+      for (const d of importPreview) {
+        const s = students.find(x => `${x.firstName} ${x.lastName}` === d.studentName);
+        if (!s) continue;
+        await dataService.create(id, 'payments', { id: uuidv4(), feeId: '', studentId: s.id, amount: parseFloat(d.amount), method: (d.method as PaymentMethod) || PaymentMethod.CASH, date: d.date || now, createdAt: now } as any);
+        count++;
+      }
+      setIsImporting(false);
+      closeImportModal();
+      setShowImportSuccess(true);
+    } catch {
+      setIsImporting(false);
+      addToast('Import failed', 'error');
     }
-    addToast(`Imported ${count} payments`, 'success'); closeImportModal();
   }
 
   useEffect(() => {
@@ -559,8 +570,11 @@ export default function Finance() {
                     </table>
                   </div>
                   <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1"><Check size={14} />Import</button>
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
+                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                      {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check size={14} />}
+                      Import
+                    </button>
                   </div>
                 </div>
               )}
@@ -619,6 +633,14 @@ export default function Finance() {
           </div>
         </div>
       , document.body)}
+
+      {showImportSuccess && (
+        <SuccessPopup 
+          message="Import Complete!" 
+          subMessage="Payment records have been updated."
+          onClose={() => setShowImportSuccess(false)}
+        />
+      )}
     </div>
   );
 }

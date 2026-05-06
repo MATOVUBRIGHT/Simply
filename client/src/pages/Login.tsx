@@ -4,6 +4,7 @@ import { Eye, EyeOff, Loader2, UserPlus, Shield, CheckCircle, Cloud, CloudOff, W
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { isSupabaseConfigured } from '../lib/supabase';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 export default function Login() {
   const [isRegister, setIsRegister] = useState(false);
@@ -16,6 +17,7 @@ export default function Login() {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [securingAccount, setSecuringAccount] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{
     step: 'creating' | 'syncing' | 'complete' | 'error' | 'offline';
@@ -111,6 +113,9 @@ export default function Login() {
           localStorage.removeItem('remembered_email');
           localStorage.removeItem('remember_me');
         }
+        
+        setShowSuccess(true);
+        await new Promise(resolve => setTimeout(resolve, 1500));
         
         // Navigate to dashboard
         navigate('/');
@@ -376,6 +381,13 @@ export default function Login() {
           Cloud-first | Works offline | Auto-sync
         </p>
       </div>
+
+      {showSuccess && (
+        <SuccessPopup 
+          message={isRegister ? "Account Created!" : "Welcome Back!"} 
+          subMessage="Taking you to your dashboard..."
+        />
+      )}
     </div>
   );
 }

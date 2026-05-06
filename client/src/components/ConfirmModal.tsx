@@ -6,7 +6,8 @@
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Portal } from './Portal';
-import { AlertTriangle, Trash2, Info, CheckCircle, X } from 'lucide-react';
+import { AlertTriangle, Trash2 as TrashIcon, Info, CheckCircle, X } from 'lucide-react';
+// Build: 2026-05-07
 
 export type ConfirmVariant = 'danger' | 'warning' | 'info' | 'success';
 
@@ -64,7 +65,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
 
   const iconConfig = {
     danger: {
-      icon: <Trash2 size={20} className="text-red-600" />,
+      icon: <TrashIcon size={20} className="text-red-600" />,
       bg: 'bg-red-100 dark:bg-red-900/30',
       btn: 'bg-red-600 hover:bg-red-700 active:bg-red-800 text-white shadow-red-200 dark:shadow-red-900/30',
     },

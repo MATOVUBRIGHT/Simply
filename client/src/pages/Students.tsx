@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+﻿﻿import { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, CreditCard } from 'lucide-react';
 import { Portal } from '../components/Portal';
@@ -7,7 +7,6 @@ import type { Class, Student } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { Gender } from '@schofy/shared';
 import ImageModal from '../components/ImageModal';
-import { useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments } from '../utils/classroom';
@@ -16,7 +15,10 @@ import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
 import { useConfirm } from '../components/ConfirmModal';
-import { getSubscriptionAccessState, PLAN_DEFINITIONS } from '../utils/plans';
+import { getSubscriptionAccessState } from '../utils/plans';
+import { SuccessPopup } from '../components/SuccessPopup';
+import { usePagination } from '../hooks/usePagination';
+import { useDebounce } from '../hooks/useDebounce';
 
 const avatarColors = [
   'bg-rose-500',
@@ -56,6 +58,164 @@ function generateStudentId(firstName: string, lastName: string): string {
   return `${fn}${ln}${digits}`;
 }
 
+const StudentRow = memo(({ 
+  student, 
+  index, 
+  currentPage, 
+  selectMode, 
+  isSelected, 
+  onSingleClick, 
+  onDoubleClick, 
+  onPreviewImage, 
+  onMarkCompleted, 
+  onToggleStatus, 
+  onSendEmail, 
+  onDelete,
+  classes,
+  finance,
+  formatMoney
+}: {
+  student: Student;
+  index: number;
+  currentPage: number;
+  selectMode: boolean;
+  isSelected: boolean;
+  onSingleClick: (id: string) => void;
+  onDoubleClick: (id: string) => void;
+  onPreviewImage: (img: { src: string; alt: string }) => void;
+  onMarkCompleted: (id: string) => void;
+  onToggleStatus: (student: Student) => void;
+  onSendEmail: (id: string) => void;
+  onDelete: (id: string) => void;
+  classes: Class[];
+  finance: { status: string; balance: number; invoiced: number };
+  formatMoney: (val: number) => string;
+}) => {
+  return (
+    <tr 
+      className={`group cursor-pointer transition-colors ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+      onClick={() => onSingleClick(student.id)}
+      onDoubleClick={() => onDoubleClick(student.id)}
+    >
+      <td className="text-center text-xs text-slate-400 dark:text-slate-500">
+        {(currentPage - 1) * 10 + index + 1}
+      </td>
+      {selectMode && (
+        <td className="text-center">
+          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+            isSelected 
+              ? 'bg-primary-600 border-primary-600' 
+              : 'border-slate-300 dark:border-slate-600'
+          }`}>
+            {isSelected && (
+              <Check size={12} className="text-white" />
+            )}
+          </div>
+        </td>
+      )}
+      <td>
+        <div className="flex items-center gap-3">
+          {student.photoUrl ? (
+            <button 
+              onClick={(e) => { e.stopPropagation(); onPreviewImage({ src: student.photoUrl!, alt: `${student.firstName} ${student.lastName}` }); }}
+              className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
+            >
+              <img 
+                src={student.photoUrl} 
+                alt={`${student.firstName} ${student.lastName}`}
+                className="w-full h-full object-cover object-top"
+              />
+            </button>
+          ) : (
+            <div className={`w-9 h-9 rounded-lg ${getAvatarColor(student.firstName)} flex items-center justify-center`}>
+              <span className="text-xs font-bold text-white">
+                {student.firstName[0]}
+                {student.lastName[0]}
+              </span>
+            </div>
+          )}
+          <div>
+            <p className="font-medium text-slate-800 dark:text-white">
+              {student.firstName} {student.lastName}
+            </p>
+            <p className="text-xs text-slate-400">{student.guardianEmail || 'No guardian email'}</p>
+          </div>
+        </div>
+      </td>
+      <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
+        {student.studentId || student.admissionNo}
+      </td>
+      <td>
+        <span className="badge badge-info">{getClassDisplayName(student.classId, classes)}</span>
+      </td>
+      <td className="capitalize">
+        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${
+          student.gender === 'male' 
+            ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' 
+            : 'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300'
+        }`}>
+          {student.gender}
+        </span>
+      </td>
+      <td>
+        <div>
+          <p className="text-sm font-medium">{student.guardianName}</p>
+          <p className="text-xs text-slate-400">{student.guardianPhone}</p>
+        </div>
+      </td>
+      <td>
+        <span className={`badge text-xs ${
+          finance.status === 'paid'    ? 'badge-success' :
+          finance.status === 'partial' ? 'badge-warning' :
+          finance.status === 'pending' ? 'badge-danger'  :
+          'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+        }`}>
+          {finance.status === 'none' ? 'No invoice' : finance.status}
+        </span>
+      </td>
+      <td onClick={(e) => e.stopPropagation()}>
+        {finance.status === 'none' ? <span className="text-xs text-slate-400">-</span> : 
+         finance.balance <= 0 ? <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span> :
+         <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(finance.balance)}</span>}
+      </td>
+      <td onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => onMarkCompleted(student.id)}
+            className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors"
+            title="Mark Completed"
+          >
+            <Award size={15} />
+          </button>
+          {student.status === 'active' && (
+            <button
+              onClick={() => onToggleStatus(student)}
+              className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg transition-colors"
+              title="Deactivate"
+            >
+              <UserX size={15} />
+            </button>
+          )}
+          <button
+            onClick={() => onSendEmail(student.id)}
+            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
+            title="Send Email"
+          >
+            <Mail size={15} />
+          </button>
+          <button
+            onClick={() => onDelete(student.id)}
+            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 // Build: 2026-05-05
 export default function Students() {
   const { user, schoolId } = useAuth();
@@ -87,14 +247,11 @@ export default function Students() {
     return { status, balance, invoiced };
   }
 
-  const { searchStudents } = useStudents();
   const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [debouncedSearch] = useDebounce(search, 300);
   const [selectedClass, setSelectedClass] = useState('');
   const [searchResults, setSearchResults] = useState<Student[] | null>(null); // null = not searching
   const [isSearching, setIsSearching] = useState(false);
-  const itemsPerPage = 10;
   const { addToast } = useToast();
   // ... rest of state stays same
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -117,6 +274,8 @@ export default function Students() {
   const [completedYearFilter, setCompletedYearFilter] = useState<string>('');
   const [planLimitMessage, setPlanLimitMessage] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [importLimitInfo, setImportLimitInfo] = useState<{ allowed: number; total: number; planName: string; remaining: number } | null>(null);
   const navigate = useNavigate();
   const statusFilterRef = useRef<HTMLDivElement>(null);
@@ -124,14 +283,6 @@ export default function Students() {
 
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(search);
-      setCurrentPage(1);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [search]);
 
   // Search via store (cache-based, instant)
   useEffect(() => {
@@ -166,11 +317,18 @@ export default function Students() {
     });
   }, [allStudents, searchResults, selectedClass, viewFilter]);
 
-  const totalCount = filteredStudents.length;
-  const totalPages = Math.ceil(totalCount / itemsPerPage);
-  const students = filteredStudents.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const {
+    items: paginatedStudents,
+    currentPage,
+    totalPages,
+    goToPage,
+    nextPage,
+    prevPage,
+    totalItems: totalCount
+  } = usePagination(filteredStudents, { pageSize: 10 });
+
+  const students = paginatedStudents;
   const loading = studentsLoading && allStudents.length === 0 && !localStorage.getItem('schofy_data_cache');
-  const paginatedStudents = students;
 
   const availableClassIds = Array.from(new Set([
     ...classes.map((classItem) => classItem.id),
@@ -742,46 +900,6 @@ export default function Students() {
     event.target.value = '';
   }
 
-  function parseCSVHeaders(line: string): string[] {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    result.push(current.trim());
-    return result;
-  }
-
-  function parseCSVLine(line: string): string[] {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    result.push(current.trim());
-    return result;
-  }
-
   async function processMapping() {
     const mappedData: Partial<Student>[] = [];
     const newFlaggedItems: Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }> = {};
@@ -877,12 +995,10 @@ export default function Students() {
       };
       const importStatus = getImportStatus();
 
-      // Close modal immediately - import runs in background
       const previewSnapshot = [...importPreview];
       const flaggedSnapshot = { ...flaggedItems };
-      closeImportModal();
-      addToast(`Importing ${previewSnapshot.length} student${previewSnapshot.length !== 1 ? 's' : ''}... completing in background`, 'info');
-
+      
+      // Don't close modal immediately, show progress
       for (let i = 0; i < previewSnapshot.length; i++) {
         const data = previewSnapshot[i];
         const studentId = (data as any).id;
@@ -969,18 +1085,16 @@ export default function Students() {
           await dataService.create(id, 'students', student as any);
           successCount++;
         }
+        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
       }
 
-      const parts: string[] = [];
-      if (successCount > 0) parts.push(`${successCount} imported`);
-      if (replacedCount > 0) parts.push(`${replacedCount} replaced`);
-      if (skippedCount > 0) parts.push(`${skippedCount} skipped`);
-      addToast(parts.join(', ') || 'Import complete', 'success');
+      setIsImporting(false);
+      closeImportModal();
+      setShowImportSuccess(true);
     } catch (error) {
       console.error('Import error:', error);
-      addToast('Failed to import students', 'error');
-    } finally {
       setIsImporting(false);
+      addToast('Failed to import students', 'error');
     }
   }
 
@@ -1475,136 +1589,24 @@ export default function Students() {
                   </tr>
                 ) : (
                   paginatedStudents.map((student, index) => (
-                    <tr 
-                      key={student.id} 
-                      className={`group cursor-pointer transition-colors ${selectedStudents.has(student.id) ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
-                      onClick={() => handleRowSingleClick(student.id)}
-                      onDoubleClick={() => handleRowDoubleClick(student.id)}
-                    >
-                      <td className="text-center text-xs text-slate-400 dark:text-slate-500">
-                        {(currentPage - 1) * itemsPerPage + index + 1}
-                      </td>
-                      {selectMode && (
-                        <td className="text-center">
-                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                            selectedStudents.has(student.id) 
-                              ? 'bg-primary-600 border-primary-600' 
-                              : 'border-slate-300 dark:border-slate-600'
-                          }`}>
-                            {selectedStudents.has(student.id) && (
-                              <Check size={12} className="text-white" />
-                            )}
-                          </div>
-                        </td>
-                      )}
-                      <td>
-                        <div className="flex items-center gap-3">
-                          {student.photoUrl ? (
-                            <button 
-                              onClick={() => setPreviewImage({ src: student.photoUrl!, alt: `${student.firstName} ${student.lastName}` })}
-                              className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
-                            >
-                              <img 
-                                src={student.photoUrl} 
-                                alt={`${student.firstName} ${student.lastName}`}
-                                className="w-full h-full object-cover object-top"
-                              />
-                            </button>
-                          ) : (
-                            <div className={`w-9 h-9 rounded-lg ${getAvatarColor(student.firstName)} flex items-center justify-center`}>
-                              <span className="text-xs font-bold text-white">
-                                {student.firstName[0]}
-                                {student.lastName[0]}
-                              </span>
-                            </div>
-                          )}
-                          <div>
-                            <p className="font-medium text-slate-800 dark:text-white">
-                              {student.firstName} {student.lastName}
-                            </p>
-                            <p className="text-xs text-slate-400">{student.guardianEmail || 'No guardian email'}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
-                        {student.studentId || student.admissionNo}
-                      </td>
-                      <td>
-                        <span className="badge badge-info">{getClassDisplayName(student.classId, classes)}</span>
-                      </td>
-                      <td className="capitalize">
-                        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${
-                          student.gender === 'male' 
-                            ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' 
-                            : 'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300'
-                        }`}>
-                          {student.gender}
-                        </span>
-                      </td>
-                      <td>
-                        <div>
-                          <p className="text-sm font-medium">{student.guardianName}</p>
-                          <p className="text-xs text-slate-400">{student.guardianPhone}</p>
-                        </div>
-                      </td>
-                      <td>
-                        {(() => {
-                          const { status } = getStudentFinance(student.id);
-                          return (
-                            <span className={`badge text-xs ${
-                              status === 'paid'    ? 'badge-success' :
-                              status === 'partial' ? 'badge-warning' :
-                              status === 'pending' ? 'badge-danger'  :
-                              'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
-                            }`}>
-                              {status === 'none' ? 'No invoice' : status}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        {(() => {
-                          const { status, balance } = getStudentFinance(student.id);
-                          if (status === 'none') return <span className="text-xs text-slate-400">-</span>;
-                          if (balance <= 0) return <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>;
-                          return <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(balance)}</span>;
-                        })()}
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleMarkCompleted(student.id)}
-                            className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors"
-                            title="Mark Completed"
-                          >
-                            <Award size={15} />
-                          </button>
-                          {student.status === 'active' && (
-                            <button
-                              onClick={() => handleToggleStatus(student)}
-                              className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg transition-colors"
-                              title="Deactivate"
-                            >
-                              <UserX size={15} />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleSendEmail(student.id)}
-                            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
-                            title="Send Email"
-                          >
-                            <Mail size={15} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(student.id)}
-                            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                    <StudentRow
+                      key={student.id}
+                      student={student}
+                      index={index}
+                      currentPage={currentPage}
+                      selectMode={selectMode}
+                      isSelected={selectedStudents.has(student.id)}
+                      onSingleClick={handleRowSingleClick}
+                      onDoubleClick={handleRowDoubleClick}
+                      onPreviewImage={setPreviewImage}
+                      onMarkCompleted={handleMarkCompleted}
+                      onToggleStatus={handleToggleStatus}
+                      onSendEmail={handleSendEmail}
+                      onDelete={handleDelete}
+                      classes={classes}
+                      finance={getStudentFinance(student.id)}
+                      formatMoney={formatMoney}
+                    />
                   ))
                 )}
               </tbody>
@@ -1715,13 +1717,13 @@ export default function Students() {
         {totalPages > 1 && viewFilter !== 'completed' && (
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>G--
-              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span> of{' '}
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * 10 + 1}</span> to{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * 10, totalCount)}</span> of{' '}
               <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students
             </p>
             <div className="flex items-center gap-1">
               <button
-                onClick={() => setCurrentPage(1)}
+                onClick={() => goToPage(1)}
                 disabled={currentPage === 1}
                 className="btn btn-secondary p-2 disabled:opacity-40"
                 title="First page"
@@ -1730,13 +1732,13 @@ export default function Students() {
                 <ChevronLeft size={14} className="-ml-2" />
               </button>
               <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                onClick={prevPage}
                 disabled={currentPage === 1}
                 className="btn btn-secondary p-2 disabled:opacity-40"
               >
                 <ChevronLeft size={16} />
               </button>
-              {/* Page number buttons G-- show up to 5 around current page */}
+              {/* Page number buttons - show up to 5 around current page */}
               {Array.from({ length: totalPages }, (_, i) => i + 1)
                 .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
                 .reduce<(number | '...')[]>((acc, p, i, arr) => {
@@ -1746,11 +1748,11 @@ export default function Students() {
                 }, [])
                 .map((p, i) =>
                   p === '...' ? (
-                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">GO</span>
+                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">...</span>
                   ) : (
                     <button
                       key={p}
-                      onClick={() => setCurrentPage(p as number)}
+                      onClick={() => goToPage(p as number)}
                       className={`min-w-[2rem] h-8 px-2 rounded-lg text-sm font-medium transition-colors ${
                         currentPage === p
                           ? 'text-white shadow-sm'
@@ -1763,14 +1765,14 @@ export default function Students() {
                   )
                 )}
               <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                onClick={nextPage}
                 disabled={currentPage === totalPages}
                 className="btn btn-secondary p-2 disabled:opacity-40"
               >
                 <ChevronRight size={16} />
               </button>
               <button
-                onClick={() => setCurrentPage(totalPages)}
+                onClick={() => goToPage(totalPages)}
                 disabled={currentPage === totalPages}
                 className="btn btn-secondary p-2 disabled:opacity-40"
                 title="Last page"
@@ -2056,15 +2058,30 @@ export default function Students() {
                   <div className="flex justify-between px-5 py-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
                     <button onClick={() => setImportStep('map')} className="btn btn-secondary py-2 px-4">Back to Mapping</button>
                     <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-2 px-4 flex items-center gap-2 disabled:opacity-70">
-                      {isImporting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing...</> : <><Check size={16} /> Import Selected</>}
+                      {isImporting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={16} /> Import Selected</>}
                     </button>
                   </div>
+                  {isImporting && (
+                    <div className="px-5 pb-4">
+                      <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5">
+                        <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
         </div>
       </Portal>
+      )}
+
+      {showImportSuccess && (
+        <SuccessPopup 
+          message="Import Complete!" 
+          subMessage="Your student records have been updated."
+          onClose={() => setShowImportSuccess(false)}
+        />
       )}
     </div>
   );

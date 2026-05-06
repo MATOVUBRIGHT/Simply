@@ -12,6 +12,7 @@ import { useStudents } from '../contexts/StudentsContext';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 export default function Transport() {
   const { user, schoolId } = useAuth();
@@ -28,6 +29,7 @@ export default function Transport() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
@@ -265,9 +267,14 @@ export default function Transport() {
         successCount++;
         setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
       }
-      addToast(`Successfully imported ${successCount} route${successCount !== 1 ? 's' : ''}`, 'success');
-    } catch (error) { addToast('Failed to import routes', 'error'); }
-    finally { setIsImporting(false); setImportProgress(0); }
+      setIsImporting(false);
+      closeImportModal();
+      setShowImportSuccess(true);
+    } catch (error) {
+      console.error('Import error:', error);
+      setIsImporting(false);
+      addToast('Failed to import routes', 'error');
+    }
   }
 
   return (
@@ -730,6 +737,14 @@ export default function Transport() {
             </div>
           </div>
         </Portal>
+      )}
+
+      {showImportSuccess && (
+        <SuccessPopup 
+          message="Import Complete!" 
+          subMessage="Transport routes have been updated."
+          onClose={() => setShowImportSuccess(false)}
+        />
       )}
     </div>
   );

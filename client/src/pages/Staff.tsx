@@ -1,8 +1,8 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, StaffRole } from '@schofy/shared';
 import type { Staff, SalaryPayment } from '@schofy/shared';
@@ -16,6 +16,9 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
+import { SuccessPopup } from '../components/SuccessPopup';
+import { usePagination } from '../hooks/usePagination';
+import { useDebounce } from '../hooks/useDebounce';
 
 const avatarColors = [
   'bg-violet-500',
@@ -32,6 +35,128 @@ function getAvatarColor(name: string) {
   return avatarColors[index];
 }
 
+const StaffRow = memo(({ 
+  staff: s, 
+  index, 
+  currentPage, 
+  selectMode, 
+  isSelected, 
+  onSingleClick, 
+  onDoubleClick, 
+  onPreviewImage, 
+  onDelete
+}: {
+  staff: Staff;
+  index: number;
+  currentPage: number;
+  selectMode: boolean;
+  isSelected: boolean;
+  onSingleClick: (id: string) => void;
+  onDoubleClick: (id: string) => void;
+  onPreviewImage: (img: { src: string; alt: string }) => void;
+  onDelete: (id: string) => void;
+}) => {
+  return (
+    <tr 
+      className={`group cursor-pointer transition-colors ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+      onClick={() => onSingleClick(s.id)}
+      onDoubleClick={() => onDoubleClick(s.id)}
+    >
+      <td className="text-center text-xs text-slate-400 dark:text-slate-500">
+        {(currentPage - 1) * 10 + index + 1}
+      </td>
+      {selectMode && (
+        <td className="text-center">
+          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+            isSelected 
+              ? 'bg-primary-600 border-primary-600' 
+              : 'border-slate-300 dark:border-slate-600'
+          }`}>
+            {isSelected && (
+              <Check size={12} className="text-white" />
+            )}
+          </div>
+        </td>
+      )}
+      <td>
+        <div className="flex items-center gap-3">
+          {s.photoUrl ? (
+            <button 
+              onClick={(e) => { e.stopPropagation(); onPreviewImage({ src: s.photoUrl!, alt: `${s.firstName} ${s.lastName}` }); }}
+              className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
+            >
+              <img 
+                src={s.photoUrl} 
+                alt={`${s.firstName} ${s.lastName}`}
+                className="w-full h-full object-cover object-top"
+              />
+            </button>
+          ) : (
+            <div className={`w-9 h-9 rounded-lg ${getAvatarColor(s.firstName)} flex items-center justify-center`}>
+              <span className="text-xs font-bold text-white">
+                {s.firstName[0]}{s.lastName[0]}
+              </span>
+            </div>
+          )}
+          <div>
+            <p className="font-medium text-slate-800 dark:text-white">
+              {s.firstName} {s.lastName}
+            </p>
+            <p className="text-xs text-slate-400">{s.department || 'Staff Member'}</p>
+          </div>
+        </div>
+      </td>
+      <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
+        {s.employeeId}
+      </td>
+      <td>
+        <span className="badge badge-violet capitalize">{s.role}</span>
+      </td>
+      <td>
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
+            <Phone size={12} className="text-slate-400" />
+            <span>{s.phone || 'N/A'}</span>
+          </div>
+          {s.email && (
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 truncate max-w-[140px]">
+              <Mail size={12} />
+              <span>{s.email}</span>
+            </div>
+          )}
+        </div>
+      </td>
+      <td>
+        <span className={`badge ${s.status === 'active' ? 'badge-success' : 'badge-gray'}`}>
+          {s.status}
+        </span>
+      </td>
+      <td onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-1">
+          <Link to={`/staff/${s.id}`} className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 dark:text-sky-400 rounded-lg transition-colors">
+            <Eye size={15} />
+          </Link>
+          <Link to={`/staff/${s.id}/edit`} className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors">
+            <Edit size={15} />
+          </Link>
+          {s.email && (
+            <button 
+              onClick={() => window.open(`mailto:${s.email}`, '_blank')}
+              className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
+              title="Send Email"
+            >
+              <Mail size={15} />
+            </button>
+          )}
+          <button onClick={() => onDelete(s.id)} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors">
+            <Trash2 size={15} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 export default function StaffPage() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
@@ -45,6 +170,26 @@ export default function StaffPage() {
   const salaryPayments = salaryPaymentsData as SalaryPayment[];
 
   const [search, setSearch] = useState('');
+  const [debouncedSearch] = useDebounce(search, 300);
+
+  const filteredStaff = useMemo(() => {
+    return staff.filter((s) =>
+      s.firstName.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+      s.lastName.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+      (s.employeeId || '').toLowerCase().includes(debouncedSearch.toLowerCase())
+    );
+  }, [staff, debouncedSearch]);
+
+  const {
+    items: paginatedStaff,
+    currentPage,
+    totalPages,
+    goToPage,
+    nextPage,
+    prevPage,
+    totalItems: totalCount
+  } = usePagination(filteredStaff, { pageSize: 10 });
+
   const { addToast } = useToast();
   const { formatMoney } = useCurrency();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -54,6 +199,7 @@ export default function StaffPage() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
   const [isImporting, setIsImporting] = useState(false);
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
@@ -267,12 +413,6 @@ export default function StaffPage() {
     }
   }
 
-  const filteredStaff = staff.filter((s) =>
-    s.firstName.toLowerCase().includes(search.toLowerCase()) ||
-    s.lastName.toLowerCase().includes(search.toLowerCase()) ||
-    s.employeeId.toLowerCase().includes(search.toLowerCase())
-  );
-
   async function handleDelete(id: string) {
     const authId = schoolId || user?.id;
     if (!authId) return;
@@ -432,38 +572,6 @@ export default function StaffPage() {
     event.target.value = '';
   }
 
-  function parseCSVHeaders(line: string): string[] {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') inQuotes = !inQuotes;
-      else if (char === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = '';
-      } else current += char;
-    }
-    result.push(current.trim());
-    return result;
-  }
-
-  function parseCSVLine(line: string): string[] {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') inQuotes = !inQuotes;
-      else if (char === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = '';
-      } else current += char;
-    }
-    result.push(current.trim());
-    return result;
-  }
-
   function processMapping() {
     const mappedData: Partial<Staff>[] = [];
     for (const row of csvData) {
@@ -495,15 +603,13 @@ export default function StaffPage() {
     try {
       const now = new Date().toISOString();
       let successCount = 0;
-      // Close modal immediately — import runs in background
       const previewSnapshot = [...importPreview];
-      closeImportModal();
-      addToast(`Importing ${previewSnapshot.length} staff member${previewSnapshot.length !== 1 ? 's' : ''}... completing in background`, 'info');
+      
       for (let i = 0; i < previewSnapshot.length; i++) {
         const data = previewSnapshot[i];
         const staffMember: Staff = {
           id: crypto.randomUUID(), schoolId: id,
-          employeeId: (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          employeeId: (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
           firstName: (data.firstName as string) || 'Unknown',
           lastName: (data.lastName as string) || 'Unknown',
           role: (data.role as any) || 'teacher',
@@ -516,13 +622,15 @@ export default function StaffPage() {
         else successCount++;
         setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
       }
-      addToast(`Imported ${successCount} staff member${successCount !== 1 ? 's' : ''}`, 'success');
+
+      setIsImporting(false);
+      closeImportModal();
+      setShowImportSuccess(true);
     } catch (error) {
+      setIsImporting(false);
       addToast('Failed to import staff', 'error');
     } finally {
       submittingRef.current = false;
-      setIsImporting(false);
-      setImportProgress(0);
     }
   }
 
@@ -761,7 +869,7 @@ export default function StaffPage() {
                     </div>
                   </td>
                 </tr>
-              ) : filteredStaff.length === 0 ? (
+              ) : paginatedStaff.length === 0 ? (
                 <tr>
                   <td colSpan={selectMode ? 8 : 7} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
@@ -776,110 +884,94 @@ export default function StaffPage() {
                   </td>
                 </tr>
               ) : (
-                filteredStaff.map((s, index) => (
-                  <tr 
+                paginatedStaff.map((s, index) => (
+                  <StaffRow
                     key={s.id}
-                    className={`group cursor-pointer transition-colors ${selectedStaff.has(s.id) ? 'bg-violet-50 dark:bg-violet-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
-                    onClick={() => handleRowSingleClick(s.id)}
-                    onDoubleClick={() => handleRowDoubleClick(s.id)}
-                  >
-                    <td className="text-center text-xs text-slate-400 dark:text-slate-500">
-                      {index + 1}
-                    </td>
-                    {selectMode && (
-                      <td className="text-center">
-                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                          selectedStaff.has(s.id) 
-                            ? 'bg-violet-600 border-violet-600' 
-                            : 'border-slate-300 dark:border-slate-600'
-                        }`}>
-                          {selectedStaff.has(s.id) && (
-                            <Check size={12} className="text-white" />
-                          )}
-                        </div>
-                      </td>
-                    )}
-                    <td>
-                      <div className="flex items-center gap-3">
-                        {s.photoUrl ? (
-                          <button 
-                            onClick={() => setPreviewImage({ src: s.photoUrl!, alt: `${s.firstName} ${s.lastName}` })}
-                            className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
-                          >
-                            <img 
-                              src={s.photoUrl} 
-                              alt={`${s.firstName} ${s.lastName}`}
-                              className="w-full h-full object-cover object-top"
-                            />
-                          </button>
-                        ) : (
-                          <div className={`w-9 h-9 rounded-lg ${getAvatarColor(s.firstName)} flex items-center justify-center`}>
-                            <span className="text-xs font-bold text-white">
-                              {s.firstName[0]}{s.lastName[0]}
-                            </span>
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-medium text-slate-800 dark:text-white">
-                            {s.firstName} {s.lastName}
-                          </p>
-                          <p className="text-xs text-slate-400">{s.department || 'Staff Member'}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
-                      {s.employeeId}
-                    </td>
-                    <td>
-                      <span className="badge badge-violet capitalize">{s.role}</span>
-                    </td>
-                    <td>
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
-                          <Phone size={12} className="text-slate-400" />
-                          <span>{s.phone || 'N/A'}</span>
-                        </div>
-                        {s.email && (
-                          <div className="flex items-center gap-1.5 text-xs text-slate-500 truncate max-w-[140px]">
-                            <Mail size={12} />
-                            <span>{s.email}</span>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`badge ${s.status === 'active' ? 'badge-success' : 'badge-gray'}`}>
-                        {s.status}
-                      </span>
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-1">
-                        <Link to={`/staff/${s.id}`} className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 dark:text-sky-400 rounded-lg transition-colors">
-                          <Eye size={15} />
-                        </Link>
-                        <Link to={`/staff/${s.id}/edit`} className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors">
-                          <Edit size={15} />
-                        </Link>
-                        {s.email && (
-                          <button 
-                            onClick={() => window.open(`mailto:${s.email}`, '_blank')}
-                            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
-                            title="Send Email"
-                          >
-                            <Mail size={15} />
-                          </button>
-                        )}
-                        <button onClick={() => handleDelete(s.id)} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors">
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                    staff={s}
+                    index={index}
+                    currentPage={currentPage}
+                    selectMode={selectMode}
+                    isSelected={selectedStaff.has(s.id)}
+                    onSingleClick={handleRowSingleClick}
+                    onDoubleClick={handleRowDoubleClick}
+                    onPreviewImage={setPreviewImage}
+                    onDelete={handleDelete}
+                  />
                 ))
               )}
             </tbody>
           </table>
         </div>
+
+        {totalPages > 1 && (
+          <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+            <p className="text-sm text-slate-500">
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * 10 + 1}</span> to{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * 10, totalCount)}</span> of{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> staff members
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => goToPage(1)}
+                disabled={currentPage === 1}
+                className="btn btn-secondary p-2 disabled:opacity-40"
+                title="First page"
+              >
+                <ChevronLeft size={14} />
+                <ChevronLeft size={14} className="-ml-2" />
+              </button>
+              <button
+                onClick={prevPage}
+                disabled={currentPage === 1}
+                className="btn btn-secondary p-2 disabled:opacity-40"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              {/* Page number buttons */}
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
+                .reduce<(number | '...')[]>((acc, p, i, arr) => {
+                  if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push('...');
+                  acc.push(p);
+                  return acc;
+                }, [])
+                .map((p, i) =>
+                  p === '...' ? (
+                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">...</span>
+                  ) : (
+                    <button
+                      key={p}
+                      onClick={() => goToPage(p as number)}
+                      className={`min-w-[2rem] h-8 px-2 rounded-lg text-sm font-medium transition-colors ${
+                        currentPage === p
+                          ? 'text-white shadow-sm'
+                          : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600'
+                      }`}
+                      style={currentPage === p ? { backgroundColor: 'var(--primary-color)' } : {}}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+              <button
+                onClick={nextPage}
+                disabled={currentPage === totalPages}
+                className="btn btn-secondary p-2 disabled:opacity-40"
+              >
+                <ChevronRight size={16} />
+              </button>
+              <button
+                onClick={() => goToPage(totalPages)}
+                disabled={currentPage === totalPages}
+                className="btn btn-secondary p-2 disabled:opacity-40"
+                title="Last page"
+              >
+                <ChevronRight size={14} />
+                <ChevronRight size={14} className="-ml-2" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       {previewImage && (
         <ImageModal 
@@ -1206,6 +1298,14 @@ export default function StaffPage() {
           )}
         </div>
       </DropdownModal>
+
+      {showImportSuccess && (
+        <SuccessPopup 
+          message="Import Complete!" 
+          subMessage="Staff records have been updated."
+          onClose={() => setShowImportSuccess(false)}
+        />
+      )}
     </div>
   );
 }

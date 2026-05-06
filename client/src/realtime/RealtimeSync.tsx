@@ -3,6 +3,8 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { store } from '../lib/store';
 import { dataService } from '../lib/database/SupabaseDataService';
 
+import { useAuth } from '../contexts/AuthContext';
+
 interface RealtimeSyncContextType { isConnected: boolean; }
 const RealtimeSyncContext = createContext<RealtimeSyncContextType>({ isConnected: false });
 export function useRealtimeSync() { return useContext(RealtimeSyncContext); }
@@ -22,8 +24,7 @@ const TABLE_NAME_MAP: Record<string, string> = {
 function localName(t: string) { return TABLE_NAME_MAP[t] || t; }
 
 // Only refresh tables with active subscribers and stale data
-function refreshStale() {
-  const sid = localStorage.getItem('schofy_current_school_id') || '';
+function refreshStale(sid: string) {
   if (!sid) return;
   store.refreshStale(sid, REALTIME_TABLES.map(localName));
 }
@@ -31,6 +32,9 @@ function refreshStale() {
 const POLL_INTERVAL = 30_000; // 30 seconds — only for stale tables
 
 export function RealtimeSyncProvider({ children }: { children: React.ReactNode }) {
+  const { schoolId, user } = useAuth();
+  const sid = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
+  
   const [isConnected, setIsConnected] = useState(false);
   const channelRef = useRef<any>(null);
   const pollRef = useRef<number | null>(null);
@@ -38,18 +42,24 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
 
   // ── Single Supabase channel for all tables ──────────────────────────────────
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!isSupabaseConfigured || !supabase || !sid) return;
 
     function connect() {
       if (channelRef.current) {
         try { supabase!.removeChannel(channelRef.current); } catch { /* ignore */ }
       }
 
-      let ch = supabase!.channel('schofy-all');
+      // Filter by school_id to reduce traffic and improve performance
+      let ch = supabase!.channel(`schofy-all:${sid}`);
       for (const table of REALTIME_TABLES) {
-        ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
-          const sid = localStorage.getItem('schofy_current_school_id') || '';
-          if (!sid) return;
+        const filter = table === 'schools' ? `id=eq.${sid}` : `school_id=eq.${sid}`;
+        
+        ch = ch.on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table,
+          filter
+        }, () => {
           const local = localName(table);
           // Trigger a background merge — pulls remote changes and merges without overriding pending local
           void dataService.syncTable(sid, local);
@@ -72,7 +82,6 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
       // First flush pending local changes to Supabase
       void dataService.flushOfflineQueue().then(() => {
         // Then pull fresh data from Supabase and merge
-        const sid = localStorage.getItem('schofy_current_school_id') || '';
         if (sid) {
           void Promise.allSettled(
             // Exclude settings — they have their own save path and must not be overwritten
@@ -89,14 +98,14 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
         try { supabase.removeChannel(channelRef.current); } catch { /* ignore */ }
       }
     };
-  }, []);
+  }, [sid]);
 
   // ── Polling fallback — only refreshes stale tables with active subscribers ──
   useEffect(() => {
     function startPoll() {
       if (pollRef.current) return;
       pollRef.current = window.setInterval(() => {
-        if (document.visibilityState === 'visible') refreshStale();
+        if (document.visibilityState === 'visible') refreshStale(sid);
       }, POLL_INTERVAL);
     }
     function stopPoll() {
@@ -105,7 +114,7 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
     function onVisible() {
       const away = Date.now() - lastActiveRef.current;
       // Only refresh if away > 30s
-      if (away > 30_000) refreshStale();
+      if (away > 30_000) refreshStale(sid);
       lastActiveRef.current = Date.now();
       startPoll();
     }

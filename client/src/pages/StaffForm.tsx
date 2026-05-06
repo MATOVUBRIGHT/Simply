@@ -8,6 +8,7 @@ import ImageUpload from '../components/ImageUpload';
 import { generateStaffId } from '../utils/idFormat';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 const initialFormData: Partial<Staff> = {
   firstName: '',
@@ -30,6 +31,7 @@ export default function StaffForm() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [loadingData, setLoadingData] = useState(!!id);
   const [formData, setFormData] = useState<Partial<Staff>>(initialFormData);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -116,18 +118,19 @@ export default function StaffForm() {
     try {
       if (isEditing) {
         const finalEmployeeId = employeeId.trim() || await generateEmployeeId();
-        addToast('Staff updated', 'success');
-        navigate('/staff');
         await dataService.update(authId, 'staff', id!, { ...formData, employeeId: finalEmployeeId, updatedAt: now } as any);
       } else {
         const finalEmployeeId = employeeId.trim() || await generateEmployeeId();
         const newStaff: Staff = { id: uuidv4(), schoolId: authId, employeeId: finalEmployeeId, ...formData, createdAt: now, updatedAt: now } as Staff;
-        addToast('Staff added', 'success');
-        navigate('/staff');
         await dataService.create(authId, 'staff', newStaff as any);
       }
+
+      setShowSuccess(true);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      navigate('/staff');
     } catch (error) {
-      addToast('Failed to save staff', 'error');
+      console.error('Save error:', error);
+      addToast('Failed to save staff member', 'error');
     } finally {
       setLoading(false);
     }
@@ -250,6 +253,13 @@ export default function StaffForm() {
           </button>
         </div>
       </form>
+
+      {showSuccess && (
+        <SuccessPopup 
+          message={isEditing ? "Staff Updated!" : "Staff Registered!"} 
+          subMessage="Returning to staff list..."
+        />
+      )}
     </div>
   );
 }

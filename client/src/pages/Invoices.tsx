@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus } from 'lucide-react';
@@ -14,6 +14,7 @@ import { useTableData } from '../lib/store';
 import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor, generateInvoicesFromStructure } from '../utils/feeStructures';
 import { ClassOption } from '../utils/classroom';
 import DropdownModal from '../components/DropdownModal';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 interface Invoice {
   id: string;
@@ -76,6 +77,9 @@ export default function Invoices() {
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<'invoices' | 'students'>('invoices');
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   
   const [showStructureModal, setShowStructureModal] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -655,6 +659,7 @@ export default function Invoices() {
 
   async function executeImport() {
     if (importPreview.length === 0 || !user?.id) { addToast('No valid invoices to import', 'error'); return; }
+    setIsImporting(true);
     try {
       const now = new Date().toISOString();
       const year = new Date().getFullYear().toString();
@@ -677,10 +682,14 @@ export default function Invoices() {
         await dataService.create(id, 'fees', fee as any);
         successCount++;
       }
-      addToast(`Successfully imported ${successCount} invoices`, 'success');
+      setIsImporting(false);
       closeImportModal();
+      setShowImportSuccess(true);
       refreshInvoices();
-    } catch (error) { addToast('Failed to import invoices', 'error'); }
+    } catch (error) {
+      setIsImporting(false);
+      addToast('Failed to import invoices', 'error');
+    }
   }
 
   const filteredInvoices = invoices.filter(inv => {
@@ -2013,6 +2022,14 @@ export default function Invoices() {
           </div>
         </div>
       , document.body)}
+
+      {(showSuccess || showImportSuccess) && (
+        <SuccessPopup 
+          message={showImportSuccess ? "Import Complete!" : "Record Saved!"} 
+          subMessage={showImportSuccess ? "Invoice records have been updated." : undefined}
+          onClose={() => { setShowSuccess(false); setShowImportSuccess(false); }}
+        />
+      )}
     </div>
   );
 }

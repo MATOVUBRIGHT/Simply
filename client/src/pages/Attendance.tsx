@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Check, X, Clock, Save, Calendar, Users, BookOpen, Download, Upload, ChevronDown, FileText, ArrowRight, Check as CheckIcon } from 'lucide-react';
@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
+import { SuccessPopup } from '../components/SuccessPopup';
 
 const avatarColors = [
   'from-orange-500 to-red-400',
@@ -44,6 +45,7 @@ export default function Attendance() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
@@ -309,8 +311,8 @@ export default function Attendance() {
         }
         successCount++;
       }
-      addToast(`Successfully imported ${successCount} attendance records`, 'success');
       closeImportModal();
+      setShowImportSuccess(true);
     } catch (error) { addToast('Failed to import attendance', 'error'); }
   }
 
@@ -719,6 +721,14 @@ export default function Attendance() {
           </div>
         </div>
       , document.body)}
+
+      {showImportSuccess && (
+        <SuccessPopup 
+          message="Import Complete!" 
+          subMessage="Attendance records have been updated."
+          onClose={() => setShowImportSuccess(false)}
+        />
+      )}
     </div>
   );
 }
