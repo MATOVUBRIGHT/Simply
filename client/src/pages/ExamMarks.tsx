@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
@@ -76,7 +76,7 @@ export default function ExamMarks() {
     });
   }, [exams, filterTerm, filterClass, allStudents, examResults]);
 
-  // Deduplicated exam options for the dropdown ΓÇö group by name+term+year
+  // Deduplicated exam options for the dropdown — group by name+term+year
   const dedupedExamOptions = useMemo(() => {
     const seen = new Map<string, any>();
     for (const e of availableExams) {
@@ -274,7 +274,7 @@ export default function ExamMarks() {
 
     return (
       <div>
-        {/* ΓöÇΓöÇ Scrollable per-exam scores ΓöÇΓöÇ */}
+        {/* --- Scrollable per-exam scores --- */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse"
             style={{ minWidth: `${Math.max(400, (classExams.length * (allSubjects.length + 3) + fixedCols) * 52)}px` }}>
@@ -286,7 +286,7 @@ export default function ExamMarks() {
                 {classExams.map(exam => (
                   <th key={exam.id} colSpan={allSubjects.length + 3}
                     className="px-3 py-1.5 text-center font-semibold border-l border-teal-600 text-xs whitespace-nowrap">
-                    {exam.name} ┬╖ T{exam.term} {exam.year}
+                    {exam.name} - T{exam.term} {exam.year}
                   </th>
                 ))}
               </tr>
@@ -331,13 +331,13 @@ export default function ExamMarks() {
                           <td key={`${exam.id}-${sub.id}`} className="px-2 py-2 text-center border-l border-slate-100 dark:border-slate-700">
                             {score !== null && score !== undefined
                               ? <span className="font-medium">{score}</span>
-                              : <span className="text-slate-300">ΓÇö</span>}
+                              : <span className="text-slate-300">-</span>}
                           </td>
                         );
                       })}
-                      <td className="px-2 py-2 text-center font-semibold border-l border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 text-xs">{row.examTotals[exam.id] ?? 'ΓÇö'}</td>
-                      <td className="px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30">{row.examAvgs[exam.id] != null ? `${row.examAvgs[exam.id]}%` : 'ΓÇö'}</td>
-                      <td className={`px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30 ${gradeColor(row.examGrades[exam.id] ?? '-')}`}>{row.examGrades[exam.id] ?? 'ΓÇö'}</td>
+                      <td className="px-2 py-2 text-center font-semibold border-l border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 text-xs">{row.examTotals[exam.id] ?? '-'}</td>
+                      <td className="px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30">{row.examAvgs[exam.id] != null ? `${row.examAvgs[exam.id]}%` : '-'}</td>
+                      <td className={`px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30 ${gradeColor(row.examGrades[exam.id] ?? '-')}`}>{row.examGrades[exam.id] ?? '-'}</td>
                     </>
                   ))}
                 </tr>
@@ -346,7 +346,7 @@ export default function ExamMarks() {
           </table>
         </div>
 
-        {/* ΓöÇΓöÇ Overall summary ΓÇö fixed below, no horizontal scroll ΓöÇΓöÇ */}
+        {/* --- Overall summary --- */}
         <div className="border-t-2 border-teal-700 dark:border-teal-600">
           <table className="w-full text-sm border-collapse">
             <thead>
@@ -371,16 +371,16 @@ export default function ExamMarks() {
                     {row.student.firstName} {row.student.lastName}
                   </td>
                   <td className="px-3 py-2 text-center font-bold text-teal-700 dark:text-teal-300">
-                    {row.grandTotal ?? 'ΓÇö'}
+                    {row.grandTotal ?? '-'}
                   </td>
                   <td className="px-3 py-2 text-center font-bold text-teal-700 dark:text-teal-300">
-                    {row.grandAvg != null ? `${row.grandAvg}%` : 'ΓÇö'}
+                    {row.grandAvg != null ? `${row.grandAvg}%` : '-'}
                   </td>
                   <td className={`px-3 py-2 text-center font-bold ${gradeColor(row.grade)}`}>
                     {row.grade}
                   </td>
                   <td className="px-3 py-2 text-center text-xs font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                    {row.position ? `${row.position}${ordSuffix(row.position)} / ${matrix.length}` : 'ΓÇö'}
+                    {row.position ? `${row.position}${ordSuffix(row.position)} / ${matrix.length}` : '-'}
                   </td>
                   <td className="px-3 py-2 text-center print:hidden">
                     <button
@@ -408,7 +408,7 @@ export default function ExamMarks() {
         </button>
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Exam Marks & Reports</h1>
-          <p className="text-sm text-slate-500 mt-1">All exams per class ΓÇö one row per student</p>
+          <p className="text-sm text-slate-500 mt-1">All exams per class - one row per student</p>
         </div>
         {hasResults && (
           <div className="relative" ref={exportMenuRef}>
@@ -448,7 +448,7 @@ export default function ExamMarks() {
           <label className="form-label">Exam</label>
           <select value={filterExam} onChange={e => setFilterExam(e.target.value)} className="form-input">
             <option value="">All Exams</option>
-            {dedupedExamOptions.map((e: any) => <option key={e.id} value={e.id}>{e.name} ┬╖ T{e.term} {e.year}</option>)}
+            {dedupedExamOptions.map((e: any) => <option key={e.id} value={e.id}>{e.name} - T{e.term} {e.year}</option>)}
           </select>
         </div>
         <div>
@@ -498,7 +498,7 @@ export default function ExamMarks() {
               <div>
                 <h2 className="font-bold text-slate-800 dark:text-white text-lg">{className}</h2>
                 <p className="text-sm text-slate-500">
-                  {classExams.length} exam{classExams.length !== 1 ? 's' : ''} ┬╖ {visibleMatrix.length} student{visibleMatrix.length !== 1 ? 's' : ''} ┬╖ {allSubjects.length} subject{allSubjects.length !== 1 ? 's' : ''}
+                  {classExams.length} exam{classExams.length !== 1 ? 's' : ''} - {visibleMatrix.length} student{visibleMatrix.length !== 1 ? 's' : ''} - {allSubjects.length} subject{allSubjects.length !== 1 ? 's' : ''}
                 </p>
               </div>
               {isWide && (
@@ -519,7 +519,7 @@ export default function ExamMarks() {
           <div className="flex items-center justify-between px-5 py-3 bg-teal-800 text-white shrink-0">
             <div>
               <h2 className="font-bold text-lg">{fullViewGroup.className}</h2>
-              <p className="text-sm text-teal-200">{fullViewGroup.classExams.length} exam{fullViewGroup.classExams.length !== 1 ? 's' : ''} ┬╖ {fullViewGroup.matrix.length} students ┬╖ {fullViewGroup.allSubjects.length} subjects</p>
+              <p className="text-sm text-teal-200">{fullViewGroup.classExams.length} exam{fullViewGroup.classExams.length !== 1 ? 's' : ''} - {fullViewGroup.matrix.length} students - {fullViewGroup.allSubjects.length} subjects</p>
             </div>
             <button onClick={() => setFullViewClassId(null)} className="p-2 hover:bg-white/20 rounded-lg transition-colors">
               <X size={22} className="text-white" />

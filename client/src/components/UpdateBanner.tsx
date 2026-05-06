@@ -7,13 +7,13 @@ const APP_VERSION = '2.4.0';
 const STORAGE_KEY = `schofy_seen_update_${APP_VERSION}`;
 
 const CHANGELOG = [
-  { emoji: '📚', text: 'Subjects now show as a deduplicated list — no more repeats' },
-  { emoji: '🎓', text: 'Exam Marks: selecting "CAT" shows all classes at once' },
-  { emoji: '👩‍🏫', text: 'Staff form: subject list deduplicated by name' },
-  { emoji: '📅', text: 'Term defaults now follow your Settings → Current Term' },
-  { emoji: '🔔', text: 'Notifications & profile dropdowns now blur the full app' },
-  { emoji: '⚡', text: 'Offline cache upgraded to IndexedDB — faster cold starts' },
-  { emoji: '🛡️', text: 'Errors caught silently — no raw crashes in the UI' },
+  { text: 'Subjects now show as a deduplicated list - no more repeats' },
+  { text: 'Exam Marks: selecting "CAT" shows all classes at once' },
+  { text: 'Staff form: subject list deduplicated by name' },
+  { text: 'Term defaults now follow your Settings -> Current Term' },
+  { text: 'Notifications & profile dropdowns now blur the full app' },
+  { text: 'Offline cache upgraded to IndexedDB - faster cold starts' },
+  { text: 'Errors caught silently - no raw crashes in the UI' },
 ];
 
 export default function UpdateBanner() {
@@ -68,8 +68,7 @@ export default function UpdateBanner() {
           <div className="px-4 py-3 space-y-2">
             {CHANGELOG.map((item, i) => (
               <div key={i} className="flex items-start gap-2.5 text-sm">
-                <span className="text-base leading-none mt-0.5 shrink-0">{item.emoji}</span>
-                <span className="text-slate-700 dark:text-slate-200 leading-snug">{item.text}</span>
+                <span className="text-slate-700 dark:text-slate-200 leading-snug">- {item.text}</span>
               </div>
             ))}
             <button

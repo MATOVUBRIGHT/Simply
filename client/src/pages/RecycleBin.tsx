@@ -119,6 +119,24 @@ export default function RecycleBin() {
     addToast(`${item.type.charAt(0).toUpperCase() + item.type.slice(1)} permanently deleted`, 'success');
   }
 
+  async function restoreAll() {
+    if (deletedItems.length === 0) return;
+    const ok = await confirm({ 
+       title: 'Restore All Items', 
+       description: `Restore all ${deletedItems.length} items to their original sections?`, 
+       confirmLabel: 'Restore All', 
+       variant: 'info' 
+     });
+    if (!ok) return;
+
+    const ids = deletedItems.map(i => i.id);
+    for (const id of ids) {
+      if (!restoringIds.has(id)) {
+        await restoreItem(id);
+      }
+    }
+  }
+
   async function restoreSelected() {
     const ids = Array.from(selectedItems);
     for (const id of ids) {
@@ -271,14 +289,24 @@ export default function RecycleBin() {
             </>
           )}
           {deletedItems.length > 0 && (
-            <button
-              onClick={cleanDuplicates}
-              className="btn btn-secondary flex items-center gap-2"
-              title="Remove duplicate items"
-            >
-              <Trash2 size={16} />
-              Clean Duplicates
-            </button>
+            <>
+              <button
+                onClick={restoreAll}
+                className="btn btn-secondary flex items-center gap-2"
+                title="Restore all items in the bin"
+              >
+                <RotateCcw size={16} />
+                Restore All
+              </button>
+              <button
+                onClick={cleanDuplicates}
+                className="btn btn-secondary flex items-center gap-2"
+                title="Remove duplicate items"
+              >
+                <Trash2 size={16} />
+                Clean Duplicates
+              </button>
+            </>
           )}
           {deletedItems.length > 0 && (
             <button

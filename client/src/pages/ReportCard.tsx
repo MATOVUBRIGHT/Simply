@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
@@ -72,7 +72,7 @@ const DEFAULT_TEMPLATE: ReportTemplate = {
   schoolPhone: '',
   schoolEmail: '',
   schoolMotto: '',
-  schoolLogo: '≡ƒÄô',
+  schoolLogo: 'S',
   headerColor: '#1a5f5f',
   accentColor: '#7ecece',
   showBehavior: true,
@@ -186,8 +186,8 @@ export default function ReportCard() {
       const score = result ? Number(result.score) : null;
       const maxScore = result ? Number(result.maxScore || 100) : 100;
       const pct = score !== null ? Math.round((score / maxScore) * 100) : null;
-      const grade = pct !== null ? getGrade(pct) : 'ΓÇö';
-      rows.push({ subject: (sub as any).name, code: (sub as any).code || '', score, maxScore, pct, grade, remark: pct !== null ? getRemark(grade) : 'ΓÇö', remarks: result?.remarks || '' });
+      const grade = pct !== null ? getGrade(pct) : '-';
+      rows.push({ subject: (sub as any).name, code: (sub as any).code || '', score, maxScore, pct, grade, remark: pct !== null ? getRemark(grade) : '-', remarks: result?.remarks || '' });
       if (result) usedKeys.add((sub as any).id);
     }
 
@@ -210,7 +210,7 @@ export default function ReportCard() {
   const overallPct = totalMax > 0 ? Math.round((totalScore / totalMax) * 100) : 0;
   const overallGrade = getGrade(overallPct);
 
-  // Calculate position in class ΓÇö rank all class students by total score for same term/year
+  // Calculate position in class -- rank all class students by total score for same term/year
   const classPosition = useMemo(() => {
     if (!studentId || !student?.classId) return null;
     const targetTerm = exam?.term;
@@ -298,9 +298,9 @@ export default function ReportCard() {
               <h1 className="text-2xl font-black text-white uppercase tracking-wide">{displaySchoolName}</h1>
               {template.schoolMotto && <p className="text-sm italic mt-0.5" style={{ color: acc }}>"{template.schoolMotto}"</p>}
               <div className="flex flex-wrap gap-3 mt-1.5 text-xs" style={{ color: `${acc}cc` }}>
-                {displayAddress && <span>≡ƒôì {displayAddress}</span>}
-                {displayPhone && <span>≡ƒô₧ {displayPhone}</span>}
-                {displayEmail && <span>Γ£ë {displayEmail}</span>}
+                {displayAddress && <span>Addr: {displayAddress}</span>}
+                {displayPhone && <span>Tel: {displayPhone}</span>}
+                {displayEmail && <span>Mail: {displayEmail}</span>}
               </div>
               <h2 className="text-lg font-bold mt-2" style={{ color: acc }}>STUDENT REPORT CARD</h2>
             </div>
@@ -318,8 +318,8 @@ export default function ReportCard() {
               { label: 'Student ID:', value: student.studentId || student.admissionNo },
               { label: 'Class:', value: className },
               { label: 'Academic Year:', value: academicYear },
-              { label: 'Exam:', value: exam?.name || 'ΓÇö' },
-              { label: 'Term:', value: `Term ${exam?.term} ┬╖ ${exam?.year}` },
+              { label: 'Exam:', value: exam?.name || '-' },
+              { label: 'Term:', value: `Term ${exam?.term} - ${exam?.year}` },
               ...(classPosition ? [{ label: 'Position:', value: `${classPosition.position}${ordinal(classPosition.position)} out of ${classPosition.outOf}` }] : []),
             ].map(({ label, value }) => (
               <div key={label} className="flex items-center gap-2">
@@ -350,9 +350,9 @@ export default function ReportCard() {
               ) : studentResults.map((r, i) => (
                 <tr key={i} style={{ backgroundColor: i % 2 === 0 ? `${acc}18` : 'white' }}>
                   <td className="px-2 py-1.5 font-medium uppercase text-slate-700">{r.subject}</td>
-                  <td className="px-2 py-1.5 text-center text-slate-700">{r.score ?? 'ΓÇö'}</td>
+                  <td className="px-2 py-1.5 text-center text-slate-700">{r.score ?? '-'}</td>
                   <td className="px-2 py-1.5 text-center text-slate-500">{r.maxScore}</td>
-                  <td className="px-2 py-1.5 text-center text-slate-700">{r.pct ?? 'ΓÇö'}</td>
+                  <td className="px-2 py-1.5 text-center text-slate-700">{r.pct ?? '-'}</td>
                   <td className="px-2 py-1.5 text-center font-bold" style={{ color: r.grade.startsWith('D') ? '#059669' : r.grade.startsWith('F') ? '#dc2626' : hdr }}>
                     {r.grade}
                   </td>
@@ -401,7 +401,7 @@ export default function ReportCard() {
                   <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>Behavior Assessment</div>
                   {template.behaviorItems.map(b => (
                     <div key={b} className="flex items-center gap-2 py-0.5 border-b border-slate-100">
-                      <div className="w-6 border-b border-slate-400 text-center text-[10px]">Γ£ô</div>
+                      <div className="w-6 border-b border-slate-400 text-center text-[10px]">v</div>
                       <span className="text-[10px] uppercase text-slate-600">{b}</span>
                     </div>
                   ))}
@@ -412,7 +412,7 @@ export default function ReportCard() {
                   <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>Grading System</div>
                   {template.gradingScale.map(({ grade, min, max, remark }) => (
                     <div key={grade} className="py-0.5 border-b border-slate-100">
-                      <span className="text-[10px] font-bold text-slate-700">{grade} ({min}ΓÇô{max}%): </span>
+                      <span className="text-[10px] font-bold text-slate-700">{grade} ({min}-{max}%): </span>
                       <span className="text-[10px] text-slate-600">{remark}</span>
                     </div>
                   ))}
@@ -488,7 +488,7 @@ export default function ReportCard() {
                     </div>
                     <div>
                       <label className="form-label">Logo (emoji or URL)</label>
-                      <input value={draft.schoolLogo} onChange={e => setDraft(p => ({ ...p, schoolLogo: e.target.value }))} className="form-input" placeholder="≡ƒÄô or https://..." />
+                      <input value={draft.schoolLogo} onChange={e => setDraft(p => ({ ...p, schoolLogo: e.target.value }))} className="form-input" placeholder="S or https://..." />
                     </div>
                   </div>
                 </>

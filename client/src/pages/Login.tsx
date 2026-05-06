@@ -373,7 +373,7 @@ export default function Login() {
         </div>
 
         <p className="text-center text-sm text-slate-400 dark:text-slate-500 mt-6">
-          Cloud-first • Works offline • Auto-sync
+          Cloud-first | Works offline | Auto-sync
         </p>
       </div>
     </div>

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
@@ -21,7 +21,7 @@ import {
   Tooltip,
   CartesianGrid
 } from 'recharts';
-import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, Megaphone, Calendar as CalendarIcon, Clock, X } from 'lucide-react';
+import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, Megaphone, Calendar as CalendarIcon, Clock, X, Star, Play, PartyPopper } from 'lucide-react';
 import { Announcement } from '@schofy/shared';
 
 // Uganda public holidays (month is 0-indexed)
@@ -756,12 +756,12 @@ export default function Dashboard() {
                     ev.type === 'announcement' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' :
                     'bg-slate-50 border-slate-200 text-slate-700'
                   }`}>
-                    <span className="text-lg">{
-                      ev.type === 'term-end' ? '★' :
-                      ev.type === 'term-start' ? '▶' :
-                      ev.type === 'holiday' ? '🎉' :
-                      ev.type === 'announcement' ? '📢' : '📅'
-                    }</span>
+                    <div className="shrink-0">{
+                      ev.type === 'term-end' ? <Star size={18} /> :
+                      ev.type === 'term-start' ? <Play size={18} /> :
+                      ev.type === 'holiday' ? <PartyPopper size={18} /> :
+                      ev.type === 'announcement' ? <Megaphone size={18} /> : <CalendarIcon size={18} />
+                    }</div>
                     <div>
                       <p className="font-semibold text-sm">{ev.label}</p>
                       <p className="text-xs opacity-70 capitalize">{ev.type.replace('-', ' ')}</p>

@@ -6,7 +6,7 @@
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Portal } from './Portal';
-import { AlertTriangle, Info, CheckCircle, X } from 'lucide-react';
+import { AlertTriangle, Trash2, Info, CheckCircle, X } from 'lucide-react';
 
 export type ConfirmVariant = 'danger' | 'warning' | 'info' | 'success';
 

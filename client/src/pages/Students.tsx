@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+ï»¿import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, CreditCard } from 'lucide-react';
 import { Portal } from '../components/Portal';
@@ -984,7 +984,7 @@ export default function Students() {
     }
   }
 
-  // Stats use ALL students (not just current page) — always accurate
+  // Stats use ALL students (not just current page) - always accurate
   const activeCount = allStudents.filter(s => s.status === 'active').length;
   const deactivatedCount = allStudents.filter(s => s.status === 'inactive').length;
   const completedCount = allStudents.filter(s => s.status === 'completed').length;
@@ -1565,7 +1565,7 @@ export default function Students() {
                       <td onClick={(e) => e.stopPropagation()}>
                         {(() => {
                           const { status, balance } = getStudentFinance(student.id);
-                          if (status === 'none') return <span className="text-xs text-slate-400">G--</span>;
+                          if (status === 'none') return <span className="text-xs text-slate-400">-</span>;
                           if (balance <= 0) return <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>;
                           return <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(balance)}</span>;
                         })()}

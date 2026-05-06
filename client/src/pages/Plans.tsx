@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
@@ -58,10 +58,7 @@ export default function Plans() {
   const handleSubscribe = (planId: string) => {
     const plan = PLAN_DEFINITIONS.find(p => p.id === planId);
     if (!plan) return;
-    if (billingCycle === 'yearly') {
-      window.open('https://wa.me/256750034304', '_blank');
-      return;
-    }
+    
     setSelectedPlan(plan);
     if (latestReceipt) {
       setShowContinueModal(true);
@@ -93,7 +90,12 @@ Powered by Schofy`;
     URL.revokeObjectURL(url);
   };
 
-  const getPrice = (plan: PlanDefinition) => billingCycle === 'yearly' ? 'Contact' : `$${billingCycle === 'monthly' ? plan.monthlyPrice : plan.termPrice}`;
+  const getPrice = (plan: PlanDefinition) => {
+    if (billingCycle === 'monthly') return `$${plan.monthlyPrice}`;
+    if (billingCycle === 'term') return `$${plan.termPrice}`;
+    return `$${plan.yearlyPrice}`;
+  };
+
   const checkPlanLimit = (planId: string) => studentCount <= (PLAN_DEFINITIONS.find(p => p.id === planId)?.studentLimit || 0);
   const currentCycle = latestReceipt?.billingCycle || null;
   const currentCycleLabel = currentCycle === 'monthly' ? 'Current Monthly' : currentCycle === 'yearly' ? 'Current Yearly' : currentCycle === 'term' ? 'Current Term' : 'Current';
@@ -102,7 +104,7 @@ Powered by Schofy`;
     <div className="relative space-y-4 text-slate-900 dark:text-white">
       <div className="rounded-xl border p-4 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800">
         <p className="text-sm font-semibold text-slate-900 dark:text-white">
-          ≡ƒÄë Your account is now fully unlocked! Schofy is now free to use with no student limits and real-time cloud sync across all your devices.
+          Your account is unlocked! Enjoy features and student limits based on your selected plan below. Real-time cloud sync active across all your devices.
         </p>
       </div>
 
@@ -149,7 +151,7 @@ Powered by Schofy`;
               <p className="text-sm text-green-700 dark:text-green-300 mt-1">
                 {accessState.status === 'active' ? 'Active' : 
                  accessState.status === 'expiring' ? `Expires in ${accessState.daysRemaining} days` :
-                 accessState.status === 'expired' ? 'Expired' : 'Unknown'} ΓÇó 
+                 accessState.status === 'expired' ? 'Expired' : 'Unknown'} - 
                 {currentCycle === 'monthly' ? ' Monthly' : 
                  currentCycle === 'yearly' ? ' Yearly' : ' Term'} billing
               </p>
@@ -185,7 +187,7 @@ Powered by Schofy`;
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
         {PLAN_DEFINITIONS.map((plan) => {
           const isAtLimit = !checkPlanLimit(plan.id);
-          const isCurrentPlan = plan.id === currentPlanId;
+          const isCurrentPlan = plan.id === currentPlanId && billingCycle === currentCycle;
           return (
             <div
               key={plan.id}
@@ -203,7 +205,7 @@ Powered by Schofy`;
                   </span>
                 </div>
               )}
-              {isCurrentPlan && !plan.popular && (
+              {isCurrentPlan && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                   <span className="bg-green-500 text-white text-xs font-bold px-4 py-1 rounded-full flex items-center gap-1">
                     <Check size={12} /> {currentCycleLabel.toUpperCase()}
@@ -232,7 +234,7 @@ Powered by Schofy`;
 
                 <div className="mb-2">
                   <span className="text-3xl font-bold text-slate-900 dark:text-white">{getPrice(plan)}</span>
-                  {billingCycle !== 'yearly' && <span className="text-sm text-slate-500 dark:text-slate-400">/{billingCycle === 'monthly' ? 'mo' : 'term'}</span>}
+                  <span className="text-sm text-slate-500 dark:text-slate-400">/{billingCycle === 'monthly' ? 'mo' : billingCycle === 'yearly' ? 'yr' : 'term'}</span>
                 </div>
                 <p className="text-sm text-indigo-600 dark:text-indigo-400 font-medium mb-4">Up to {plan.studentLimit} students</p>
 
@@ -269,12 +271,11 @@ Powered by Schofy`;
                     <button
                       onClick={() => handleSubscribe(plan.id)}
                       className={`w-full py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-2 ${
-                        billingCycle === 'yearly' ? 'bg-amber-500 hover:bg-amber-600 text-white' :
                         plan.popular ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' :
                         'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-900 dark:text-white'
                       }`}
                     >
-                      {billingCycle === 'yearly' ? <><MessageCircle size={16} /> Contact Us</> : <><CreditCard size={16} /> Subscribe</>}
+                      <CreditCard size={16} /> Subscribe
                     </button>
                   )}
                 </div>
@@ -412,7 +413,7 @@ Powered by Schofy`;
                 {latestReceipt && (
                   <div className="mb-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-3 text-left">
                     <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">Receipt saved</p>
-                    <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{latestReceipt.planName} ΓÇó ${latestReceipt.amount} ΓÇó {latestReceipt.billingCycle}</p>
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{latestReceipt.planName} - ${latestReceipt.amount} - {latestReceipt.billingCycle}</p>
                     <p className="text-xs text-emerald-700 dark:text-emerald-300">Expires {new Date(latestReceipt.expiresAt).toLocaleDateString()}</p>
                   </div>
                 )}

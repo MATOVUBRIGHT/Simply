@@ -2,6 +2,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
+import AdminApp from './admin/AdminApp';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
@@ -12,8 +13,11 @@ import './index.css';
 
 const queryClient = getQueryClient();
 
-// Register service worker for offline support
-if ('serviceWorker' in navigator) {
+// Detect if we're on the admin portal path
+const isAdminPath = window.location.pathname.startsWith('/admin');
+
+// Register service worker for offline support (main app only)
+if (!isAdminPath && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(reg => {
@@ -21,7 +25,6 @@ if ('serviceWorker' in navigator) {
         setInterval(() => reg.update(), 30 * 60 * 1000);
 
         // After SW is active, tell it to cache all app routes
-        // so every page works offline even if never visited
         navigator.serviceWorker.ready.then(sw => {
           const appRoutes = [
             '/', '/students', '/admission', '/staff', '/classes',
@@ -44,36 +47,47 @@ window.addEventListener('online', () => {
   });
 });
 
-// ── Bootstrap cache into store BEFORE React renders ──────────────────────────
-// This runs synchronously at module load time — zero delay
-import('./lib/database/SupabaseDataService').then(({ dataService, cacheReady }) => {
-  const session = localStorage.getItem('schofy_session');
-  if (session) {
-    try {
-      const user = JSON.parse(session);
-      const sid = user.schoolId || user.id;
-      if (sid) {
-        // Push all cached data into store immediately after IndexedDB loads
-        cacheReady.then(() => dataService.bootstrapSession(user.id, sid));
-      }
-    } catch { /* ignore */ }
-  }
-});
+// Bootstrap cache into store BEFORE React renders (main app only)
+if (!isAdminPath) {
+  import('./lib/database/SupabaseDataService').then(({ dataService, cacheReady }) => {
+    const session = localStorage.getItem('schofy_session');
+    if (session) {
+      try {
+        const user = JSON.parse(session);
+        const sid = user.schoolId || user.id;
+        if (sid) {
+          cacheReady.then(() => dataService.bootstrapSession(user.id, sid));
+        }
+      } catch { /* ignore */ }
+    }
+  });
+}
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <QueryClientProvider client={queryClient}>
+// ── Render ────────────────────────────────────────────────────────────────────
+if (isAdminPath) {
+  // Admin portal — minimal providers, no school auth
+  ReactDOM.createRoot(document.getElementById('root')!).render(
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <ThemeProvider>
-        <ToastProvider>
-          <AuthProvider>
-            <ConfirmProvider>
-              <SyncProvider>
-                <App />
-              </SyncProvider>
-            </ConfirmProvider>
-          </AuthProvider>
-        </ToastProvider>
-      </ThemeProvider>
+      <AdminApp />
     </BrowserRouter>
-  </QueryClientProvider>
-);
+  );
+} else {
+  // Main school app
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <ThemeProvider>
+          <ToastProvider>
+            <AuthProvider>
+              <ConfirmProvider>
+                <SyncProvider>
+                  <App />
+                </SyncProvider>
+              </ConfirmProvider>
+            </AuthProvider>
+          </ToastProvider>
+        </ThemeProvider>
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
+}

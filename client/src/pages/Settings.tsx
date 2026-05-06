@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users } from 'lucide-react';
@@ -934,9 +934,9 @@ export default function Settings() {
               </div>
               <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-3 space-y-1.5 text-sm text-amber-800 dark:text-amber-300">
                 <div className="flex items-center gap-2 font-semibold"><Users size={14} /> What will happen:</div>
-                <p>• Each active student moves to the next class (by level)</p>
-                <p>• Students in the final class are graduated (marked completed)</p>
-                <p>• Current term is updated to Term {promoteNewTerm} / {promoteNewYear}</p>
+                <p>- Each active student moves to the next class (by level)</p>
+                <p>- Students in the final class are graduated (marked completed)</p>
+                <p>- Current term is updated to Term {promoteNewTerm} / {promoteNewYear}</p>
               </div>
             </div>
             <div className="flex justify-end gap-3 px-5 pb-5">

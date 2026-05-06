@@ -6,6 +6,7 @@ export interface PlanDefinition {
   name: string;
   monthlyPrice: number;
   termPrice: number;
+  yearlyPrice: number;
   period: string;
   features: string[];
   notIncluded: string[];
@@ -30,33 +31,33 @@ export interface SubscriptionAccessState {
 
 export const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
-    id: 'nursery',
-    name: 'Nursery',
+    id: 'starter',
+    name: 'Starter',
     monthlyPrice: 5,
     termPrice: 12,
+    yearlyPrice: 30,
     period: 'month',
     features: [
       'Up to 100 students',
-      'Nursery classes (Baby, Nursery, Middle, Top)',
       'Attendance tracking',
       'Fee management',
       'Parent notifications',
       'Basic reports',
       'Email support',
     ],
-    notIncluded: ['Primary classes', 'Secondary classes', 'Advanced analytics'],
+    notIncluded: ['Advanced analytics', 'Bulk SMS', 'Payroll'],
     popular: false,
     studentLimit: 100,
   },
   {
-    id: 'nursery_primary',
-    name: 'Nursery & Primary',
+    id: 'professional',
+    name: 'Professional',
     monthlyPrice: 10,
     termPrice: 25,
+    yearlyPrice: 65,
     period: 'month',
     features: [
       'Up to 300 students',
-      'Nursery + Primary classes (P.1–P.7)',
       'Full attendance & gradebook',
       'Fee management & invoicing',
       'Parent notifications',
@@ -64,19 +65,19 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
       'Priority support',
       'Data export',
     ],
-    notIncluded: ['Secondary classes'],
+    notIncluded: ['Payroll', 'Custom domains'],
     popular: true,
     studentLimit: 300,
   },
   {
-    id: 'secondary',
-    name: 'Secondary',
+    id: 'enterprise',
+    name: 'Enterprise',
     monthlyPrice: 15,
     termPrice: 35,
+    yearlyPrice: 95,
     period: 'month',
     features: [
       'Up to 500 students',
-      'Secondary classes (S.1–S.6)',
       'Full attendance & gradebook',
       'Fee management & invoicing',
       'Payroll management',
@@ -305,7 +306,7 @@ export async function saveCurrentPlan(
     planId,
     planName: selectedPlan.name,
     billingCycle,
-    amount: billingCycle === 'monthly' ? selectedPlan.monthlyPrice : billingCycle === 'yearly' ? 'Contact' : selectedPlan.termPrice,
+    amount: billingCycle === 'monthly' ? selectedPlan.monthlyPrice : billingCycle === 'yearly' ? selectedPlan.yearlyPrice : selectedPlan.termPrice,
     paidAt: now.toISOString(),
     expiresAt: nextExpiry.toISOString(),
   });
