@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useMemo, useEffect } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen, Pencil } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -42,8 +42,10 @@ export default function Grades() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
-  // Edit grade state
   const [editGrade, setEditGrade] = useState<{ id: string; studentName: string; subjectName: string; score: string; maxScore: string } | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isImportingGrades, setIsImportingGrades] = useState(false);
+  const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('all');
   const [filterTerm, setFilterTerm] = useState('all');
@@ -64,7 +66,10 @@ export default function Grades() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceAmount, setInvoiceAmount] = useState('');
   const [invoiceDescription, setInvoiceDescription] = useState('Examination Fee');
-  const [invoiceTerm, setInvoiceTerm] = useState('1');
+  const [invoiceTerm, setInvoiceTerm] = useState(() => {
+    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
+    return '1';
+  });
 
   const { data: examResults } = useTableData(sid, 'examResults');
   const { data: subjects } = useTableData(sid, 'subjects');
@@ -100,14 +105,11 @@ export default function Grades() {
     { key: 'maxScore', label: 'Max Score', required: true },
   ];
 
-  // Bulk entry form state
-  const [bulkForm, setBulkForm] = useState({
-    classId: '',
-    studentId: '',
-    examType: 'Mid-Term',
-    term: '1',
-    year: new Date().getFullYear().toString(),
-    maxScore: '100',
+  // Bulk entry form state � default term from settings
+  const [bulkForm, setBulkForm] = useState(() => {
+    let term = '1';
+    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) term = JSON.parse(r).currentTerm || '1'; } catch {}
+    return { classId: '', studentId: '', examType: 'Mid-Term', term, year: new Date().getFullYear().toString(), maxScore: '100' };
   });
   // scores keyed by subjectId
   const [bulkScores, setBulkScores] = useState<Record<string, string>>({});
@@ -243,6 +245,7 @@ export default function Grades() {
     if (isNaN(score) || isNaN(maxScore) || maxScore <= 0) { addToast('Enter valid score and max score', 'error'); return; }
     const pct = Math.round((score / maxScore) * 100);
     const gradeInfo = getGrade(pct);
+    setIsSavingEdit(true);
     try {
       await dataService.update(id, 'examResults', editGrade.id, {
         score, maxScore, grade: gradeInfo.grade, remarks: gradeInfo.remark, updatedAt: new Date().toISOString(),
@@ -250,6 +253,7 @@ export default function Grades() {
       addToast('Grade updated', 'success');
       setEditGrade(null);
     } catch { addToast('Failed to update grade', 'error'); }
+    finally { setIsSavingEdit(false); }
   }
 
   // Get unique students who have grades
@@ -262,40 +266,26 @@ export default function Grades() {
     const id = schoolId || user?.id;
     if (!id) return;
     const amount = parseFloat(invoiceAmount);
-    if (isNaN(amount) || amount <= 0) {
-      addToast('Please enter a valid amount', 'error');
-      return;
-    }
-    if (studentsWithGrades.length === 0) {
-      addToast('No students with grades to invoice', 'error');
-      return;
-    }
+    if (isNaN(amount) || amount <= 0) { addToast('Please enter a valid amount', 'error'); return; }
+    if (studentsWithGrades.length === 0) { addToast('No students with grades to invoice', 'error'); return; }
+    setIsCreatingInvoice(true);
     try {
       const now = new Date().toISOString();
       const year = new Date().getFullYear().toString();
       let count = 0;
       for (const student of studentsWithGrades) {
-        const newFee = {
-          id: uuidv4(),
-          studentId: student.id,
-          description: invoiceDescription,
-          amount: amount,
-          term: invoiceTerm,
-          year: year,
-          createdAt: now,
-        };
-        await dataService.create(id, 'fees', newFee as any);
+        await dataService.create(id, 'fees', { id: uuidv4(), studentId: student.id, description: invoiceDescription, amount, term: invoiceTerm, year, createdAt: now } as any);
         count++;
       }
-      // Broadcast change to update other pages
       window.dispatchEvent(new CustomEvent('feesUpdated'));
       addToast(`Created exam fee invoices for ${count} students`, 'success');
       setShowInvoiceModal(false);
       setInvoiceAmount('');
       setInvoiceDescription('Examination Fee');
     } catch (error) {
-      console.error('Failed to create exam fee invoices:', error);
       addToast('Failed to create exam fee invoices', 'error');
+    } finally {
+      setIsCreatingInvoice(false);
     }
   }
 
@@ -357,13 +347,16 @@ export default function Grades() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Smart template state — class/student selection before download
+  // Smart template state � class/student selection before download
   const [templateClassId, setTemplateClassId] = useState('');
   const [templateStudentIds, setTemplateStudentIds] = useState<Set<string>>(new Set());
   const [templateStep, setTemplateStep] = useState<'select' | 'ready'>('select');
   // Exam config for import
   const [importExamType, setImportExamType] = useState('Mid-Term');
-  const [importTerm, setImportTerm] = useState('1');
+  const [importTerm, setImportTerm] = useState(() => {
+    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
+    return '1';
+  });
   const [importYear, setImportYear] = useState(new Date().getFullYear().toString());
 
   const studentsForTemplateClass = useMemo(() => {
@@ -406,7 +399,7 @@ export default function Grades() {
   }
 
   function downloadTemplate() {
-    // Legacy fallback — open smart template selector instead
+    // Legacy fallback � open smart template selector instead
     setTemplateStep('select');
     setTemplateClassId('');
     setTemplateStudentIds(new Set());
@@ -547,6 +540,7 @@ export default function Grades() {
     const id = schoolId || user?.id;
     if (importPreview.length === 0) { addToast('No valid grades to import', 'error'); return; }
     if (!id) return;
+    setIsImportingGrades(true);
     try {
       const now = new Date().toISOString();
 
@@ -579,7 +573,7 @@ export default function Grades() {
         const pct = Math.round((score / maxScore) * 100);
         const gradeInfo = getGrade(pct);
 
-        // Check if result already exists for this student/exam/subject — update if so
+        // Check if result already exists for this student/exam/subject � update if so
         const existing = (examResults as any[]).find(r =>
           r.studentId === (data as any).studentId &&
           r.examId === examId &&
@@ -612,6 +606,7 @@ export default function Grades() {
       addToast(`Imported ${successCount} grade${successCount !== 1 ? 's' : ''} for ${importExamType} Term ${importTerm} ${importYear}`, 'success');
       closeImportModal();
     } catch (error) { addToast('Failed to import grades', 'error'); }
+    finally { setIsImportingGrades(false); }
   }
 
   const filteredGrades = grades.filter(g => {
@@ -820,7 +815,7 @@ export default function Grades() {
       <div className="card">
         <div className="card-header">
           <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="relative flex-1 w-full">
+            <div className="relative flex-1 min-w-0 w-full">
               <Search size={18} className="search-input-icon" />
               <input
                 type="text"
@@ -830,7 +825,7 @@ export default function Grades() {
                 className="search-input"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
               {/* Class Filter Dropdown */}
               <div className="relative" ref={classFilterRef}>
                 <button
@@ -957,7 +952,7 @@ export default function Grades() {
 
           return (
             <div key={cls.id} className="card overflow-hidden">
-              {/* Class header — click to expand */}
+              {/* Class header � click to expand */}
               <button
                 onClick={() => toggleClass(cls.id)}
                 className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors text-left"
@@ -969,13 +964,13 @@ export default function Grades() {
                 <div className="flex-1 min-w-0">
                   <h3 className="font-bold text-slate-800 dark:text-white">{cls.name}</h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {studentList.length} student{studentList.length !== 1 ? 's' : ''} · {uniqueSubjects.length} subject{uniqueSubjects.length !== 1 ? 's' : ''} · {totalGrades} grade{totalGrades !== 1 ? 's' : ''}
+                    {studentList.length} student{studentList.length !== 1 ? 's' : ''} � {uniqueSubjects.length} subject{uniqueSubjects.length !== 1 ? 's' : ''} � {totalGrades} grade{totalGrades !== 1 ? 's' : ''}
                   </p>
                 </div>
                 <ChevronRight size={18} className={`text-slate-400 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
               </button>
 
-              {/* Expanded: student × subject table */}
+              {/* Expanded: student � subject table */}
               {isOpen && (
                 <div className="border-t border-slate-200 dark:border-slate-700">
                   <div className="overflow-x-auto">
@@ -1005,7 +1000,7 @@ export default function Grades() {
                                 sub.id ? gr.subjectId === sub.id : gr.subjectName === sub.name
                               );
                               if (!g) return (
-                                <td key={sub.id || sub.name} className="px-3 py-2.5 text-center text-slate-300 dark:text-slate-600">—</td>
+                                <td key={sub.id || sub.name} className="px-3 py-2.5 text-center text-slate-300 dark:text-slate-600">�</td>
                               );
                               const pct = Math.round((g.score / g.maxScore) * 100);
                               const gi = getGrade(pct);
@@ -1054,9 +1049,9 @@ export default function Grades() {
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Award size={18} className="text-white" />
-                <h2 className="font-bold text-white">Add Grades — All Subjects</h2>
+                <h2 className="font-bold text-white">Add Grades � All Subjects</h2>
               </div>
-              <button onClick={() => setShowForm(false)} className="p-1 hover:bg-white/20 rounded-lg text-white text-lg leading-none">✕</button>
+              <button onClick={() => setShowForm(false)} className="p-1 hover:bg-white/20 rounded-lg text-white text-lg leading-none">?</button>
             </div>
             <form onSubmit={handleBulkSubmit} className="flex flex-col overflow-hidden">
               {/* Top controls */}
@@ -1066,7 +1061,7 @@ export default function Grades() {
                   <select value={bulkForm.classId}
                     onChange={e => { setBulkForm(p => ({ ...p, classId: e.target.value, studentId: '' })); setBulkScores({}); }}
                     className="form-input" required>
-                    <option value="">— Select Class —</option>
+                    <option value="">� Select Class �</option>
                     {[...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)).map((c: any) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
@@ -1076,7 +1071,7 @@ export default function Grades() {
                   <label className="form-label">Student *</label>
                   <select value={bulkForm.studentId} onChange={e => handleBulkStudentChange(e.target.value)}
                     className="form-input" required disabled={!bulkForm.classId}>
-                    <option value="">— Select Student —</option>
+                    <option value="">� Select Student �</option>
                     {studentsForBulkClass.map(s => (
                       <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>
                     ))}
@@ -1139,7 +1134,7 @@ export default function Grades() {
                         return (
                           <tr key={sub.id} className={i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
                             <td className="px-4 py-2 font-medium text-slate-800 dark:text-white">{sub.name}</td>
-                            <td className="px-3 py-2 text-center font-mono text-xs text-slate-500">{sub.code || '—'}</td>
+                            <td className="px-3 py-2 text-center font-mono text-xs text-slate-500">{sub.code || '�'}</td>
                             <td className="px-3 py-2 text-center">
                               <input
                                 type="number"
@@ -1148,12 +1143,12 @@ export default function Grades() {
                                 className="w-20 text-center form-input py-1 text-sm"
                                 min="0"
                                 max={bulkForm.maxScore}
-                                placeholder="—"
+                                placeholder="�"
                                 disabled={!bulkForm.studentId}
                               />
                             </td>
                             <td className={`px-3 py-2 text-center text-sm ${gradeClass}`}>
-                              {grade ? `${grade.grade}` : '—'}
+                              {grade ? `${grade.grade}` : '�'}
                               {pct !== null && <div className="text-[10px] text-slate-400 font-normal">{pct}%</div>}
                             </td>
                           </tr>
@@ -1234,9 +1229,9 @@ export default function Grades() {
                 </select>
               </div>
               <div className="flex justify-end gap-3 pt-2">
-                <button onClick={() => setShowInvoiceModal(false)} className="btn btn-secondary">Cancel</button>
-                <button onClick={handleCreateExamFeeInvoice} className="btn btn-primary">
-                  Create Invoices
+                <button onClick={() => setShowInvoiceModal(false)} className="btn btn-secondary" disabled={isCreatingInvoice}>Cancel</button>
+                <button onClick={handleCreateExamFeeInvoice} disabled={isCreatingInvoice} className="btn btn-primary flex items-center gap-2 disabled:opacity-70">
+                  {isCreatingInvoice ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</> : 'Create Invoices'}
                 </button>
               </div>
             </div>
@@ -1285,8 +1280,10 @@ export default function Grades() {
                 </div>
               )}
               <div className="flex justify-end gap-2 pt-1">
-                <button onClick={() => setEditGrade(null)} className="btn btn-secondary">Cancel</button>
-                <button onClick={handleEditSave} className="btn btn-primary">Save Changes</button>
+                <button onClick={() => setEditGrade(null)} className="btn btn-secondary" disabled={isSavingEdit}>Cancel</button>
+                <button onClick={handleEditSave} disabled={isSavingEdit} className="btn btn-primary flex items-center gap-2 disabled:opacity-70">
+                  {isSavingEdit ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : 'Save Changes'}
+                </button>
               </div>
             </div>
           </div>
@@ -1322,14 +1319,14 @@ export default function Grades() {
                     <div key={s.n} className="flex items-center gap-1.5">
                       {i > 0 && <ArrowRight size={10} className="text-slate-300" />}
                       <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${done ? 'bg-emerald-500 text-white' : active ? 'bg-indigo-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>
-                        {done ? '✓' : s.n} {s.label}
+                        {done ? '?' : s.n} {s.label}
                       </span>
                     </div>
                   );
                 })}
               </div>
 
-              {/* ── Step 1: Select class + students, download template ── */}
+              {/* -- Step 1: Select class + students, download template -- */}
               {importStep === 'upload' && (
                 <div className="space-y-4">
                   {/* Class selector */}
@@ -1340,7 +1337,7 @@ export default function Grades() {
                       onChange={e => { setTemplateClassId(e.target.value); setTemplateStudentIds(new Set()); }}
                       className="form-input"
                     >
-                      <option value="">— Choose a class —</option>
+                      <option value="">� Choose a class �</option>
                       {[...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)).map((c: any) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
@@ -1385,7 +1382,7 @@ export default function Grades() {
                           >
                             All ({studentsForTemplateClass.length})
                           </button>
-                          <span className="text-slate-300">·</span>
+                          <span className="text-slate-300">�</span>
                           <button
                             type="button"
                             onClick={() => setTemplateStudentIds(new Set())}
@@ -1444,7 +1441,7 @@ export default function Grades() {
                       className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium transition-colors"
                     >
                       <Download size={16} />
-                      Download Excel Template ({templateStudentIds.size > 0 ? templateStudentIds.size : studentsForTemplateClass.length} students × {subjectsForTemplateClass.length} subjects)
+                      Download Excel Template ({templateStudentIds.size > 0 ? templateStudentIds.size : studentsForTemplateClass.length} students � {subjectsForTemplateClass.length} subjects)
                     </button>
                   )}
 
@@ -1462,17 +1459,65 @@ export default function Grades() {
                 </div>
               )}
 
-              {/* ── Step 2: Map (auto-mapped for smart template) ── */}
+              {/* -- Step 2: Map (auto-mapped for smart template) -- */}
               {importStep === 'map' && (
                 <div className="space-y-3">
-                  <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3">
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300 font-medium">
-                      ✓ Smart template detected — {csvHeaders.length - 2} subject column{csvHeaders.length - 2 !== 1 ? 's' : ''} found
-                    </p>
-                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
-                      Columns: {csvHeaders.slice(2).join(', ')}
-                    </p>
+                  {/* Show all file columns with mapping */}
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    {csvHeaders.length} column{csvHeaders.length !== 1 ? 's' : ''} found in file. Map each to a grade field:
+                  </p>
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample Value</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {csvHeaders.map((header, idx) => {
+                          const sample = csvData[0]?.[idx] || '';
+                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
+                          return (
+                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
+                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
+                              <td className="px-3 py-2">
+                                <select
+                                  value={currentMapping}
+                                  onChange={e => {
+                                    const newKey = e.target.value;
+                                    setFieldMapping(prev => {
+                                      const next = { ...prev };
+                                      // Remove old mapping for this header
+                                      Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; });
+                                      if (newKey) next[newKey] = header;
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-full form-input py-1 px-2 text-xs"
+                                >
+                                  <option value="">� Skip �</option>
+                                  {gradeExpectedFields.map(f => (
+                                    <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
+                                  ))}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
+                  {/* Smart template hint */}
+                  {csvHeaders.length >= 3 && csvHeaders[0].toLowerCase().includes('student') && csvHeaders[1].toLowerCase().includes('id') && (
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3">
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                        ? Smart template detected � {csvHeaders.length - 2} subject column{csvHeaders.length - 2 !== 1 ? 's' : ''} will be auto-mapped
+                      </p>
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2 pt-2">
                     <button onClick={() => setImportStep('upload')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
                     <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
@@ -1482,15 +1527,15 @@ export default function Grades() {
                 </div>
               )}
 
-              {/* ── Step 3: Preview ── */}
+              {/* -- Step 3: Preview -- */}
               {importStep === 'preview' && (
                 <div className="space-y-3">
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 space-y-1">
                     <p className="text-sm text-emerald-700 dark:text-emerald-300 font-medium">
-                      ✓ {importPreview.length} grade entr{importPreview.length !== 1 ? 'ies' : 'y'} ready to import
+                      ? {importPreview.length} grade entr{importPreview.length !== 1 ? 'ies' : 'y'} ready to import
                     </p>
                     <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                      Exam: <strong>{importExamType}</strong> · Term <strong>{importTerm}</strong> · <strong>{importYear}</strong>
+                      Exam: <strong>{importExamType}</strong> � Term <strong>{importTerm}</strong> � <strong>{importYear}</strong>
                     </p>
                   </div>
                   <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
@@ -1535,12 +1580,12 @@ export default function Grades() {
                     </table>
                   </div>
                   {importPreview.some((g: any) => !allStudents.find(s => s.id === g.studentId) || !(subjects as any[]).find(s => s.id === g.subjectId)) && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400">⚠ Some entries show "Not found" — they will be skipped during import.</p>
+                    <p className="text-xs text-amber-600 dark:text-amber-400">? Some entries show "Not found" � they will be skipped during import.</p>
                   )}
                   <div className="flex justify-between pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
-                      <Check size={14} /> Import {importPreview.length}
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImportingGrades}>Back</button>
+                    <button onClick={executeImport} disabled={isImportingGrades} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                      {isImportingGrades ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing...</> : <><Check size={14} /> Import {importPreview.length}</>}
                     </button>
                   </div>
                 </div>

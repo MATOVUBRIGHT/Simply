@@ -19,8 +19,23 @@ import {
   Tooltip,
   CartesianGrid
 } from 'recharts';
-import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, Megaphone, Calendar as CalendarIcon, Clock } from 'lucide-react';
+import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, Megaphone, Calendar as CalendarIcon, Clock, X } from 'lucide-react';
 import { Announcement } from '@schofy/shared';
+
+// Uganda public holidays (month is 0-indexed)
+const UGANDA_HOLIDAYS: { month: number; day: number; name: string }[] = [
+  { month: 0, day: 1, name: "New Year's Day" },
+  { month: 1, day: 16, name: "Archbishop Janani Luwum Day" },
+  { month: 2, day: 8, name: "International Women's Day" },
+  { month: 3, day: 18, name: "Good Friday" },
+  { month: 3, day: 21, name: "Easter Monday" },
+  { month: 4, day: 1, name: "Labour Day" },
+  { month: 5, day: 3, name: "Martyrs' Day" },
+  { month: 5, day: 9, name: "National Heroes' Day" },
+  { month: 9, day: 9, name: "Independence Day" },
+  { month: 11, day: 25, name: "Christmas Day" },
+  { month: 11, day: 26, name: "Boxing Day" },
+];
 
 export default function Dashboard() {
   const { user, schoolId } = useAuth();
@@ -28,6 +43,7 @@ export default function Dashboard() {
   const { formatMoney } = useCurrency();
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+  const [selectedDay, setSelectedDay] = useState<{ day: number; events: { label: string; type: string }[] } | null>(null);
   const [termSettings, setTermSettings] = useState<Record<string, string>>({});
 
   const sid = schoolId || user?.id || '';
@@ -49,8 +65,14 @@ export default function Dashboard() {
 
   // Build all calendar events from every data source
   const allCalendarEvents = useMemo(() => {
-    type CalEvent = { date: Date; label: string; type: 'term-start' | 'term-end' | 'announcement' | 'exam' | 'payment' | 'salary' };
+    type CalEvent = { date: Date; label: string; type: 'term-start' | 'term-end' | 'announcement' | 'exam' | 'payment' | 'salary' | 'holiday' };
     const events: CalEvent[] = [];
+
+    // Public holidays for selected year
+    for (const h of UGANDA_HOLIDAYS) {
+      const d = new Date(selectedYear, h.month, h.day);
+      events.push({ date: d, label: h.name, type: 'holiday' });
+    }
 
     for (const t of ['1', '2', '3']) {
       const startRaw = termSettings[`term${t}Start`];
@@ -60,7 +82,8 @@ export default function Dashboard() {
     }
 
     for (const a of announcements) {
-      const d = new Date(a.createdAt);
+      const dateStr = (a as any).eventDate || a.createdAt;
+      const d = new Date(dateStr);
       if (!isNaN(d.getTime())) events.push({ date: d, label: a.title || 'Announcement', type: 'announcement' });
     }
 
@@ -87,7 +110,7 @@ export default function Dashboard() {
     }
 
     return events;
-  }, [termSettings, announcements, fees, payments]);
+  }, [termSettings, announcements, fees, payments, selectedYear]);
 
   // Derive term end dates from settings
   const termEndDates = useMemo(() => {
@@ -128,8 +151,8 @@ export default function Dashboard() {
   };
 
   const enrollmentDataArray = useMemo(() => {
-    const currentTerm = '1';
-    const currentYear = new Date().getFullYear().toString();
+    const currentTerm = termSettings.currentTerm || '1';
+    const currentYear = termSettings.academicYear || new Date().getFullYear().toString();
     const enrollmentTerms = fees.reduce((acc, fee) => {
       const key = `${fee.term}/${fee.year}`;
       if (!acc[key]) {
@@ -150,11 +173,11 @@ export default function Dashboard() {
       data.push({ term: `${currentTerm}/${currentYear}`, students, staff: activeStaff });
     }
     return data;
-  }, [fees, activeStaff, students]);
+  }, [fees, activeStaff, students, termSettings]);
 
   const feeCollectionArray = useMemo(() => {
-    const currentTerm = '1';
-    const currentYear = new Date().getFullYear().toString();
+    const currentTerm = termSettings.currentTerm || '1';
+    const currentYear = termSettings.academicYear || new Date().getFullYear().toString();
     const collectionByTerm = fees.reduce((acc, fee) => {
       const key = `${fee.term}/${fee.year}`;
       if (!acc[key]) {
@@ -185,7 +208,7 @@ export default function Dashboard() {
       });
     }
     return data;
-  }, [fees, payments, totalFees, feesCollected]);
+  }, [fees, payments, totalFees, feesCollected, termSettings]);
 
   const growthStatsValue = useMemo(() => {
     const collectionRate = totalFees > 0 ? Math.round((feesCollected / totalFees) * 100) : 0;
@@ -214,6 +237,7 @@ export default function Dashboard() {
       count: evts.length,
       hasTermEnd: evts.some(e => e.type === 'term-end'),
       hasTermStart: evts.some(e => e.type === 'term-start'),
+      hasHoliday: evts.some(e => e.type === 'holiday'),
       events: evts,
     };
   }
@@ -231,10 +255,14 @@ export default function Dashboard() {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-4xl font-extrabold text-slate-800 tracking-tight">Welcome</h1>
-          <p className="text-slate-500 font-medium mt-1">Good afternoon. 2025-2026 Term 1</p>
+          <p className="text-slate-500 font-medium mt-1">
+            {termSettings.academicYear || new Date().getFullYear()}-{(parseInt(termSettings.academicYear || String(new Date().getFullYear())) + 1)} · Term {termSettings.currentTerm || '1'}
+          </p>
         </div>
         <div className="bg-white px-6 py-2 rounded-xl border border-slate-200 shadow-sm self-start md:self-auto">
-          <span className="text-blue-600 font-bold">2025-2026 Term 1</span>
+          <span className="text-blue-600 font-bold">
+            {termSettings.academicYear || new Date().getFullYear()}-{(parseInt(termSettings.academicYear || String(new Date().getFullYear())) + 1)} Term {termSettings.currentTerm || '1'}
+          </span>
         </div>
       </div>
 
@@ -475,7 +503,9 @@ export default function Dashboard() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-slate-800">Quick Stats</h2>
-            <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">2026 T1</span>
+            <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">
+              {termSettings.academicYear || new Date().getFullYear()} T{termSettings.currentTerm || '1'}
+            </span>
           </div>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -553,7 +583,7 @@ export default function Dashboard() {
 
             <div className="grid grid-cols-3 gap-2">
               {months.map((month, index) => {
-                const { count: eventCount, hasTermEnd, hasTermStart, events: monthEvents } = getEventsForMonth(index, selectedYear);
+                const { count: eventCount, hasTermEnd, hasTermStart, hasHoliday, events: monthEvents } = getEventsForMonth(index, selectedYear);
                 const tooltip = monthEvents.map(e => e.label).join(', ');
                 return (
                   <button
@@ -577,9 +607,12 @@ export default function Dashboard() {
                     {!hasTermEnd && hasTermStart && (
                       <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center bg-white text-emerald-600">▶</span>
                     )}
-                    {!hasTermEnd && !hasTermStart && eventCount > 0 && (
+                    {!hasTermEnd && !hasTermStart && hasHoliday && (
+                      <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center bg-amber-400 text-white">H</span>
+                    )}
+                    {!hasTermEnd && !hasTermStart && !hasHoliday && eventCount > 0 && (
                       <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center bg-rose-500 text-white">{eventCount}</span>
-)}
+                    )}
                   </button>
                 );
               })}
@@ -639,17 +672,26 @@ export default function Dashboard() {
                         });
                         const hasTermEnd = dayEvents.some(e => e.type === 'term-end');
                         const hasTermStart = dayEvents.some(e => e.type === 'term-start');
+                        const hasHoliday = dayEvents.some(e => e.type === 'holiday');
+                        const allDayEvents = dayEvents.map(e => ({ label: e.label, type: e.type }));
                         
                         days.push(
                           <div 
-                            key={d} 
-                            className={`h-8 flex items-center justify-center rounded-lg text-xs font-medium relative cursor-pointer hover:bg-indigo-50 transition-colors ${
-                              isToday ? 'bg-indigo-100 text-indigo-700 font-bold' : 'text-slate-600'
-                            } ${hasTermEnd ? 'bg-rose-500 text-white hover:bg-rose-600' : ''} ${hasTermStart ? 'bg-emerald-500 text-white hover:bg-emerald-600' : ''}`}
-                            title={dayEvents.map(e => e.label).join(', ') || (dayAnnouncements.length > 0 ? `${dayAnnouncements.length} announcement(s)` : '')}
+                            key={d}
+                            onClick={() => allDayEvents.length > 0 && setSelectedDay({ day: d, events: allDayEvents })}
+                            className={`h-8 flex items-center justify-center rounded-lg text-xs font-medium relative transition-colors ${
+                              allDayEvents.length > 0 ? 'cursor-pointer' : 'cursor-default'
+                            } ${isToday ? 'bg-indigo-100 text-indigo-700 font-bold' : 'text-slate-600'
+                            } ${hasTermEnd ? 'bg-rose-500 text-white hover:bg-rose-600' : ''
+                            } ${hasTermStart ? 'bg-emerald-500 text-white hover:bg-emerald-600' : ''
+                            } ${hasHoliday && !hasTermEnd && !hasTermStart ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : ''
+                            } ${!hasTermEnd && !hasTermStart && !hasHoliday && allDayEvents.length > 0 ? 'hover:bg-indigo-50' : ''}`}
                           >
                             {d}
-                            {dayAnnouncements.length > 0 && !hasTermEnd && !hasTermStart && (
+                            {hasHoliday && !hasTermEnd && !hasTermStart && (
+                              <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-amber-500" />
+                            )}
+                            {!hasHoliday && dayAnnouncements.length > 0 && !hasTermEnd && !hasTermStart && (
                               <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-indigo-600" />
                             )}
                           </div>
@@ -665,6 +707,7 @@ export default function Dashboard() {
                   <div className="flex flex-wrap gap-2 mb-3 text-xs">
                     <span className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700"><span className="font-bold">▶</span> Term Start</span>
                     <span className="flex items-center gap-1.5 px-2 py-1 bg-rose-50 border border-rose-200 rounded-lg text-rose-700"><span className="font-bold">★</span> Term End</span>
+                    <span className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg text-amber-700"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Holiday</span>
                     <span className="flex items-center gap-1.5 px-2 py-1 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-700"><span className="w-2 h-2 rounded-full bg-indigo-600 inline-block" /> Events</span>
                   </div>
                   <p className="text-xs text-slate-400 font-medium mb-2">Upcoming announcements</p>
@@ -690,6 +733,43 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* Day event popup */}
+        {selectedDay && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setSelectedDay(null)}>
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
+                <div className="flex items-center gap-2">
+                  <CalendarIcon size={16} className="text-white" />
+                  <h3 className="font-bold text-white">{months[selectedMonth!]} {selectedDay.day}, {selectedYear}</h3>
+                </div>
+                <button onClick={() => setSelectedDay(null)} className="p-1 hover:bg-white/20 rounded-lg text-white"><X size={16} /></button>
+              </div>
+              <div className="p-4 space-y-2">
+                {selectedDay.events.map((ev, i) => (
+                  <div key={i} className={`flex items-center gap-3 p-3 rounded-xl border ${
+                    ev.type === 'term-end' ? 'bg-rose-50 border-rose-200 text-rose-700' :
+                    ev.type === 'term-start' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
+                    ev.type === 'holiday' ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                    ev.type === 'announcement' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' :
+                    'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}>
+                    <span className="text-lg">{
+                      ev.type === 'term-end' ? '★' :
+                      ev.type === 'term-start' ? '▶' :
+                      ev.type === 'holiday' ? '🎉' :
+                      ev.type === 'announcement' ? '📢' : '📅'
+                    }</span>
+                    <div>
+                      <p className="font-semibold text-sm">{ev.label}</p>
+                      <p className="text-xs opacity-70 capitalize">{ev.type.replace('-', ' ')}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* School Performance & Growth */}
         <div className="lg:col-span-5 flex flex-col gap-6">

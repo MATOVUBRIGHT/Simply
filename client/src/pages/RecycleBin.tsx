@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useToast } from '../contexts/ToastContext';
 import { getRecycleBin, removeFromRecycleBin, clearRecycleBin, DeletedItem } from '../utils/recycleBin';
+import { useConfirm } from '../components/ConfirmModal';
 
 function getStoreName(type: string): string | null {
   switch (type) {
@@ -24,6 +25,7 @@ export default function RecycleBin() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
   const { addToast } = useToast();
+  const confirm = useConfirm();
   const [deletedItems, setDeletedItems] = useState<DeletedItem[]>([]);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
@@ -126,27 +128,27 @@ export default function RecycleBin() {
     }
   }
 
-  function deleteSelected() {
+  async function deleteSelected() {
     if (restoringIds.size > 0) return;
     const authId = schoolId || user?.id;
     if (!authId) return;
-    if (window.confirm(`Are you sure you want to permanently delete ${selectedItems.size} item(s)?`)) {
-      selectedItems.forEach(id => permanentlyDeleteItem(id));
-    }
+    const ok = await confirm({ title: `Delete ${selectedItems.size} Item(s)`, description: `Permanently delete ${selectedItems.size} item(s)? This cannot be undone.`, confirmLabel: 'Delete', variant: 'danger' });
+    if (!ok) return;
+    selectedItems.forEach(id => permanentlyDeleteItem(id));
   }
 
-  function emptyBin() {
+  async function emptyBin() {
     const authId = schoolId || user?.id;
     if (!authId) return;
-    if (window.confirm('Are you sure you want to permanently delete all items in the recycle bin? This action cannot be undone.')) {
-      clearRecycleBin(authId);
-      setDeletedItems([]);
-      setSelectedItems(new Set());
-      addToast('Recycle bin emptied', 'success');
-    }
+    const ok = await confirm({ title: 'Empty Recycle Bin', description: 'Permanently delete all items in the recycle bin? This cannot be undone.', confirmLabel: 'Empty Bin', variant: 'danger' });
+    if (!ok) return;
+    clearRecycleBin(authId);
+    setDeletedItems([]);
+    setSelectedItems(new Set());
+    addToast('Recycle bin emptied', 'success');
   }
 
-  function cleanDuplicates() {
+  async function cleanDuplicates() {
     const authId = schoolId || user?.id;
     if (!authId) return;
     
@@ -169,11 +171,11 @@ export default function RecycleBin() {
       return;
     }
 
-    if (window.confirm(`Remove ${duplicatesFound} duplicate item(s)?`)) {
-      toRemove.forEach(id => removeFromRecycleBin(authId, id));
-      loadDeletedItems();
-      addToast(`Removed ${duplicatesFound} duplicate(s)`, 'success');
-    }
+    const ok = await confirm({ title: 'Remove Duplicates', description: `Remove ${duplicatesFound} duplicate item(s) from the recycle bin?`, confirmLabel: 'Remove', variant: 'warning' });
+    if (!ok) return;
+    toRemove.forEach(id => removeFromRecycleBin(authId, id));
+    loadDeletedItems();
+    addToast(`Removed ${duplicatesFound} duplicate(s)`, 'success');
   }
 
   function toggleSelect(id: string) {
@@ -380,10 +382,9 @@ export default function RecycleBin() {
                       <RotateCcw size={18} className={restoringIds.has(item.id) ? 'animate-spin' : ''} />
                     </button>
                     <button
-                      onClick={() => {
-                        if (window.confirm('Permanently delete this item? This cannot be undone.')) {
-                          permanentlyDeleteItem(item.id);
-                        }
+                      onClick={async () => {
+                        const ok = await confirm({ title: 'Delete Permanently', description: 'Permanently delete this item? This cannot be undone.', confirmLabel: 'Delete', variant: 'danger' });
+                        if (ok) permanentlyDeleteItem(item.id);
                       }}
                       disabled={restoringIds.has(item.id)}
                       className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors disabled:opacity-50"

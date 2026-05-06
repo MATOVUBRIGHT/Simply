@@ -27,33 +27,10 @@ export default function Plans() {
   const [latestReceipt, setLatestReceipt] = useState<Awaited<ReturnType<typeof getLatestReceipt>>>(null);
   const [showIntroModal, setShowIntroModal] = useState(false);
   const [showContinueModal, setShowContinueModal] = useState(false);
-  const [modalCenterY, setModalCenterY] = useState<number | null>(null);
 
   useEffect(() => {
     if (user?.id || schoolId) loadPlanState();
   }, [user?.id, schoolId]);
-
-  useEffect(() => {
-    const anyModalOpen = showPaymentModal || showFAQModal || showUpgradeModal || showIntroModal || showContinueModal;
-
-    if (!anyModalOpen) {
-      setModalCenterY(null);
-      return;
-    }
-
-    const updateModalCenter = () => {
-      setModalCenterY(window.scrollY + (window.innerHeight / 2));
-    };
-
-    updateModalCenter();
-    window.addEventListener('scroll', updateModalCenter, { passive: true });
-    window.addEventListener('resize', updateModalCenter);
-
-    return () => {
-      window.removeEventListener('scroll', updateModalCenter);
-      window.removeEventListener('resize', updateModalCenter);
-    };
-  }, [showPaymentModal, showFAQModal, showUpgradeModal, showIntroModal, showContinueModal]);
 
   async function loadPlanState() {
     const authId = schoolId || user?.id;
@@ -118,7 +95,6 @@ Powered by Schofy`;
   const checkPlanLimit = (planId: string) => studentCount <= (PLAN_DEFINITIONS.find(p => p.id === planId)?.studentLimit || 0);
   const currentCycle = latestReceipt?.billingCycle || null;
   const currentCycleLabel = currentCycle === 'monthly' ? 'Current Monthly' : currentCycle === 'yearly' ? 'Current Yearly' : currentCycle === 'term' ? 'Current Term' : 'Current';
-  const modalContentStyle = modalCenterY === null ? undefined : { top: `${modalCenterY}px` };
 
   return (
     <div className="relative space-y-4 text-slate-900 dark:text-white">
@@ -368,10 +344,8 @@ Powered by Schofy`;
       </div>
 
       {showPaymentModal && selectedPlan && (
-        <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div className="pointer-events-none absolute inset-0" />
-          <div style={modalContentStyle} className="absolute left-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 px-4">
-            <div className="animate-modal-in max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowPaymentModal(false); }}>
+          <div className="animate-modal-in max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <h2 className="text-lg font-bold text-slate-900 dark:text-white">Subscribe to {selectedPlan.name}</h2>
               <button onClick={() => setShowPaymentModal(false)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"><X size={18} /></button>
@@ -448,15 +422,13 @@ Powered by Schofy`;
                 </div>
               </div>
             )}
-            </div>
           </div>
         </div>
       )}
 
       {showFAQModal && (
-        <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div style={modalContentStyle} className="absolute left-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 px-4">
-            <div className="animate-modal-in max-h-[80vh] w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowFAQModal(false); }}>
+          <div className="animate-modal-in max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
               <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2"><HelpCircle className="text-indigo-500" size={18} /> FAQ</h2>
               <button onClick={() => setShowFAQModal(false)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"><X size={18} /></button>
@@ -472,15 +444,13 @@ Powered by Schofy`;
                 </div>
               ))}
             </div>
-            </div>
           </div>
         </div>
       )}
 
       {showUpgradeModal && upgradeToPlan && (
-        <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div style={modalContentStyle} className="absolute left-1/2 z-10 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 px-4">
-            <div className="animate-modal-in w-full rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowUpgradeModal(false); }}>
+          <div className="animate-modal-in w-full max-w-sm rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2"><AlertTriangle className="text-red-500" size={18} /> Limit Reached</h2>
               <button onClick={() => setShowUpgradeModal(false)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"><X size={18} /></button>
@@ -495,15 +465,13 @@ Powered by Schofy`;
                 <a href="https://wa.me/256750034304" target="_blank" rel="noopener noreferrer" className="flex-1 py-2 bg-green-500 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1"><MessageCircle size={12} /> Contact</a>
               </div>
             </div>
-            </div>
           </div>
         </div>
       )}
 
       {showIntroModal && (
-        <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm">
-          <div style={modalContentStyle} className="absolute left-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 px-4">
-            <div className="w-full rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowIntroModal(false); }}>
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700">
               <h2 className="text-lg font-bold text-slate-900 dark:text-white">Select A Plan First</h2>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Choose monthly, per term, or yearly before paying.</p>
@@ -524,15 +492,13 @@ Powered by Schofy`;
                   Continue
                 </button>
               </div>
-            </div>
           </div>
         </div>
       )}
 
       {showContinueModal && selectedPlan && latestReceipt && (
-        <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm">
-          <div style={modalContentStyle} className="absolute left-1/2 z-10 w-full max-w-md -translate-x-1/2 -translate-y-1/2 px-4">
-            <div className="w-full rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowContinueModal(false); }}>
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700">
               <h2 className="text-lg font-bold text-slate-900 dark:text-white">Continue With New Subscription?</h2>
             </div>
@@ -567,7 +533,6 @@ Powered by Schofy`;
               >
                 Continue
               </button>
-            </div>
             </div>
           </div>
         </div>

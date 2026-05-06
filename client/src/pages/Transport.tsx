@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+﻿import { useState, useRef, useEffect } from 'react';
 import { Plus, Bus, Trash2, User, MapPin, DollarSign, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,6 +10,7 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useStudents } from '../contexts/StudentsContext';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
 export default function Transport() {
   const { user, schoolId } = useAuth();
@@ -21,6 +22,7 @@ export default function Transport() {
   const [selectedRoute, setSelectedRoute] = useState<string>('');
   const { addToast } = useToast();
   const { formatMoney } = useCurrency();
+  const confirm = useConfirm();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -57,8 +59,9 @@ export default function Transport() {
   async function handleDelete(idRoute: string) {
     const id = schoolId || user?.id;
     if (!id) return;
-    const _ok = await (async () => window.confirm('Delete this route? Students will be unassigned.'))(); if (_ok) {
-      try {
+    const ok = await confirm({ title: 'Delete Route', description: 'Delete this route? Students will be unassigned.', confirmLabel: 'Delete', variant: 'danger' });
+    if (!ok) return;
+    try {
         const route = routes.find(r => r.id === idRoute);
         const relatedAssignments = assignments.filter(a => a.routeId === idRoute);
         
@@ -83,7 +86,6 @@ export default function Transport() {
       } catch (error) {
         addToast('Failed to delete', 'error');
       }
-    }
   }
 
   const totalStudentsAssigned = assignments.length;
@@ -137,16 +139,16 @@ export default function Transport() {
   }, []);
 
   function downloadTemplate() {
-    const headers = transportExpectedFields.map(f => f.label);
-    const sampleRow = ['Route A', 'Kampala Central', '50000'];
-    const csv = [headers.join(','), sampleRow.join(',')].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'transport-route-import-template.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
-    addToast('Template downloaded', 'success');
+    import('xlsx').then(({ utils, writeFile }) => {
+      const headers = transportExpectedFields.map(f => f.label);
+      const sampleRow = ['Route A', 'Kampala Central', '50000'];
+      const ws = utils.aoa_to_sheet([headers, sampleRow]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Transport');
+      writeFile(wb, 'transport-route-import-template.xlsx');
+      addToast('Template downloaded', 'success');
+    });
   }
 
   function closeImportModal() {
@@ -296,7 +298,7 @@ export default function Transport() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".csv"
+            accept=".xlsx,.xls,.csv"
             className="hidden"
           />
           <button onClick={() => setShowForm(true)} className="btn btn-primary shadow-lg shadow-primary-500/25">
@@ -342,31 +344,31 @@ export default function Transport() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-sky-200 dark:border-sky-800">
-          <div className="card-header bg-gradient-to-r from-sky-50 to-cyan-50 dark:from-sky-900/20 dark:to-cyan-900/20">
-            <h3 className="font-bold text-sky-700 dark:text-sky-300 flex items-center gap-2">
-              <Plus size={20} />
-              Add New Route
-            </h3>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowForm(false); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <h3 className="font-bold text-white flex items-center gap-2"><Plus size={18} /> Add New Route</h3>
+              <button onClick={() => setShowForm(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>
+            </div>
+            <form onSubmit={handleAddRoute} className="p-5 grid grid-cols-1 gap-4">
+              <div className="space-y-2">
+                <label className="form-label">Route Name</label>
+                <input value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="form-input" required placeholder="Route A" />
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Description</label>
+                <input value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} className="form-input" placeholder="Area covered" />
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Monthly Fee</label>
+                <input type="number" value={formData.fee} onChange={e => setFormData(prev => ({ ...prev, fee: parseFloat(e.target.value) }))} className="form-input" />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="submit" className="btn btn-primary flex-1">Save Route</button>
+                <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
+              </div>
+            </form>
           </div>
-          <form onSubmit={handleAddRoute} className="card-body grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <label className="form-label">Route Name</label>
-              <input value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="form-input" required placeholder="Route A" />
-            </div>
-            <div className="space-y-2">
-              <label className="form-label">Description</label>
-              <input value={formData.description} onChange={e => setFormData(prev => ({ ...prev, description: e.target.value }))} className="form-input" placeholder="Area covered" />
-            </div>
-            <div className="space-y-2">
-              <label className="form-label">Monthly Fee</label>
-              <input type="number" value={formData.fee} onChange={e => setFormData(prev => ({ ...prev, fee: parseFloat(e.target.value) }))} className="form-input" />
-            </div>
-            <div className="md:col-span-3 flex gap-2">
-              <button type="submit" className="btn btn-primary">Save Route</button>
-              <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
-            </div>
-          </form>
         </div>
       )}
 
@@ -579,26 +581,44 @@ export default function Transport() {
 
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {transportExpectedFields.filter(f => f.required).map(field => (
-                          <tr key={field.key}>
-                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">
-                              {field.label}*
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <select
-                                value={fieldMapping[field.key] || ''}
-                                onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
-                                className="w-full form-input py-1 px-2 text-xs"
-                              >
-                                <option value="">-- Skip --</option>
-                                {csvHeaders.map(header => (
-                                  <option key={header} value={header}>{header}</option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
-                        ))}
+                        {csvHeaders.map((header, idx) => {
+                          const sample = csvData[0]?.[idx] || '';
+                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
+                          return (
+                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
+                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
+                              <td className="px-3 py-2">
+                                <select
+                                  value={currentMapping}
+                                  onChange={e => {
+                                    const newKey = e.target.value;
+                                    setFieldMapping(prev => {
+                                      const next = { ...prev };
+                                      Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; });
+                                      if (newKey) next[newKey] = header;
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-full form-input py-1 px-2 text-xs"
+                                >
+                                  <option value="">— Skip —</option>
+                                  {transportExpectedFields.map(f => (
+                                    <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
+                                  ))}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

@@ -19,12 +19,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import DropdownModal from '../components/DropdownModal';
 import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
 export default function Payroll() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
   const { formatMoney } = useCurrency();
   const { addToast } = useToast();
+  const confirm = useConfirm();
   const sid = schoolId || user?.id || '';
   const { data: staff, loading } = useTableData(sid, 'staff');
   const { data: salaryPayments } = useTableData(sid, 'salaryPayments');
@@ -104,7 +106,8 @@ export default function Payroll() {
   async function handleDeletePayment(paymentId: string) {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (!window.confirm('Delete this payment record?')) return;
+    const ok = await confirm({ title: 'Delete Payment Record', description: 'Permanently delete this payment record?', confirmLabel: 'Delete', variant: 'danger' });
+    if (!ok) return;
     try {
       await dataService.delete(id, 'salaryPayments', paymentId);
       addToast('Payment record deleted', 'success');

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+﻿import { useEffect, useState, useRef } from 'react';
 import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
@@ -28,9 +28,13 @@ export default function Finance() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTerm, setFilterTerm] = useState('all');
   const [showTermFilter, setShowTermFilter] = useState(false);
-  // expanded rows: set of studentId
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
   const [expandedPayments, setExpandedPayments] = useState<Set<string>>(new Set());
+  // Payment modal state
+  const [payModal, setPayModal] = useState<{ feeId: string; studentId: string; amount: number; studentName: string; description: string } | null>(null);
+  const [payAmount, setPayAmount] = useState('');
+  const [payMethod, setPayMethod] = useState<string>(PaymentMethod.CASH);
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
 
   const students = useActiveStudents();
   const sid = schoolId || user?.id || '';
@@ -44,21 +48,36 @@ export default function Finance() {
     setExpandedPayments(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
+  function openPayModal(feeId: string, studentId: string, amount: number) {
+    const student = students.find(s => s.id === studentId);
+    const fee = (fees as any[]).find(f => f.id === feeId);
+    setPayModal({
+      feeId, studentId, amount,
+      studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
+      description: fee?.description || 'Fee',
+    });
+    setPayAmount(String(amount));
+    setPayMethod(PaymentMethod.CASH);
+  }
+
   async function handleRecordPayment(feeId: string, studentId: string, _amount: number) {
     const id = schoolId || user?.id;
-    if (!id) return;
-    const raw = prompt('Enter payment amount:');
-    if (!raw || isNaN(parseFloat(raw))) return;
+    if (!id || !payModal) return;
+    const parsed = parseFloat(payAmount);
+    if (isNaN(parsed) || parsed <= 0) { addToast('Enter a valid amount', 'error'); return; }
+    setIsRecordingPayment(true);
     try {
       await dataService.create(id, 'payments', {
         id: uuidv4(), feeId, studentId,
-        amount: parseFloat(raw),
-        method: PaymentMethod.CASH,
+        amount: parsed,
+        method: payMethod as any,
         date: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       } as any);
       addToast('Payment recorded', 'success');
+      setPayModal(null);
     } catch { addToast('Failed to record payment', 'error'); }
+    finally { setIsRecordingPayment(false); }
   }
 
   function handleExportInvoicesCSV() {
@@ -90,9 +109,17 @@ export default function Finance() {
   ];
 
   function downloadTemplate() {
-    const csv = ['Student Name,Amount,Method,Date', 'John Doe,50000,cash,2024-01-15'].join('\n');
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'payments-template.csv'; a.click();
-    addToast('Template downloaded', 'success');
+    import('xlsx').then(({ utils, writeFile }) => {
+      const ws = utils.aoa_to_sheet([
+        ['Student Name', 'Amount', 'Method', 'Date'],
+        ['John Doe', '50000', 'cash', '2024-01-15'],
+      ]);
+      ws['!cols'] = [{ wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Payments');
+      writeFile(wb, 'payments-template.xlsx');
+      addToast('Template downloaded', 'success');
+    });
   }
 
   function closeImportModal() {
@@ -234,7 +261,7 @@ export default function Finance() {
               <Upload size={16} /><span className="hidden sm:inline">Import</span>
             </button>
           )}
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".csv" className="hidden" />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls,.csv" className="hidden" />
         </div>
       </div>
 
@@ -278,7 +305,7 @@ export default function Finance() {
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
               {activeTab === 'invoices' && (
                 <div className="relative" ref={termFilterRef}>
                   <button onClick={() => setShowTermFilter(!showTermFilter)}
@@ -381,7 +408,7 @@ export default function Finance() {
                             <td>
                               <div className="flex items-center gap-2">
                                 <span className={`badge ${badge[feeStatus]} text-[10px]`}>{feeStatus}</span>
-                                {feeStatus !== 'Paid' && <button onClick={e => { e.stopPropagation(); handleRecordPayment(fee.id, fee.studentId!, fee.amount - paid); }} className="btn btn-secondary text-xs py-1 px-2"><CreditCard size={11} /> Pay</button>}
+                                {feeStatus !== 'Paid' && <button onClick={e => { e.stopPropagation(); openPayModal(fee.id, fee.studentId!, fee.amount - paid); }} className="btn btn-secondary text-xs py-1 px-2"><CreditCard size={11} /> Pay</button>}
                               </div>
                             </td>
                           </tr>
@@ -472,18 +499,23 @@ export default function Finance() {
                     <span className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-500 rounded">3</span>
                   </div>
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
-                    <table className="w-full text-xs"><tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                      {paymentExpectedFields.filter(f => f.required).map(f => (
-                        <tr key={f.key}>
-                          <td className="px-3 py-2 font-medium whitespace-nowrap">{f.label}*</td>
-                          <td className="px-2 py-1.5">
-                            <select value={fieldMapping[f.key] || ''} onChange={e => setFieldMapping(p => ({ ...p, [f.key]: e.target.value }))} className="w-full form-input py-1 px-2 text-xs">
-                              <option value="">-- Skip --</option>
-                              {csvHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
+                    <table className="w-full text-xs"><thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0"><tr><th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th><th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th><th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {csvHeaders.map((header, idx) => {
+                        const sample = csvData[0]?.[idx] || '';
+                        const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
+                        return (
+                          <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                            <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
+                            <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
+                            <td className="px-3 py-2">
+                              <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(p => { const next = { ...p }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
+                                <option value="">— Skip —</option>
+                                {paymentExpectedFields.map(f => <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>)}
+                              </select>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody></table>
                   </div>
                   <div className="flex justify-end gap-2 pt-2">
@@ -518,6 +550,57 @@ export default function Finance() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Record Payment Modal */}
+      {payModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setPayModal(null); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <h3 className="font-bold text-white flex items-center gap-2"><CreditCard size={18} /> Record Payment</h3>
+              <button onClick={() => setPayModal(null)} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 space-y-1">
+                <p className="text-sm font-semibold text-slate-800 dark:text-white">{payModal.studentName}</p>
+                <p className="text-xs text-slate-500">{payModal.description}</p>
+                <p className="text-xs text-slate-500">Remaining: <span className="font-semibold text-slate-700 dark:text-slate-200">{formatMoney(payModal.amount)}</span></p>
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Amount</label>
+                <input
+                  type="number"
+                  value={payAmount}
+                  onChange={e => setPayAmount(e.target.value)}
+                  className="form-input"
+                  placeholder="Enter amount"
+                  min="0"
+                  step="0.01"
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Method</label>
+                <select value={payMethod} onChange={e => setPayMethod(e.target.value)} className="form-input">
+                  <option value={PaymentMethod.CASH}>Cash</option>
+                  <option value={PaymentMethod.BANK_TRANSFER}>Bank Transfer</option>
+                </select>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setPayModal(null)} className="btn btn-secondary flex-1" disabled={isRecordingPayment}>Cancel</button>
+                <button
+                  onClick={() => handleRecordPayment(payModal.feeId, payModal.studentId, payModal.amount)}
+                  disabled={isRecordingPayment || !payAmount || isNaN(parseFloat(payAmount)) || parseFloat(payAmount) <= 0}
+                  className="btn btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-70"
+                >
+                  {isRecordingPayment
+                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
+                    : <><CheckIcon size={16} /> Record</>}
+                </button>
+              </div>
             </div>
           </div>
         </div>

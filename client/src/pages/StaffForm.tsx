@@ -63,7 +63,15 @@ export default function StaffForm() {
     if (!authId) return;
     try {
       const data = await dataService.getAll(authId, 'subjects');
-      setSubjects(data);
+      // Deduplicate by name — show each unique subject name once
+      const seen = new Set<string>();
+      const unique = data.filter((s: any) => {
+        const key = s.name.toLowerCase().trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setSubjects(unique);
     } catch (error) {
       console.error('Failed to load subjects:', error);
     }

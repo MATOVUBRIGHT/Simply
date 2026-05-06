@@ -158,7 +158,7 @@ export default function Settings() {
         return;
       }
 
-      await autoCreateClasses(sid);
+      await autoCreateClasses(sid, settings.schoolType);
       window.dispatchEvent(new CustomEvent('classesUpdated'));
       window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
       addToast('Settings saved', 'success');
@@ -170,8 +170,8 @@ export default function Settings() {
     }
   }
 
-  async function autoCreateClasses(sid: string) {
-    const schoolType = settings.schoolType || 'nursery_primary';
+  async function autoCreateClasses(sid: string, schoolTypeOverride?: string) {
+    const schoolType = schoolTypeOverride || settings.schoolType || 'nursery_primary';
 
     const CLASS_MAP: Record<string, { name: string; level: number }[]> = {
       nursery: [
@@ -218,17 +218,19 @@ export default function Settings() {
     }
 
     const existingClasses = await dataService.getAll(sid, 'classes');
-    const existingNames = new Set(existingClasses.map((c: any) => c.name));
+    // Check by name (case-insensitive) — don't create if already exists
+    const existingNames = new Set(existingClasses.map((c: any) => c.name.toLowerCase().trim()));
 
     let createdCount = 0;
     for (const cls of classesToCreate) {
-      if (!existingNames.has(cls.name)) {
+      if (!existingNames.has(cls.name.toLowerCase().trim())) {
         await dataService.create(sid, 'classes', { name: cls.name, level: cls.level, capacity: 40 } as any);
         createdCount++;
       }
     }
 
     if (createdCount > 0) addToast(`${createdCount} classes auto-created`, 'info');
+    else if (schoolTypeOverride) addToast('All classes for this school type already exist', 'info');
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) {
@@ -238,6 +240,12 @@ export default function Settings() {
 
     if (name === 'currency') {
       setCurrency(value as any);
+    }
+
+    // Auto-generate classes immediately when school type changes
+    if (name === 'schoolType') {
+      const sid = schoolId || user?.id;
+      if (sid) void autoCreateClasses(sid, value);
     }
 
     // Debounced auto-save — fires 1s after last keystroke

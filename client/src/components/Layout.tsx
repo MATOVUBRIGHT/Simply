@@ -35,6 +35,7 @@ import InstallPWA from './InstallPWA';
 import { getSubscriptionAccessState, SubscriptionAccessState } from '../utils/plans';
 import { getRecycleBin } from '../utils/recycleBin';
 import RealtimeStatus from './RealtimeStatus';
+import { useTableData } from '../lib/store';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -64,7 +65,6 @@ function Layout({ children }: LayoutProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationType[]>([]);
   const [profileImage, setProfileImage] = useState<string>('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=64&h=64&fit=crop');
-  const [schoolName, setSchoolName] = useState('My School');
   const [deletedItemsCount, setDeletedItemsCount] = useState(0);
   const [showRenewPopup, setShowRenewPopup] = useState(false);
   const [subscriptionState, setSubscriptionState] = useState<SubscriptionAccessState | null>(null);
@@ -75,6 +75,12 @@ function Layout({ children }: LayoutProps) {
   const tenantId = schoolId || user?.id;
   const { isSyncing } = useSync();
   const headerRef = useRef<HTMLDivElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
+  // Reactive school name + logo from settings store — updates instantly when settings change
+  const { data: settingsRows } = useTableData(tenantId || '', 'settings');
+  const schoolName = settingsRows.find((s: any) => s.key === 'schoolName')?.value || 'My School';
+  const schoolLogo = settingsRows.find((s: any) => s.key === 'schoolLogo')?.value || null;
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -105,7 +111,6 @@ function Layout({ children }: LayoutProps) {
     loadNotifications();
     checkUpcomingEvents();
     checkSubscriptionStatus();
-    loadSchoolName();
     loadDeletedItemsCount();
   }, []);
 
@@ -160,31 +165,14 @@ function Layout({ children }: LayoutProps) {
   }, [user?.id, schoolId]);
 
   async function loadSchoolName() {
-    if (!tenantId) return;
-    try {
-      const stored = await userDBManager.getAll(tenantId, 'settings');
-      const schoolNameSetting = stored.find((s: any) => s.key === 'schoolName');
-      if (schoolNameSetting?.value) {
-        setSchoolName(schoolNameSetting.value);
-      }
-    } catch (error) {
-      console.error('Failed to load school name:', error);
-    }
+    // No longer needed — school name comes from useTableData reactively
   }
 
   useEffect(() => {
-    const handleSettingsUpdate = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      if (customEvent.detail?.schoolName) {
-        setSchoolName(customEvent.detail.schoolName);
-      }
-    };
+    // Keep settingsUpdated listener for legacy compatibility
+    const handleSettingsUpdate = (e: Event) => { void e; };
     window.addEventListener('settingsUpdated', handleSettingsUpdate);
-    window.addEventListener('dataRefresh', loadSchoolName);
-    return () => {
-      window.removeEventListener('settingsUpdated', handleSettingsUpdate);
-      window.removeEventListener('dataRefresh', loadSchoolName);
-    };
+    return () => window.removeEventListener('settingsUpdated', handleSettingsUpdate);
   }, []);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -198,6 +186,22 @@ function Layout({ children }: LayoutProps) {
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !tenantId) return;
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = reader.result as string;
+      // Save logo to settings so it persists and shows on reports
+      try {
+        await dataService.saveSettings(tenantId, { schoolLogo: base64 });
+        window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
+      } catch { /* ignore */ }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   useEffect(() => {
@@ -330,9 +334,17 @@ function Layout({ children }: LayoutProps) {
         <div className="h-full flex flex-col">
           {/* School Header */}
           <div className="flex items-center gap-3 h-20 px-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center shadow-lg shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <GraduationCap size={22} className="text-white" />
-            </div>
+            <label className="relative w-10 h-10 rounded-lg flex items-center justify-center shadow-lg shrink-0 cursor-pointer group overflow-hidden" style={{ backgroundColor: schoolLogo ? 'transparent' : 'var(--primary-color)' }} title="Click to change school logo">
+              {schoolLogo ? (
+                <img src={schoolLogo} alt="School Logo" className="w-10 h-10 rounded-lg object-cover" />
+              ) : (
+                <GraduationCap size={22} className="text-white" />
+              )}
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
+                <Camera size={14} className="text-white" />
+              </div>
+              <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+            </label>
             <div className="flex-1 min-w-0">
               <h2 className="font-bold text-sm leading-tight text-slate-800 dark:text-white truncate">
                 {schoolName}
@@ -464,7 +476,9 @@ function Layout({ children }: LayoutProps) {
 
           {/* Notifications dropdown */}
           {notifOpen && (
-            <div className="absolute top-16 right-2 sm:right-6 w-[calc(100vw-1rem)] sm:w-96 max-w-sm animate-dropdown-in z-50">
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
+              <div className="absolute top-16 right-2 sm:right-6 w-[calc(100vw-1rem)] sm:w-96 max-w-sm animate-dropdown-in z-50">
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="px-4 py-3 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
                   <div className="flex items-center gap-2">
@@ -499,11 +513,14 @@ function Layout({ children }: LayoutProps) {
                 </div>
               </div>
             </div>
+            </>
           )}
 
           {/* Profile dropdown */}
           {profileOpen && (
-            <div className="absolute top-16 right-2 sm:right-6 w-72 animate-dropdown-in z-50">
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
+              <div className="absolute top-16 right-2 sm:right-6 w-72 animate-dropdown-in z-50">
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[80vh] overflow-y-auto">
                 <div className="p-5 text-center border-b border-slate-100 dark:border-slate-700">
                   <div className="relative w-16 h-16 mx-auto mb-2">
@@ -543,6 +560,7 @@ function Layout({ children }: LayoutProps) {
                 </div>
               </div>
             </div>
+            </>
           )}
         </header>
 
@@ -556,8 +574,8 @@ function Layout({ children }: LayoutProps) {
         )}
 
         {/* Page Content — scrolls vertically, allows horizontal scroll on small screens */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto overflow-x-auto bg-[#f8fafc] dark:bg-slate-950">
-          <div className="w-full min-w-0">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto overflow-x-hidden bg-[#f8fafc] dark:bg-slate-950">
+          <div className="w-full min-w-0 overflow-x-auto">
             {children}
           </div>
         </main>

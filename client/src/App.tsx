@@ -4,7 +4,10 @@ import { StudentsProvider } from './contexts/StudentsContext';
 import { RealtimeSyncProvider } from './realtime/RealtimeSync';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import Layout from './components/Layout';
+import UpdateBanner from './components/UpdateBanner';
 import { useEffect, useState, Suspense } from 'react';
+import { useToast } from './contexts/ToastContext';
+import { initErrorInterceptor } from './lib/errorInterceptor';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Students from './pages/Students';
@@ -52,6 +55,12 @@ function MainApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const [hasValidPlan, setHasValidPlan] = useState<boolean | null>(null);
+  const { addToast } = useToast();
+
+  // Wire global error interceptor — catches unhandled rejections and shows clean toasts
+  useEffect(() => {
+    initErrorInterceptor(addToast);
+  }, [addToast]);
 
   useEffect(() => {
     if (loading || !user) return;
@@ -126,6 +135,7 @@ function MainApp() {
               </div>
             </Suspense>
           </Layout>
+          <UpdateBanner />
         </RealtimeSyncProvider>
       </StudentsProvider>
     </ErrorBoundary>

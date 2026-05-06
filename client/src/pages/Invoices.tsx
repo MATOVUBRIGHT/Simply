@@ -39,8 +39,10 @@ interface Bursary {
 
 interface Discount {
   id: string;
-  classId: string;
-  className: string;
+  classId?: string;
+  className?: string;
+  studentId?: string;
+  studentName?: string;
   amount: number;
   type: 'fixed' | 'percentage';
   term: string;
@@ -84,13 +86,18 @@ export default function Invoices() {
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [showBursaryModal, setShowBursaryModal] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
-  const [newBursary, setNewBursary] = useState({ studentId: '', amount: 0 });
-  const [newDiscount, setNewDiscount] = useState({ classId: '', amount: 0, type: 'fixed' as 'fixed' | 'percentage' });
+  const [newBursary, setNewBursary] = useState({ studentId: '', amount: 0, reason: '' });
+  const [newDiscount, setNewDiscount] = useState({ studentId: '', amount: 0, type: 'fixed' as 'fixed' | 'percentage' });
   const [searchStudent, setSearchStudent] = useState('');
   const [filterBursaryClass, setFilterBursaryClass] = useState<string>('all');
   const [termSettings, setTermSettings] = useState<Record<string, string>>({});
   const [showPromotionBanner, setShowPromotionBanner] = useState(false);
   const [expiredTerm, setExpiredTerm] = useState('');
+  // Payment modal
+  const [invoicePayModal, setInvoicePayModal] = useState<{ invoiceId: string; studentName: string; description: string; remaining: number } | null>(null);
+  const [invoicePayAmount, setInvoicePayAmount] = useState('');
+  const [invoicePayMethod, setInvoicePayMethod] = useState<string>(PaymentMethod.CASH);
+  const [isRecordingInvoicePayment, setIsRecordingInvoicePayment] = useState(false);
 
   const students = useActiveStudents();
   const { students: allStudents } = useStudents();
@@ -226,7 +233,7 @@ export default function Invoices() {
   }, [selectedClassId, selectedTerm, selectedYear, user]);
 
   async function loadBursariesAndDiscounts() {
-    // Now using store — no-op kept for compatibility
+    // Now using store � no-op kept for compatibility
   }
 
   async function loadTermSettings() {
@@ -237,7 +244,7 @@ export default function Invoices() {
       const obj: Record<string, string> = {};
       stored.forEach((s: any) => { obj[s.key] = s.value; });
       setTermSettings(obj);
-      // Check if current term has ended → prompt class promotion
+      // Check if current term has ended ? prompt class promotion
       const currentTerm = obj.currentTerm || '1';
       const endKey = `term${currentTerm}End`;
       const endDate = obj[endKey];
@@ -415,7 +422,7 @@ export default function Invoices() {
     if (!id || !classId) { addToast('Student has no class assigned', 'error'); return; }
     const structures = await getFeeStructuresByClass(id, classId, selectedTerm, selectedYear);
     if (structures.length === 0) {
-      // No fee structures — open the structure modal for this class
+      // No fee structures � open the structure modal for this class
       setSelectedClassId(classId);
       setShowStructureModal(true);
       addToast('No fee structures found. Please set up fees for this class first.', 'info');
@@ -483,31 +490,41 @@ export default function Invoices() {
     finally { (window as any).__bulkInvoicing = false; }
   }
 
-  async function markAsPaid(invoiceId: string) {
-    const id = schoolId || user?.id;
-    if (!id) return;
+  function markAsPaid(invoiceId: string) {
     const invoice = invoices.find(i => i.id === invoiceId);
     if (!invoice) return;
+    const remaining = invoice.amount - invoice.paidAmount;
+    setInvoicePayModal({
+      invoiceId,
+      studentName: invoice.studentName,
+      description: invoice.description,
+      remaining,
+    });
+    setInvoicePayAmount(String(remaining));
+    setInvoicePayMethod(PaymentMethod.CASH);
+  }
 
-    const remainingAmount = invoice.amount - invoice.paidAmount;
-    const paymentAmount = prompt(`Enter payment amount (remaining: ${formatMoney(remainingAmount)}):`, remainingAmount.toString());
-    if (!paymentAmount || isNaN(parseFloat(paymentAmount))) return;
-
+  async function submitInvoicePayment() {
+    const id = schoolId || user?.id;
+    if (!id || !invoicePayModal) return;
+    const amount = parseFloat(invoicePayAmount);
+    if (isNaN(amount) || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
+    setIsRecordingInvoicePayment(true);
     try {
       await dataService.create(id, 'payments', {
         id: uuidv4(),
-        feeId: invoiceId,
-        studentId: invoice.studentId,
-        amount: parseFloat(paymentAmount),
-        method: PaymentMethod.CASH,
+        feeId: invoicePayModal.invoiceId,
+        studentId: invoices.find(i => i.id === invoicePayModal.invoiceId)?.studentId,
+        amount,
+        method: invoicePayMethod as any,
         date: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       } as any);
       addToast('Payment recorded', 'success');
+      setInvoicePayModal(null);
       refreshInvoices();
-    } catch (error) {
-      addToast('Failed to record payment', 'error');
-    }
+    } catch { addToast('Failed to record payment', 'error'); }
+    finally { setIsRecordingInvoicePayment(false); }
   }
 
   function handleExportCSV() {
@@ -549,16 +566,16 @@ export default function Invoices() {
   }
 
   function downloadTemplate() {
-    const headers = invoiceExpectedFields.map(f => f.label);
-    const sampleRows = [['John Doe', 'Term 1 Tuition', '50000', '1']];
-    const csv = [headers.join(','), ...sampleRows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'invoices-import-template.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
-    addToast('Template downloaded', 'success');
+    import('xlsx').then(({ utils, writeFile }) => {
+      const headers = invoiceExpectedFields.map(f => f.label);
+      const sampleRows = [['John Doe', 'Term 1 Tuition', '50000', '1']];
+      const ws = utils.aoa_to_sheet([headers, ...sampleRows]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Invoices');
+      writeFile(wb, 'invoices-import-template.xlsx');
+      addToast('Template downloaded', 'success');
+    });
   }
 
   function closeImportModal() {
@@ -688,7 +705,7 @@ export default function Invoices() {
 
   return (
     <div className="space-y-6">
-      {/* Term ended — class promotion banner */}
+      {/* Term ended � class promotion banner */}
       {showPromotionBanner && (
         <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl">
           <GraduationCap size={20} className="text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
@@ -755,7 +772,7 @@ export default function Invoices() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".csv"
+            accept=".xlsx,.xls,.csv"
             className="hidden"
           />
           <button onClick={() => setShowStructureModal(true)} className="btn btn-secondary">
@@ -780,9 +797,9 @@ export default function Invoices() {
           </button>
           <button 
             onClick={() => setShowStructureModal(true)}
-            className="btn btn-primary shadow-lg shadow-primary-500/25"
+            className="btn btn-secondary"
           >
-            <Plus size={18} /> Generate Invoices
+            <Plus size={18} /> Fee Structures
           </button>
         </div>
       </div>
@@ -857,8 +874,8 @@ export default function Invoices() {
 
       <div className="card">
         <div className="card-header">
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => { setViewMode('invoices'); setFilterStatus('all'); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -866,7 +883,8 @@ export default function Invoices() {
                 }`}
               >
                 <FileText size={16} />
-                Invoice List
+                <span className="hidden sm:inline">Invoice List</span>
+                <span className="sm:hidden">Invoices</span>
               </button>
               <button
                 onClick={() => { setViewMode('students'); setFilterStatus('all'); }}
@@ -875,10 +893,11 @@ export default function Invoices() {
                 }`}
               >
                 <Users size={16} />
-                Student View
+                <span className="hidden sm:inline">Student View</span>
+                <span className="sm:hidden">Students</span>
               </button>
             </div>
-            <div className="relative flex-1 w-full sm:max-w-xs">
+            <div className="relative flex-1 min-w-0 w-full sm:max-w-xs">
               <Search size={18} className="search-input-icon" />
               <input
                 type="text"
@@ -888,7 +907,7 @@ export default function Invoices() {
                 className="search-input"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => setShowStatusFilter(true)}
                 className={`btn btn-secondary flex items-center gap-2 ${filterStatus !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
@@ -1387,26 +1406,30 @@ export default function Invoices() {
 
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {invoiceExpectedFields.filter(f => f.required).map(field => (
-                          <tr key={field.key}>
-                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">
-                              {field.label}*
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <select
-                                value={fieldMapping[field.key] || ''}
-                                onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
-                                className="w-full form-input py-1 px-2 text-xs"
-                              >
-                                <option value="">-- Skip --</option>
-                                {csvHeaders.map(header => (
-                                  <option key={header} value={header}>{header}</option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
-                        ))}
+                        {csvHeaders.map((header, idx) => {
+                          const sample = csvData[0]?.[idx] || '';
+                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
+                          return (
+                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
+                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
+                              <td className="px-3 py-2">
+                                <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
+                                  <option value="">� Skip �</option>
+                                  {invoiceExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1705,139 +1728,93 @@ export default function Invoices() {
       {showBursaryModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                  <Award size={24} className="text-amber-500" />
-                  Bursary Management
-                </h2>
-                <p className="text-sm text-slate-500 mt-1">Manage student bursaries/scholarships</p>
-              </div>
-              <button onClick={() => setShowBursaryModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-              <div className="flex gap-4 items-end">
-                <div className="flex-1">
-                  <label className="form-label">Search Student</label>
-                  <div className="relative">
-                    <SearchIcon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      value={searchStudent}
-                      onChange={(e) => setSearchStudent(e.target.value)}
-                      className="form-input pl-10"
-                      placeholder="Search by name or ID..."
-                    />
-                  </div>
-                </div>
-                <div className="w-40">
-                  <label className="form-label">Class Filter</label>
-                  <select 
-                    value={filterBursaryClass} 
-                    onChange={(e) => setFilterBursaryClass(e.target.value)}
-                    className="form-input"
-                  >
-                    <option value="all">All Classes</option>
-                    {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+            <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <Award size={20} className="text-white" />
+                <div>
+                  <h2 className="text-lg font-bold text-white">Bursary / Scholarship</h2>
+                  <p className="text-xs text-white/70">Grant a bursary to a student � reduces their invoice</p>
                 </div>
               </div>
-              
-              <div className="mt-4 flex gap-4 items-end">
-                <div className="flex-1">
-                  <label className="form-label">Select Student</label>
-                  <select 
-                    value={newBursary.studentId} 
-                    onChange={(e) => setNewBursary({...newBursary, studentId: e.target.value})}
-                    className="form-input"
-                  >
-                    <option value="">Select a student...</option>
-                    {students
-                      .filter(s => {
-                        if (filterBursaryClass !== 'all' && s.classId !== filterBursaryClass) return false;
-                        if (searchStudent) {
-                          const search = searchStudent.toLowerCase();
-                          return s.firstName.toLowerCase().includes(search) || 
-                                 s.lastName.toLowerCase().includes(search) ||
-                                 (s.studentId || s.admissionNo || '').toLowerCase().includes(search);
-                        }
-                        return true;
-                      })
-                      .slice(0, 20)
-                      .map(s => (
-                        <option key={s.id} value={s.id}>{s.firstName} {s.lastName} - {s.studentId || s.admissionNo}</option>
-                      ))
-                    }
-                  </select>
-                </div>
-                <div className="w-40">
-                  <label className="form-label">Amount ({currency.symbol})</label>
-                  <input
-                    type="number"
-                    value={newBursary.amount || ''}
-                    onChange={(e) => setNewBursary({...newBursary, amount: parseFloat(e.target.value) || 0})}
-                    className="form-input"
-                    placeholder="0.00"
-                  />
-                </div>
-                <button 
-                  onClick={async () => {
-                    if (!newBursary.studentId || newBursary.amount <= 0) {
-                      addToast('Please select a student and enter amount', 'error');
-                      return;
-                    }
-                    const student = students.find(s => s.id === newBursary.studentId);
-                    const bursary: Bursary = {
-                      id: uuidv4(),
-                      studentId: newBursary.studentId,
-                      studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
-                      amount: newBursary.amount,
-                      term: selectedTerm,
-                      year: selectedYear,
-                      createdAt: new Date().toISOString(),
-                    };
-                    await dataService.create(user!.id, 'bursaries', bursary as any);
-                    setNewBursary({ studentId: '', amount: 0 });
-                    addToast('Bursary added successfully', 'success');
-                  }}
-                  className="btn btn-primary"
-                >
-                  <UserPlus size={16} /> Add
-                </button>
-              </div>
+              <button onClick={() => setShowBursaryModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg text-white"><X size={18} /></button>
             </div>
 
-            <div className="p-5 max-h-[40vh] overflow-y-auto">
-              {bursaries.length === 0 ? (
-                <div className="text-center py-8">
-                  <Award size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-                  <p className="text-slate-500 font-medium">No bursaries added</p>
-                  <p className="text-sm text-slate-400 mt-1">Add bursaries to reduce invoiced amounts</p>
+            {/* Bursary add form */}
+            <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label">Class Filter</label>
+                  <select value={filterBursaryClass} onChange={e => setFilterBursaryClass(e.target.value)} className="form-input">
+                    <option value="all">All Classes</option>
+                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
                 </div>
+                <div>
+                  <label className="form-label">Search Student</label>
+                  <div className="relative">
+                    <SearchIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input type="text" value={searchStudent} onChange={e => setSearchStudent(e.target.value)} className="form-input pl-9" placeholder="Name or ID..." />
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="form-label">Student *</label>
+                  <select value={newBursary.studentId} onChange={e => setNewBursary({ ...newBursary, studentId: e.target.value })} className="form-input">
+                    <option value="">� Select student �</option>
+                    {students.filter(s => {
+                      if (filterBursaryClass !== 'all' && s.classId !== filterBursaryClass) return false;
+                      if (searchStudent) { const q = searchStudent.toLowerCase(); return `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || (s.studentId || s.admissionNo || '').toLowerCase().includes(q); }
+                      return true;
+                    }).slice(0, 30).map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName} � {s.studentId || s.admissionNo}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Amount ({currency.symbol}) *</label>
+                  <input type="number" value={newBursary.amount || ''} onChange={e => setNewBursary({ ...newBursary, amount: parseFloat(e.target.value) || 0 })} className="form-input" placeholder="0.00" min="0" />
+                </div>
+                <div>
+                  <label className="form-label">Reason</label>
+                  <input type="text" value={newBursary.reason} onChange={e => setNewBursary({ ...newBursary, reason: e.target.value })} className="form-input" placeholder="e.g. Scholarship" />
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!newBursary.studentId || newBursary.amount <= 0) { addToast('Select a student and enter amount', 'error'); return; }
+                  const id = schoolId || user?.id; if (!id) return;
+                  const student = students.find(s => s.id === newBursary.studentId);
+                  const now = new Date().toISOString();
+                  const existing = bursaries.find(b => b.studentId === newBursary.studentId && String(b.term) === String(selectedTerm) && String(b.year) === String(selectedYear));
+                  if (existing) await dataService.delete(id, 'bursaries', existing.id);
+                  await dataService.create(id, 'bursaries', { id: uuidv4(), studentId: newBursary.studentId, studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown', amount: newBursary.amount, reason: newBursary.reason, term: selectedTerm, year: selectedYear, createdAt: now } as any);
+                  const studentFee = fees.find(f => f.studentId === newBursary.studentId && String(f.term) === String(selectedTerm) && String(f.year) === String(selectedYear));
+                  if (studentFee) {
+                    const newAmt = Math.max(0, studentFee.amount - newBursary.amount);
+                    await dataService.update(id, 'fees', studentFee.id, { amount: newAmt, description: (studentFee.description || 'School Fees') + ` (Bursary: ${formatMoney(newBursary.amount)})` } as any);
+                    addToast(`Bursary applied � invoice updated to ${formatMoney(newAmt)}`, 'success');
+                  } else { addToast('Bursary saved. Will apply when invoice is created.', 'success'); }
+                  setNewBursary({ studentId: '', amount: 0, reason: '' });
+                }}
+                className="btn btn-primary"
+              >
+                <UserPlus size={15} /> Apply Bursary
+              </button>
+            </div>
+
+            <div className="p-5 max-h-[35vh] overflow-y-auto">
+              {bursaries.length === 0 ? (
+                <div className="text-center py-8 text-slate-400"><Award size={36} className="mx-auto mb-2 opacity-40" /><p className="text-sm">No bursaries yet</p></div>
               ) : (
                 <div className="space-y-2">
                   {bursaries.map(b => (
                     <div key={b.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                       <div>
                         <p className="font-medium text-slate-800 dark:text-white">{b.studentName}</p>
-                        <p className="text-xs text-slate-500">Term {b.term}, {b.year}</p>
+                        <p className="text-xs text-slate-500">Term {b.term} {b.year}{(b as any).reason ? ` � ${(b as any).reason}` : ''}</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-amber-600">{formatMoney(b.amount)}</span>
-                        <button
-                          onClick={async () => {
-                            await dataService.delete(user!.id, 'bursaries', b.id);
-                            addToast('Bursary removed', 'success');
-                          }}
-                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <button onClick={async () => { await dataService.delete(user!.id, 'bursaries', b.id); addToast('Bursary removed', 'success'); }} className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><Trash2 size={14} /></button>
                       </div>
                     </div>
                   ))}
@@ -1845,13 +1822,9 @@ export default function Invoices() {
               )}
             </div>
 
-            <div className="p-5 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-              <div className="flex justify-between items-center">
-                <p className="font-medium text-slate-700 dark:text-slate-300">
-                  Total Bursary: <span className="text-amber-600 font-bold">{formatMoney(bursaries.reduce((sum, b) => sum + b.amount, 0))}</span>
-                </p>
-                <button onClick={() => setShowBursaryModal(false)} className="btn btn-secondary">Close</button>
-              </div>
+            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Total: <span className="text-amber-600 font-bold">{formatMoney(bursaries.reduce((s, b) => s + b.amount, 0))}</span></p>
+              <button onClick={() => setShowBursaryModal(false)} className="btn btn-secondary">Close</button>
             </div>
           </div>
         </div>
@@ -1860,112 +1833,98 @@ export default function Invoices() {
       {showDiscountModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                  <Percent size={24} className="text-cyan-500" />
-                  Class Discount Management
-                </h2>
-                <p className="text-sm text-slate-500 mt-1">Set percentage or fixed amount discounts per class</p>
+            <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <Percent size={20} className="text-white" />
+                <div>
+                  <h2 className="text-lg font-bold text-white">Student Discount</h2>
+                  <p className="text-xs text-white/70">Apply a discount to a student � updates their invoice</p>
+                </div>
               </div>
-              <button onClick={() => setShowDiscountModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
-                <X size={20} />
-              </button>
+              <button onClick={() => setShowDiscountModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg text-white"><X size={18} /></button>
             </div>
-            
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-              <div className="flex gap-4 items-end">
-                <div className="flex-1">
-                  <label className="form-label">Class</label>
-                  <select 
-                    value={newDiscount.classId} 
-                    onChange={(e) => setNewDiscount({...newDiscount, classId: e.target.value})}
-                    className="form-input"
-                  >
-                    <option value="">Select a class...</option>
-                    {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
+
+            {/* Discount add form */}
+            <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="form-label">Class Filter</label>
+                  <select value={filterBursaryClass} onChange={e => setFilterBursaryClass(e.target.value)} className="form-input">
+                    <option value="all">All Classes</option>
+                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
-                <div className="w-32">
+                <div>
+                  <label className="form-label">Search Student</label>
+                  <div className="relative">
+                    <SearchIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input type="text" value={searchStudent} onChange={e => setSearchStudent(e.target.value)} className="form-input pl-9" placeholder="Name or ID..." />
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="form-label">Student *</label>
+                  <select value={newDiscount.studentId} onChange={e => setNewDiscount({ ...newDiscount, studentId: e.target.value })} className="form-input">
+                    <option value="">� Select student �</option>
+                    {students.filter(s => {
+                      if (filterBursaryClass !== 'all' && s.classId !== filterBursaryClass) return false;
+                      if (searchStudent) { const q = searchStudent.toLowerCase(); return `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || (s.studentId || s.admissionNo || '').toLowerCase().includes(q); }
+                      return true;
+                    }).slice(0, 30).map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName} � {s.studentId || s.admissionNo}</option>)}
+                  </select>
+                </div>
+                <div>
                   <label className="form-label">Type</label>
-                  <select 
-                    value={newDiscount.type} 
-                    onChange={(e) => setNewDiscount({...newDiscount, type: e.target.value as 'fixed' | 'percentage'})}
-                    className="form-input"
-                  >
-                    <option value="fixed">Fixed Amount</option>
+                  <select value={newDiscount.type} onChange={e => setNewDiscount({ ...newDiscount, type: e.target.value as 'fixed' | 'percentage' })} className="form-input">
+                    <option value="fixed">Fixed ({currency.symbol})</option>
                     <option value="percentage">Percentage (%)</option>
                   </select>
                 </div>
-                <div className="w-32">
-                  <label className="form-label">{newDiscount.type === 'percentage' ? 'Percent' : 'Amount'} ({newDiscount.type === 'percentage' ? '%' : currency.symbol})</label>
-                  <input
-                    type="number"
-                    value={newDiscount.amount || ''}
-                    onChange={(e) => setNewDiscount({...newDiscount, amount: parseFloat(e.target.value) || 0})}
-                    className="form-input"
-                    placeholder={newDiscount.type === 'percentage' ? '10' : '0.00'}
-                    max={newDiscount.type === 'percentage' ? 100 : undefined}
-                  />
+                <div>
+                  <label className="form-label">{newDiscount.type === 'percentage' ? 'Percent (%)' : `Amount (${currency.symbol})`} *</label>
+                  <input type="number" value={newDiscount.amount || ''} onChange={e => setNewDiscount({ ...newDiscount, amount: parseFloat(e.target.value) || 0 })} className="form-input" placeholder={newDiscount.type === 'percentage' ? '10' : '0.00'} min="0" max={newDiscount.type === 'percentage' ? 100 : undefined} />
                 </div>
-                <button 
-                  onClick={async () => {
-                    if (!newDiscount.classId || newDiscount.amount <= 0) {
-                      addToast('Please select a class and enter amount', 'error');
-                      return;
-                    }
-                    const cls = classes.find(c => c.id === newDiscount.classId);
-                    const discount: Discount = {
-                      id: uuidv4(),
-                      classId: newDiscount.classId,
-                      className: cls ? cls.name : 'Unknown',
-                      amount: newDiscount.amount,
-                      type: newDiscount.type,
-                      term: selectedTerm,
-                      year: selectedYear,
-                      createdAt: new Date().toISOString(),
-                    };
-                    await dataService.create(user!.id, 'discounts', discount as any);
-                    setNewDiscount({ classId: '', amount: 0, type: 'fixed' });
-                    addToast('Discount added successfully', 'success');
-                  }}
-                  className="btn btn-primary"
-                >
-                  <Plus size={16} /> Add
-                </button>
               </div>
+              <button
+                onClick={async () => {
+                  if (!newDiscount.studentId || newDiscount.amount <= 0) { addToast('Select a student and enter amount', 'error'); return; }
+                  const id = schoolId || user?.id; if (!id) return;
+                  const student = students.find(s => s.id === newDiscount.studentId);
+                  const now = new Date().toISOString();
+                  const existing = discounts.find(d => d.studentId === newDiscount.studentId && String(d.term) === String(selectedTerm) && String(d.year) === String(selectedYear));
+                  if (existing) await dataService.delete(id, 'discounts', existing.id);
+                  await dataService.create(id, 'discounts', { id: uuidv4(), studentId: newDiscount.studentId, studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown', amount: newDiscount.amount, type: newDiscount.type, term: selectedTerm, year: selectedYear, createdAt: now } as any);
+                  const studentFee = fees.find(f => f.studentId === newDiscount.studentId && String(f.term) === String(selectedTerm) && String(f.year) === String(selectedYear));
+                  if (studentFee) {
+                    const discAmt = newDiscount.type === 'percentage' ? (studentFee.amount * newDiscount.amount) / 100 : newDiscount.amount;
+                    const newAmt = Math.max(0, studentFee.amount - discAmt);
+                    const label = newDiscount.type === 'percentage' ? `${newDiscount.amount}% off` : formatMoney(discAmt);
+                    await dataService.update(id, 'fees', studentFee.id, { amount: newAmt, description: (studentFee.description || 'School Fees') + ` (Discount: ${label})` } as any);
+                    addToast(`Discount applied � invoice updated to ${formatMoney(newAmt)}`, 'success');
+                  } else { addToast('Discount saved. Will apply when invoice is created.', 'success'); }
+                  setNewDiscount({ studentId: '', amount: 0, type: 'fixed' });
+                }}
+                className="btn btn-primary"
+              >
+                <Plus size={15} /> Apply Discount
+              </button>
             </div>
 
-            <div className="p-5 max-h-[40vh] overflow-y-auto">
+            <div className="p-5 max-h-[35vh] overflow-y-auto">
               {discounts.length === 0 ? (
-                <div className="text-center py-8">
-                  <Percent size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-                  <p className="text-slate-500 font-medium">No discounts added</p>
-                  <p className="text-sm text-slate-400 mt-1">Add discounts to reduce class invoiced amounts</p>
-                </div>
+                <div className="text-center py-8 text-slate-400"><Percent size={36} className="mx-auto mb-2 opacity-40" /><p className="text-sm">No discounts yet</p></div>
               ) : (
                 <div className="space-y-2">
                   {discounts.map(d => (
                     <div key={d.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                       <div>
-                        <p className="font-medium text-slate-800 dark:text-white">{d.className}</p>
-                        <p className="text-xs text-slate-500">Term {d.term}, {d.year}</p>
+                        <p className="font-medium text-slate-800 dark:text-white">{(d as any).studentName || d.className || '�'}</p>
+                        <p className="text-xs text-slate-500">Term {d.term} {d.year}</p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="font-bold text-cyan-600">
-                          {d.type === 'percentage' ? `${d.amount}%` : formatMoney(d.amount)}
-                        </span>
-                        <button
-                          onClick={async () => {
-                            await dataService.delete(user!.id, 'discounts', d.id);
-                            addToast('Discount removed', 'success');
-                          }}
-                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <span className="font-bold text-cyan-600">{d.type === 'percentage' ? `${d.amount}%` : formatMoney(d.amount)}</span>
+                        <button onClick={async () => { await dataService.delete(user!.id, 'discounts', d.id); addToast('Discount removed', 'success'); }} className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><Trash2 size={14} /></button>
                       </div>
                     </div>
                   ))}
@@ -1973,12 +1932,63 @@ export default function Invoices() {
               )}
             </div>
 
-            <div className="p-5 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-              <div className="flex justify-between items-center">
-                <p className="font-medium text-slate-700 dark:text-slate-300">
-                  Total Discount Value: <span className="text-cyan-600 font-bold">{formatMoney(discounts.reduce((sum, d) => d.type === 'percentage' ? sum : sum + d.amount, 0))}</span>
-                </p>
-                <button onClick={() => setShowDiscountModal(false)} className="btn btn-secondary">Close</button>
+            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Total fixed: <span className="text-cyan-600 font-bold">{formatMoney(discounts.reduce((s, d) => d.type === 'percentage' ? s : s + d.amount, 0))}</span></p>
+              <button onClick={() => setShowDiscountModal(false)} className="btn btn-secondary">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invoice Payment Modal */}
+      {invoicePayModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setInvoicePayModal(null); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <CheckIcon size={18} /> Record Payment
+              </h3>
+              <button onClick={() => setInvoicePayModal(null)} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+                <XCircle size={18} className="text-white" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 space-y-1">
+                <p className="text-sm font-semibold text-slate-800 dark:text-white">{invoicePayModal.studentName}</p>
+                <p className="text-xs text-slate-500">{invoicePayModal.description}</p>
+                <p className="text-xs text-slate-500">Remaining: <span className="font-semibold text-slate-700 dark:text-slate-200">{formatMoney(invoicePayModal.remaining)}</span></p>
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Amount</label>
+                <input
+                  type="number"
+                  value={invoicePayAmount}
+                  onChange={e => setInvoicePayAmount(e.target.value)}
+                  className="form-input"
+                  placeholder="Enter amount"
+                  min="0"
+                  step="0.01"
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Method</label>
+                <select value={invoicePayMethod} onChange={e => setInvoicePayMethod(e.target.value)} className="form-input">
+                  <option value={PaymentMethod.CASH}>Cash</option>
+                  <option value={PaymentMethod.BANK_TRANSFER}>Bank Transfer</option>
+                </select>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setInvoicePayModal(null)} className="btn btn-secondary flex-1" disabled={isRecordingInvoicePayment}>Cancel</button>
+                <button
+                  onClick={submitInvoicePayment}
+                  disabled={isRecordingInvoicePayment || !invoicePayAmount || isNaN(parseFloat(invoicePayAmount)) || parseFloat(invoicePayAmount) <= 0}
+                  className="btn btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-70"
+                >
+                  {isRecordingInvoicePayment
+                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
+                    : <><CheckIcon size={16} /> Record</>}
+                </button>
               </div>
             </div>
           </div>

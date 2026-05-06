@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash } from 'lucide-react';
+﻿import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash, Clock, Calendar } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class } from '@schofy/shared';
 import { generateUUID } from '../utils/uuid';
@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
 const classColors = [
   { card: 'card-coral-light', gradient: 'from-orange-100 to-amber-100', text: 'text-orange-600' },
@@ -29,6 +30,7 @@ function getClassColor(index: number) {
 export default function Classes() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
+  const confirm = useConfirm();
   const { data: classesData, loading } = useTableData(sid, 'classes');
   const { data: allStudentsData } = useTableData(sid, 'students');
 
@@ -65,6 +67,70 @@ export default function Classes() {
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
   const clickTimeoutRef = useRef<number | null>(null);
   const [selectMode, setSelectMode] = useState(false);
+
+  // Timetable state
+  const { data: subjectsData } = useTableData(sid, 'subjects');
+  const { data: staffData } = useTableData(sid, 'staff');
+  const { data: timetableData } = useTableData(sid, 'timetable');
+  const [showTimetable, setShowTimetable] = useState(false);
+  const [timetableClassId, setTimetableClassId] = useState('');
+  const [ttForm, setTtForm] = useState({ subjectId: '', teacherId: '', dayOfWeek: '1', startTime: '08:00', endTime: '09:00' });
+  const [ttSaving, setTtSaving] = useState(false);
+
+  const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  const timetableForClass = useMemo(() =>
+    (timetableData as any[]).filter(t => t.classId === timetableClassId)
+      .sort((a: any, b: any) => Number(a.dayOfWeek) - Number(b.dayOfWeek) || a.startTime.localeCompare(b.startTime)),
+    [timetableData, timetableClassId]
+  );
+
+  function timeToMins(t: string) {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  function detectCollision(day: string, start: string, end: string, excludeId?: string) {
+    const s = timeToMins(start), e = timeToMins(end);
+    return timetableForClass.filter(t => {
+      if (excludeId && t.id === excludeId) return false;
+      if (String(t.dayOfWeek) !== String(day)) return false;
+      const ts = timeToMins(t.startTime), te = timeToMins(t.endTime);
+      return s < te && e > ts;
+    });
+  }
+
+  async function handleAddTimetable() {
+    if (!ttForm.subjectId || !ttForm.startTime || !ttForm.endTime) {
+      addToast('Select subject, start and end time', 'error'); return;
+    }
+    if (timeToMins(ttForm.endTime) <= timeToMins(ttForm.startTime)) {
+      addToast('End time must be after start time', 'error'); return;
+    }
+    const collisions = detectCollision(ttForm.dayOfWeek, ttForm.startTime, ttForm.endTime);
+    if (collisions.length > 0) {
+      const sub = (subjectsData as any[]).find(s => s.id === collisions[0].subjectId);
+      addToast(`Time collision with ${sub?.name || 'another subject'} (${collisions[0].startTime}–${collisions[0].endTime})`, 'error');
+      return;
+    }
+    setTtSaving(true);
+    try {
+      await dataService.create(sid, 'timetable', {
+        id: generateUUID(), classId: timetableClassId,
+        subjectId: ttForm.subjectId, teacherId: ttForm.teacherId || null,
+        dayOfWeek: ttForm.dayOfWeek, startTime: ttForm.startTime, endTime: ttForm.endTime,
+        createdAt: new Date().toISOString(),
+      } as any);
+      setTtForm(p => ({ ...p, subjectId: '', teacherId: '' }));
+      addToast('Period added', 'success');
+    } catch { addToast('Failed to add period', 'error'); }
+    finally { setTtSaving(false); }
+  }
+
+  async function handleDeleteTimetable(id: string) {
+    await dataService.delete(sid, 'timetable', id);
+    addToast('Period removed', 'success');
+  }
 
   const classExpectedFields = [
     { key: 'name', label: 'Class Name', required: true },
@@ -117,7 +183,8 @@ export default function Classes() {
 
   async function handleBulkDelete() {
     if (selectedClasses.size === 0) return;
-    if (!window.confirm(`Are you sure you want to delete ${selectedClasses.size} class(es)?`)) return;
+    const ok = await confirm({ title: `Delete ${selectedClasses.size} Class(es)`, description: `Move ${selectedClasses.size} class(es) to the recycle bin?`, confirmLabel: 'Delete', variant: 'danger' });
+    if (!ok) return;
     const id = schoolId || user?.id;
     if (!id) return;
     
@@ -177,27 +244,25 @@ export default function Classes() {
   }
 
   async function handleDelete(id: string) {
-    if (window.confirm('Delete this class?')) {
-      const authId = schoolId || user?.id;
-      if (!authId) return;
-      try {
-        const classItem = classes.find(c => c.id === id);
-        await dataService.delete(authId, 'classes', id);
-        
-        if (classItem) {
-          addToRecycleBin(authId, {
-            id: `class-${Date.now()}`,
-            type: 'class',
-            name: classItem.name,
-            data: classItem,
-            deletedAt: new Date().toISOString()
-          });
-        }
-        
-        addToast('Class moved to recycle bin', 'success');
-      } catch (error) {
-        addToast('Failed to delete', 'error');
+    const ok = await confirm({ title: 'Delete Class', description: 'Move this class to the recycle bin?', confirmLabel: 'Delete', variant: 'danger' });
+    if (!ok) return;
+    const authId = schoolId || user?.id;
+    if (!authId) return;
+    try {
+      const classItem = classes.find(c => c.id === id);
+      await dataService.delete(authId, 'classes', id);
+      if (classItem) {
+        addToRecycleBin(authId, {
+          id: `class-${Date.now()}`,
+          type: 'class',
+          name: classItem.name,
+          data: classItem,
+          deletedAt: new Date().toISOString()
+        });
       }
+      addToast('Class moved to recycle bin', 'success');
+    } catch (error) {
+      addToast('Failed to delete', 'error');
     }
   }
 
@@ -244,16 +309,16 @@ export default function Classes() {
   }, []);
 
   function downloadTemplate() {
-    const headers = classExpectedFields.map(f => f.label);
-    const sampleRow = ['Primary 1', '1', '', '40'];
-    const csv = [headers.join(','), sampleRow.join(',')].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'class-import-template.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
-    addToast('Template downloaded', 'success');
+    import('xlsx').then(({ utils, writeFile }) => {
+      const headers = classExpectedFields.map(f => f.label);
+      const sampleRow = ['Primary 1', '1', '', '40'];
+      const ws = utils.aoa_to_sheet([headers, sampleRow]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Classes');
+      writeFile(wb, 'class-import-template.xlsx');
+      addToast('Template downloaded', 'success');
+    });
   }
 
   function closeImportModal() {
@@ -388,7 +453,7 @@ export default function Classes() {
             <Upload size={16} />
             <span className="hidden sm:inline">Import</span>
           </button>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".csv" className="hidden" />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls,.csv" className="hidden" />
           <button onClick={() => { setShowForm(true); setEditingClass(null); setFormData({ name: '', level: 1, stream: '', capacity: 40 }); }} className="btn btn-primary shadow-lg shadow-primary-500/25">
             <Plus size={18} /> Add Class
           </button>
@@ -432,59 +497,42 @@ export default function Classes() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-emerald-200 dark:border-emerald-800">
-          <div className="card-header bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20">
-            <h3 className="font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-              <GraduationCap size={20} />
-              {editingClass ? 'Edit Class' : 'Add New Class'}
-            </h3>
-          </div>
-          <form onSubmit={handleSubmit} className="card-body grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="space-y-2">
-              <label className="form-label">Class Name</label>
-              <input 
-                value={formData.name} 
-                onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} 
-                className="form-input" 
-                required 
-                placeholder="Primary 1" 
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="form-label">Level</label>
-              <input 
-                type="number" 
-                value={formData.level} 
-                onChange={e => setFormData(prev => ({ ...prev, level: parseInt(e.target.value) }))} 
-                className="form-input" 
-                min="1" 
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="form-label">Stream</label>
-              <input 
-                value={formData.stream} 
-                onChange={e => setFormData(prev => ({ ...prev, stream: e.target.value }))} 
-                className="form-input" 
-                placeholder="A, B, C..." 
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="form-label">Capacity</label>
-              <input 
-                type="number" 
-                value={formData.capacity} 
-                onChange={e => setFormData(prev => ({ ...prev, capacity: parseInt(e.target.value) }))} 
-                className="form-input" 
-              />
-            </div>
-            <div className="md:col-span-4 flex gap-2">
-              <button type="submit" className="btn btn-primary">
-                <GraduationCap size={16} /> {editingClass ? 'Update' : 'Save'}
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) { setShowForm(false); setEditingClass(null); } }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <GraduationCap size={20} />
+                {editingClass ? 'Edit Class' : 'Add New Class'}
+              </h3>
+              <button onClick={() => { setShowForm(false); setEditingClass(null); }} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
               </button>
-              <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
             </div>
-          </form>
+            <form onSubmit={handleSubmit} className="p-5 grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="form-label">Class Name</label>
+                <input value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="form-input" required placeholder="Primary 1" />
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Level</label>
+                <input type="number" value={formData.level} onChange={e => setFormData(prev => ({ ...prev, level: parseInt(e.target.value) }))} className="form-input" min="1" />
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Stream</label>
+                <input value={formData.stream} onChange={e => setFormData(prev => ({ ...prev, stream: e.target.value }))} className="form-input" placeholder="A, B, C..." />
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Capacity</label>
+                <input type="number" value={formData.capacity} onChange={e => setFormData(prev => ({ ...prev, capacity: parseInt(e.target.value) }))} className="form-input" />
+              </div>
+              <div className="col-span-2 flex gap-2 pt-2">
+                <button type="submit" className="btn btn-primary flex-1">
+                  <GraduationCap size={16} /> {editingClass ? 'Update' : 'Save'}
+                </button>
+                <button type="button" onClick={() => { setShowForm(false); setEditingClass(null); }} className="btn btn-secondary">Cancel</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -565,6 +613,13 @@ export default function Classes() {
                   {!selectMode && (
                     <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
                       <button
+                        onClick={() => { setTimetableClassId(c.id); setShowTimetable(true); }}
+                        className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 rounded-lg transition-colors"
+                        title="Timetable"
+                      >
+                        <Clock size={15} />
+                      </button>
+                      <button
                         onClick={() => handleEdit(c)}
                         className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 rounded-lg transition-colors"
                         title="Edit"
@@ -612,6 +667,110 @@ export default function Classes() {
           >
             Cancel
           </button>
+        </div>
+      )}
+
+      {/* Timetable Modal */}
+      {showTimetable && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <Calendar size={18} className="text-white" />
+                <h2 className="font-bold text-white">
+                  Timetable — {classes.find(c => c.id === timetableClassId)?.name || ''}
+                </h2>
+              </div>
+              <button onClick={() => setShowTimetable(false)} className="p-1 hover:bg-white/20 rounded-lg text-white"><X size={18} /></button>
+            </div>
+
+            {/* Add period form */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 shrink-0">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="form-label">Day</label>
+                  <select value={ttForm.dayOfWeek} onChange={e => setTtForm(p => ({ ...p, dayOfWeek: e.target.value }))} className="form-input">
+                    {DAYS.map((d, i) => <option key={i} value={String(i + 1)}>{d}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Subject *</label>
+                  <select value={ttForm.subjectId} onChange={e => setTtForm(p => ({ ...p, subjectId: e.target.value }))} className="form-input">
+                    <option value="">— Select —</option>
+                    {(subjectsData as any[]).filter(s => s.classId === timetableClassId).map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Teacher</label>
+                  <select value={ttForm.teacherId} onChange={e => setTtForm(p => ({ ...p, teacherId: e.target.value }))} className="form-input">
+                    <option value="">— Optional —</option>
+                    {(staffData as any[]).filter(s => s.role === 'teacher' || s.role === 'Teacher').map(s => (
+                      <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Start Time *</label>
+                  <input type="time" value={ttForm.startTime} onChange={e => setTtForm(p => ({ ...p, startTime: e.target.value }))} className="form-input" />
+                </div>
+                <div>
+                  <label className="form-label">End Time *</label>
+                  <input type="time" value={ttForm.endTime} onChange={e => setTtForm(p => ({ ...p, endTime: e.target.value }))} className="form-input" />
+                </div>
+                <div className="flex items-end">
+                  <button onClick={handleAddTimetable} disabled={ttSaving} className="btn btn-primary w-full">
+                    <Plus size={15} /> {ttSaving ? 'Adding...' : 'Add Period'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Timetable grid */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {timetableForClass.length === 0 ? (
+                <div className="text-center py-10 text-slate-400">
+                  <Clock size={32} className="mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">No periods yet. Add the first one above.</p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {DAYS.map((day, di) => {
+                    const periods = timetableForClass.filter(t => String(t.dayOfWeek) === String(di + 1));
+                    if (periods.length === 0) return null;
+                    return (
+                      <div key={di}>
+                        <div className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1 py-1.5">{day}</div>
+                        <div className="space-y-1">
+                          {periods.map((t: any) => {
+                            const sub = (subjectsData as any[]).find(s => s.id === t.subjectId);
+                            const teacher = (staffData as any[]).find(s => s.id === t.teacherId);
+                            return (
+                              <div key={t.id} className="flex items-center gap-3 px-3 py-2 bg-white dark:bg-slate-700 rounded-lg border border-slate-100 dark:border-slate-600">
+                                <div className="w-20 text-xs font-mono text-slate-500 shrink-0">{t.startTime}–{t.endTime}</div>
+                                <div className="flex-1 min-w-0">
+                                  <span className="font-medium text-slate-800 dark:text-white text-sm">{sub?.name || '—'}</span>
+                                  {teacher && <span className="text-xs text-slate-400 ml-2">{teacher.firstName} {teacher.lastName}</span>}
+                                </div>
+                                <button onClick={() => handleDeleteTimetable(t.id)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors">
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end shrink-0">
+              <button onClick={() => setShowTimetable(false)} className="btn btn-secondary">Close</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -665,18 +824,44 @@ export default function Classes() {
                   </div>
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {classExpectedFields.filter(f => f.required).map(field => (
-                          <tr key={field.key}>
-                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">{field.label}*</td>
-                            <td className="px-2 py-1.5">
-                              <select value={fieldMapping[field.key] || ''} onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))} className="w-full form-input py-1 px-2 text-xs">
-                                <option value="">-- Skip --</option>
-                                {csvHeaders.map(header => (<option key={header} value={header}>{header}</option>))}
-                              </select>
-                            </td>
-                          </tr>
-                        ))}
+                        {csvHeaders.map((header, idx) => {
+                          const sample = csvData[0]?.[idx] || '';
+                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
+                          return (
+                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
+                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
+                              <td className="px-3 py-2">
+                                <select
+                                  value={currentMapping}
+                                  onChange={e => {
+                                    const newKey = e.target.value;
+                                    setFieldMapping(prev => {
+                                      const next = { ...prev };
+                                      Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; });
+                                      if (newKey) next[newKey] = header;
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-full form-input py-1 px-2 text-xs"
+                                >
+                                  <option value="">— Skip —</option>
+                                  {classExpectedFields.map(f => (
+                                    <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
+                                  ))}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

@@ -74,10 +74,27 @@ export default function ExamMarks() {
     });
   }, [exams, filterTerm, filterClass, allStudents, examResults]);
 
+  // Deduplicated exam options for the dropdown — group by name+term+year
+  const dedupedExamOptions = useMemo(() => {
+    const seen = new Map<string, any>();
+    for (const e of availableExams) {
+      const key = `${e.name}||${e.term}||${e.year}`;
+      if (!seen.has(key)) seen.set(key, e);
+    }
+    return Array.from(seen.values());
+  }, [availableExams]);
+
+  // When a deduped exam is selected, include ALL exam IDs with the same name+term+year
   const activeExamIds = useMemo(() => {
     const base = availableExams.map((e: any) => e.id);
-    if (filterExam) return base.includes(filterExam) ? [filterExam] : [];
-    return base;
+    if (!filterExam) return base;
+    // Find the selected exam's name+term+year
+    const sel = availableExams.find((e: any) => e.id === filterExam);
+    if (!sel) return base.includes(filterExam) ? [filterExam] : [];
+    // Include all exams with same name+term+year
+    return availableExams
+      .filter((e: any) => e.name === sel.name && String(e.term) === String(sel.term) && String(e.year) === String(sel.year))
+      .map((e: any) => e.id);
   }, [availableExams, filterExam]);
 
   const classGroups = useMemo(() => {
@@ -429,14 +446,14 @@ export default function ExamMarks() {
           <label className="form-label">Exam</label>
           <select value={filterExam} onChange={e => setFilterExam(e.target.value)} className="form-input">
             <option value="">All Exams</option>
-            {availableExams.map((e: any) => <option key={e.id} value={e.id}>{e.name} · T{e.term} {e.year}</option>)}
+            {dedupedExamOptions.map((e: any) => <option key={e.id} value={e.id}>{e.name} · T{e.term} {e.year}</option>)}
           </select>
         </div>
         <div>
           <label className="form-label">Search Student</label>
           <div className="relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input value={searchStudent} onChange={e => setSearchStudent(e.target.value)} placeholder="Name or ID..." className="form-input pl-8" />
+            <Search size={16} className="search-input-icon" />
+            <input value={searchStudent} onChange={e => setSearchStudent(e.target.value)} placeholder="Name or ID..." className="search-input" />
           </div>
         </div>
       </div>

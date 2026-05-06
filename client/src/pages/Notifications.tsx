@@ -4,6 +4,7 @@ import { Notification } from '@schofy/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
 const typeConfig: Record<string, { bg: string; text: string; icon: any }> = {
   info: { bg: 'bg-blue-50', text: 'text-blue-600', icon: Info },
@@ -15,6 +16,7 @@ const typeConfig: Record<string, { bg: string; text: string; icon: any }> = {
 export default function Notifications() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
+  const confirm = useConfirm();
   const { data: rawNotifications, loading } = useTableData(sid, 'notifications');
   const notifications = useMemo(() =>
     [...rawNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
@@ -57,15 +59,15 @@ export default function Notifications() {
   async function clearAll() {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (window.confirm('Are you sure you want to delete all notifications?')) {
-      try {
-        const all = await dataService.getAll(id, 'notifications');
-        for (const notif of all) {
-          await dataService.delete(id, 'notifications', notif.id);
-        }
-      } catch (error) {
-        console.error('Failed to clear notifications:', error);
+    const ok = await confirm({ title: 'Clear All Notifications', description: 'Delete all notifications? This cannot be undone.', confirmLabel: 'Clear All', variant: 'danger' });
+    if (!ok) return;
+    try {
+      const all = await dataService.getAll(id, 'notifications');
+      for (const notif of all) {
+        await dataService.delete(id, 'notifications', notif.id);
       }
+    } catch (error) {
+      console.error('Failed to clear notifications:', error);
     }
   }
 

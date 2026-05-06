@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+﻿import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Plus, Megaphone, Clock, Trash2, AlertCircle, CheckCircle, Info, Bell, Pin, Edit2, X, Download, FileText, ChevronDown, Check, Trash, Search } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Announcement, Priority } from '@schofy/shared';
@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
+import { useConfirm } from '../components/ConfirmModal';
 
 const priorityConfig: Record<string, { 
   bg: string; 
@@ -54,6 +55,7 @@ const priorityConfig: Record<string, {
 export default function Announcements() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
+  const confirm = useConfirm();
   const { data: rawAnnouncements, loading } = useTableData(sid, 'announcements');
   const announcements = useMemo(() =>
     [...rawAnnouncements].sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()),
@@ -62,7 +64,7 @@ export default function Announcements() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ title: '', content: '', priority: Priority.MEDIUM });
+  const [formData, setFormData] = useState({ title: '', content: '', priority: Priority.MEDIUM, eventDate: '' });
   const { addToast } = useToast();
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -79,6 +81,7 @@ export default function Announcements() {
       title: announcement.title,
       content: announcement.content,
       priority: announcement.priority as Priority,
+      eventDate: (announcement as any).eventDate || '',
     });
     setShowForm(true);
   }
@@ -86,7 +89,7 @@ export default function Announcements() {
   function handleCancelEdit() {
     setEditingId(null);
     setShowForm(false);
-    setFormData({ title: '', content: '', priority: Priority.MEDIUM });
+    setFormData({ title: '', content: '', priority: Priority.MEDIUM, eventDate: '' });
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -104,7 +107,8 @@ export default function Announcements() {
         createdBy: 'admin',
         createdAt: announcements.find(a => a.id === editingId)?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      };
+        ...(formData.eventDate ? { eventDate: formData.eventDate } : {}),
+      } as any;
       addToast('Announcement updated', 'success');
       handleCancelEdit();
       const result = await dataService.update(id, 'announcements', editingId, updated as any);
@@ -118,7 +122,8 @@ export default function Announcements() {
         ...formData,
         createdBy: 'admin',
         createdAt: new Date().toISOString(),
-      };
+        ...(formData.eventDate ? { eventDate: formData.eventDate } : {}),
+      } as any;
       addToast('Announcement published', 'success');
       handleCancelEdit();
       const result = await dataService.create(id, 'announcements', newAnnouncement as any);
@@ -132,7 +137,9 @@ export default function Announcements() {
 
   async function handleDelete(idAnnouncement: string) {
     const id = schoolId || user?.id;
-    if (!id || !confirm('Delete this announcement?')) return;
+    if (!id) return;
+    const ok = await confirm({ title: 'Delete Announcement', description: 'Move this announcement to the recycle bin?', confirmLabel: 'Delete', variant: 'danger' });
+    if (!ok) return;
     const announcement = announcements.find(a => a.id === idAnnouncement);
     // Optimistic remove
     addToast('Announcement moved to recycle bin', 'success');
@@ -190,8 +197,8 @@ export default function Announcements() {
   async function handleBulkDelete() {
     const id = schoolId || user?.id;
     if (selectedAnnouncements.size === 0) return;
-    if (!window.confirm(`Are you sure you want to delete ${selectedAnnouncements.size} announcement(s)?`)) return;
-    if (!id) return;
+    const ok = await confirm({ title: `Delete ${selectedAnnouncements.size} Announcement(s)`, description: `Move ${selectedAnnouncements.size} announcement(s) to the recycle bin?`, confirmLabel: 'Delete All', variant: 'danger' });
+    if (!ok || !id) return;
     
     try {
       const now = new Date().toISOString();
@@ -297,7 +304,7 @@ export default function Announcements() {
               </div>
             )}
           </div>
-          <button onClick={() => { setShowForm(true); setEditingId(null); setFormData({ title: '', content: '', priority: Priority.MEDIUM }); }} className="btn btn-primary shadow-lg shadow-primary-500/25">
+          <button onClick={() => { setShowForm(true); setEditingId(null); setFormData({ title: '', content: '', priority: Priority.MEDIUM, eventDate: '' }); }} className="btn btn-primary shadow-lg shadow-primary-500/25">
             <Plus size={18} /> New Announcement
           </button>
         </div>
@@ -342,58 +349,47 @@ export default function Announcements() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-violet-200 dark:border-violet-800">
-          <div className="card-header bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-900/20 dark:to-purple-900/20 flex items-center justify-between">
-            <h3 className="font-bold text-violet-700 dark:text-violet-300 flex items-center gap-2">
-              {editingId ? <Edit2 size={20} /> : <Plus size={20} />}
-              {editingId ? 'Edit Announcement' : 'Create Announcement'}
-            </h3>
-            <button onClick={handleCancelEdit} className="p-1 hover:bg-violet-100 dark:hover:bg-violet-800 rounded-lg transition-colors">
-              <X size={18} className="text-violet-600 dark:text-violet-400" />
-            </button>
-          </div>
-          <form onSubmit={handleSubmit} className="card-body space-y-4">
-            <div className="space-y-2">
-              <label className="form-label">Title</label>
-              <input 
-                value={formData.title} 
-                onChange={e => setFormData(prev => ({ ...prev, title: e.target.value }))} 
-                className="form-input" 
-                required 
-                placeholder="Enter announcement title" 
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="form-label">Content</label>
-              <textarea 
-                value={formData.content} 
-                onChange={e => setFormData(prev => ({ ...prev, content: e.target.value }))} 
-                className="form-input" 
-                rows={4} 
-                required 
-                placeholder="Write your announcement..." 
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="form-label">Priority</label>
-              <select 
-                value={formData.priority} 
-                onChange={e => setFormData(prev => ({ ...prev, priority: e.target.value as Priority }))} 
-                className="form-input"
-              >
-                <option value={Priority.LOW}>Low - General info</option>
-                <option value={Priority.MEDIUM}>Medium - Important</option>
-                <option value={Priority.HIGH}>High - Urgent attention</option>
-                <option value={Priority.URGENT}>Urgent - Immediate action</option>
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <button type="submit" className="btn btn-primary">
-                {editingId ? <><Edit2 size={16} /> Update</> : <><Megaphone size={16} /> Publish</>}
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) handleCancelEdit(); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <h3 className="font-bold text-white flex items-center gap-2">
+                {editingId ? <Edit2 size={20} /> : <Plus size={20} />}
+                {editingId ? 'Edit Announcement' : 'Create Announcement'}
+              </h3>
+              <button onClick={handleCancelEdit} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
               </button>
-              <button type="button" onClick={handleCancelEdit} className="btn btn-secondary">Cancel</button>
             </div>
-          </form>
+            <form onSubmit={handleSubmit} className="p-5 space-y-4">
+              <div className="space-y-2">
+                <label className="form-label">Title</label>
+                <input value={formData.title} onChange={e => setFormData(prev => ({ ...prev, title: e.target.value }))} className="form-input" required placeholder="Enter announcement title" />
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Content</label>
+                <textarea value={formData.content} onChange={e => setFormData(prev => ({ ...prev, content: e.target.value }))} className="form-input" rows={4} required placeholder="Write your announcement..." />
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Priority</label>
+                <select value={formData.priority} onChange={e => setFormData(prev => ({ ...prev, priority: e.target.value as Priority }))} className="form-input">
+                  <option value={Priority.LOW}>Low - General info</option>
+                  <option value={Priority.MEDIUM}>Medium - Important</option>
+                  <option value={Priority.HIGH}>High - Urgent attention</option>
+                  <option value={Priority.URGENT}>Urgent - Immediate action</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="form-label">Event Date <span className="text-slate-400 font-normal text-xs">(optional — shows on calendar)</span></label>
+                <input type="date" value={formData.eventDate} onChange={e => setFormData(prev => ({ ...prev, eventDate: e.target.value }))} className="form-input" />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="submit" className="btn btn-primary flex-1">
+                  {editingId ? <><Edit2 size={16} /> Update</> : <><Megaphone size={16} /> Publish</>}
+                </button>
+                <button type="button" onClick={handleCancelEdit} className="btn btn-secondary">Cancel</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -426,7 +422,7 @@ export default function Announcements() {
             <p className="text-slate-500 font-medium mt-4">{searchTerm ? 'No announcements found' : 'No announcements yet'}</p>
             <p className="text-slate-400 text-sm mt-1">{searchTerm ? 'Try a different search term' : 'Create your first announcement to notify everyone'}</p>
             {!searchTerm && (
-              <button onClick={() => { setShowForm(true); setEditingId(null); setFormData({ title: '', content: '', priority: Priority.MEDIUM }); }} className="btn btn-primary mt-4">
+              <button onClick={() => { setShowForm(true); setEditingId(null); setFormData({ title: '', content: '', priority: Priority.MEDIUM, eventDate: '' }); }} className="btn btn-primary mt-4">
                 <Plus size={16} /> Create Announcement
               </button>
             )}
@@ -511,6 +507,11 @@ export default function Announcements() {
                           minute: '2-digit'
                         })}
                       </span>
+                      {(a as any).eventDate && (
+                        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-medium">
+                          📅 Event: {new Date((a as any).eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                      )}
                       <span className="flex items-center gap-1.5">
                         <div className="w-6 h-6 rounded-full bg-gradient-to-br from-violet-400 to-purple-400 flex items-center justify-center">
                           <span className="text-[10px] font-bold text-white">A</span>

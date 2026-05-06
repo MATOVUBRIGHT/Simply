@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+﻿import { useEffect, useState, useRef, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -349,28 +349,28 @@ export default function StaffPage() {
   }, []);
 
   function downloadTemplate() {
-    const headers = staffExpectedFields.map(f => f.label);
-    const sampleRow = staffExpectedFields.map(f => {
-      switch (f.key) {
-        case 'employeeId': return 'EMP-001';
-        case 'firstName': return 'John';
-        case 'lastName': return 'Doe';
-        case 'role': return 'teacher';
-        case 'department': return 'Academic';
-        case 'phone': return '0771234567';
-        case 'email': return 'john.doe@school.com';
-        case 'address': return '123 Main Street';
-        default: return '';
-      }
+    import('xlsx').then(({ utils, writeFile }) => {
+      const headers = staffExpectedFields.map(f => f.label);
+      const sampleRow = staffExpectedFields.map(f => {
+        switch (f.key) {
+          case 'employeeId': return 'EMP-001';
+          case 'firstName': return 'John';
+          case 'lastName': return 'Doe';
+          case 'role': return 'teacher';
+          case 'department': return 'Academic';
+          case 'phone': return '0771234567';
+          case 'email': return 'john.doe@school.com';
+          case 'address': return '123 Main Street';
+          default: return '';
+        }
+      });
+      const ws = utils.aoa_to_sheet([headers, sampleRow]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Staff');
+      writeFile(wb, 'staff-import-template.xlsx');
+      addToast('Template downloaded', 'success');
     });
-    const csv = [headers.join(','), sampleRow.join(',')].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'staff-import-template.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
-    addToast('Template downloaded', 'success');
   }
 
   function closeImportModal() {
@@ -387,19 +387,30 @@ export default function StaffPage() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) {
-        addToast('CSV must have headers and at least one data row', 'error');
-        return;
+      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+      let headers: string[];
+      let data: string[][];
+
+      if (isExcel) {
+        const { read, utils } = await import('xlsx');
+        const buffer = await file.arrayBuffer();
+        const wb = read(buffer);
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+        if (rows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+        headers = rows[0].map((h: any) => String(h ?? ''));
+        data = rows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '')));
+      } else {
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+        if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
+        headers = parseCSVHeaders(lines[0]);
+        data = lines.slice(1).map(line => parseCSVLine(line));
       }
-      const headers = parseCSVHeaders(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
-      setCsvHeaders(headers);
-      setCsvData(data);
+
       const autoMapping: Record<string, string> = {};
       staffExpectedFields.forEach(field => {
-        const matchingHeader = headers.find(h => 
+        const matchingHeader = headers.find(h =>
           h.toLowerCase() === field.label.toLowerCase() ||
           h.toLowerCase() === field.key.toLowerCase() ||
           h.toLowerCase().includes(field.key.toLowerCase()) ||
@@ -407,11 +418,13 @@ export default function StaffPage() {
         );
         if (matchingHeader) autoMapping[field.key] = matchingHeader;
       });
+      setCsvHeaders(headers);
+      setCsvData(data);
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
     } catch (error) {
-      addToast('Failed to read CSV file', 'error');
+      addToast('Failed to read file', 'error');
     }
     event.target.value = '';
   }
@@ -545,7 +558,7 @@ export default function StaffPage() {
             <Upload size={16} />
             <span className="hidden sm:inline">Import</span>
           </button>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".csv" className="hidden" />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls,.csv" className="hidden" />
           <Link to="/staff/new" className="btn btn-primary">
             <Plus size={16} />
             Add Staff
@@ -920,18 +933,30 @@ export default function StaffPage() {
                   </div>
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {staffExpectedFields.filter(f => f.required).map(field => (
-                          <tr key={field.key}>
-                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">{field.label}*</td>
-                            <td className="px-2 py-1.5">
-                              <select value={fieldMapping[field.key] || ''} onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))} className="w-full form-input py-1 px-2 text-xs">
-                                <option value="">-- Skip --</option>
-                                {csvHeaders.map(header => (<option key={header} value={header}>{header}</option>))}
-                              </select>
-                            </td>
-                          </tr>
-                        ))}
+                        {csvHeaders.map((header, idx) => {
+                          const sample = csvData[0]?.[idx] || '';
+                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
+                          return (
+                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
+                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
+                              <td className="px-3 py-2">
+                                <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
+                                  <option value="">— Skip —</option>
+                                  {staffExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

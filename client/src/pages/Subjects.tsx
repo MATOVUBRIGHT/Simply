@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
-import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, ChevronRight, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash, Pencil } from 'lucide-react';
+﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, ChevronRight, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash, Pencil, Search } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class, Subject } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -165,12 +165,12 @@ export default function Subjects() {
     if (schoolType.includes('nursery')) levels.push({ key: 'nursery', label: 'Nursery' });
     if (schoolType.includes('primary') || schoolType === 'nursery_primary') levels.push({ key: 'primary', label: 'Primary' });
     if (schoolType.includes('secondary') || schoolType === 'primary_secondary') {
-      levels.push({ key: 'jss', label: 'S.1–S.4 (JSS)' });
-      levels.push({ key: 'ss', label: 'S.5–S.6 (SS)' });
+      levels.push({ key: 'jss', label: 'S.1ΓÇôS.4 (JSS)' });
+      levels.push({ key: 'ss', label: 'S.5ΓÇôS.6 (SS)' });
     }
     if (schoolType === 'all') {
-      levels.push({ key: 'jss', label: 'S.1–S.4 (JSS)' });
-      levels.push({ key: 'ss', label: 'S.5–S.6 (SS)' });
+      levels.push({ key: 'jss', label: 'S.1ΓÇôS.4 (JSS)' });
+      levels.push({ key: 'ss', label: 'S.5ΓÇôS.6 (SS)' });
     }
     return levels;
   })();
@@ -396,7 +396,7 @@ export default function Subjects() {
         addToast('Subject already exists for all selected classes', 'warning');
         return;
       }
-      // Fire all creates in parallel — optimistic cache updates happen immediately
+      // Fire all creates in parallel ΓÇö optimistic cache updates happen immediately
       await Promise.all(newSubjects.map(s => dataService.create(id, 'subjects', s as any)));
       resetSubjectForm();
       addToast(`Added "${name}" to ${newSubjects.length} class${newSubjects.length > 1 ? 'es' : ''}`, 'success');
@@ -569,7 +569,7 @@ export default function Subjects() {
   const primaryCount = [...new Set(subjects.filter(s => getClassLevel(s.classId) === 'primary').map(s => s.name))].length;
   const secondaryCount = [...new Set(subjects.filter(s => ['jss','ss'].includes(getClassLevel(s.classId))).map(s => s.name))].length;
 
-  // Group subjects by name — one row per subject, showing all assigned classes
+  // Group subjects by name ΓÇö one row per subject, showing all assigned classes
   const groupedSubjects = useMemo(() => {
     const map = new Map<string, { name: string; code: string; ids: string[]; classIds: string[] }>();
     for (const s of subjects) {
@@ -749,7 +749,7 @@ export default function Subjects() {
                 <Book size={18} className="text-white" />
                 <h3 className="font-bold text-white">Add Subject</h3>
               </div>
-              <button onClick={resetSubjectForm} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">✕</button>
+              <button onClick={resetSubjectForm} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">Γ£ò</button>
             </div>
 
             <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden">
@@ -771,7 +771,7 @@ export default function Subjects() {
                       }}
                       className="form-input"
                     >
-                      <option value="">— Select subject —</option>
+                      <option value="">ΓÇö Select subject ΓÇö</option>
                       {ugandaSubjects[selectedLevel].map(s => (
                         <option key={s.name} value={s.name}>{s.name}</option>
                       ))}
@@ -792,7 +792,7 @@ export default function Subjects() {
                       />
                       {formData.customSubject && (
                         <button type="button" onClick={() => setFormData(prev => ({ ...prev, name: '', code: '', customSubject: false }))}
-                          className="btn btn-secondary text-xs px-3">← Presets</button>
+                          className="btn btn-secondary text-xs px-3">ΓåÉ Presets</button>
                       )}
                     </div>
                   )}
@@ -834,7 +834,7 @@ export default function Subjects() {
                     <div className="flex gap-2">
                       <button type="button" onClick={() => setSelectedClassIds(classesForSelectedLevel.map(c => c.id))}
                         className="text-xs text-primary-600 dark:text-primary-400 hover:underline">All</button>
-                      <span className="text-slate-300">·</span>
+                      <span className="text-slate-300">┬╖</span>
                       <button type="button" onClick={() => setSelectedClassIds([])}
                         className="text-xs text-slate-500 hover:underline">None</button>
                     </div>
@@ -886,20 +886,20 @@ export default function Subjects() {
               <div>
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white">All Subjects</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {subjectsByClass.length} class{subjectsByClass.length !== 1 ? 'es' : ''} · {subjects.length} subject entr{subjects.length !== 1 ? 'ies' : 'y'}
+                  {subjectsByClass.length} class{subjectsByClass.length !== 1 ? 'es' : ''} ┬╖ {subjects.length} subject entr{subjects.length !== 1 ? 'ies' : 'y'}
                   {searchTerm ? ` matching "${searchTerm}"` : ''}
                 </p>
               </div>
             </div>
-            <div className="relative w-64">
+            <div className="relative w-64 min-w-0">
+              <Search size={18} className="search-input-icon" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
                 placeholder="Search subjects..."
-                className="form-input pl-9 py-2 text-sm"
+                className="search-input"
               />
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
             </div>
           </div>
         </div>
@@ -1009,7 +1009,7 @@ export default function Subjects() {
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Pencil size={18} className="text-white" />
-                <h3 className="font-bold text-white">Edit Subject — {editGroup.name}</h3>
+                <h3 className="font-bold text-white">Edit Subject ΓÇö {editGroup.name}</h3>
               </div>
               <button onClick={closeEditGroup} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>
             </div>
@@ -1046,7 +1046,7 @@ export default function Subjects() {
                     <div className="flex gap-2">
                       <button type="button" onClick={() => setEditClassIds(classes.map(c => c.id))}
                         className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">All</button>
-                      <span className="text-slate-300">·</span>
+                      <span className="text-slate-300">┬╖</span>
                       <button type="button" onClick={() => setEditClassIds([])}
                         className="text-xs text-slate-500 hover:underline">None</button>
                     </div>
