@@ -1,11 +1,12 @@
 /**
  * Global full-page confirm modal — blurs entire page, centered.
+ * Modern SaaS design: soft icon, clean typography, smooth animation.
  * Usage: const confirm = useConfirm(); await confirm({ title, description, confirmLabel, variant });
  */
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { AlertTriangle, Trash2, AlertCircle, Info } from 'lucide-react';
+import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
+import { AlertTriangle, Trash2, Info, CheckCircle } from 'lucide-react';
 
-export type ConfirmVariant = 'danger' | 'warning' | 'info';
+export type ConfirmVariant = 'danger' | 'warning' | 'info' | 'success';
 
 export interface ConfirmOptions {
   title: string;
@@ -29,77 +30,116 @@ interface PendingConfirm extends ConfirmOptions {
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<PendingConfirm | null>(null);
+  const [visible, setVisible] = useState(false);
 
   const confirm = useCallback((opts: ConfirmOptions): Promise<boolean> => {
     return new Promise(resolve => {
       setPending({ ...opts, resolve });
+      // Slight delay so the animation triggers after mount
+      requestAnimationFrame(() => setVisible(true));
     });
   }, []);
 
   function handleConfirm() {
-    pending?.resolve(true);
-    setPending(null);
+    setVisible(false);
+    setTimeout(() => { pending?.resolve(true); setPending(null); }, 180);
   }
 
   function handleCancel() {
-    pending?.resolve(false);
-    setPending(null);
+    setVisible(false);
+    setTimeout(() => { pending?.resolve(false); setPending(null); }, 180);
   }
+
+  // ESC key closes modal
+  useEffect(() => {
+    if (!pending) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') handleCancel(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [pending]);
 
   const variant = pending?.variant ?? 'warning';
 
-  const iconMap = {
-    danger: <Trash2 size={22} className="text-red-500" />,
-    warning: <AlertTriangle size={22} className="text-amber-500" />,
-    info: <Info size={22} className="text-blue-500" />,
+  const iconConfig = {
+    danger: {
+      icon: <Trash2 size={20} className="text-red-600" />,
+      bg: 'bg-red-100 dark:bg-red-900/30',
+      btn: 'bg-red-600 hover:bg-red-700 active:bg-red-800 text-white shadow-red-200 dark:shadow-red-900/30',
+    },
+    warning: {
+      icon: <AlertTriangle size={20} className="text-amber-600" />,
+      bg: 'bg-amber-100 dark:bg-amber-900/30',
+      btn: 'bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white shadow-amber-200 dark:shadow-amber-900/30',
+    },
+    info: {
+      icon: <Info size={20} className="text-blue-600" />,
+      bg: 'bg-blue-100 dark:bg-blue-900/30',
+      btn: 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-blue-200 dark:shadow-blue-900/30',
+    },
+    success: {
+      icon: <CheckCircle size={20} className="text-emerald-600" />,
+      bg: 'bg-emerald-100 dark:bg-emerald-900/30',
+      btn: 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white shadow-emerald-200 dark:shadow-emerald-900/30',
+    },
   };
 
-  const btnMap = {
-    danger: 'bg-red-600 hover:bg-red-700 text-white',
-    warning: 'bg-amber-500 hover:bg-amber-600 text-white',
-    info: 'bg-blue-600 hover:bg-blue-700 text-white',
-  };
+  const cfg = iconConfig[variant];
 
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
       {pending && (
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{
+            backgroundColor: visible ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0)',
+            backdropFilter: visible ? 'blur(4px)' : 'blur(0px)',
+            transition: 'background-color 0.2s ease, backdrop-filter 0.2s ease',
+          }}
           onClick={handleCancel}
         >
           <div
-            className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden"
+            className="bg-white dark:bg-slate-800 w-full max-w-[420px] overflow-hidden"
+            style={{
+              borderRadius: '20px',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.15), 0 4px 16px rgba(0,0,0,0.08)',
+              border: '1px solid rgba(0,0,0,0.06)',
+              transform: visible ? 'scale(1) translateY(0)' : 'scale(0.94) translateY(16px)',
+              opacity: visible ? 1 : 0,
+              transition: 'transform 0.22s cubic-bezier(0.34,1.56,0.64,1), opacity 0.18s ease',
+            }}
             onClick={e => e.stopPropagation()}
           >
-            <div className="p-6">
-              <div className="flex items-start gap-4 mb-5">
-                <div className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${
-                  variant === 'danger' ? 'bg-red-100 dark:bg-red-900/30' :
-                  variant === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' :
-                  'bg-blue-100 dark:bg-blue-900/30'
-                }`}>
-                  {iconMap[variant]}
+            <div className="p-7">
+              {/* Icon + Title */}
+              <div className="flex items-start gap-4 mb-4">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${cfg.bg}`}>
+                  {cfg.icon}
                 </div>
-                <div>
-                  <h3 className="font-bold text-slate-800 dark:text-white text-base leading-tight">
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <h3 className="font-bold text-slate-900 dark:text-white text-[17px] leading-snug">
                     {pending.title}
                   </h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                  <p className="text-[14px] text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
                     {pending.description}
                   </p>
                 </div>
               </div>
-              <div className="flex gap-2 justify-end">
+
+              {/* Actions */}
+              <div className="flex gap-3 justify-end mt-6">
                 <button
                   onClick={handleCancel}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 transition-colors"
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-200 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
+                  style={{ background: '#F3F4F6' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')}
+                  onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}
                 >
                   {pending.cancelLabel ?? 'Cancel'}
                 </button>
                 <button
                   onClick={handleConfirm}
-                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${btnMap[variant]}`}
+                  className={`px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] ${cfg.btn}`}
                 >
                   {pending.confirmLabel ?? 'Confirm'}
                 </button>
