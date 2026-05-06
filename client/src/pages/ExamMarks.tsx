@@ -1,11 +1,13 @@
-import { useState, useMemo, useRef } from 'react';
+﻿import { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Download, ArrowLeft, GraduationCap, Search, Check, Maximize2, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
-import { useStudents } from '../contexts/StudentsContext';
-import { exportToExcel } from '../utils/export';
+import { Portal } from '../components/Portal';
 
+    param($m)
+    $m.Value
+  
 function getGrade(score: number): string {
   if (score >= 90) return 'D1';
   if (score >= 85) return 'D2';
@@ -513,6 +515,7 @@ export default function ExamMarks() {
 
       {/* Full-screen modal for wide tables */}
       {fullViewGroup && (
+        <Portal>
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex flex-col print:hidden">
           <div className="flex items-center justify-between px-5 py-3 bg-teal-800 text-white shrink-0">
             <div>

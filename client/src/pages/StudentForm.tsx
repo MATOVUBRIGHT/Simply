@@ -8,9 +8,11 @@ import ImageUpload from '../components/ImageUpload';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
-import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
-import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, extractFormatFromId, IdFormat } from '../utils/idFormat';
+import { Portal } from '../components/Portal';
 
+    param($m)
+    $m.Value
+  
 interface CustomField { id: string; label: string; value: string; }
 interface Attachment { id: string; name: string; file: string; type: string; }
 
@@ -432,6 +434,7 @@ export default function StudentForm() {
 
       {/* ID Format Modal */}
       {showIdFormatModal && (
+        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowIdFormatModal(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>

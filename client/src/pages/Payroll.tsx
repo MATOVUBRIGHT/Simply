@@ -19,9 +19,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import DropdownModal from '../components/DropdownModal';
-import { useTableData } from '../lib/store';
-import { useConfirm } from '../components/ConfirmModal';
+import { Portal } from '../components/Portal';
 
+    param($m)
+    $m.Value
+  
 export default function Payroll() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
@@ -314,6 +316,7 @@ export default function Payroll() {
 
       {/* Generate Payroll Modal */}
       {showPayrollModal && (
+        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
           <div className="modal-card w-full max-w-md max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>

@@ -7,9 +7,11 @@ import { useCurrency } from '../hooks/useCurrency';
 import { exportToPDF, exportToCSV, exportToExcel } from '../utils/export';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/SupabaseDataService';
-import { useTableData } from '../lib/store';
+import { Portal } from '../components/Portal';
 
+    param($m)
+    $m.Value
+  
 export default function Finance() {
   const { user, schoolId } = useAuth();
   const [activeTab, setActiveTab] = useState<'students' | 'invoices' | 'payments'>('students');
@@ -487,6 +489,7 @@ export default function Finance() {
 
       {/* Import Modal - fixed inset-0 full-page blur */}
       {showImportModal && (
+        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -569,6 +572,7 @@ export default function Finance() {
 
       {/* Record Payment Modal */}
       {payModal && (
+        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setPayModal(null); }}>
           <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>

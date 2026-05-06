@@ -7,9 +7,11 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
-import { useTableData } from '../lib/store';
-import { useConfirm } from '../components/ConfirmModal';
+import { Portal } from '../components/Portal';
 
+    param($m)
+    $m.Value
+  
 const priorityConfig: Record<string, { 
   bg: string; 
   text: string; 
@@ -349,6 +351,7 @@ export default function Announcements() {
       </div>
 
       {showForm && (
+        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={e => { if (e.target === e.currentTarget) handleCancelEdit(); }}>
           <div className="w-full max-w-lg animate-modal-in" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
             <div className="p-7">

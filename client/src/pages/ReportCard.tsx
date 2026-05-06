@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Download, Settings, Check, Building, Palette, Layout, FileText as FileTextIcon, Eye, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useStudents } from '../contexts/StudentsContext';
-import { dataService } from '../lib/database/SupabaseDataService';
-import { useToast } from '../contexts/ToastContext';
+import { Portal } from '../components/Portal';
 
+    param($m)
+    $m.Value
+  
 // ── Grade helpers ─────────────────────────────────────────────────────────────
 function getGrade(score: number): string {
   if (score >= 90) return 'D1';
@@ -428,6 +430,7 @@ export default function ReportCard() {
 
       {/* ── Template Editor Modal ─────────────────────────────────────────── */}
       {showEditor && (
+        <Portal>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 print:hidden" onClick={() => setShowEditor(false)}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
 
@@ -438,6 +441,7 @@ export default function ReportCard() {
                 <X size={18} className="text-white" />
               </button>
             </div>
+
 
             {/* Tabs */}
             <div className="flex border-b border-slate-200 dark:border-slate-700 shrink-0 overflow-x-auto">

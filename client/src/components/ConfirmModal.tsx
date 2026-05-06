@@ -5,6 +5,7 @@
  */
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { AlertTriangle, Trash2, Info, CheckCircle } from 'lucide-react';
+import { Portal } from './Portal';
 
 export type ConfirmVariant = 'danger' | 'warning' | 'info' | 'success';
 
@@ -89,8 +90,9 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     <ConfirmContext.Provider value={confirm}>
       {children}
       {pending && (
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+        <Portal>
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           style={{
             backgroundColor: visible ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0)',
             backdropFilter: visible ? 'blur(4px)' : 'blur(0px)',
@@ -146,7 +148,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               </div>
             </div>
           </div>
-        </div>
+        </Portal>
       )}
     </ConfirmContext.Provider>
   );
