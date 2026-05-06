@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
@@ -137,14 +137,26 @@ export default function Finance() {
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
     try {
-      const lines = (await file.text()).split('\n').filter(l => l.trim());
-      if (lines.length < 2) { addToast('CSV needs headers + data', 'error'); return; }
-      const headers = parseCSVLine(lines[0]);
-      setCsvHeaders(headers); setCsvData(lines.slice(1).map(parseCSVLine));
+      const { read, utils } = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const wb = read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
+      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
+      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
+      setCsvHeaders(headers); setCsvData(data);
+      const norm = (s: string) => s.toLowerCase().replace(/[\s_()\-\/]/g, '').replace(/[^a-z0-9]/g, '');
+      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
       const auto: Record<string, string> = {};
-      paymentExpectedFields.forEach(f => { const h = headers.find(h => h.toLowerCase().includes(f.key.toLowerCase())); if (h) auto[f.key] = h; });
+      paymentExpectedFields.forEach(f => {
+        const nKey = norm(f.key); const nLabel = norm(f.label); const nCamel = camelWords(f.key);
+        const h = headers.find(h => { const nH = norm(h); return nH === nKey || nH === nLabel || nH === nCamel || nH.includes(nKey) || nKey.includes(nH) || nH.includes(nLabel) || nLabel.includes(nH); });
+        if (h) auto[f.key] = h;
+      });
       setFieldMapping(auto); setImportStep('map'); setShowImportModal(true);
-    } catch { addToast('Failed to read CSV', 'error'); }
+    } catch { addToast('Failed to read Excel file', 'error'); }
     e.target.value = '';
   }
 
@@ -261,7 +273,7 @@ export default function Finance() {
               <Upload size={16} /><span className="hidden sm:inline">Import</span>
             </button>
           )}
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls,.csv" className="hidden" />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls" className="hidden" />
         </div>
       </div>
 
@@ -364,7 +376,7 @@ export default function Finance() {
           </div>
         )}
 
-        {/* Invoices Tab — one row per student, expandable fee history */}
+        {/* Invoices Tab � one row per student, expandable fee history */}
         {activeTab === 'invoices' && (
           <div className="table-container">
             <table>
@@ -399,7 +411,7 @@ export default function Finance() {
                           <tr key={fee.id} className="bg-slate-50/70 dark:bg-slate-800/30">
                             <td></td>
                             <td colSpan={2} className="pl-8 text-sm text-slate-600 dark:text-slate-300">
-                              <span className="text-slate-400 mr-2">↳</span>{fee.description}
+                              <span className="text-slate-400 mr-2">?</span>{fee.description}
                               {fee.term && <span className="ml-2 badge badge-info text-[10px]">Term {fee.term}</span>}
                             </td>
                             <td className="text-sm">{formatMoney(fee.amount)}</td>
@@ -422,7 +434,7 @@ export default function Finance() {
           </div>
         )}
 
-        {/* Payments Tab — one row per student, expandable payment history */}
+        {/* Payments Tab � one row per student, expandable payment history */}
         {activeTab === 'payments' && (
           <div className="table-container">
             <table>
@@ -445,7 +457,7 @@ export default function Finance() {
                         <td className="font-medium">{student.firstName} {student.lastName}</td>
                         <td><span className="badge badge-info">{sp.length}</span></td>
                         <td className="font-bold text-emerald-600 dark:text-emerald-400">{formatMoney(total)}</td>
-                        <td className="text-slate-500 text-sm">{last ? new Date(last.date).toLocaleDateString() : '—'}</td>
+                        <td className="text-slate-500 text-sm">{last ? new Date(last.date).toLocaleDateString() : '�'}</td>
                       </tr>
                       {isExpanded && sp.map(p => {
                         const fee = fees.find(f => f.id === p.feeId);
@@ -454,10 +466,10 @@ export default function Finance() {
                           <tr key={p.id} className="bg-slate-50/70 dark:bg-slate-800/30">
                             <td></td>
                             <td colSpan={2} className="pl-8 text-sm text-slate-600 dark:text-slate-300">
-                              <span className="text-slate-400 mr-2">↳</span>
+                              <span className="text-slate-400 mr-2">?</span>
                               <span className="font-medium">{dt.toLocaleDateString()}</span>
                               <span className="text-slate-400 ml-1">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                              {fee && <span className="ml-2 text-slate-500">— {fee.description}</span>}
+                              {fee && <span className="ml-2 text-slate-500">� {fee.description}</span>}
                             </td>
                             <td className="text-sm font-semibold text-emerald-600">{formatMoney(p.amount)}</td>
                             <td><span className="badge badge-info capitalize text-[10px]">{p.method?.replace('_', ' ')}</span></td>
@@ -473,7 +485,7 @@ export default function Finance() {
         )}
       </div>
 
-      {/* Import Modal — fixed inset-0 full-page blur */}
+      {/* Import Modal � fixed inset-0 full-page blur */}
       {showImportModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) closeImportModal(); }}>
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -509,7 +521,7 @@ export default function Finance() {
                             <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                             <td className="px-3 py-2">
                               <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(p => { const next = { ...p }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                <option value="">— Skip —</option>
+                                <option value="">Skip</option>
                                 {paymentExpectedFields.map(f => <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>)}
                               </select>
                             </td>

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash, Clock, Calendar } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class } from '@schofy/shared';
@@ -59,6 +59,8 @@ export default function Classes() {
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
@@ -311,9 +313,20 @@ export default function Classes() {
   function downloadTemplate() {
     import('xlsx').then(({ utils, writeFile }) => {
       const headers = classExpectedFields.map(f => f.label);
-      const sampleRow = ['Primary 1', '1', '', '40'];
-      const ws = utils.aoa_to_sheet([headers, sampleRow]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+      const sampleRows = [
+        ['Baby Class', '1', '', '30'],
+        ['Nursery', '2', '', '30'],
+        ['P.1', '3', 'A', '40'],
+        ['P.1', '4', 'B', '40'],
+        ['P.2', '5', '', '40'],
+        ['S.1', '6', '', '45'],
+      ];
+      const ws = utils.aoa_to_sheet([
+        ['// Example: Class Name must match your school format. Level = sort order. Stream = A/B/C (optional).'],
+        headers,
+        ...sampleRows,
+      ]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 16) }));
       const wb = utils.book_new();
       utils.book_append_sheet(wb, ws, 'Classes');
       writeFile(wb, 'class-import-template.xlsx');
@@ -328,6 +341,8 @@ export default function Classes() {
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
+    setIsImporting(false);
+    setImportProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -335,22 +350,29 @@ export default function Classes() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
-      const headers = parseCSVLine(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
+      const { read, utils } = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const wb = read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
+      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
+      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
       setCsvHeaders(headers);
       setCsvData(data);
+      const norm = (s: string) => s.toLowerCase().replace(/[\s_()\-\/]/g, '').replace(/[^a-z0-9]/g, '');
+      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
       const autoMapping: Record<string, string> = {};
       classExpectedFields.forEach(field => {
-        const matchingHeader = headers.find(h => h.toLowerCase() === field.label.toLowerCase() || h.toLowerCase().includes(field.key.toLowerCase()));
+        const nKey = norm(field.key); const nLabel = norm(field.label); const nCamel = camelWords(field.key);
+        const matchingHeader = headers.find(h => { const nH = norm(h); return nH === nKey || nH === nLabel || nH === nCamel || nH.includes(nKey) || nKey.includes(nH) || nH.includes(nLabel) || nLabel.includes(nH); });
         if (matchingHeader) autoMapping[field.key] = matchingHeader;
       });
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
-    } catch (error) { addToast('Failed to read CSV file', 'error'); }
+    } catch (error) { addToast('Failed to read Excel file', 'error'); }
     event.target.value = '';
   }
 
@@ -395,10 +417,13 @@ export default function Classes() {
   async function executeImport() {
     const id = schoolId || user?.id;
     if (importPreview.length === 0 || !id) { addToast('No valid classes to import', 'error'); return; }
+    setIsImporting(true);
+    setImportProgress(0);
     try {
       const now = new Date().toISOString();
       let successCount = 0;
-      for (const data of importPreview) {
+      for (let i = 0; i < importPreview.length; i++) {
+        const data = importPreview[i];
         const classItem: Class = {
           id: crypto.randomUUID(),
           schoolId: id,
@@ -410,10 +435,11 @@ export default function Classes() {
         };
         await dataService.create(id, 'classes', classItem);
         successCount++;
+        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
       }
-      addToast(`Successfully imported ${successCount} classes`, 'success');
-      closeImportModal();
+      addToast(`Successfully imported ${successCount} class${successCount !== 1 ? 'es' : ''}`, 'success');
     } catch (error) { addToast('Failed to import classes', 'error'); }
+    finally { setIsImporting(false); setImportProgress(0); }
   }
 
   const totalEnrolled = classes.reduce((sum, classItem) => sum + (classEnrollmentCounts[classItem.id] || 0), 0);
@@ -453,7 +479,7 @@ export default function Classes() {
             <Upload size={16} />
             <span className="hidden sm:inline">Import</span>
           </button>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls,.csv" className="hidden" />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls" className="hidden" />
           <button onClick={() => { setShowForm(true); setEditingClass(null); setFormData({ name: '', level: 1, stream: '', capacity: 40 }); }} className="btn btn-primary shadow-lg shadow-primary-500/25">
             <Plus size={18} /> Add Class
           </button>
@@ -797,7 +823,7 @@ export default function Classes() {
                   <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors cursor-pointer text-center"
                     onClick={() => fileInputRef.current?.click()}>
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
@@ -853,7 +879,7 @@ export default function Classes() {
                                   }}
                                   className="w-full form-input py-1 px-2 text-xs"
                                 >
-                                  <option value="">— Skip —</option>
+                                  <option value="">Skip</option>
                                   {classExpectedFields.map(f => (
                                     <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
                                   ))}
@@ -907,9 +933,16 @@ export default function Classes() {
                     )}
                   </div>
                   <div className="flex justify-between pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1"><Check size={14} /> Import {importPreview.length}</button>
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
+                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                      {isImporting ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={14} /> Import {importPreview.length}</>}
+                    </button>
                   </div>
+                  {isImporting && (
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-2">
+                      <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -58,7 +58,7 @@ export default function Students() {
   const sid = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
   const confirm = useConfirm();
 
-  // All data from store � instant from cache, no separate fetch
+  // All data from store G�� instant from cache, no separate fetch
   const { data: allStudentsData, loading: studentsLoading } = useTableData(sid, 'students');
   const { data: classesData } = useTableData(sid, 'classes');
   const { data: feesData } = useTableData(sid, 'fees');
@@ -147,7 +147,7 @@ export default function Students() {
     setIsSearching(false);
   }, [debouncedSearch, allStudents]);
 
-  // Derive filtered students directly from store � no separate fetch
+  // Derive filtered students directly from store G�� no separate fetch
   const filteredStudents = useMemo(() => {
     const base = searchResults !== null ? searchResults : allStudents;
     return base.filter(s => {
@@ -225,7 +225,7 @@ export default function Students() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectMode]);
 
-  // Classes update from store automatically � no manual reload needed
+  // Classes update from store automatically G�� no manual reload needed
   useEffect(() => {
     return () => {}; // cleanup placeholder
   }, []);
@@ -237,7 +237,7 @@ export default function Students() {
       addToast('Cleaning up...', 'info');
       const allStudentsRaw = await dataService.getAll(id, 'students');
 
-      // -- 1. Remove duplicate students (same firstName+lastName, keep oldest) --
+      // G��G�� 1. Remove duplicate students (same firstName+lastName, keep oldest) G��G��
       const seen = new Map<string, any>();
       const duplicateIds: string[] = [];
       // Sort oldest first so we keep the first-created record
@@ -256,7 +256,7 @@ export default function Students() {
         await dataService.batchDelete(id, 'students', duplicateIds);
       }
 
-      // -- 2. Remove orphaned related records --------------------------------
+      // G��G�� 2. Remove orphaned related records G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��G��
       const validIds = new Set(allStudentsRaw.map((s: any) => s.id).filter((i: string) => !duplicateIds.includes(i)));
       let cleanedCount = 0;
 
@@ -332,7 +332,7 @@ export default function Students() {
     try {
       const result = await dataService.delete(authId, 'students', id);
       if (!result.success) throw new Error(result.error || 'Failed to delete');
-      // Store updates automatically via notifyUI � no manual state update needed
+      // Store updates automatically via notifyUI G�� no manual state update needed
       if (student) {
         addToRecycleBin(authId, {
           id: `student-${Date.now()}`,
@@ -664,23 +664,16 @@ export default function Students() {
   function downloadTemplate() {
     import('xlsx').then(({ utils, writeFile }) => {
       const headers = expectedFields.map(f => f.label);
-      const sampleRow = expectedFields.map(f => {
-        switch (f.key) {
-          case 'studentId': return 'JODO123';
-          case 'firstName': return 'John';
-          case 'lastName': return 'Doe';
-          case 'gender': return 'male';
-          case 'dob': return '2010-01-15';
-          case 'classId': return 'primary-1';
-          case 'address': return '123 Main Street';
-          case 'guardianName': return 'Jane Doe';
-          case 'guardianPhone': return '0771234567';
-          case 'guardianEmail': return 'jane@example.com';
-          default: return '';
-        }
-      });
-      const ws = utils.aoa_to_sheet([headers, sampleRow]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+      const sampleRows = [
+        ['John', 'Doe', 'male', '2010-01-15', 'P.4', '123 Main Street', 'Jane Doe', '0771234567', 'jane@example.com'],
+        ['Mary', 'Smith', 'female', '2011-03-20', 'P.3', '45 Park Avenue', 'Peter Smith', '0782345678', ''],
+      ];
+      const ws = utils.aoa_to_sheet([
+        ['// Fill in student details below. Class must match exactly (e.g. P.4, S.1, Baby). Gender: male or female. Date format: YYYY-MM-DD'],
+        headers,
+        ...sampleRows,
+      ]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 16) }));
       const wb = utils.book_new();
       utils.book_append_sheet(wb, ws, 'Students');
       writeFile(wb, 'student-import-template.xlsx');
@@ -706,48 +699,33 @@ export default function Students() {
   async function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-
     try {
-      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
-      let headers: string[];
-      let data: string[][];
-
-      if (isExcel) {
-        const { read, utils } = await import('xlsx');
-        const buffer = await file.arrayBuffer();
-        const wb = read(buffer);
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
-        if (rows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
-        headers = rows[0].map((h: any) => String(h ?? ''));
-        data = rows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '')));
-      } else {
-        const text = await file.text();
-        const lines = text.split('\n').filter(line => line.trim());
-        if (lines.length < 2) { addToast('CSV file must have headers and at least one data row', 'error'); return; }
-        headers = parseCSVHeaders(lines[0]);
-        data = lines.slice(1).map(line => parseCSVLine(line));
-      }
-
-      const autoMapping: Record<string, string> = {};
-      expectedFields.forEach(field => {
-        const matchingHeader = headers.find(h =>
-          h.toLowerCase() === field.label.toLowerCase() ||
-          h.toLowerCase() === field.key.toLowerCase() ||
-          h.toLowerCase().includes(field.key.toLowerCase()) ||
-          field.label.toLowerCase().includes(h.toLowerCase())
-        );
-        if (matchingHeader) autoMapping[field.key] = matchingHeader;
-      });
+      const { read, utils } = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const wb = read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+      // Skip comment rows (starting with //)
+      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
+      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
+      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
       setCsvHeaders(headers);
       setCsvData(data);
+      const norm = (s: string) => s.toLowerCase().replace(/[\s_()\-\/]/g, '').replace(/[^a-z0-9]/g, '');
+      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
+      const autoMapping: Record<string, string> = {};
+      expectedFields.forEach(field => {
+        const nKey = norm(field.key); const nLabel = norm(field.label); const nCamel = camelWords(field.key);
+        const matchingHeader = headers.find(h => { const nH = norm(h); return nH === nKey || nH === nLabel || nH === nCamel || nH.includes(nKey) || nKey.includes(nH) || nH.includes(nLabel) || nLabel.includes(nH); });
+        if (matchingHeader) autoMapping[field.key] = matchingHeader;
+      });
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
     } catch (error) {
-      addToast('Failed to read file', 'error');
+      addToast('Failed to read Excel file', 'error');
     }
-
     event.target.value = '';
   }
 
@@ -791,7 +769,7 @@ export default function Students() {
     return result;
   }
 
-  function processMapping() {
+  async function processMapping() {
     const mappedData: Partial<Student>[] = [];
     const newFlaggedItems: Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }> = {};
     
@@ -813,22 +791,14 @@ export default function Students() {
         const fn = (student.firstName as string) || '';
         const ln = (student.lastName as string) || '';
         const generatedId = generateStudentId(fn, ln);
-        
         (student as any).id = generatedId;
-        
         const existingStudent = students.find(s => 
           s.firstName.toLowerCase() === fn.toLowerCase() && 
           s.lastName.toLowerCase() === ln.toLowerCase()
         );
-        
         if (existingStudent) {
-          newFlaggedItems[i] = {
-            action: 'skip',
-            existingId: existingStudent.id,
-            existingStudent: existingStudent
-          };
+          newFlaggedItems[i] = { action: 'skip', existingId: existingStudent.id, existingStudent };
         }
-        
         mappedData.push(student);
       }
     }
@@ -836,6 +806,26 @@ export default function Students() {
     setImportPreview(mappedData);
     setFlaggedItems(newFlaggedItems);
     setPlanLimitMessage(null);
+    setImportLimitInfo(null);
+
+    // Check plan limit immediately so user sees it before clicking Import
+    const id = schoolId || user?.id;
+    if (id) {
+      try {
+        const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
+        if (access.plan && access.plan.studentLimit > 0) {
+          const newStudentsOnly = mappedData.filter((_, i) => !newFlaggedItems[i]).length;
+          const remaining = Math.max(0, access.plan.studentLimit - access.used);
+          if (newStudentsOnly > remaining) {
+            setImportLimitInfo({ allowed: remaining, total: newStudentsOnly, planName: access.plan.name, remaining });
+          } else if (remaining < 20) {
+            // Warn when close to limit
+            setPlanLimitMessage(`${remaining} slot${remaining !== 1 ? 's' : ''} remaining on your ${access.plan.name} plan. Importing ${newStudentsOnly} student${newStudentsOnly !== 1 ? 's' : ''}.`);
+          }
+        }
+      } catch { /* silent � plan check is non-blocking */ }
+    }
+
     setImportStep('preview');
   }
 
@@ -848,28 +838,12 @@ export default function Students() {
 
     setIsImporting(true);
     try {
-      // Check plan limit � count only new students (not replacements/skips)
-      const newCount = importPreview.filter((_, i) => {
-        const flagged = flaggedItems[i];
-        return !flagged || flagged.action !== 'skip';
-      }).length;
-
       const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
-      // If plan is configured and has a limit, enforce it
       if (access.plan && access.plan.studentLimit > 0) {
         const remaining = Math.max(0, access.plan.studentLimit - access.used);
-        const newStudentsOnly = importPreview.filter((_, i) => {
-          const flagged = flaggedItems[i];
-          return !flagged; // only truly new (not flagged duplicates)
-        }).length;
-
+        const newStudentsOnly = importPreview.filter((_, i) => !flaggedItems[i]).length;
         if (newStudentsOnly > remaining) {
-          setImportLimitInfo({
-            allowed: remaining,
-            total: newStudentsOnly,
-            planName: access.plan.name,
-            remaining,
-          });
+          setImportLimitInfo({ allowed: remaining, total: newStudentsOnly, planName: access.plan.name, remaining });
           setIsImporting(false);
           return;
         }
@@ -888,13 +862,18 @@ export default function Students() {
           default: return 'active';
         }
       };
-
       const importStatus = getImportStatus();
 
-      for (let i = 0; i < importPreview.length; i++) {
-        const data = importPreview[i];
+      // Close modal immediately � import runs in background
+      const previewSnapshot = [...importPreview];
+      const flaggedSnapshot = { ...flaggedItems };
+      closeImportModal();
+      addToast(`Importing ${previewSnapshot.length} student${previewSnapshot.length !== 1 ? 's' : ''}... completing in background`, 'info');
+
+      for (let i = 0; i < previewSnapshot.length; i++) {
+        const data = previewSnapshot[i];
         const studentId = (data as any).id;
-        const flagged = flaggedItems[i];
+        const flagged = flaggedSnapshot[i];
 
         if (flagged) {
           if (flagged.action === 'skip') {
@@ -981,7 +960,6 @@ export default function Students() {
       if (replacedCount > 0) parts.push(`${replacedCount} replaced`);
       if (skippedCount > 0) parts.push(`${skippedCount} skipped`);
       addToast(parts.join(', ') || 'Import complete', 'success');
-      closeImportModal();
     } catch (error) {
       console.error('Import error:', error);
       addToast('Failed to import students', 'error');
@@ -990,7 +968,7 @@ export default function Students() {
     }
   }
 
-  // Stats use ALL students (not just current page) � always accurate
+  // Stats use ALL students (not just current page) G�� always accurate
   const activeCount = allStudents.filter(s => s.status === 'active').length;
   const deactivatedCount = allStudents.filter(s => s.status === 'inactive').length;
   const completedCount = allStudents.filter(s => s.status === 'completed').length;
@@ -1082,7 +1060,7 @@ export default function Students() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".xlsx,.xls,.csv"
+            accept=".xlsx,.xls"
             className="hidden"
           />
           <Link to="/admission" className="btn btn-primary">
@@ -1155,8 +1133,8 @@ export default function Students() {
       {/* Filter & Table Card */}
       <div className="card">
         <div className="card-header">
-          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-            <div className="relative flex-1 min-w-0 w-full">
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="relative flex-1 w-full">
               <Search size={18} className="search-input-icon" />
               <input
                 type="text"
@@ -1166,7 +1144,7 @@ export default function Students() {
                 className="search-input"
               />
             </div>
-            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               {/* Status Filter Dropdown */}
               <div className="relative" ref={statusFilterRef}>
                 <button
@@ -1438,7 +1416,7 @@ export default function Students() {
                   <th className="w-10">#</th>
                   {selectMode && <th className="w-10">
                     <button onClick={handleSelectAll} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">
-                      {selectedStudents.size === filteredStudents.length && paginatedStudents.length > 0 ? (
+                      {selectedStudents.size === filteredStudents.length && filteredStudents.length > 0 ? (
                         <CheckSquare size={16} className="text-primary-600" />
                       ) : (
                         <Square size={16} className="text-slate-400" />
@@ -1571,7 +1549,7 @@ export default function Students() {
                       <td onClick={(e) => e.stopPropagation()}>
                         {(() => {
                           const { status, balance } = getStudentFinance(student.id);
-                          if (status === 'none') return <span className="text-xs text-slate-400">�</span>;
+                          if (status === 'none') return <span className="text-xs text-slate-400">G��</span>;
                           if (balance <= 0) return <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>;
                           return <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(balance)}</span>;
                         })()}
@@ -1721,7 +1699,7 @@ export default function Students() {
         {totalPages > 1 && viewFilter !== 'completed' && (
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>�
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>G��
               <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span> of{' '}
               <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students
             </p>
@@ -1742,7 +1720,7 @@ export default function Students() {
               >
                 <ChevronLeft size={16} />
               </button>
-              {/* Page number buttons � show up to 5 around current page */}
+              {/* Page number buttons G�� show up to 5 around current page */}
               {Array.from({ length: totalPages }, (_, i) => i + 1)
                 .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
                 .reduce<(number | '...')[]>((acc, p, i, arr) => {
@@ -1752,7 +1730,7 @@ export default function Students() {
                 }, [])
                 .map((p, i) =>
                   p === '...' ? (
-                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">�</span>
+                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">GǪ</span>
                   ) : (
                     <button
                       key={p}
@@ -1826,7 +1804,7 @@ export default function Students() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
 
@@ -1873,7 +1851,7 @@ export default function Students() {
                               <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                               <td className="px-3 py-2">
                                 <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">� Skip �</option>
+                                  <option value="">Skip</option>
                                   {expectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
                                 </select>
                               </td>
@@ -1903,7 +1881,7 @@ export default function Students() {
                       <ArrowRight size={12} />
                       <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3 Review</span>
                     </div>
-                    <div className="flex gap-3 ml-auto">
+                    <div className="flex gap-3 ml-auto flex-wrap">
                       <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-3 py-1">
                         <p className="text-sm text-emerald-700 dark:text-emerald-300">
                           <strong>{importPreview.length - Object.keys(flaggedItems).length}</strong> new
@@ -1916,6 +1894,11 @@ export default function Students() {
                           </p>
                         </div>
                       )}
+                      <div className="bg-slate-100 dark:bg-slate-700 rounded-lg px-3 py-1">
+                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                          <strong>{importPreview.length}</strong> total in file
+                        </p>
+                      </div>
                     </div>
                   </div>
 
@@ -1925,7 +1908,6 @@ export default function Students() {
                     </div>
                   )}
 
-                  {/* Plan limit upgrade screen */}
                   {importLimitInfo && (
                     <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
                       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -1952,15 +1934,12 @@ export default function Students() {
                             </div>
                           </div>
                           <p className="text-sm text-slate-600 dark:text-slate-300">
-                            {importLimitInfo.remaining === 0
-                              ? 'Your plan is full. Upgrade to import more students.'
-                              : `Only ${importLimitInfo.remaining} of ${importLimitInfo.total} students can be imported. Upgrade to import all.`}
+                            {importLimitInfo.remaining === 0 ? 'Your plan is full. Upgrade to import more students.' : `Only ${importLimitInfo.remaining} of ${importLimitInfo.total} students can be imported. Upgrade to import all.`}
                           </p>
                           <div className="flex flex-col gap-2">
                             {importLimitInfo.remaining > 0 && (
                               <button
                                 onClick={() => {
-                                  // Trim preview to only allowed count
                                   const newOnly = importPreview.map((s, i) => ({ s, i })).filter(({ i }) => !flaggedItems[i]);
                                   const allowed = newOnly.slice(0, importLimitInfo.remaining).map(({ i }) => i);
                                   const trimmed = importPreview.filter((_, i) => flaggedItems[i] || allowed.includes(i));
@@ -1978,10 +1957,7 @@ export default function Students() {
                             >
                               <CreditCard size={16} /> Upgrade Plan
                             </button>
-                            <button
-                              onClick={() => setImportLimitInfo(null)}
-                              className="w-full py-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-sm transition-colors"
-                            >
+                            <button onClick={() => setImportLimitInfo(null)} className="w-full py-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-sm transition-colors">
                               Cancel
                             </button>
                           </div>
@@ -2061,13 +2037,9 @@ export default function Students() {
                   </div>
 
                   <div className="flex justify-between px-5 py-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-2 px-4" disabled={isImporting}>Back to Mapping</button>
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-2 px-4">Back to Mapping</button>
                     <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-2 px-4 flex items-center gap-2 disabled:opacity-70">
-                      {isImporting ? (
-                        <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing...</>
-                      ) : (
-                        <><Check size={16} /> Import Selected</>
-                      )}
+                      {isImporting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing...</> : <><Check size={16} /> Import Selected</>}
                     </button>
                   </div>
                 </div>

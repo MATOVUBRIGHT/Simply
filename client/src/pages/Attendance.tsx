@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Check, X, Clock, Save, Calendar, Users, BookOpen, Download, Upload, ChevronDown, FileText, ArrowRight, Check as CheckIcon } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -54,7 +54,7 @@ export default function Attendance() {
     { key: 'status', label: 'Status', required: true },
   ];
 
-  // Derive students from store — instant, no fetch
+  // Derive students from store � instant, no fetch
   const students = useMemo(() => {
     const all = studentsData as Student[];
     return selectedClass
@@ -62,7 +62,7 @@ export default function Attendance() {
       : all.filter(s => s.status !== 'completed');
   }, [studentsData, selectedClass]);
 
-  // Derive today's attendance from store — instant, no fetch
+  // Derive today's attendance from store � instant, no fetch
   const allAttendance = attendanceData as AttendanceRecord[];
 
   // Sync attendance state when date/students/store data changes
@@ -95,7 +95,7 @@ export default function Attendance() {
     setLoading(true);
     try {
       const now = new Date().toISOString();
-      // Use store data — no network call needed
+      // Use store data � no network call needed
       const existingRecords = allAttendance.filter(r => r.date === selectedDate);
       for (const record of existingRecords) {
         if (record.entityType === EntityType.STUDENT && students.some(s => s.id === record.entityId)) {
@@ -233,22 +233,29 @@ export default function Attendance() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
-      const headers = parseCSVLine(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
+      const { read, utils } = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const wb = read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
+      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
+      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
       setCsvHeaders(headers);
       setCsvData(data);
+      const norm = (s: string) => s.toLowerCase().replace(/[\s_()\-\/]/g, '').replace(/[^a-z0-9]/g, '');
+      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
       const autoMapping: Record<string, string> = {};
       attendanceExpectedFields.forEach(field => {
-        const matchingHeader = headers.find(h => h.toLowerCase() === field.label.toLowerCase() || h.toLowerCase().includes(field.key.toLowerCase()));
+        const nKey = norm(field.key); const nLabel = norm(field.label); const nCamel = camelWords(field.key);
+        const matchingHeader = headers.find(h => { const nH = norm(h); return nH === nKey || nH === nLabel || nH === nCamel || nH.includes(nKey) || nKey.includes(nH) || nH.includes(nLabel) || nLabel.includes(nH); });
         if (matchingHeader) autoMapping[field.key] = matchingHeader;
       });
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
-    } catch (error) { addToast('Failed to read CSV file', 'error'); }
+    } catch (error) { addToast('Failed to read Excel file', 'error'); }
     event.target.value = '';
   }
 
@@ -282,7 +289,7 @@ export default function Attendance() {
         const student = students.find(s => s.admissionNo === data.admissionNo);
         if (!student) continue;
 
-        // Use store data — no network call
+        // Use store data � no network call
         const existingRecord = allAttendance.find(a => a.date === data.date && a.entityId === student.id);
 
         if (existingRecord) {
@@ -364,7 +371,7 @@ export default function Attendance() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".xlsx,.xls,.csv"
+            accept=".xlsx,.xls"
             className="hidden"
           />
           <button 
@@ -454,7 +461,7 @@ export default function Attendance() {
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-800 dark:text-white">Student List</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{selectedClass ? (classes.find((c: any) => c.id === selectedClass) as any)?.name : 'All Classes'} — {students.length} students</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{selectedClass ? (classes.find((c: any) => c.id === selectedClass) as any)?.name : 'All Classes'} � {students.length} students</p>
             </div>
           </div>
           {totalMarked > 0 && (
@@ -514,7 +521,7 @@ export default function Attendance() {
                   {!selectedClass && (
                     <td>
                       <span className="badge badge-info text-xs">
-                        {(classes.find((c: any) => c.id === s.classId) as any)?.name || s.classId || '—'}
+                        {(classes.find((c: any) => c.id === s.classId) as any)?.name || s.classId || '�'}
                       </span>
                     </td>
                   )}
@@ -589,7 +596,7 @@ export default function Attendance() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
 
@@ -636,7 +643,7 @@ export default function Attendance() {
                               <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                               <td className="px-3 py-2">
                                 <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">— Skip —</option>
+                                  <option value="">Skip</option>
                                   {attendanceExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
                                 </select>
                               </td>

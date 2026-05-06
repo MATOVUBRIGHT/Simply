@@ -606,22 +606,29 @@ export default function Invoices() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
-      const headers = parseCSVLine(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
+      const { read, utils } = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const wb = read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
+      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
+      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
       setCsvHeaders(headers);
       setCsvData(data);
+      const norm = (s: string) => s.toLowerCase().replace(/[\s_()\-\/]/g, '').replace(/[^a-z0-9]/g, '');
+      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
       const autoMapping: Record<string, string> = {};
       invoiceExpectedFields.forEach(field => {
-        const matchingHeader = headers.find(h => h.toLowerCase() === field.label.toLowerCase() || h.toLowerCase().includes(field.key.toLowerCase()));
+        const nKey = norm(field.key); const nLabel = norm(field.label); const nCamel = camelWords(field.key);
+        const matchingHeader = headers.find(h => { const nH = norm(h); return nH === nKey || nH === nLabel || nH === nCamel || nH.includes(nKey) || nKey.includes(nH) || nH.includes(nLabel) || nLabel.includes(nH); });
         if (matchingHeader) autoMapping[field.key] = matchingHeader;
       });
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
-    } catch (error) { addToast('Failed to read CSV file', 'error'); }
+    } catch (error) { addToast('Failed to read Excel file', 'error'); }
     event.target.value = '';
   }
 
@@ -772,7 +779,7 @@ export default function Invoices() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".xlsx,.xls,.csv"
+            accept=".xlsx,.xls"
             className="hidden"
           />
           <button onClick={() => setShowStructureModal(true)} className="btn btn-secondary">
@@ -1376,7 +1383,7 @@ export default function Invoices() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
 

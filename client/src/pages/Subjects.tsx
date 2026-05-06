@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, ChevronRight, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash, Pencil, Search } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class, Subject } from '@schofy/shared';
@@ -100,6 +100,8 @@ export default function Subjects() {
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
@@ -165,12 +167,12 @@ export default function Subjects() {
     if (schoolType.includes('nursery')) levels.push({ key: 'nursery', label: 'Nursery' });
     if (schoolType.includes('primary') || schoolType === 'nursery_primary') levels.push({ key: 'primary', label: 'Primary' });
     if (schoolType.includes('secondary') || schoolType === 'primary_secondary') {
-      levels.push({ key: 'jss', label: 'S.1ΓÇôS.4 (JSS)' });
-      levels.push({ key: 'ss', label: 'S.5ΓÇôS.6 (SS)' });
+      levels.push({ key: 'jss', label: 'S.1G��S.4 (JSS)' });
+      levels.push({ key: 'ss', label: 'S.5G��S.6 (SS)' });
     }
     if (schoolType === 'all') {
-      levels.push({ key: 'jss', label: 'S.1ΓÇôS.4 (JSS)' });
-      levels.push({ key: 'ss', label: 'S.5ΓÇôS.6 (SS)' });
+      levels.push({ key: 'jss', label: 'S.1G��S.4 (JSS)' });
+      levels.push({ key: 'ss', label: 'S.5G��S.6 (SS)' });
     }
     return levels;
   })();
@@ -396,7 +398,7 @@ export default function Subjects() {
         addToast('Subject already exists for all selected classes', 'warning');
         return;
       }
-      // Fire all creates in parallel ΓÇö optimistic cache updates happen immediately
+      // Fire all creates in parallel G�� optimistic cache updates happen immediately
       await Promise.all(newSubjects.map(s => dataService.create(id, 'subjects', s as any)));
       resetSubjectForm();
       addToast(`Added "${name}" to ${newSubjects.length} class${newSubjects.length > 1 ? 'es' : ''}`, 'success');
@@ -450,16 +452,24 @@ export default function Subjects() {
   }, []);
 
   function downloadTemplate() {
-    const headers = subjectExpectedFields.map(f => f.label);
-    const sampleRow = ['Mathematics', 'MATH', 'primary'];
-    const csv = [headers.join(','), sampleRow.join(',')].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'subject-import-template.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
-    addToast('Template downloaded', 'success');
+    import('xlsx').then(({ utils, writeFile }) => {
+      const headers = subjectExpectedFields.map(f => f.label);
+      const sampleRows = [
+        ['Mathematics', 'MATH', 'P.4'],
+        ['English Language', 'ENG', 'P.4'],
+        ['Science', 'SCI', 'P.5'],
+      ];
+      const ws = utils.aoa_to_sheet([
+        ['// Example: Fill in your subjects below. Class Name must match exactly.'],
+        headers,
+        ...sampleRows,
+      ]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 16) }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Subjects');
+      writeFile(wb, 'subject-import-template.xlsx');
+      addToast('Template downloaded', 'success');
+    });
   }
 
   function closeImportModal() {
@@ -469,6 +479,8 @@ export default function Subjects() {
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
+    setIsImporting(false);
+    setImportProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -476,22 +488,29 @@ export default function Subjects() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
-      const headers = parseCSVLine(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
+      const { read, utils } = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const wb = read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
+      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
+      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
       setCsvHeaders(headers);
       setCsvData(data);
+      const norm = (s: string) => s.toLowerCase().replace(/[\s_()\-\/]/g, '').replace(/[^a-z0-9]/g, '');
+      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
       const autoMapping: Record<string, string> = {};
       subjectExpectedFields.forEach(field => {
-        const matchingHeader = headers.find(h => h.toLowerCase() === field.label.toLowerCase() || h.toLowerCase().includes(field.key.toLowerCase()));
+        const nKey = norm(field.key); const nLabel = norm(field.label); const nCamel = camelWords(field.key);
+        const matchingHeader = headers.find(h => { const nH = norm(h); return nH === nKey || nH === nLabel || nH === nCamel || nH.includes(nKey) || nKey.includes(nH) || nH.includes(nLabel) || nLabel.includes(nH); });
         if (matchingHeader) autoMapping[field.key] = matchingHeader;
       });
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
-    } catch (error) { addToast('Failed to read CSV file', 'error'); }
+    } catch (error) { addToast('Failed to read Excel file', 'error'); }
     event.target.value = '';
   }
 
@@ -531,23 +550,30 @@ export default function Subjects() {
   async function executeImport() {
     const id = schoolId || user?.id;
     if (importPreview.length === 0 || !id) { addToast('No valid subjects to import', 'error'); return; }
+    setIsImporting(true);
+    setImportProgress(0);
     try {
       const now = new Date().toISOString();
       let successCount = 0;
-      for (const data of importPreview) {
+      const previewSnapshot = [...importPreview];
+      closeImportModal();
+      addToast(`Importing ${previewSnapshot.length} subject${previewSnapshot.length !== 1 ? 's' : ''}... completing in background`, 'info');
+      for (let i = 0; i < previewSnapshot.length; i++) {
+        const data = previewSnapshot[i];
         const subject: Subject = {
           id: uuidv4(),
           name: (data.name as string) || 'Unknown',
-          code: (data.code as string) || 'UNK',
-          classId: (data.classId as string) || 'primary',
+          code: (data.code as string) || '',
+          classId: (data.classId as string) || '',
           createdAt: now,
         };
         await dataService.create(id, 'subjects', subject as any);
         successCount++;
+        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
       }
-      addToast(`Successfully imported ${successCount} subjects`, 'success');
-      closeImportModal();
+      addToast(`Successfully imported ${successCount} subject${successCount !== 1 ? 's' : ''}`, 'success');
     } catch (error) { addToast('Failed to import subjects', 'error'); }
+    finally { setIsImporting(false); setImportProgress(0); }
   }
 
   const subjectColors = [
@@ -569,7 +595,7 @@ export default function Subjects() {
   const primaryCount = [...new Set(subjects.filter(s => getClassLevel(s.classId) === 'primary').map(s => s.name))].length;
   const secondaryCount = [...new Set(subjects.filter(s => ['jss','ss'].includes(getClassLevel(s.classId))).map(s => s.name))].length;
 
-  // Group subjects by name ΓÇö one row per subject, showing all assigned classes
+  // Group subjects by name G�� one row per subject, showing all assigned classes
   const groupedSubjects = useMemo(() => {
     const map = new Map<string, { name: string; code: string; ids: string[]; classIds: string[] }>();
     for (const s of subjects) {
@@ -675,7 +701,7 @@ export default function Subjects() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".csv"
+            accept=".xlsx,.xls"
             className="hidden"
           />
           <button onClick={() => setShowForm(true)} className="btn btn-primary shadow-lg shadow-primary-500/25">
@@ -749,7 +775,7 @@ export default function Subjects() {
                 <Book size={18} className="text-white" />
                 <h3 className="font-bold text-white">Add Subject</h3>
               </div>
-              <button onClick={resetSubjectForm} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">Γ£ò</button>
+              <button onClick={resetSubjectForm} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">G��</button>
             </div>
 
             <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden">
@@ -771,7 +797,7 @@ export default function Subjects() {
                       }}
                       className="form-input"
                     >
-                      <option value="">ΓÇö Select subject ΓÇö</option>
+                      <option value="">G�� Select subject G��</option>
                       {ugandaSubjects[selectedLevel].map(s => (
                         <option key={s.name} value={s.name}>{s.name}</option>
                       ))}
@@ -792,7 +818,7 @@ export default function Subjects() {
                       />
                       {formData.customSubject && (
                         <button type="button" onClick={() => setFormData(prev => ({ ...prev, name: '', code: '', customSubject: false }))}
-                          className="btn btn-secondary text-xs px-3">ΓåÉ Presets</button>
+                          className="btn btn-secondary text-xs px-3">G�� Presets</button>
                       )}
                     </div>
                   )}
@@ -834,7 +860,7 @@ export default function Subjects() {
                     <div className="flex gap-2">
                       <button type="button" onClick={() => setSelectedClassIds(classesForSelectedLevel.map(c => c.id))}
                         className="text-xs text-primary-600 dark:text-primary-400 hover:underline">All</button>
-                      <span className="text-slate-300">┬╖</span>
+                      <span className="text-slate-300">-+</span>
                       <button type="button" onClick={() => setSelectedClassIds([])}
                         className="text-xs text-slate-500 hover:underline">None</button>
                     </div>
@@ -886,7 +912,7 @@ export default function Subjects() {
               <div>
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white">All Subjects</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {subjectsByClass.length} class{subjectsByClass.length !== 1 ? 'es' : ''} ┬╖ {subjects.length} subject entr{subjects.length !== 1 ? 'ies' : 'y'}
+                  {subjectsByClass.length} class{subjectsByClass.length !== 1 ? 'es' : ''} -+ {subjects.length} subject entr{subjects.length !== 1 ? 'ies' : 'y'}
                   {searchTerm ? ` matching "${searchTerm}"` : ''}
                 </p>
               </div>
@@ -1009,7 +1035,7 @@ export default function Subjects() {
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Pencil size={18} className="text-white" />
-                <h3 className="font-bold text-white">Edit Subject ΓÇö {editGroup.name}</h3>
+                <h3 className="font-bold text-white">Edit Subject G�� {editGroup.name}</h3>
               </div>
               <button onClick={closeEditGroup} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18} className="text-white" /></button>
             </div>
@@ -1046,7 +1072,7 @@ export default function Subjects() {
                     <div className="flex gap-2">
                       <button type="button" onClick={() => setEditClassIds(classes.map(c => c.id))}
                         className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">All</button>
-                      <span className="text-slate-300">┬╖</span>
+                      <span className="text-slate-300">-+</span>
                       <button type="button" onClick={() => setEditClassIds([])}
                         className="text-xs text-slate-500 hover:underline">None</button>
                     </div>
@@ -1116,7 +1142,7 @@ export default function Subjects() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
 
@@ -1146,26 +1172,30 @@ export default function Subjects() {
 
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
+                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {subjectExpectedFields.filter(f => f.required).map(field => (
-                          <tr key={field.key}>
-                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">
-                              {field.label}*
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <select
-                                value={fieldMapping[field.key] || ''}
-                                onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
-                                className="w-full form-input py-1 px-2 text-xs"
-                              >
-                                <option value="">-- Skip --</option>
-                                {csvHeaders.map(header => (
-                                  <option key={header} value={header}>{header}</option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
-                        ))}
+                        {csvHeaders.map((header, idx) => {
+                          const sample = csvData[0]?.[idx] || '';
+                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
+                          return (
+                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
+                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
+                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
+                              <td className="px-3 py-2">
+                                <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
+                                  <option value="">Skip</option>
+                                  {subjectExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1222,11 +1252,16 @@ export default function Subjects() {
                   </div>
 
                   <div className="flex justify-between pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
-                      <Check size={14} /> Import {importPreview.length}
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
+                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                      {isImporting ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={14} /> Import {importPreview.length}</>}
                     </button>
                   </div>
+                  {isImporting && (
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-2">
+                      <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>

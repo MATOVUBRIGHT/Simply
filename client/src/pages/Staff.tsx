@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -51,6 +51,8 @@ export default function StaffPage() {
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
@@ -351,21 +353,17 @@ export default function StaffPage() {
   function downloadTemplate() {
     import('xlsx').then(({ utils, writeFile }) => {
       const headers = staffExpectedFields.map(f => f.label);
-      const sampleRow = staffExpectedFields.map(f => {
-        switch (f.key) {
-          case 'employeeId': return 'EMP-001';
-          case 'firstName': return 'John';
-          case 'lastName': return 'Doe';
-          case 'role': return 'teacher';
-          case 'department': return 'Academic';
-          case 'phone': return '0771234567';
-          case 'email': return 'john.doe@school.com';
-          case 'address': return '123 Main Street';
-          default: return '';
-        }
-      });
-      const ws = utils.aoa_to_sheet([headers, sampleRow]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+      const sampleRows = [
+        ['EMP-001', 'John', 'Doe', 'teacher', 'Academic', '0771234567', 'john.doe@school.com', '123 Main Street'],
+        ['EMP-002', 'Jane', 'Smith', 'admin', 'Administration', '0782345678', 'jane.smith@school.com', '45 Park Avenue'],
+        ['EMP-003', 'Peter', 'Okello', 'teacher', 'Sciences', '0753456789', '', ''],
+      ];
+      const ws = utils.aoa_to_sheet([
+        ['// Role options: teacher, admin, principal, librarian, nurse, driver, cook, security, other'],
+        headers,
+        ...sampleRows,
+      ]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 16) }));
       const wb = utils.book_new();
       utils.book_append_sheet(wb, ws, 'Staff');
       writeFile(wb, 'staff-import-template.xlsx');
@@ -380,6 +378,8 @@ export default function StaffPage() {
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
+    setIsImporting(false);
+    setImportProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -387,35 +387,30 @@ export default function StaffPage() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
-      let headers: string[];
-      let data: string[][];
+      const { read, utils } = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const wb = read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
+      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
+      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
 
-      if (isExcel) {
-        const { read, utils } = await import('xlsx');
-        const buffer = await file.arrayBuffer();
-        const wb = read(buffer);
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
-        if (rows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
-        headers = rows[0].map((h: any) => String(h ?? ''));
-        data = rows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '')));
-      } else {
-        const text = await file.text();
-        const lines = text.split('\n').filter(line => line.trim());
-        if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
-        headers = parseCSVHeaders(lines[0]);
-        data = lines.slice(1).map(line => parseCSVLine(line));
-      }
-
+      // Smart auto-mapping: normalize by stripping spaces/underscores and camelCase
+      const norm = (s: string) => s.toLowerCase().replace(/[\s_\-()\/]/g, '').replace(/[^a-z0-9]/g, '');
+      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
       const autoMapping: Record<string, string> = {};
       staffExpectedFields.forEach(field => {
-        const matchingHeader = headers.find(h =>
-          h.toLowerCase() === field.label.toLowerCase() ||
-          h.toLowerCase() === field.key.toLowerCase() ||
-          h.toLowerCase().includes(field.key.toLowerCase()) ||
-          field.label.toLowerCase().includes(h.toLowerCase())
-        );
+        const nKey = norm(field.key);
+        const nLabel = norm(field.label);
+        const nCamel = camelWords(field.key);
+        const matchingHeader = headers.find(h => {
+          const nH = norm(h);
+          return nH === nKey || nH === nLabel || nH === nCamel ||
+            nH.includes(nKey) || nKey.includes(nH) ||
+            nH.includes(nLabel) || nLabel.includes(nH);
+        });
         if (matchingHeader) autoMapping[field.key] = matchingHeader;
       });
       setCsvHeaders(headers);
@@ -424,7 +419,7 @@ export default function StaffPage() {
       setImportStep('map');
       setShowImportModal(true);
     } catch (error) {
-      addToast('Failed to read file', 'error');
+      addToast('Failed to read Excel file', 'error');
     }
     event.target.value = '';
   }
@@ -487,11 +482,17 @@ export default function StaffPage() {
     if (!id || submittingRef.current) return;
     if (importPreview.length === 0) { addToast('No valid staff to import', 'error'); return; }
     submittingRef.current = true;
+    setIsImporting(true);
+    setImportProgress(0);
     try {
       const now = new Date().toISOString();
       let successCount = 0;
-      const newStaff: Staff[] = [];
-      for (const data of importPreview) {
+      // Close modal immediately — import runs in background
+      const previewSnapshot = [...importPreview];
+      closeImportModal();
+      addToast(`Importing ${previewSnapshot.length} staff member${previewSnapshot.length !== 1 ? 's' : ''}... completing in background`, 'info');
+      for (let i = 0; i < previewSnapshot.length; i++) {
+        const data = previewSnapshot[i];
         const staffMember: Staff = {
           id: crypto.randomUUID(), schoolId: id,
           employeeId: (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -502,21 +503,19 @@ export default function StaffPage() {
           email: data.email as string | undefined, address: data.address as string | undefined,
           status: 'active', createdAt: now, updatedAt: now,
         };
-        newStaff.push(staffMember);
-        successCount++;
+        const result = await dataService.create(id, 'staff', staffMember as any);
+        if (!result.success) console.error('Import failed for', staffMember.firstName, result.error);
+        else successCount++;
+        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
       }
-      // Optimistic update
-      addToast(`Imported ${successCount} staff`, 'success');
-      closeImportModal();
-      // Fire to Supabase in background
-      for (const s of newStaff) {
-        const result = await dataService.create(id, 'staff', s as any);
-        if (!result.success) console.error('Import failed for', s.firstName, result.error);
-      }
+      addToast(`Imported ${successCount} staff member${successCount !== 1 ? 's' : ''}`, 'success');
     } catch (error) {
       addToast('Failed to import staff', 'error');
+    } finally {
+      submittingRef.current = false;
+      setIsImporting(false);
+      setImportProgress(0);
     }
-    submittingRef.current = false;
   }
 
   const [showTeachersPanel, setShowTeachersPanel] = useState(false);
@@ -558,7 +557,7 @@ export default function StaffPage() {
             <Upload size={16} />
             <span className="hidden sm:inline">Import</span>
           </button>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls,.csv" className="hidden" />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls" className="hidden" />
           <Link to="/staff/new" className="btn btn-primary">
             <Plus size={16} />
             Add Staff
@@ -616,7 +615,7 @@ export default function StaffPage() {
         </div>
       </div>
 
-      {/* Teachers Panel — only shown when Teachers card is clicked */}
+      {/* Teachers Panel � only shown when Teachers card is clicked */}
       {showTeachersPanel && (
         <div className="card">
           <div className="card-header flex items-center justify-between">
@@ -906,7 +905,7 @@ export default function StaffPage() {
                   <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors cursor-pointer text-center"
                     onClick={() => fileInputRef.current?.click()}>
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
@@ -950,7 +949,7 @@ export default function StaffPage() {
                               <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                               <td className="px-3 py-2">
                                 <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">— Skip —</option>
+                                  <option value="">� Skip �</option>
                                   {staffExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
                                 </select>
                               </td>
@@ -1002,9 +1001,16 @@ export default function StaffPage() {
                     )}
                   </div>
                   <div className="flex justify-between pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1"><Check size={14} /> Import {importPreview.length}</button>
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
+                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                      {isImporting ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={14} /> Import {importPreview.length}</>}
+                    </button>
                   </div>
+                  {isImporting && (
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-2">
+                      <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>

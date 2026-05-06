@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Plus, Bus, Trash2, User, MapPin, DollarSign, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -28,6 +28,8 @@ export default function Transport() {
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
@@ -141,9 +143,17 @@ export default function Transport() {
   function downloadTemplate() {
     import('xlsx').then(({ utils, writeFile }) => {
       const headers = transportExpectedFields.map(f => f.label);
-      const sampleRow = ['Route A', 'Kampala Central', '50000'];
-      const ws = utils.aoa_to_sheet([headers, sampleRow]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+      const sampleRows = [
+        ['Route A - Kampala Central', 'Kampala Road, City Centre', '50000'],
+        ['Route B - Entebbe', 'Entebbe Road via Munyonyo', '80000'],
+        ['Route C - Mukono', 'Jinja Road via Mukono', '60000'],
+      ];
+      const ws = utils.aoa_to_sheet([
+        ['// Example: Route Name, Description (area covered), Monthly Fee (numbers only, no currency symbol)'],
+        headers,
+        ...sampleRows,
+      ]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 20) }));
       const wb = utils.book_new();
       utils.book_append_sheet(wb, ws, 'Transport');
       writeFile(wb, 'transport-route-import-template.xlsx');
@@ -158,6 +168,8 @@ export default function Transport() {
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
+    setIsImporting(false);
+    setImportProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -165,22 +177,29 @@ export default function Transport() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
-      const headers = parseCSVLine(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
+      const { read, utils } = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const wb = read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
+      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
+      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
+      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
       setCsvHeaders(headers);
       setCsvData(data);
+      const norm = (s: string) => s.toLowerCase().replace(/[\s_()\-\/]/g, '').replace(/[^a-z0-9]/g, '');
+      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
       const autoMapping: Record<string, string> = {};
       transportExpectedFields.forEach(field => {
-        const matchingHeader = headers.find(h => h.toLowerCase() === field.label.toLowerCase() || h.toLowerCase().includes(field.key.toLowerCase()));
+        const nKey = norm(field.key); const nLabel = norm(field.label); const nCamel = camelWords(field.key);
+        const matchingHeader = headers.find(h => { const nH = norm(h); return nH === nKey || nH === nLabel || nH === nCamel || nH.includes(nKey) || nKey.includes(nH) || nH.includes(nLabel) || nLabel.includes(nH); });
         if (matchingHeader) autoMapping[field.key] = matchingHeader;
       });
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
-    } catch (error) { addToast('Failed to read CSV file', 'error'); }
+    } catch (error) { addToast('Failed to read Excel file', 'error'); }
     event.target.value = '';
   }
 
@@ -223,12 +242,17 @@ export default function Transport() {
 
   async function executeImport() {
     const id = schoolId || user?.id;
-    if (importPreview.length === 0) { addToast('No valid routes to import', 'error'); return; }
-    if (!id) return;
+    if (importPreview.length === 0 || !id) { addToast('No valid routes to import', 'error'); return; }
+    setIsImporting(true);
+    setImportProgress(0);
     try {
       const now = new Date().toISOString();
       let successCount = 0;
-      for (const data of importPreview) {
+      const previewSnapshot = [...importPreview];
+      closeImportModal();
+      addToast(`Importing ${previewSnapshot.length} route${previewSnapshot.length !== 1 ? 's' : ''}... completing in background`, 'info');
+      for (let i = 0; i < previewSnapshot.length; i++) {
+        const data = previewSnapshot[i];
         const route: TransportRoute = {
           id: uuidv4(),
           name: (data.name as string) || 'Unknown',
@@ -238,10 +262,11 @@ export default function Transport() {
         };
         await dataService.create(id, 'transportRoutes', route as any);
         successCount++;
+        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
       }
-      addToast(`Successfully imported ${successCount} routes`, 'success');
-      closeImportModal();
+      addToast(`Successfully imported ${successCount} route${successCount !== 1 ? 's' : ''}`, 'success');
     } catch (error) { addToast('Failed to import routes', 'error'); }
+    finally { setIsImporting(false); setImportProgress(0); }
   }
 
   return (
@@ -298,7 +323,7 @@ export default function Transport() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".xlsx,.xls,.csv"
+            accept=".xlsx,.xls"
             className="hidden"
           />
           <button onClick={() => setShowForm(true)} className="btn btn-primary shadow-lg shadow-primary-500/25">
@@ -551,7 +576,7 @@ export default function Transport() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
 
@@ -610,7 +635,7 @@ export default function Transport() {
                                   }}
                                   className="w-full form-input py-1 px-2 text-xs"
                                 >
-                                  <option value="">— Skip —</option>
+                                  <option value="">Skip</option>
                                   {transportExpectedFields.map(f => (
                                     <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
                                   ))}
@@ -675,11 +700,16 @@ export default function Transport() {
                   </div>
 
                   <div className="flex justify-between pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
-                      <Check size={14} /> Import {importPreview.length}
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
+                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                      {isImporting ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={14} /> Import {importPreview.length}</>}
                     </button>
                   </div>
+                  {isImporting && (
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-2">
+                      <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>

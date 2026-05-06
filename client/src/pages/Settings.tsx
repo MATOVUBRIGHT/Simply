@@ -848,46 +848,47 @@ export default function Settings() {
             </p>
             
             {showDeleteConfirm ? (
-              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <AlertTriangle size={20} className="text-red-500" />
-                  <p className="font-medium text-red-700 dark:text-red-300">This will delete ALL your data!</p>
-                </div>
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
-                  Enter your <strong>password</strong> to confirm:
-                </p>
-                <input
-                  type="password"
-                  value={deletePassword}
-                  onChange={(e) => {
-                    setDeletePassword(e.target.value);
-                    setDeleteError('');
-                  }}
-                  className="form-input mb-3"
-                  placeholder="Enter your password"
-                  autoFocus
-                />
-                {deleteError && (
-                  <p className="text-red-500 text-sm mb-3">{deleteError}</p>
-                )}
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleDeleteAllData}
-                    disabled={!deletePassword || isDeleting}
-                    className="btn bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isDeleting ? 'Deleting...' : 'Delete All Data'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowDeleteConfirm(false);
-                      setDeletePassword('');
-                      setDeleteError('');
-                    }}
-                    className="btn btn-secondary"
-                  >
-                    Cancel
-                  </button>
+              <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center gap-3 px-5 py-4 border-b border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
+                    <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center shrink-0">
+                      <AlertTriangle size={20} className="text-red-600" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-red-700 dark:text-red-300">Delete All Data</h3>
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">This action cannot be undone</p>
+                    </div>
+                  </div>
+                  <div className="p-5 space-y-4">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      This will permanently delete <strong>ALL</strong> your school data. Enter your <strong>password</strong> to confirm:
+                    </p>
+                    <input
+                      type="password"
+                      value={deletePassword}
+                      onChange={(e) => { setDeletePassword(e.target.value); setDeleteError(''); }}
+                      className="form-input"
+                      placeholder="Enter your password"
+                      autoFocus
+                    />
+                    {deleteError && <p className="text-red-500 text-sm">{deleteError}</p>}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => { setShowDeleteConfirm(false); setDeletePassword(''); setDeleteError(''); }}
+                        className="btn btn-secondary flex-1"
+                        disabled={isDeleting}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDeleteAllData}
+                        disabled={!deletePassword || isDeleting}
+                        className="btn bg-red-600 hover:bg-red-700 text-white flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isDeleting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Deleting...</> : <><Trash2 size={16} /> Delete All</>}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (
