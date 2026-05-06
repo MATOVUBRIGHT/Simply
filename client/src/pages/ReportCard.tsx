@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, Settings, Check, Building, Palette, Layout, FileText as FileTextIcon, Eye } from 'lucide-react';
+import { ArrowLeft, Download, Settings, Check, Building, Palette, Layout, FileText as FileTextIcon, Eye, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useStudents } from '../contexts/StudentsContext';
@@ -434,7 +434,9 @@ export default function ReportCard() {
             {/* Editor header */}
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2"><Settings size={18} className="text-white" /><h3 className="font-bold text-white">Edit Report Template</h3></div>
-              <button onClick={() => setShowEditor(false)} className="p-1 hover:bg-white/20 rounded-lg text-white text-lg">✕</button>
+              <button onClick={() => setShowEditor(false)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
             </div>
 
             {/* Tabs */}

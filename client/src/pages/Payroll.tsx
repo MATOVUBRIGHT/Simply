@@ -8,7 +8,8 @@ import {
   Calendar, 
   Settings, 
   ArrowLeft, 
-  Plus 
+  Plus,
+  X
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import type { Staff, SalaryPayment } from '@schofy/shared';
@@ -320,8 +321,8 @@ export default function Payroll() {
                 <Settings size={18} className="text-white" />
                 <h2 className="font-bold text-white">Generate Payroll</h2>
               </div>
-              <button onClick={() => setShowPayrollModal(false)} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <Plus size={18} className="text-white rotate-45" />
+              <button onClick={() => setShowPayrollModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
               </button>
             </div>
             <div className="p-5 space-y-4">

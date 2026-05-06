@@ -2,7 +2,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Edit, Mail, Phone, MapPin, Calendar, User,
   GraduationCap, BookOpen, CreditCard, FileText, CheckCircle, AlertCircle,
-  Clock, Receipt, BarChart2, Printer, ChevronDown, ChevronUp } from 'lucide-react';
+  Clock, Receipt, BarChart2, Printer, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { Student, Class } from '@schofy/shared';
 import ImageModal from '../components/ImageModal';
 import DropdownModal from '../components/DropdownModal';
@@ -511,7 +511,9 @@ export default function StudentProfile() {
           <div className="modal-card w-full max-w-md" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2"><CreditCard size={18} className="text-white" /><h3 className="font-bold text-white">Record Payment</h3></div>
-              <button onClick={() => setShowPayModal(null)} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">✕</button>
+              <button onClick={() => setShowPayModal(null)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
             </div>
             <div className="p-5 space-y-4">
               <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600">

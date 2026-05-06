@@ -1051,7 +1051,9 @@ export default function Grades() {
                 <Award size={18} className="text-white" />
                 <h2 className="font-bold text-white">Add Grades - All Subjects</h2>
               </div>
-              <button onClick={() => setShowForm(false)} className="p-1 hover:bg-white/20 rounded-lg text-white text-lg leading-none">?</button>
+              <button onClick={() => setShowForm(false)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
             </div>
             <form onSubmit={handleBulkSubmit} className="flex flex-col overflow-hidden">
               {/* Top controls */}

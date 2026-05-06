@@ -775,7 +775,9 @@ export default function Subjects() {
                 <Book size={18} className="text-white" />
                 <h3 className="font-bold text-white">Add Subject</h3>
               </div>
-              <button onClick={resetSubjectForm} className="p-1 hover:bg-white/20 rounded-lg transition-colors text-white text-lg leading-none">G--</button>
+              <button onClick={resetSubjectForm} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
             </div>
 
             <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden">
