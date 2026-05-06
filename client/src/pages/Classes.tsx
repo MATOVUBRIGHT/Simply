@@ -422,11 +422,12 @@ export default function Classes() {
     try {
       const now = new Date().toISOString();
       let successCount = 0;
-      const previewSnapshot = [...importPreview];
+      // Snapshot preview before closing modal (closeImportModal resets importPreview to [])
+      const snap = [...importPreview];
       closeImportModal();
-      addToast(`Importing ${previewSnapshot.length} class${previewSnapshot.length !== 1 ? 'es' : ''}... completing in background`, 'info');
-      for (let i = 0; i < previewSnapshot.length; i++) {
-        const data = previewSnapshot[i];
+      addToast(`Importing ${snap.length} class${snap.length !== 1 ? 'es' : ''}... completing in background`, 'info');
+      for (let i = 0; i < snap.length; i++) {
+        const data = snap[i];
         const classItem: Class = {
           id: crypto.randomUUID(),
           schoolId: id,
@@ -438,7 +439,7 @@ export default function Classes() {
         };
         await dataService.create(id, 'classes', classItem);
         successCount++;
-        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
+        setImportProgress(Math.round(((i + 1) / snap.length) * 100));
       }
       addToast(`Successfully imported ${successCount} class${successCount !== 1 ? 'es' : ''}`, 'success');
     } catch (error) { addToast('Failed to import classes', 'error'); }
