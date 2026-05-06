@@ -1,5 +1,6 @@
 ﻿/**
  * SupabaseDataService — offline-first with conflict-safe sync.
+ * Cache helpers: cacheGet, cacheSet, cacheApplyCreate, cacheApplyUpdate, cacheApplyDelete
  *
  * Strategy:
  * - ALL reads return local cache immediately (works 100% offline)
