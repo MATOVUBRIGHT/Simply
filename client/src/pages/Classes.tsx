@@ -527,41 +527,79 @@ export default function Classes() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) { setShowForm(false); setEditingClass(null); } }}>
-          <div className="modal-card w-full max-w-lg" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <h3 className="font-bold text-white flex items-center gap-2">
-                <GraduationCap size={20} />
-                {editingClass ? 'Edit Class' : 'Add New Class'}
-              </h3>
-              <button onClick={() => { setShowForm(false); setEditingClass(null); }} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="p-5 grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="form-label">Class Name</label>
-                <input value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="form-input" required placeholder="Primary 1" />
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Level</label>
-                <input type="number" value={formData.level} onChange={e => setFormData(prev => ({ ...prev, level: parseInt(e.target.value) }))} className="form-input" min="1" />
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Stream</label>
-                <input value={formData.stream} onChange={e => setFormData(prev => ({ ...prev, stream: e.target.value }))} className="form-input" placeholder="A, B, C..." />
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Capacity</label>
-                <input type="number" value={formData.capacity} onChange={e => setFormData(prev => ({ ...prev, capacity: parseInt(e.target.value) }))} className="form-input" />
-              </div>
-              <div className="col-span-2 flex gap-2 pt-2">
-                <button type="submit" className="btn btn-primary flex-1">
-                  <GraduationCap size={16} /> {editingClass ? 'Update' : 'Save'}
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
+          onClick={e => { if (e.target === e.currentTarget) { setShowForm(false); setEditingClass(null); } }}
+        >
+          <div
+            className="w-full max-w-md animate-modal-in"
+            style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-7">
+              {/* Icon + Title */}
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#EEF2FF' }}>
+                  <GraduationCap size={20} className="text-indigo-600" />
+                </div>
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <h3 className="font-bold text-slate-900 text-[17px] leading-snug">
+                    {editingClass ? 'Edit Class' : 'Add New Class'}
+                  </h3>
+                  <p className="text-[14px] text-slate-500 mt-1">
+                    {editingClass ? 'Update class details below.' : 'Fill in the details to create a new class.'}
+                  </p>
+                </div>
+                <button onClick={() => { setShowForm(false); setEditingClass(null); }} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
+                  <X size={16} className="text-slate-400" />
                 </button>
-                <button type="button" onClick={() => { setShowForm(false); setEditingClass(null); }} className="btn btn-secondary">Cancel</button>
               </div>
-            </form>
+
+              {/* Form */}
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="form-label">Class Name *</label>
+                    <input value={formData.name} onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))} className="form-input" required placeholder="e.g. P.4" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="form-label">Level *</label>
+                    <input type="number" value={formData.level} onChange={e => setFormData(prev => ({ ...prev, level: parseInt(e.target.value) }))} className="form-input" min="1" placeholder="1" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="form-label">Stream</label>
+                    <input value={formData.stream} onChange={e => setFormData(prev => ({ ...prev, stream: e.target.value }))} className="form-input" placeholder="A, B, C..." />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="form-label">Capacity</label>
+                    <input type="number" value={formData.capacity} onChange={e => setFormData(prev => ({ ...prev, capacity: parseInt(e.target.value) }))} className="form-input" placeholder="40" />
+                  </div>
+                </div>
+
+                {/* Buttons */}
+                <div className="flex gap-3 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowForm(false); setEditingClass(null); }}
+                    className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
+                    style={{ background: '#F3F4F6' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')}
+                    onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2"
+                    style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}
+                  >
+                    <GraduationCap size={15} />
+                    {editingClass ? 'Update Class' : 'Save Class'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
