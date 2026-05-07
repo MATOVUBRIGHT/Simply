@@ -39,7 +39,9 @@ export default function AdminSchoolDetail() {
 
   // Grant/extend form state
   const [grantPlan, setGrantPlan] = useState('nursery_primary');
-  const [grantMonths, setGrantMonths] = useState(3);
+  const [grantUnit, setGrantUnit] = useState<'days' | 'weeks' | 'months' | 'free'>('months');
+  const [grantAmount, setGrantAmount] = useState(3);
+  const [extendUnit, setExtendUnit] = useState<'days' | 'weeks' | 'months'>('months');
   const [extendMonths, setExtendMonths] = useState(3);
 
   useEffect(() => { if (schoolId) loadDetail(); }, [schoolId]);
@@ -100,7 +102,19 @@ export default function AdminSchoolDetail() {
     try {
       const now = new Date();
       const endsAt = new Date(now);
-      endsAt.setMonth(endsAt.getMonth() + grantMonths);
+
+      if (grantUnit === 'free') {
+        // Free trial: 7 days by default
+        endsAt.setDate(endsAt.getDate() + 7);
+      } else if (grantUnit === 'days') {
+        endsAt.setDate(endsAt.getDate() + grantAmount);
+      } else if (grantUnit === 'weeks') {
+        endsAt.setDate(endsAt.getDate() + grantAmount * 7);
+      } else {
+        endsAt.setMonth(endsAt.getMonth() + grantAmount);
+      }
+
+      const label = grantUnit === 'free' ? 'Free Trial (7 days)' : `${grantAmount} ${grantUnit}`;
 
       const subData = {
         school_id: schoolId,
@@ -110,7 +124,7 @@ export default function AdminSchoolDetail() {
         starts_at: now.toISOString(),
         ends_at: endsAt.toISOString(),
         updated_at: now.toISOString(),
-        metadata: { grantedByAdmin: true, grantedAt: now.toISOString() },
+        metadata: { grantedByAdmin: true, grantedAt: now.toISOString(), accessType: grantUnit === 'free' ? 'free_trial' : 'paid', label },
       };
 
       if (detail.subId) {
@@ -119,14 +133,13 @@ export default function AdminSchoolDetail() {
         await supabase.from('subscriptions').insert({ ...subData, id: crypto.randomUUID(), created_at: now.toISOString() });
       }
 
-      // Also save to settings for offline access
       await supabase.from('settings').upsert([
         { school_id: schoolId, key: 'subscriptionPlanId', value: grantPlan, updated_at: now.toISOString() },
         { school_id: schoolId, key: 'subscriptionExpiryDate', value: endsAt.toISOString(), updated_at: now.toISOString() },
         { school_id: schoolId, key: 'subscriptionPlanEligible', value: true, updated_at: now.toISOString() },
       ], { onConflict: 'school_id,key' });
 
-      setSuccess(`Access granted: ${PLAN_DEFINITIONS.find(p => p.id === grantPlan)?.name} for ${grantMonths} months`);
+      setSuccess(`Access granted: ${PLAN_DEFINITIONS.find(p => p.id === grantPlan)?.name} — ${label} (expires ${endsAt.toLocaleDateString()})`);
       setShowGrantModal(false);
       await loadDetail();
     } catch (err: any) {
@@ -174,14 +187,23 @@ export default function AdminSchoolDetail() {
       const now = new Date();
       const base = detail.endsAt && new Date(detail.endsAt) > now ? new Date(detail.endsAt) : now;
       const newEndsAt = new Date(base);
-      newEndsAt.setMonth(newEndsAt.getMonth() + extendMonths);
+
+      if (extendUnit === 'days') {
+        newEndsAt.setDate(newEndsAt.getDate() + extendMonths);
+      } else if (extendUnit === 'weeks') {
+        newEndsAt.setDate(newEndsAt.getDate() + extendMonths * 7);
+      } else {
+        newEndsAt.setMonth(newEndsAt.getMonth() + extendMonths);
+      }
+
+      const label = `${extendMonths} ${extendUnit}`;
 
       if (detail.subId) {
         await supabase.from('subscriptions').update({
           ends_at: newEndsAt.toISOString(),
           status: 'active',
           updated_at: now.toISOString(),
-          metadata: { extendedByAdmin: true, extendedAt: now.toISOString() },
+          metadata: { extendedByAdmin: true, extendedAt: now.toISOString(), label },
         }).eq('id', detail.subId);
       }
 
@@ -190,7 +212,7 @@ export default function AdminSchoolDetail() {
         { school_id: schoolId, key: 'subscriptionPlanEligible', value: true, updated_at: now.toISOString() },
       ], { onConflict: 'school_id,key' });
 
-      setSuccess(`Subscription extended by ${extendMonths} months`);
+      setSuccess(`Subscription extended by ${label} — new expiry: ${newEndsAt.toLocaleDateString()}`);
       setShowExtendModal(false);
       await loadDetail();
     } catch (err: any) {
@@ -318,26 +340,94 @@ export default function AdminSchoolDetail() {
               <h2 className={`text-base font-bold ${t.text}`}>Grant Access</h2>
             </div>
             <div className="p-5 space-y-4">
+              {/* Plan selector */}
               <div>
                 <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>Plan</label>
                 <select value={grantPlan} onChange={e => setGrantPlan(e.target.value)}
                   className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
                 >
-                  {PLAN_DEFINITIONS.map(p => <option key={p.id} value={p.id}>{p.name} (up to {p.studentLimit} students)</option>)}
+                  {PLAN_DEFINITIONS.map(p => <option key={p.id} value={p.id}>{p.name} — up to {p.studentLimit} students</option>)}
                 </select>
               </div>
+
+              {/* Access type */}
               <div>
-                <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>Duration (months)</label>
-                <select value={grantMonths} onChange={e => setGrantMonths(Number(e.target.value))}
-                  className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
-                >
-                  {[1, 3, 6, 12].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
-                </select>
+                <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>Access Type</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(['days', 'weeks', 'months', 'free'] as const).map(u => (
+                    <button key={u} onClick={() => setGrantUnit(u)}
+                      className={`py-2 rounded-xl text-xs font-medium transition-all ${
+                        grantUnit === u
+                          ? u === 'free' ? 'bg-violet-600 text-white' : 'bg-emerald-600 text-white'
+                          : isDark ? 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700' : 'bg-slate-100 text-slate-600 hover:text-slate-900 border border-slate-200'
+                      }`}
+                    >
+                      {u === 'free' ? '🎁 Free' : u.charAt(0).toUpperCase() + u.slice(1)}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex gap-3 pt-2">
+
+              {/* Amount — hidden for free */}
+              {grantUnit !== 'free' && (
+                <div>
+                  <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>
+                    Duration ({grantUnit})
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={grantUnit === 'days' ? 365 : grantUnit === 'weeks' ? 52 : 24}
+                      value={grantAmount}
+                      onChange={e => setGrantAmount(Math.max(1, Number(e.target.value)))}
+                      className={`flex-1 px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
+                    />
+                    <span className={`text-sm ${t.muted}`}>{grantUnit}</span>
+                  </div>
+                  {/* Quick presets */}
+                  <div className="flex gap-1.5 mt-2 flex-wrap">
+                    {(grantUnit === 'days' ? [3, 7, 14, 30] : grantUnit === 'weeks' ? [1, 2, 4, 8] : [1, 3, 6, 12]).map(v => (
+                      <button key={v} onClick={() => setGrantAmount(v)}
+                        className={`px-2.5 py-1 rounded-lg text-xs transition-all ${
+                          grantAmount === v
+                            ? 'bg-emerald-600 text-white'
+                            : isDark ? 'bg-slate-800 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Free trial note */}
+              {grantUnit === 'free' && (
+                <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-violet-900/20 border border-violet-800 text-violet-300' : 'bg-violet-50 border border-violet-200 text-violet-700'}`}>
+                  <p className="font-semibold mb-1">🎁 Free Trial — 7 days</p>
+                  <p>School gets full access for 7 days at no cost. After expiry they must subscribe.</p>
+                </div>
+              )}
+
+              {/* Preview */}
+              <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                <span className="font-medium">Expires: </span>
+                {(() => {
+                  const d = new Date();
+                  if (grantUnit === 'free') d.setDate(d.getDate() + 7);
+                  else if (grantUnit === 'days') d.setDate(d.getDate() + grantAmount);
+                  else if (grantUnit === 'weeks') d.setDate(d.getDate() + grantAmount * 7);
+                  else d.setMonth(d.getMonth() + grantAmount);
+                  return d.toLocaleDateString('en-UG', { year: 'numeric', month: 'long', day: 'numeric' });
+                })()}
+              </div>
+
+              <div className="flex gap-3 pt-1">
                 <button onClick={() => setShowGrantModal(false)} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
                 <button onClick={grantAccess} disabled={saving} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
-                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />} Grant
+                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
+                  {grantUnit === 'free' ? 'Grant Free Trial' : 'Grant Access'}
                 </button>
               </div>
             </div>
@@ -354,16 +444,64 @@ export default function AdminSchoolDetail() {
               <h2 className={`text-base font-bold ${t.text}`}>Extend Access</h2>
             </div>
             <div className="p-5 space-y-4">
-              <p className={`text-sm ${t.muted}`}>Current expiry: <span className={`font-medium ${t.text}`}>{detail.endsAt ? new Date(detail.endsAt).toLocaleDateString() : '—'}</span></p>
-              <div>
-                <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>Extend by (months)</label>
-                <select value={extendMonths} onChange={e => setExtendMonths(Number(e.target.value))}
-                  className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${t.input}`}
-                >
-                  {[1, 3, 6, 12].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
-                </select>
+              <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                Current expiry: <span className={`font-semibold ${t.text}`}>{detail.endsAt ? new Date(detail.endsAt).toLocaleDateString() : '—'}</span>
               </div>
-              <div className="flex gap-3 pt-2">
+
+              {/* Unit selector */}
+              <div>
+                <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>Extend by</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(['days', 'weeks', 'months'] as const).map(u => (
+                    <button key={u} onClick={() => setExtendUnit(u)}
+                      className={`py-2 rounded-xl text-xs font-medium transition-all ${
+                        extendUnit === u ? 'bg-indigo-600 text-white' : isDark ? 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700' : 'bg-slate-100 text-slate-600 hover:text-slate-900 border border-slate-200'
+                      }`}
+                    >
+                      {u.charAt(0).toUpperCase() + u.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={extendUnit === 'days' ? 365 : extendUnit === 'weeks' ? 52 : 24}
+                  value={extendMonths}
+                  onChange={e => setExtendMonths(Math.max(1, Number(e.target.value)))}
+                  className={`flex-1 px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${t.input}`}
+                />
+                <span className={`text-sm ${t.muted}`}>{extendUnit}</span>
+              </div>
+
+              {/* Quick presets */}
+              <div className="flex gap-1.5 flex-wrap">
+                {(extendUnit === 'days' ? [3, 7, 14, 30] : extendUnit === 'weeks' ? [1, 2, 4, 8] : [1, 3, 6, 12]).map(v => (
+                  <button key={v} onClick={() => setExtendMonths(v)}
+                    className={`px-2.5 py-1 rounded-lg text-xs transition-all ${
+                      extendMonths === v ? 'bg-indigo-600 text-white' : isDark ? 'bg-slate-800 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+
+              {/* New expiry preview */}
+              <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-indigo-50 text-indigo-700'}`}>
+                <span className="font-medium">New expiry: </span>
+                {(() => {
+                  const base = detail.endsAt && new Date(detail.endsAt) > new Date() ? new Date(detail.endsAt) : new Date();
+                  if (extendUnit === 'days') base.setDate(base.getDate() + extendMonths);
+                  else if (extendUnit === 'weeks') base.setDate(base.getDate() + extendMonths * 7);
+                  else base.setMonth(base.getMonth() + extendMonths);
+                  return base.toLocaleDateString('en-UG', { year: 'numeric', month: 'long', day: 'numeric' });
+                })()}
+              </div>
+
+              <div className="flex gap-3 pt-1">
                 <button onClick={() => setShowExtendModal(false)} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
                 <button onClick={extendAccess} disabled={saving} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
                   {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />} Extend

@@ -31,8 +31,10 @@ export default function Plans() {
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
   const [accessState, setAccessState] = useState<SubscriptionAccessState | null>(null);
   const [latestReceipt, setLatestReceipt] = useState<Awaited<ReturnType<typeof getLatestReceipt>>>(null);
-  const [showIntroModal, setShowIntroModal] = useState(false);
-  const [showContinueModal, setShowContinueModal] = useState(false);
+  const [showTrialModal, setShowTrialModal] = useState(false);
+  const [trialRequested, setTrialRequested] = useState(false);
+  const [showRenewModal, setShowRenewModal] = useState(false);
+  const [renewPlan, setRenewPlan] = useState<typeof PLAN_DEFINITIONS[0] | null>(null);
 
   useEffect(() => {
     if (user?.id || schoolId) loadPlanState();
@@ -62,10 +64,11 @@ export default function Plans() {
   const handleSubscribe = (planId: string) => {
     const plan = PLAN_DEFINITIONS.find(p => p.id === planId);
     if (!plan) return;
-    
     setSelectedPlan(plan);
-    if (latestReceipt) {
-      setShowContinueModal(true);
+    // If user has an existing plan (renewing), show renew instructions first
+    if (currentPlanId) {
+      setRenewPlan(plan);
+      setShowRenewModal(true);
       return;
     }
     setShowPaymentModal(true);
@@ -141,49 +144,82 @@ Powered by Schofy`;
         </div>
       </div>
 
+      {/* First-time user — no plan yet: show trial request */}
+      {!currentPlanId && (
+        <div className="rounded-xl border border-violet-200 bg-violet-50 dark:border-violet-800 dark:bg-violet-900/20 p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-violet-100 dark:bg-violet-900/50 flex items-center justify-center flex-shrink-0 text-xl">🎁</div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-violet-900 dark:text-violet-100 text-sm">New to Schofy?</h3>
+              <p className="text-xs text-violet-700 dark:text-violet-300 mt-0.5">Request a free 7-day trial — no payment needed. Admin will activate it for you.</p>
+            </div>
+            {!trialRequested ? (
+              <button onClick={() => setShowTrialModal(true)}
+                className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium rounded-lg flex-shrink-0"
+              >
+                Request Trial
+              </button>
+            ) : (
+              <span className="px-3 py-1.5 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-xs font-medium rounded-lg flex-shrink-0">
+                ✓ Requested
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Current Plan Status */}
       {currentPlanId && accessState && (
-        <div className="rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
+        <div className={`rounded-xl border p-4 ${
+          accessState.status === 'expired' ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20' :
+          accessState.status === 'expiring' ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20' :
+          'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
+        }`}>
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/50 flex items-center justify-center flex-shrink-0">
-              <Check className="text-green-600 dark:text-green-400" size={20} />
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+              accessState.status === 'expired' ? 'bg-red-100 dark:bg-red-900/50' :
+              accessState.status === 'expiring' ? 'bg-amber-100 dark:bg-amber-900/50' :
+              'bg-green-100 dark:bg-green-900/50'
+            }`}>
+              {accessState.status === 'expired' ? <AlertTriangle className="text-red-600 dark:text-red-400" size={20} /> :
+               accessState.status === 'expiring' ? <Clock className="text-amber-600 dark:text-amber-400" size={20} /> :
+               <Check className="text-green-600 dark:text-green-400" size={20} />}
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-green-900 dark:text-green-100">
-                Your Current Plan: {PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.name || 'Unknown'}
+              <h3 className={`font-semibold text-sm ${
+                accessState.status === 'expired' ? 'text-red-900 dark:text-red-100' :
+                accessState.status === 'expiring' ? 'text-amber-900 dark:text-amber-100' :
+                'text-green-900 dark:text-green-100'
+              }`}>
+                {PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.name || 'Unknown'} Plan
+                {accessState.status === 'expired' && ' — Expired'}
+                {accessState.status === 'expiring' && ` — Expires in ${accessState.daysRemaining} days`}
+                {accessState.status === 'active' && ' — Active'}
               </h3>
-              <p className="text-sm text-green-700 dark:text-green-300 mt-1">
-                {accessState.status === 'active' ? 'Active' : 
-                 accessState.status === 'expiring' ? `Expires in ${accessState.daysRemaining} days` :
-                 accessState.status === 'expired' ? 'Expired' : 'Unknown'} - 
-                {currentCycle === 'monthly' ? ' Monthly' : 
-                 currentCycle === 'yearly' ? ' Yearly' : ' Term'} billing
-              </p>
-              <div className="flex items-center gap-4 mt-2 text-xs text-green-600 dark:text-green-400">
+              <div className={`flex items-center gap-3 mt-1.5 text-xs ${
+                accessState.status === 'expired' ? 'text-red-600 dark:text-red-400' :
+                accessState.status === 'expiring' ? 'text-amber-600 dark:text-amber-400' :
+                'text-green-600 dark:text-green-400'
+              }`}>
                 <span>Students: {studentCount}/{PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.studentLimit || 0}</span>
-                {accessState.expiryDate && (
-                  <span>Expires: {new Date(accessState.expiryDate).toLocaleDateString()}</span>
-                )}
+                {accessState.expiryDate && <span>Expires: {new Date(accessState.expiryDate).toLocaleDateString()}</span>}
+                <span className="capitalize">{currentCycle} billing</span>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {accessState.status === 'expiring' && (
-                <button
-                  onClick={() => setShowUpgradeModal(true)}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium rounded-lg flex items-center gap-1"
-                >
-                  <AlertTriangle size={12} /> Extend
-                </button>
-              )}
-              {accessState.status === 'expired' && (
-                <button
-                  onClick={() => setShowUpgradeModal(true)}
-                  className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-medium rounded-lg flex items-center gap-1"
-                >
-                  <AlertTriangle size={12} /> Renew
-                </button>
-              )}
-            </div>
+            {/* Renew button — always visible for expired/expiring */}
+            {(accessState.status === 'expired' || accessState.status === 'expiring') && (
+              <button
+                onClick={() => {
+                  const plan = PLAN_DEFINITIONS.find(p => p.id === currentPlanId);
+                  if (plan) { setRenewPlan(plan); setShowRenewModal(true); }
+                }}
+                className={`px-3 py-1.5 text-white text-xs font-medium rounded-lg flex items-center gap-1 flex-shrink-0 ${
+                  accessState.status === 'expired' ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
+                }`}
+              >
+                <AlertTriangle size={12} /> Renew Now
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -557,74 +593,138 @@ Powered by Schofy`;
         </div>
       , document.body)}
 
-      {showIntroModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowIntroModal(false); }}>
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700">
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Select A Plan First</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Choose monthly, per term, or yearly before paying.</p>
+      {showTrialModal && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
+            <div className="bg-gradient-to-r from-violet-600 to-purple-600 p-5 text-white text-center">
+              <div className="text-4xl mb-2">🎁</div>
+              <h2 className="text-lg font-bold">Request Free Trial</h2>
+              <p className="text-violet-100 text-sm mt-1">7 days of full access — no payment required</p>
             </div>
-            <div className="p-5 space-y-3 text-sm text-slate-700 dark:text-slate-300">
-              <p>New users do not have a current plan by default.</p>
-              <p>Pick your billing cycle and then pay only once for the plan you want.</p>
-            </div>
-              <div className="p-5 pt-0 flex justify-end">
-                <button
-                  onClick={async () => {
-                    const authId = schoolId || user?.id;
-                    if (authId) await markPlanIntroSeen(authId);
-                    setShowIntroModal(false);
-                  }}
-                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
-                >
-                  Continue
+            <div className="p-5 space-y-4">
+              <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-xl p-3 space-y-1.5 text-xs text-violet-700 dark:text-violet-300">
+                <p className="font-semibold">How it works:</p>
+                <p>1. Send a WhatsApp message to the admin requesting a trial</p>
+                <p>2. Admin will activate 7 days of free access for your school</p>
+                <p>3. After 7 days, choose a paid plan to continue</p>
+              </div>
+
+              <a
+                href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Admin,\n\nI would like to request a free trial for my school.\n\nSchool email: ${user?.email}\nSchool ID: ${schoolId || user?.id}\n\nPlease activate the 7-day free trial. Thank you.`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setTrialRequested(true)}
+                className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-all"
+              >
+                <MessageCircle size={18} /> Send Trial Request via WhatsApp
+              </a>
+
+              <div className="flex gap-2">
+                <a href="tel:0775011029" className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-medium flex items-center justify-center gap-2">
+                  <Phone size={15} /> Call Admin
+                </a>
+                <button onClick={() => setShowTrialModal(false)} className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-medium">
+                  Close
                 </button>
               </div>
+            </div>
           </div>
-        </div>
-      , document.body)}
+        </div>,
+        document.body
+      )}
 
-      {showContinueModal && selectedPlan && latestReceipt && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowContinueModal(false); }}>
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
-            <div className="p-5 border-b border-slate-200 dark:border-slate-700">
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Continue With New Subscription?</h2>
+      {showRenewModal && renewPlan && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 p-5 text-white">
+              <div className="flex items-center gap-3 mb-1">
+                <CreditCard size={22} />
+                <h2 className="text-lg font-bold">Renew {renewPlan.name}</h2>
+              </div>
+              <p className="text-indigo-100 text-sm">Follow these steps to renew your subscription</p>
             </div>
-            <div className="p-5 space-y-3">
-              <p className="text-sm text-slate-700 dark:text-slate-300">
-                You already have a paid plan receipt for <strong>{latestReceipt.planName}</strong> on <strong>{latestReceipt.billingCycle}</strong>.
-              </p>
-              <p className="text-sm text-slate-700 dark:text-slate-300">
-                Do you want to continue and subscribe to <strong>{selectedPlan.name}</strong> on <strong>{billingCycle}</strong>?
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Current receipt expires on {new Date(latestReceipt.expiresAt).toLocaleDateString()}.
-              </p>
-            </div>
-            <div className="p-5 pt-0 flex gap-3">
-              <button
-                onClick={() => {
-                  setShowContinueModal(false);
-                }}
-                className="flex-1 px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  setShowContinueModal(false);
-                  setShowPaymentModal(true);
-                  setPaymentSubmitted(false);
-                  setTransactionId('');
-                }}
-                className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
-              >
-                Continue
-              </button>
+
+            <div className="p-5 space-y-4">
+              {/* Current plan info */}
+              {accessState && (
+                <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">Current plan</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">{renewPlan.name}</span>
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-slate-500 dark:text-slate-400">Status</span>
+                    <span className={`font-medium ${accessState.status === 'expired' ? 'text-red-600' : 'text-amber-600'}`}>
+                      {accessState.status === 'expired' ? 'Expired' : `Expires in ${accessState.daysRemaining} days`}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Step-by-step instructions */}
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Renewal Steps</p>
+
+                {[
+                  { step: '1', icon: '💰', title: 'Send Payment', desc: `Send $${billingCycle === 'monthly' ? renewPlan.monthlyPrice : renewPlan.termPrice} via Airtel Money to 0750034304` },
+                  { step: '2', icon: '📋', title: 'Note Your TID', desc: 'Save the Transaction ID (TID) from your Airtel Money confirmation SMS' },
+                  { step: '3', icon: '📝', title: 'Submit Below', desc: 'Click "Pay & Submit" and enter your TID — admin will verify within 24 hours' },
+                ].map(({ step, icon, title, desc }) => (
+                  <div key={step} className="flex items-start gap-3">
+                    <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/40 rounded-xl flex items-center justify-center text-sm flex-shrink-0">{icon}</div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Amount summary */}
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl p-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-indigo-700 dark:text-indigo-300">Plan</span>
+                  <span className="font-bold text-indigo-900 dark:text-indigo-100">{renewPlan.name}</span>
+                </div>
+                <div className="flex justify-between text-sm mt-1">
+                  <span className="text-indigo-700 dark:text-indigo-300">Amount ({billingCycle})</span>
+                  <span className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-300">
+                    ${billingCycle === 'monthly' ? renewPlan.monthlyPrice : renewPlan.termPrice}
+                  </span>
+                </div>
+                <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">Send to Airtel Money: <strong>0750034304</strong></p>
+              </div>
+
+              {/* Actions */}
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    setShowRenewModal(false);
+                    setShowPaymentModal(true);
+                    setPaymentSubmitted(false);
+                    setTransactionId('');
+                  }}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"
+                >
+                  <CreditCard size={18} /> Pay & Submit TID
+                </button>
+                <a
+                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Admin,\n\nI want to renew my ${renewPlan.name} plan.\nSchool: ${user?.email}\nBilling: ${billingCycle}\nAmount: $${billingCycle === 'monthly' ? renewPlan.monthlyPrice : renewPlan.termPrice}\n\nPlease assist. Thank you.`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 text-sm"
+                >
+                  <MessageCircle size={16} /> Contact Admin on WhatsApp
+                </a>
+                <button onClick={() => setShowRenewModal(false)} className="w-full py-2 text-slate-400 text-sm">Cancel</button>
+              </div>
             </div>
           </div>
-        </div>
-      , document.body)}
+        </div>,
+        document.body
+      )}
+
 
       {showSuccess && (
         <SuccessPopup 
