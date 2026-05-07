@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2, Clock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen, saveCurrentPlan } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { supabase } from '../lib/supabase';
 
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
@@ -395,15 +396,65 @@ Powered by Schofy`;
 
                       setIsRefreshing(true);
                       try {
+                        // Save plan locally
                         const usage = await saveCurrentPlan(authId, selectedPlan.id, billingCycle, {
                           authUserId: user?.id,
                         });
+
+                        // Mark subscription as pending in Supabase so admin can verify
+                        if (supabase) {
+                          const now = new Date().toISOString();
+                          // Find existing sub row
+                          const { data: existing } = await supabase
+                            .from('subscriptions')
+                            .select('id')
+                            .eq('school_id', authId)
+                            .order('updated_at', { ascending: false })
+                            .limit(1)
+                            .single();
+
+                          const pendingMeta = {
+                            source: 'client',
+                            transactionId: transactionId.trim(),
+                            billingCycle,
+                            submittedAt: now,
+                            planId: selectedPlan.id,
+                            amount: billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice,
+                          };
+
+                          if (existing?.id) {
+                            await supabase.from('subscriptions').update({
+                              status: 'pending',
+                              plan: selectedPlan.id,
+                              updated_at: now,
+                              metadata: pendingMeta,
+                            }).eq('id', existing.id);
+                          } else {
+                            await supabase.from('subscriptions').insert({
+                              id: crypto.randomUUID(),
+                              school_id: authId,
+                              user_id: user?.id || authId,
+                              plan: selectedPlan.id,
+                              status: 'pending',
+                              starts_at: now,
+                              ends_at: now, // will be set by admin on approval
+                              created_at: now,
+                              updated_at: now,
+                              metadata: pendingMeta,
+                            });
+                          }
+                        }
+
+                        // Cache pending state locally so gate blocks immediately
+                        localStorage.setItem('schofy_sub_pending', '1');
+                        localStorage.setItem('schofy_sub_tid', transactionId.trim());
+                        localStorage.setItem('schofy_sub_plan', selectedPlan.id);
+
                         setCurrentPlanId(usage.selectedPlanId);
                         setStudentCount(usage.used);
                         setAccessState(usage);
                         setLatestReceipt(await getLatestReceipt(authId));
                         setPaymentSubmitted(true);
-                        setShowSuccess(true);
                       } catch (error) {
                         console.error('Payment error:', error);
                       } finally {
@@ -420,21 +471,42 @@ Powered by Schofy`;
               </div>
             ) : (
               <div className="p-6 text-center">
-                <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-3"><Check size={24} className="text-green-500" /></div>
+                {/* Pending verification state */}
+                <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Clock size={28} className="text-amber-500" />
+                </div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-1">Payment Submitted!</h2>
+                <p className="text-sm text-amber-600 dark:text-amber-400 font-medium mb-1">Awaiting admin verification</p>
                 <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">TID: <span className="font-mono font-bold text-slate-900 dark:text-white">{transactionId}</span></p>
-                {latestReceipt && (
-                  <div className="mb-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-3 text-left">
-                    <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">Receipt saved</p>
-                    <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{latestReceipt.planName} - ${latestReceipt.amount} - {latestReceipt.billingCycle}</p>
-                    <p className="text-xs text-emerald-700 dark:text-emerald-300">Expires {new Date(latestReceipt.expiresAt).toLocaleDateString()}</p>
+
+                {/* Pending notice */}
+                <div className="mb-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 text-left">
+                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">Access blocked until admin approves</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                    Plan: <strong>{selectedPlan.name}</strong> · Amount: <strong>${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}</strong>
+                  </p>
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">Activation within 24 hours after verification.</p>
+                </div>
+
+                <div className="space-y-2">
+                  {/* WhatsApp with pre-filled message */}
+                  <a
+                    href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Admin,\n\nPayment submitted:\nSchool: ${user?.email}\nPlan: ${selectedPlan.name}\nBilling: ${billingCycle}\nAmount: $${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}\nTransaction ID: ${transactionId}\n\nPlease verify and activate. Thank you.`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl text-xs font-medium flex items-center justify-center gap-2"
+                  >
+                    <MessageCircle size={14} /> Send to Admin via WhatsApp
+                  </a>
+                  <div className="flex gap-2">
+                    <button onClick={handleDownloadInvoice} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1">
+                      <Download size={12} /> Receipt
+                    </button>
+                    <a href="tel:0775011029" className="flex-1 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-medium flex items-center justify-center gap-1">
+                      <Phone size={12} /> Call Admin
+                    </a>
                   </div>
-                )}
-                <div className="flex gap-2 justify-center">
-                  <button onClick={handleDownloadInvoice} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-medium flex items-center gap-1">
-                    <Download size={12} /> Download Receipt
-                  </button>
-                  <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-medium">Close</button>
+                  <button onClick={() => setShowPaymentModal(false)} className="w-full py-2 text-slate-400 text-xs">Close</button>
                 </div>
               </div>
             )}
