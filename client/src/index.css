@@ -1707,17 +1707,19 @@ textarea.form-input {
    MOBILE PERFORMANCE — disable expensive effects on small screens
    ============================================================ */
 
+/* ============================================================
+   DISABLE ALL BACKDROP-BLUR GLOBALLY — causes lag on mobile
+   and shows as white/grey blur on refresh on all devices
+   ============================================================ */
+*,
+*::before,
+*::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 /* Disable backdrop-blur on mobile (GPU-intensive, causes lag) */
 @media (max-width: 768px) {
-  .backdrop-blur-sm,
-  .backdrop-blur,
-  .backdrop-blur-md,
-  .backdrop-blur-lg,
-  .backdrop-blur-xl {
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-  }
-
   /* Simplify modal animations on mobile */
   .animate-modal-in {
     animation: none !important;
@@ -1733,11 +1735,6 @@ textarea.form-input {
   /* Disable hover scale effects on touch devices */
   .btn:not(:disabled):hover {
     transform: none !important;
-  }
-
-  /* Disable sidebar hover expand on mobile */
-  .group-hover\:w-\[220px\] {
-    width: auto !important;
   }
 }
 
