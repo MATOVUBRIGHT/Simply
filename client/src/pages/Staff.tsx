@@ -44,7 +44,8 @@ const StaffRow = memo(({
   onSingleClick, 
   onDoubleClick, 
   onPreviewImage, 
-  onDelete
+  onDelete,
+  pageSize
 }: {
   staff: Staff;
   index: number;
@@ -55,6 +56,7 @@ const StaffRow = memo(({
   onDoubleClick: (id: string) => void;
   onPreviewImage: (img: { src: string; alt: string }) => void;
   onDelete: (id: string) => void;
+  pageSize: number;
 }) => {
   return (
     <tr 
@@ -63,7 +65,7 @@ const StaffRow = memo(({
       onDoubleClick={() => onDoubleClick(s.id)}
     >
       <td className="text-center text-xs text-slate-400 dark:text-slate-500">
-        {(currentPage - 1) * 10 + index + 1}
+        {(currentPage - 1) * pageSize + index + 1}
       </td>
       {selectMode && (
         <td className="text-center">
@@ -184,6 +186,7 @@ export default function StaffPage() {
     items: paginatedStaff,
     currentPage,
     totalPages,
+    pageSize,
     goToPage,
     nextPage,
     prevPage,
@@ -896,6 +899,7 @@ export default function StaffPage() {
                     onDoubleClick={handleRowDoubleClick}
                     onPreviewImage={setPreviewImage}
                     onDelete={handleDelete}
+                    pageSize={pageSize}
                   />
                 ))
               )}
@@ -906,8 +910,8 @@ export default function StaffPage() {
         {totalPages > 1 && (
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * 10 + 1}</span> to{' '}
-              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * 10, totalCount)}</span> of{' '}
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * pageSize + 1}</span> to{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * pageSize, totalCount)}</span> of{' '}
               <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> staff members
             </p>
             <div className="flex items-center gap-1">

@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   RefreshCw,
   ChevronLeft,
+  Shield,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
@@ -33,6 +34,8 @@ import { userDBManager } from '../lib/database/UserDatabaseManager';
 import { dataService } from '../lib/database/SupabaseDataService';
 import GlobalSearch from './GlobalSearch';
 import InstallPWA from './InstallPWA';
+import { useStaffAuth } from '../contexts/StaffAuthContext';
+import StaffLoginModal from './StaffLoginModal';
 import { getSubscriptionAccessState, SubscriptionAccessState } from '../utils/plans';
 import { getRecycleBin } from '../utils/recycleBin';
 import RealtimeStatus from './RealtimeStatus';
@@ -56,11 +59,13 @@ const menuItems = [
   { path: '/transport', label: 'Transport', icon: Bus, roles: [UserRole.ADMIN] },
   { path: '/announcements', label: 'Announcements', icon: MessageSquare, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/reports', label: 'Reports', icon: ClipboardList, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
+  { path: '/roles', label: 'Roles & Access', icon: Shield, roles: [UserRole.ADMIN] },
   { path: '/settings', label: 'Settings', icon: Settings, roles: [UserRole.ADMIN] },
 ];
 
 function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarHovered, setSidebarHovered] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [notifOpen, setNotifOpen] = useState(false);
@@ -74,6 +79,8 @@ function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, schoolId, logout, isOnline } = useAuth();
+  const { isStaffMode, staffSession, staffLogout } = useStaffAuth();
+  const [showStaffLogin, setShowStaffLogin] = useState(false);
   const tenantId = schoolId || user?.id;
   const { isSyncing } = useSync();
   const headerRef = useRef<HTMLDivElement>(null);
@@ -337,11 +344,13 @@ function Layout({ children }: LayoutProps) {
 
       {/* Sidebar -- always fixed, never scrolls away */}
       <aside
+        onMouseEnter={() => !sidebarOpen && setSidebarHovered(true)}
+        onMouseLeave={() => setSidebarHovered(false)}
         className={`fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl transition-all duration-300 ease-in-out ${
           mobileSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
-        } ${!mobileSidebarOpen && (sidebarOpen ? 'w-64' : 'lg:w-20')}`}
+        } ${!mobileSidebarOpen && (sidebarOpen || sidebarHovered ? 'w-64' : 'lg:w-20')}`}
       >
-        <div className="h-full flex flex-col overflow-hidden">
+        <div className="h-full flex flex-col">
           {/* School Header */}
           <div className="flex items-center gap-3 h-20 px-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
             <label className="relative w-10 h-10 rounded-lg flex items-center justify-center shadow-lg shrink-0 cursor-pointer group overflow-hidden" style={{ backgroundColor: schoolLogo ? 'transparent' : 'var(--primary-color)' }} title="Click to change school logo">
@@ -355,7 +364,7 @@ function Layout({ children }: LayoutProps) {
               </div>
               <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
             </label>
-            <div className={`flex-1 min-w-0 transition-all duration-300 ${sidebarOpen || mobileSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 hidden'}`}>
+            <div className={`flex-1 min-w-0 transition-all duration-300 ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 hidden'}`}>
               <h2 className="font-bold text-sm leading-tight text-slate-800 dark:text-white truncate">
                 {schoolName}
               </h2>
@@ -372,48 +381,66 @@ function Layout({ children }: LayoutProps) {
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar overflow-x-hidden">
-            {filteredMenuItems.map(item => {
-              const isActive = location.pathname === item.path;
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => setMobileSidebarOpen(false)}
-                  className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-200 group relative ${
-                    isActive 
-                      ? 'text-white shadow-md' 
-                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                  style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
-                  title={!sidebarOpen && !mobileSidebarOpen ? item.label : ''}
-                >
-                  <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'}`} />
-                  <span className={`text-sm font-medium whitespace-nowrap transition-all duration-300 ${sidebarOpen || mobileSidebarOpen ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4 pointer-events-none w-0'}`}>
-                    {item.label}
-                  </span>
-                </Link>
-              );
-            })}
+          <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar overflow-x-visible" style={{ direction: 'rtl' }}>
+            <div style={{ direction: 'ltr' }}>
+              {filteredMenuItems.map(item => {
+                const isActive = location.pathname === item.path;
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setMobileSidebarOpen(false)}
+                    className={`flex items-center rounded-lg transition-all duration-300 group relative h-11 ${
+                      isActive 
+                        ? 'text-white shadow-md' 
+                        : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                    style={(isActive && (sidebarOpen || sidebarHovered || mobileSidebarOpen)) ? { backgroundColor: 'var(--primary-color)' } : { zIndex: 1 }}
+                  >
+                    {/* Hover stretching container (only active when sidebar is strictly minimized and NOT hovered) */}
+                    <div className={`
+                      flex items-center gap-3 h-full rounded-lg transition-all duration-500 ease-in-out
+                      ${!sidebarOpen && !sidebarHovered && !mobileSidebarOpen 
+                        ? 'absolute left-0 top-0 w-12 px-4 group-hover:w-[220px] group-hover:bg-white group-hover:dark:bg-slate-800 group-hover:shadow-[0_10px_40px_-10px_rgba(0,0,0,0.2)] group-hover:z-[110] group-hover:ring-1 group-hover:ring-slate-200 group-hover:dark:ring-slate-700' 
+                        : 'w-full px-4'
+                      }
+                    `}
+                    style={isActive && !sidebarOpen && !sidebarHovered && !mobileSidebarOpen ? { backgroundColor: 'var(--primary-color)', color: 'white' } : {}}
+                    >
+                      <Icon size={20} className={`shrink-0 transition-colors duration-500 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
+                      
+                      <span className={`
+                        text-sm font-bold whitespace-nowrap transition-all duration-500 ease-in-out overflow-hidden
+                        ${sidebarOpen || sidebarHovered || mobileSidebarOpen 
+                          ? 'opacity-100 w-auto' 
+                          : 'opacity-0 w-0 group-hover:opacity-100 group-hover:w-[160px]'
+                        }
+                      `}>
+                        {item.label}
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
           </nav>
 
-          {/* Minimize Sidebar Button (Desktop only) */}
-          <div className="hidden lg:block px-3 py-3 border-t border-slate-200 dark:border-slate-700">
+          {/* Sidebar Footer: Minimize Button & Powered By on same line */}
+          <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0">
+            <div className={`transition-all duration-300 ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Powered by <span className="font-medium">Schofy</span></p>
+            </div>
+            
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-colors"
+              className={`p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-all ${!sidebarOpen && !sidebarHovered && !mobileSidebarOpen ? 'w-full flex justify-center' : ''}`}
               title={sidebarOpen ? "Minimize Sidebar" : "Expand Sidebar"}
             >
               <div className={`transition-transform duration-300 ${!sidebarOpen ? 'rotate-180' : ''}`}>
-                <ChevronLeft size={20} />
+                <ChevronLeft size={18} />
               </div>
             </button>
-          </div>
-
-          {/* Powered by Footer */}
-          <div className={`px-4 py-3 border-t border-slate-200 dark:border-slate-700 shrink-0 transition-all duration-300 ${sidebarOpen || mobileSidebarOpen ? 'opacity-100 h-auto' : 'opacity-0 h-0 p-0 overflow-hidden'}`}>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center">Powered by <span className="font-medium">Schofy</span></p>
           </div>
         </div>
       </aside>
@@ -580,6 +607,19 @@ function Layout({ children }: LayoutProps) {
                     </button>
                   ))}
                   <div className="border-t border-slate-100 dark:border-slate-700 my-1 mx-3" />
+                  {!isStaffMode ? (
+                    <button onClick={() => { setProfileOpen(false); setShowStaffLogin(true); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors">
+                      <Shield size={16} className="shrink-0" />
+                      <span className="font-medium text-sm">Staff Login</span>
+                    </button>
+                  ) : (
+                    <button onClick={() => { setProfileOpen(false); staffLogout(); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
+                      <Shield size={16} className="shrink-0" />
+                      <span className="font-medium text-sm">Exit Staff Mode ({staffSession?.staffMember.staffId})</span>
+                    </button>
+                  )}
                   <button onClick={() => { setProfileOpen(false); logout(); }}
                     className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
                     <LogOut size={16} className="shrink-0" />
@@ -603,7 +643,7 @@ function Layout({ children }: LayoutProps) {
 
         {/* Page Content — scrolls vertically, allows horizontal scroll on small screens */}
         <main className="flex-1 min-h-0 bg-[#f8fafc] dark:bg-slate-950" style={{ isolation: 'auto' }}>
-          <div className="h-full overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
+          <div className="h-full overflow-y-auto overflow-x-auto p-4 sm:p-6 lg:p-8">
             <div className="w-full min-w-0">
               {children}
             </div>
@@ -620,6 +660,7 @@ function Layout({ children }: LayoutProps) {
       )}
 
       <InstallPWA />
+      {showStaffLogin && <StaffLoginModal onClose={() => setShowStaffLogin(false)} />}
     </div>
   );
 }

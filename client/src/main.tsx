@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import AdminApp from './admin/AdminApp';
 import { AuthProvider } from './contexts/AuthContext';
+import { StaffAuthProvider } from './contexts/StaffAuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { SyncProvider } from './contexts/SyncContext';
@@ -79,11 +80,13 @@ if (isAdminPath) {
         <ThemeProvider>
           <ToastProvider>
             <AuthProvider>
-              <ConfirmProvider>
-                <SyncProvider>
-                  <App />
-                </SyncProvider>
-              </ConfirmProvider>
+              <StaffAuthProvider>
+                <ConfirmProvider>
+                  <SyncProvider>
+                    <App />
+                  </SyncProvider>
+                </ConfirmProvider>
+              </StaffAuthProvider>
             </AuthProvider>
           </ToastProvider>
         </ThemeProvider>

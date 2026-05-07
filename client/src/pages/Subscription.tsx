@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
@@ -181,19 +181,33 @@ export default function Subscription() {
                     ))}
                   </div>
 
-                  <div className="mt-8">
-                    <button
-                      onClick={() => handleSubscribe(plan.id)}
-                      disabled={isCurrentPlan}
-                      className={`w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
-                        isCurrentPlan ? 'bg-green-100 text-green-700 cursor-default' :
-                        billingCycle === 'yearly' ? 'bg-amber-500 hover:bg-amber-600 text-white' :
-                        plan.popular ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/30' :
-                        'bg-slate-900 hover:bg-slate-800 text-white'
-                      }`}
-                    >
-                      {isCurrentPlan ? <><Check size={18} /> Current Plan</> : billingCycle === 'yearly' ? <><MessageCircle size={18} /> Contact Us</> : <><CreditCard size={18} /> Subscribe</>}
-                    </button>
+                  <div className="mt-8 space-y-3">
+                    {isCurrentPlan ? (
+                      <button
+                        onClick={() => handleSubscribe(plan.id)}
+                        className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/30"
+                      >
+                        <RefreshCw size={18} /> Renew Plan
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleSubscribe(plan.id)}
+                        className={`w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                          billingCycle === 'yearly' ? 'bg-amber-500 hover:bg-amber-600 text-white' :
+                          plan.popular ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/30' :
+                          'bg-slate-900 hover:bg-slate-800 text-white'
+                        }`}
+                      >
+                        {billingCycle === 'yearly' ? <><MessageCircle size={18} /> Contact Us</> : <><CreditCard size={18} /> Subscribe</>}
+                      </button>
+                    )}
+                    {isCurrentPlan && (
+                      <div className="text-center">
+                        <span className="text-xs font-medium text-green-600 flex items-center justify-center gap-1">
+                          <Check size={12} /> Active Plan
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

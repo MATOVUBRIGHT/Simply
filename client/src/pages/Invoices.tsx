@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus } from 'lucide-react';
+import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, Fee, FeeStructure, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -15,6 +15,8 @@ import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCat
 import { ClassOption } from '../utils/classroom';
 import DropdownModal from '../components/DropdownModal';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { usePagination } from '../hooks/usePagination';
+import { useDebounce } from '../hooks/useDebounce';
 
 interface Invoice {
   id: string;
@@ -53,6 +55,97 @@ interface Discount {
   createdAt: string;
 }
 
+const StudentInvoiceRow = memo(({ 
+  student, 
+  formatMoney, 
+  onInvoice 
+}: { 
+  student: any; 
+  formatMoney: (val: number) => string; 
+  onInvoice: (id: string, classId: string) => void;
+}) => (
+  <tr>
+    <td className="font-medium">{student.studentName}</td>
+    <td className="text-slate-500">{student.admissionNo}</td>
+    <td>
+      <span className="badge badge-info">{student.invoiceCount}</span>
+    </td>
+    <td className="font-semibold">{formatMoney(student.totalInvoiced)}</td>
+    <td className="text-emerald-600 font-semibold">{formatMoney(student.totalPaid)}</td>
+    <td className={student.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>
+      {formatMoney(student.balance)}
+    </td>
+    <td>
+      {student.status === 'not_invoiced' ? (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+          <XCircle size={12} />
+          Not Invoiced
+        </span>
+      ) : student.status === 'paid' ? (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+          <CheckCircle size={12} />
+          Cleared
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+          <Clock size={12} />
+          Balance
+        </span>
+      )}
+    </td>
+    <td>
+      <button
+        onClick={() => onInvoice(student.id, student.classId || '')}
+        className="btn btn-secondary text-sm py-1.5"
+      >
+        <Plus size={14} /> Invoice
+      </button>
+    </td>
+  </tr>
+));
+
+const InvoiceRow = memo(({ 
+  invoice, 
+  formatMoney, 
+  onRecord,
+  statusConfig
+}: { 
+  invoice: Invoice; 
+  formatMoney: (val: number) => string; 
+  onRecord: (id: string) => void;
+  statusConfig: any;
+}) => {
+  const StatusIcon = statusConfig[invoice.status].icon;
+  return (
+    <tr>
+      <td className="font-medium">{invoice.studentName}</td>
+      <td>{invoice.description}</td>
+      <td className="font-semibold">{formatMoney(invoice.amount)}</td>
+      <td className="text-emerald-600 font-semibold">{formatMoney(invoice.paidAmount)}</td>
+      <td className={invoice.amount - invoice.paidAmount > 0 ? 'text-red-600 font-semibold' : ''}>
+        {formatMoney(invoice.amount - invoice.paidAmount)}
+      </td>
+      <td>
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${statusConfig[invoice.status].bg} ${statusConfig[invoice.status].color}`}>
+          <StatusIcon size={12} />
+          {invoice.status}
+        </span>
+      </td>
+      <td><span className="badge badge-info">Term {invoice.term}</span></td>
+      <td>
+        {invoice.status !== 'paid' && (
+          <button
+            onClick={() => onRecord(invoice.id)}
+            className="btn btn-secondary text-sm py-1.5"
+          >
+            <DollarSign size={14} /> Record
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+});
+
 // Build: 2026-05-05
 export default function Invoices() {
   const { user, schoolId } = useAuth();
@@ -61,6 +154,7 @@ export default function Invoices() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterTerm, setFilterTerm] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch] = useDebounce(searchTerm, 300);
   const [showStatusFilter, setShowStatusFilter] = useState(false);
   const [showTermFilter, setShowTermFilter] = useState(false);
   const { addToast } = useToast();
@@ -151,15 +245,17 @@ export default function Invoices() {
     });
   }, [allStudents, fees, payments]);
 
-  const filteredStudentSummary = studentInvoiceSummary.filter(s => {
-    const search = searchTerm.toLowerCase();
-    if (search && !s.studentName.toLowerCase().includes(search)) return false;
-    if (filterStatus === 'invoiced' && !s.isInvoiced) return false;
-    if (filterStatus === 'not_invoiced' && s.isInvoiced) return false;
-    if (filterStatus === 'paid' && s.status !== 'paid') return false;
-    if (filterStatus === 'pending' && s.balance <= 0) return false;
-    return true;
-  });
+  const filteredStudentSummary = useMemo(() => {
+    return studentInvoiceSummary.filter(s => {
+      const search = debouncedSearch.toLowerCase();
+      if (search && !s.studentName.toLowerCase().includes(search)) return false;
+      if (filterStatus === 'invoiced' && !s.isInvoiced) return false;
+      if (filterStatus === 'not_invoiced' && s.isInvoiced) return false;
+      if (filterStatus === 'paid' && s.status !== 'paid') return false;
+      if (filterStatus === 'pending' && s.balance <= 0) return false;
+      return true;
+    });
+  }, [studentInvoiceSummary, debouncedSearch, filterStatus]);
 
   // Realtime: fee structures reload when class selection changes
   useEffect(() => {
@@ -692,18 +788,31 @@ export default function Invoices() {
     }
   }
 
-  const filteredInvoices = invoices.filter(inv => {
-    if (filterStatus !== 'all' && inv.status !== filterStatus) return false;
-    if (filterTerm !== 'all' && inv.term !== filterTerm) return false;
-    if (searchTerm) {
-      const search = searchTerm.toLowerCase();
-      if (!inv.studentName.toLowerCase().includes(search) && 
-          !inv.description.toLowerCase().includes(search)) {
-        return false;
-      }
-    }
-    return true;
-  });
+  const filteredInvoices = useMemo(() => {
+     return invoices.filter(inv => {
+       if (filterStatus !== 'all' && inv.status !== filterStatus) return false;
+       if (filterTerm !== 'all' && inv.term !== filterTerm) return false;
+       if (debouncedSearch) {
+         const search = debouncedSearch.toLowerCase();
+         if (!inv.studentName.toLowerCase().includes(search) && 
+             !inv.description.toLowerCase().includes(search)) {
+           return false;
+         }
+       }
+       return true;
+     });
+   }, [invoices, filterStatus, filterTerm, debouncedSearch]);
+
+   const {
+      items: paginatedItems,
+      currentPage,
+      totalPages,
+      goToPage,
+      nextPage,
+      prevPage,
+      hasNextPage,
+      hasPrevPage
+    } = usePagination(viewMode === 'students' ? filteredStudentSummary : (filteredInvoices as any[]), { pageSize: 10 });
 
   const stats = {
     total: invoices.reduce((sum, i) => sum + i.amount, 0),
@@ -1143,45 +1252,13 @@ export default function Invoices() {
                       </div>
                     </td>
                   </tr>
-                ) : filteredStudentSummary.map(student => (
-                  <tr key={student.id}>
-                    <td className="font-medium">{student.studentName}</td>
-                    <td className="text-slate-500">{student.admissionNo}</td>
-                    <td>
-                      <span className="badge badge-info">{student.invoiceCount}</span>
-                    </td>
-                    <td className="font-semibold">{formatMoney(student.totalInvoiced)}</td>
-                    <td className="text-emerald-600 font-semibold">{formatMoney(student.totalPaid)}</td>
-                    <td className={student.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>
-                      {formatMoney(student.balance)}
-                    </td>
-                    <td>
-                      {student.status === 'not_invoiced' ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
-                          <XCircle size={12} />
-                          Not Invoiced
-                        </span>
-                      ) : student.status === 'paid' ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-                          <CheckCircle size={12} />
-                          Cleared
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                          <Clock size={12} />
-                          Balance
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        onClick={() => handleInvoiceStudent(student.id, student.classId || '')}
-                        className="btn btn-secondary text-sm py-1.5"
-                      >
-                        <Plus size={14} /> Invoice
-                      </button>
-                    </td>
-                  </tr>
+                ) : (paginatedItems as any[]).map(student => (
+                  <StudentInvoiceRow 
+                    key={student.id} 
+                    student={student} 
+                    formatMoney={formatMoney} 
+                    onInvoice={handleInvoiceStudent} 
+                  />
                 ))}
               </tbody>
             </table>
@@ -1220,41 +1297,74 @@ export default function Invoices() {
                       </div>
                     </td>
                   </tr>
-                ) : filteredInvoices.map(invoice => {
-                  const StatusIcon = statusConfig[invoice.status].icon;
-                  return (
-                    <tr key={invoice.id}>
-                      <td className="font-medium">{invoice.studentName}</td>
-                      <td>{invoice.description}</td>
-                      <td className="font-semibold">{formatMoney(invoice.amount)}</td>
-                      <td className="text-emerald-600 font-semibold">{formatMoney(invoice.paidAmount)}</td>
-                      <td className={invoice.amount - invoice.paidAmount > 0 ? 'text-red-600 font-semibold' : ''}>
-                        {formatMoney(invoice.amount - invoice.paidAmount)}
-                      </td>
-                      <td>
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${statusConfig[invoice.status].bg} ${statusConfig[invoice.status].color}`}>
-                          <StatusIcon size={12} />
-                          {invoice.status}
-                        </span>
-                      </td>
-                      <td><span className="badge badge-info">Term {invoice.term}</span></td>
-                      <td>
-                        {invoice.status !== 'paid' && (
-                          <button
-                            onClick={() => markAsPaid(invoice.id)}
-                            className="btn btn-secondary text-sm py-1.5"
-                          >
-                            <DollarSign size={14} /> Record
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                ) : (paginatedItems as any[]).map(invoice => (
+                  <InvoiceRow 
+                    key={invoice.id} 
+                    invoice={invoice} 
+                    formatMoney={formatMoney} 
+                    onRecord={markAsPaid} 
+                    statusConfig={statusConfig} 
+                  />
+                ))}
               </tbody>
             </table>
           )}
         </div>
+        
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 dark:border-slate-700">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Showing page <span className="font-medium text-slate-700 dark:text-slate-200">{currentPage}</span> of <span className="font-medium text-slate-700 dark:text-slate-200">{totalPages}</span>
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={prevPage}
+                disabled={!hasPrevPage}
+                className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => goToPage(pageNum)}
+                      className={`w-9 h-9 rounded-lg text-sm font-medium transition-colors ${
+                        currentPage === pageNum
+                          ? 'bg-primary-600 text-white'
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={nextPage}
+                disabled={!hasNextPage}
+                className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {showCreateModal && createPortal(

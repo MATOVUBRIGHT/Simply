@@ -109,11 +109,19 @@ Powered by Schofy`;
 
   return (
     <div className="relative space-y-4 text-slate-900 dark:text-white">
-      <div className="rounded-xl border p-4 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800">
-        <p className="text-sm font-semibold text-slate-900 dark:text-white">
-          Your account is unlocked! Enjoy features and student limits based on your selected plan below. Real-time cloud sync active across all your devices.
-        </p>
-      </div>
+      {(!currentPlanId || accessState?.status === 'expired') ? (
+        <div className="rounded-xl border p-4 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">
+            Your account is locked or expired. Please select a plan below to unlock all features and increase student limits.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-xl border p-4 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800">
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">
+            Your account is unlocked! Enjoy features and student limits based on your selected {PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.name} plan below. Real-time cloud sync active across all your devices.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -375,12 +383,15 @@ Powered by Schofy`;
         <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-500 to-orange-500 p-4 text-white dark:border-amber-700 dark:from-slate-800 dark:via-slate-800 dark:to-amber-900">
           <h3 className="mb-1 text-sm font-bold">Need more than 500 students?</h3>
           <p className="mb-3 text-xs text-amber-100 dark:text-amber-200">Custom enterprise pricing available</p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <a href="https://wa.me/256750034304" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-600 hover:bg-amber-50 dark:bg-slate-100 dark:text-amber-700 dark:hover:bg-white">
-              <MessageCircle size={12} /> 0750034304
+              <MessageCircle size={12} /> WhatsApp
+            </a>
+            <a href="tel:0750034304" className="flex items-center gap-1 rounded-lg bg-white/20 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/30 dark:bg-slate-700/80 dark:text-slate-100 dark:hover:bg-slate-600">
+              <Phone size={12} /> Airtel: 0750034304
             </a>
             <a href="tel:0775011029" className="flex items-center gap-1 rounded-lg bg-white/20 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/30 dark:bg-slate-700/80 dark:text-slate-100 dark:hover:bg-slate-600">
-              <Phone size={12} /> 0775011029
+              <Phone size={12} /> MTN: 0775011029
             </a>
           </div>
         </div>

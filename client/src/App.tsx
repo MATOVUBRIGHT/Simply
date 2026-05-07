@@ -6,6 +6,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import UpdateBanner from './components/UpdateBanner';
 import SubscriptionGate from './components/SubscriptionGate';
+import StaffSessionBanner from './components/StaffSessionBanner';
+import { StaffAuthProvider, useStaffAuth } from './contexts/StaffAuthContext';
 import { useEffect, useState, Suspense } from 'react';
 import { useToast } from './contexts/ToastContext';
 import { initErrorInterceptor } from './lib/errorInterceptor';
@@ -36,6 +38,7 @@ import ReportCard from './pages/ReportCard';
 import Plans from './pages/Plans';
 import Subscription from './pages/Subscription';
 import RecycleBin from './pages/RecycleBin';
+import Roles from './pages/Roles';
 
 function FullScreenLoader({ label = 'Loading Schofy...' }: { label?: string }) {
   return (
@@ -53,6 +56,7 @@ function FullScreenLoader({ label = 'Loading Schofy...' }: { label?: string }) {
 
 function MainApp() {
   const { user, loading } = useAuth();
+  const { canAccessPage, isStaffMode } = useStaffAuth();
   const location = useLocation();
   const { addToast } = useToast();
 
@@ -67,6 +71,16 @@ function MainApp() {
       window.sessionStorage.setItem('lastRoute', fullPath);
     }
   }, [location.pathname, location.search, location.hash]);
+
+  // Staff access guard — redirect to dashboard if page not allowed
+  useEffect(() => {
+    if (isStaffMode && !canAccessPage(location.pathname)) {
+      // Don't redirect from /roles — staff can always see their own access info
+      if (location.pathname !== '/roles') {
+        window.location.replace('/');
+      }
+    }
+  }, [location.pathname, isStaffMode, canAccessPage]);
 
   if (!user && !localStorage.getItem('schofy_session')) {
     return <Navigate to="/login" replace />;
@@ -109,6 +123,7 @@ function MainApp() {
                     <Route path="/recycle-bin" element={<ErrorBoundary inline><RecycleBin /></ErrorBoundary>} />
                     <Route path="/reports" element={<ErrorBoundary inline><Reports /></ErrorBoundary>} />
                     <Route path="/about" element={<ErrorBoundary inline><About /></ErrorBoundary>} />
+                    <Route path="/roles" element={<ErrorBoundary inline><Roles /></ErrorBoundary>} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </div>
@@ -116,6 +131,7 @@ function MainApp() {
             </Layout>
           </SubscriptionGate>
           <UpdateBanner />
+          <StaffSessionBanner />
         </RealtimeSyncProvider>
       </StudentsProvider>
     </ErrorBoundary>

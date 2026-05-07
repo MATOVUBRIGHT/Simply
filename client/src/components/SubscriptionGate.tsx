@@ -154,7 +154,7 @@ export default function SubscriptionGate({ children }: Props) {
     const plan = planName || 'Unknown';
     const tid  = pendingTid || 'N/A';
     const school = user?.email || 'Unknown school';
-    const msg = `Hello Schofy Admin,\n\nPayment submitted for verification:\nSchool: ${school}\nPlan: ${plan}\nTransaction ID: ${tid}\n\nPlease verify and activate my subscription.\n\nThank you.`;
+    const msg = `Hello Schofy Admin,\n\nPayment submitted for verification:\nSchool: ${school}\nPlan: ${plan}\nTransaction ID: ${tid}\n\nPayment via Airtel Money (0750034304) or MTN MoMo (0775011029).\n\nPlease verify and activate my subscription.\n\nThank you.`;
     return `https://wa.me/256750034304?text=${encodeURIComponent(msg)}`;
   };
 
@@ -248,7 +248,7 @@ export default function SubscriptionGate({ children }: Props) {
               {(blockReason === 'expired' || blockReason === 'incomplete') && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-xs text-indigo-700 space-y-1">
                   <p className="font-semibold">How to renew:</p>
-                  <p>1. Send payment via Airtel Money to <strong>0750034304</strong></p>
+                  <p>1. Send payment via <strong>Airtel Money: 0750034304</strong> or <strong>MTN MoMo: 0775011029</strong></p>
                   <p>2. Go to Plans page and enter your Transaction ID</p>
                   <p>3. Admin will verify and activate within 24 hours</p>
                 </div>
@@ -278,13 +278,22 @@ export default function SubscriptionGate({ children }: Props) {
                   WhatsApp Admin
                 </a>
 
-                {/* Phone */}
+                {/* Phone — Airtel */}
                 <a
-                  href="tel:0775011029"
+                  href="tel:0750034304"
                   className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium flex items-center justify-center gap-2 transition-all text-sm"
                 >
                   <Phone size={16} />
-                  Call: 0775011029
+                  Airtel: 0750034304
+                </a>
+
+                {/* Phone — MTN */}
+                <a
+                  href="tel:0775011029"
+                  className="w-full py-2.5 bg-yellow-50 hover:bg-yellow-100 text-yellow-800 rounded-xl font-medium flex items-center justify-center gap-2 transition-all text-sm border border-yellow-200"
+                >
+                  <Phone size={16} />
+                  MTN: 0775011029
                 </a>
 
                 {/* Check again */}
@@ -309,7 +318,7 @@ export default function SubscriptionGate({ children }: Props) {
 
             <div className="px-6 pb-4 text-center">
               <p className="text-xs text-slate-400">
-                Schofy · 0750034304 · 0775011029
+                Schofy · Airtel: 0750034304 · MTN: 0775011029
               </p>
             </div>
           </div>

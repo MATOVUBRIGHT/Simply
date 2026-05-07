@@ -1,7 +1,7 @@
 // client/src/hooks/usePagination.ts
 // Performance Hook: Efficient pagination for large datasets
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 
 export interface PaginationConfig {
   initialPage?: number;
@@ -38,6 +38,14 @@ export function usePagination<T>(
   
   const [currentPage, setCurrentPage] = useState(initialPage);
   const [pageSize, setPageSizeState] = useState(initialPageSize);
+
+  // Sync pageSize state with prop if it changes
+  useEffect(() => {
+    if (initialPageSize !== undefined) {
+      setPageSizeState(initialPageSize);
+      setCurrentPage(1);
+    }
+  }, [initialPageSize]);
 
   const paginationData = useMemo(() => {
     const total = totalItems ?? allItems.length;

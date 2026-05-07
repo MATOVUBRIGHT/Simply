@@ -1,4 +1,4 @@
-﻿﻿import { useEffect, useState, useRef, useMemo, memo } from 'react';
+﻿﻿﻿﻿import { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, CreditCard } from 'lucide-react';
 import { Portal } from '../components/Portal';
@@ -73,7 +73,8 @@ const StudentRow = memo(({
   onDelete,
   classes,
   finance,
-  formatMoney
+  formatMoney,
+  pageSize
 }: {
   student: Student;
   index: number;
@@ -90,6 +91,7 @@ const StudentRow = memo(({
   classes: Class[];
   finance: { status: string; balance: number; invoiced: number };
   formatMoney: (val: number) => string;
+  pageSize: number;
 }) => {
   return (
     <tr 
@@ -98,7 +100,7 @@ const StudentRow = memo(({
       onDoubleClick={() => onDoubleClick(student.id)}
     >
       <td className="text-center text-xs text-slate-400 dark:text-slate-500">
-        {(currentPage - 1) * 10 + index + 1}
+        {(currentPage - 1) * pageSize + index + 1}
       </td>
       {selectMode && (
         <td className="text-center">
@@ -252,6 +254,8 @@ export default function Students() {
   const [selectedClass, setSelectedClass] = useState('');
   const [searchResults, setSearchResults] = useState<Student[] | null>(null); // null = not searching
   const [isSearching, setIsSearching] = useState(false);
+  const [studentView, setStudentView] = useState<'table' | 'list'>('table');
+  const [showAll, setShowAll] = useState(false);
   const { addToast } = useToast();
   // ... rest of state stays same
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -321,11 +325,12 @@ export default function Students() {
     items: paginatedStudents,
     currentPage,
     totalPages,
+    pageSize,
     goToPage,
     nextPage,
     prevPage,
     totalItems: totalCount
-  } = usePagination(filteredStudents, { pageSize: 10 });
+  } = usePagination(filteredStudents, { pageSize: showAll ? filteredStudents.length || 1 : 10 });
 
   const students = paginatedStudents;
   const loading = studentsLoading && allStudents.length === 0 && !localStorage.getItem('schofy_data_cache');
@@ -1353,6 +1358,37 @@ export default function Students() {
                 )}
               </div>
 
+              {/* View Toggle */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-1 shrink-0">
+                <button
+                  onClick={() => setStudentView('table')}
+                  className={`p-1.5 rounded-md transition-all ${studentView === 'table' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  title="Table View"
+                >
+                  <FileText size={18} />
+                </button>
+                <button
+                  onClick={() => setStudentView('list')}
+                  className={`p-1.5 rounded-md transition-all ${studentView === 'list' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  title="List View"
+                >
+                  <Users size={18} />
+                </button>
+              </div>
+
+              {/* View All Toggle */}
+              <button
+                onClick={() => setShowAll(!showAll)}
+                className={`btn flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                  showAll 
+                    ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/30' 
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {showAll ? <CheckSquare size={14} /> : <Square size={14} />}
+                View All ({filteredStudents.length})
+              </button>
+
               {/* Class Filter Dropdown */}
               <div className="relative" ref={classFilterRef}>
                 <button
@@ -1540,77 +1576,168 @@ export default function Students() {
           )}
           
           {viewFilter !== 'completed' ? (
-            <table>
-              <thead>
-                <tr>
-                  <th className="w-10">#</th>
-                  {selectMode && <th className="w-10">
-                    <button onClick={handleSelectAll} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">
-                      {selectedStudents.size === filteredStudents.length && filteredStudents.length > 0 ? (
-                        <CheckSquare size={16} className="text-primary-600" />
-                      ) : (
-                        <Square size={16} className="text-slate-400" />
-                      )}
-                    </button>
-                  </th>}
-                  <th>Student</th>
-                  <th>ID Number</th>
-                  <th>Class</th>
-                  <th>Gender</th>
-                  <th>Guardian</th>
-                  <th>Invoice Status</th>
-                  <th>Fees Balance</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
-                      <div className="flex flex-col items-center gap-2 text-slate-400">
-                        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                        <p className="text-sm">Loading...</p>
-                      </div>
-                    </td>
+            studentView === 'table' ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead>
+                    <tr>
+                    <th className="w-10">#</th>
+                    {selectMode && <th className="w-10">
+                      <button onClick={handleSelectAll} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">
+                        {selectedStudents.size === filteredStudents.length && filteredStudents.length > 0 ? (
+                          <CheckSquare size={16} className="text-primary-600" />
+                        ) : (
+                          <Square size={16} className="text-slate-400" />
+                        )}
+                      </button>
+                    </th>}
+                    <th>Student</th>
+                    <th>ID Number</th>
+                    <th>Class</th>
+                    <th>Gender</th>
+                    <th>Guardian</th>
+                    <th>Invoice Status</th>
+                    <th>Fees Balance</th>
+                    <th>Actions</th>
                   </tr>
-                ) : paginatedStudents.length === 0 ? (
-                  <tr>
-                    <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                          <Users size={24} className="text-slate-400" />
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
+                        <div className="flex flex-col items-center gap-2 text-slate-400">
+                          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                          <p className="text-sm">Loading...</p>
                         </div>
-                        <p className="text-slate-500 font-medium">No students found</p>
-                        <Link to="/admission" className="text-blue-500 hover:text-blue-600 text-sm font-medium">
-                          Add your first student
-                        </Link>
+                      </td>
+                    </tr>
+                  ) : paginatedStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                            <Users size={24} className="text-slate-400" />
+                          </div>
+                          <p className="text-slate-500 font-medium">No students found</p>
+                          <Link to="/admission" className="text-blue-500 hover:text-blue-600 text-sm font-medium">
+                            Add your first student
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedStudents.map((student, index) => (
+                      <StudentRow
+                        key={student.id}
+                        student={student}
+                        index={index}
+                        currentPage={currentPage}
+                        selectMode={selectMode}
+                        isSelected={selectedStudents.has(student.id)}
+                        onSingleClick={handleRowSingleClick}
+                        onDoubleClick={handleRowDoubleClick}
+                        onPreviewImage={setPreviewImage}
+                        onMarkCompleted={handleMarkCompleted}
+                        onToggleStatus={handleToggleStatus}
+                        onSendEmail={handleSendEmail}
+                        onDelete={handleDelete}
+                        classes={classes}
+                        finance={getStudentFinance(student.id)}
+                        formatMoney={formatMoney}
+                        pageSize={pageSize}
+                      />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                {loading ? (
+                  <div className="text-center py-12">
+                    <div className="flex flex-col items-center gap-2 text-slate-400">
+                      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                      <p className="text-sm">Loading...</p>
+                    </div>
+                  </div>
+                ) : paginatedStudents.length === 0 ? (
+                  <div className="text-center py-12">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                        <Users size={24} className="text-slate-400" />
                       </div>
-                    </td>
-                  </tr>
+                      <p className="text-slate-500 font-medium">No students found</p>
+                    </div>
+                  </div>
                 ) : (
-                  paginatedStudents.map((student, index) => (
-                    <StudentRow
-                      key={student.id}
-                      student={student}
-                      index={index}
-                      currentPage={currentPage}
-                      selectMode={selectMode}
-                      isSelected={selectedStudents.has(student.id)}
-                      onSingleClick={handleRowSingleClick}
-                      onDoubleClick={handleRowDoubleClick}
-                      onPreviewImage={setPreviewImage}
-                      onMarkCompleted={handleMarkCompleted}
-                      onToggleStatus={handleToggleStatus}
-                      onSendEmail={handleSendEmail}
-                      onDelete={handleDelete}
-                      classes={classes}
-                      finance={getStudentFinance(student.id)}
-                      formatMoney={formatMoney}
-                    />
-                  ))
+                  paginatedStudents.map((student, index) => {
+                    const finance = getStudentFinance(student.id);
+                    const isSelected = selectedStudents.has(student.id);
+                    return (
+                      <div 
+                        key={student.id}
+                        onClick={() => handleRowSingleClick(student.id)}
+                        className={`p-4 flex items-center gap-4 cursor-pointer transition-colors ${isSelected ? 'bg-primary-50 dark:bg-primary-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
+                      >
+                        <span className="text-xs text-slate-400 w-6 text-center">{(currentPage - 1) * pageSize + index + 1}</span>
+                        
+                        {selectMode && (
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary-600 border-primary-600' : 'border-slate-300 dark:border-slate-600'}`}>
+                            {isSelected && <Check size={12} className="text-white" />}
+                          </div>
+                        )}
+
+                        <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0">
+                          {student.photoUrl ? (
+                            <img src={student.photoUrl} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className={`w-full h-full flex items-center justify-center text-white font-bold text-sm ${getAvatarColor(student.firstName)}`}>
+                              {student.firstName[0]}{student.lastName[0]}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-slate-800 dark:text-white truncate">
+                            {student.firstName} {student.lastName}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate">
+                            {student.studentId || student.admissionNo} • {getClassDisplayName(student.classId, classes)}
+                          </p>
+                        </div>
+
+                        <div className="hidden md:block text-right shrink-0 px-4">
+                          <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{student.guardianName}</p>
+                          <p className="text-[10px] text-slate-500">{student.guardianPhone}</p>
+                        </div>
+
+                        <div className="shrink-0 text-right min-w-[80px]">
+                          <p className={`text-xs font-bold ${finance.balance > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                            {finance.balance > 0 ? formatMoney(finance.balance) : 'Cleared'}
+                          </p>
+                          <span className={`text-[10px] uppercase font-bold tracking-wider ${
+                            finance.status === 'paid' ? 'text-emerald-500' : 
+                            finance.status === 'partial' ? 'text-amber-500' : 
+                            'text-red-500'
+                          }`}>
+                            {finance.status}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => handleSendEmail(student.id)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-500" title="Email">
+                            <Mail size={16} />
+                          </button>
+                          <button onClick={() => handleRowDoubleClick(student.id)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-500" title="View Profile">
+                            <ArrowRight size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
-              </tbody>
-            </table>
+              </div>
+            )
           ) : (
             <div className="p-4">
               {loading ? (
@@ -1714,11 +1841,11 @@ export default function Students() {
           )}
         </div>
 
-        {totalPages > 1 && viewFilter !== 'completed' && (
+        {totalPages > 1 && viewFilter !== 'completed' && !showAll && (
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * 10 + 1}</span> to{' '}
-              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * 10, totalCount)}</span> of{' '}
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * pageSize + 1}</span> to{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * pageSize, totalCount)}</span> of{' '}
               <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students
             </p>
             <div className="flex items-center gap-1">
