@@ -7,6 +7,7 @@ import {
 import { createPortal } from 'react-dom';
 import { supabase } from '../../lib/supabase';
 import { PLAN_DEFINITIONS } from '../../utils/plans';
+import { useAdminTheme } from '../AdminThemeContext';
 
 interface SchoolDetail {
   schoolId: string;
@@ -26,6 +27,7 @@ interface SchoolDetail {
 export default function AdminSchoolDetail() {
   const { schoolId } = useParams<{ schoolId: string }>();
   const navigate = useNavigate();
+  const { isDark, t } = useAdminTheme();
   const [detail, setDetail] = useState<SchoolDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -200,45 +202,45 @@ export default function AdminSchoolDetail() {
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
-      <div className="w-8 h-8 border-4 border-slate-700 border-t-indigo-500 rounded-full animate-spin" />
+      <div className={`w-8 h-8 border-4 ${isDark ? 'border-slate-700' : 'border-slate-200'} border-t-indigo-500 rounded-full animate-spin`} />
     </div>
   );
 
   if (!detail) return (
-    <div className="text-slate-400 text-center py-12">School not found</div>
+    <div className={`text-center py-12 ${t.muted}`}>School not found</div>
   );
 
   const statusBadge = () => {
-    if (detail.status === 'active') return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-green-900/40 text-green-400 border border-green-800"><CheckCircle size={14} />Active</span>;
-    if (detail.status === 'expired') return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-red-900/40 text-red-400 border border-red-800"><XCircle size={14} />Expired</span>;
-    return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-amber-900/40 text-amber-400 border border-amber-800"><Clock size={14} />No Plan</span>;
+    if (detail.status === 'active') return <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${t.badge('green')}`}><CheckCircle size={14} />Active</span>;
+    if (detail.status === 'expired') return <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${t.badge('red')}`}><XCircle size={14} />Expired</span>;
+    return <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium ${t.badge('amber')}`}><Clock size={14} />No Plan</span>;
   };
+
+  const cardBg = `${t.surface} border rounded-2xl`;
+  const statBg = isDark ? 'bg-slate-800/50' : 'bg-slate-50';
 
   return (
     <div className="space-y-6 max-w-3xl">
-      {/* Back */}
-      <button
-        onClick={() => navigate('/admin/schools')}
-        className="flex items-center gap-2 text-slate-400 hover:text-white text-sm transition-colors"
+      <button onClick={() => navigate('/admin/schools')}
+        className={`flex items-center gap-2 text-sm transition-colors ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
       >
         <ArrowLeft size={16} /> Back to Schools
       </button>
 
-      {error && <div className="bg-red-900/20 border border-red-800 rounded-xl p-4 text-red-300 text-sm">{error}</div>}
-      {success && <div className="bg-green-900/20 border border-green-800 rounded-xl p-4 text-green-300 text-sm flex items-center gap-2"><CheckCircle size={16} />{success}</div>}
+      {error && <div className={`rounded-xl p-4 text-sm ${isDark ? 'bg-red-900/20 border border-red-800 text-red-300' : 'bg-red-50 border border-red-200 text-red-700'}`}>{error}</div>}
+      {success && <div className={`rounded-xl p-4 text-sm flex items-center gap-2 ${isDark ? 'bg-green-900/20 border border-green-800 text-green-300' : 'bg-green-50 border border-green-200 text-green-700'}`}><CheckCircle size={16} />{success}</div>}
 
-      {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-        <div className="flex items-start justify-between gap-4">
+      {/* Header card */}
+      <div className={`${cardBg} p-6`}>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-bold text-white">{detail.schoolName}</h1>
-            <p className="text-slate-400 text-sm mt-1">{detail.email}</p>
-            <p className="text-slate-600 text-xs mt-1 font-mono">{detail.schoolId}</p>
+            <h1 className={`text-xl font-bold ${t.text}`}>{detail.schoolName}</h1>
+            <p className={`text-sm mt-1 ${t.muted}`}>{detail.email}</p>
+            <p className={`text-xs mt-1 font-mono ${t.subtle}`}>{detail.schoolId}</p>
           </div>
           {statusBadge()}
         </div>
 
-        {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
           {[
             { label: 'Students', value: detail.studentCount, icon: GraduationCap },
@@ -246,149 +248,153 @@ export default function AdminSchoolDetail() {
             { label: 'Plan', value: PLAN_DEFINITIONS.find(p => p.id === detail.plan)?.name || 'None', icon: ShieldCheck },
             { label: 'Expires', value: detail.endsAt ? new Date(detail.endsAt).toLocaleDateString() : '—', icon: Calendar },
           ].map(({ label, value, icon: Icon }) => (
-            <div key={label} className="bg-slate-800/50 rounded-xl p-3">
+            <div key={label} className={`${statBg} rounded-xl p-3`}>
               <div className="flex items-center gap-2 mb-1">
-                <Icon size={14} className="text-slate-400" />
-                <span className="text-xs text-slate-400">{label}</span>
+                <Icon size={13} className={t.muted} />
+                <span className={`text-xs ${t.muted}`}>{label}</span>
               </div>
-              <p className="text-white font-semibold text-sm">{value}</p>
+              <p className={`font-semibold text-sm ${t.text}`}>{value}</p>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-        <h2 className="text-sm font-semibold text-white mb-4">Access Management</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <button
-            onClick={() => setShowGrantModal(true)}
-            className="flex items-center justify-center gap-2 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-medium transition-all"
+      {/* Access Management */}
+      <div className={`${cardBg} p-6`}>
+        <h2 className={`text-sm font-semibold ${t.text} mb-4`}>Access Management</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <button onClick={() => setShowGrantModal(true)}
+            className="flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-emerald-500/20"
           >
-            <ShieldCheck size={16} /> Grant Access
+            <ShieldCheck size={15} /> Grant
           </button>
-          <button
-            onClick={() => setShowExtendModal(true)}
-            disabled={!detail.subId}
-            className="flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl text-sm font-medium transition-all"
+          <button onClick={() => setShowExtendModal(true)} disabled={!detail.subId}
+            className="flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-indigo-500/20"
           >
-            <RefreshCw size={16} /> Extend Access
+            <RefreshCw size={15} /> Extend
           </button>
-          <button
-            onClick={() => setShowPauseModal(true)}
-            disabled={detail.status !== 'active'}
-            className="flex items-center justify-center gap-2 py-3 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl text-sm font-medium transition-all"
+          <button onClick={() => setShowPauseModal(true)} disabled={detail.status !== 'active'}
+            className="flex items-center justify-center gap-2 py-3 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-amber-500/20"
           >
-            <ShieldOff size={16} /> Pause Access
+            <ShieldOff size={15} /> Pause
+          </button>
+          <button onClick={async () => {
+            if (!supabase || !schoolId) return;
+            setSaving(true);
+            try {
+              const now = new Date();
+              const past = new Date(now.getTime() - 1000).toISOString();
+              if (detail.subId) {
+                await supabase.from('subscriptions').update({
+                  ends_at: past, status: 'revoked', updated_at: now.toISOString(),
+                  metadata: { revokedByAdmin: true, revokedAt: now.toISOString() },
+                }).eq('id', detail.subId);
+              }
+              await supabase.from('settings').upsert([
+                { school_id: schoolId, key: 'subscriptionExpiryDate', value: past, updated_at: now.toISOString() },
+                { school_id: schoolId, key: 'subscriptionPlanEligible', value: false, updated_at: now.toISOString() },
+              ], { onConflict: 'school_id,key' });
+              setSuccess('Access revoked — school must resubscribe');
+              await loadDetail();
+            } catch (err: any) { setError(err.message); }
+            finally { setSaving(false); }
+          }} disabled={saving || detail.status !== 'active'}
+            className="flex items-center justify-center gap-2 py-3 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-red-500/20"
+          >
+            <ShieldOff size={15} /> Revoke
           </button>
         </div>
-        <p className="text-xs text-slate-500 mt-3">
-          Changes take effect immediately. The school will see the updated status on next app load.
+        <p className={`text-xs ${t.subtle} mt-3`}>
+          Changes take effect immediately. School sees updated status on next app load or sync.
         </p>
       </div>
 
       {/* Grant Modal */}
       {showGrantModal && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl">
-            <div className="p-5 border-b border-slate-800 flex items-center gap-3">
-              <ShieldCheck size={20} className="text-green-400" />
-              <h2 className="text-base font-bold text-white">Grant Access</h2>
+          <div className={`w-full max-w-sm ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'} border rounded-2xl shadow-2xl`}>
+            <div className={`p-5 border-b ${t.divider} flex items-center gap-3`}>
+              <div className="w-9 h-9 bg-emerald-100 rounded-xl flex items-center justify-center"><ShieldCheck size={18} className="text-emerald-600" /></div>
+              <h2 className={`text-base font-bold ${t.text}`}>Grant Access</h2>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">Plan</label>
-                <select
-                  value={grantPlan}
-                  onChange={e => setGrantPlan(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>Plan</label>
+                <select value={grantPlan} onChange={e => setGrantPlan(e.target.value)}
+                  className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
                 >
-                  {PLAN_DEFINITIONS.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} (up to {p.studentLimit} students)</option>
-                  ))}
+                  {PLAN_DEFINITIONS.map(p => <option key={p.id} value={p.id}>{p.name} (up to {p.studentLimit} students)</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">Duration (months)</label>
-                <select
-                  value={grantMonths}
-                  onChange={e => setGrantMonths(Number(e.target.value))}
-                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>Duration (months)</label>
+                <select value={grantMonths} onChange={e => setGrantMonths(Number(e.target.value))}
+                  className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
                 >
                   {[1, 3, 6, 12].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
                 </select>
               </div>
               <div className="flex gap-3 pt-2">
-                <button onClick={() => setShowGrantModal(false)} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-medium">Cancel</button>
-                <button onClick={grantAccess} disabled={saving} className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
-                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
-                  Grant
+                <button onClick={() => setShowGrantModal(false)} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
+                <button onClick={grantAccess} disabled={saving} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
+                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />} Grant
                 </button>
               </div>
             </div>
           </div>
-        </div>,
-        document.body
+        </div>, document.body
       )}
 
       {/* Extend Modal */}
       {showExtendModal && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl">
-            <div className="p-5 border-b border-slate-800 flex items-center gap-3">
-              <RefreshCw size={20} className="text-indigo-400" />
-              <h2 className="text-base font-bold text-white">Extend Access</h2>
+          <div className={`w-full max-w-sm ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'} border rounded-2xl shadow-2xl`}>
+            <div className={`p-5 border-b ${t.divider} flex items-center gap-3`}>
+              <div className="w-9 h-9 bg-indigo-100 rounded-xl flex items-center justify-center"><RefreshCw size={18} className="text-indigo-600" /></div>
+              <h2 className={`text-base font-bold ${t.text}`}>Extend Access</h2>
             </div>
             <div className="p-5 space-y-4">
-              <p className="text-sm text-slate-400">
-                Current expiry: <span className="text-white font-medium">{detail.endsAt ? new Date(detail.endsAt).toLocaleDateString() : '—'}</span>
-              </p>
+              <p className={`text-sm ${t.muted}`}>Current expiry: <span className={`font-medium ${t.text}`}>{detail.endsAt ? new Date(detail.endsAt).toLocaleDateString() : '—'}</span></p>
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">Extend by (months)</label>
-                <select
-                  value={extendMonths}
-                  onChange={e => setExtendMonths(Number(e.target.value))}
-                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>Extend by (months)</label>
+                <select value={extendMonths} onChange={e => setExtendMonths(Number(e.target.value))}
+                  className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${t.input}`}
                 >
                   {[1, 3, 6, 12].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
                 </select>
               </div>
               <div className="flex gap-3 pt-2">
-                <button onClick={() => setShowExtendModal(false)} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-medium">Cancel</button>
+                <button onClick={() => setShowExtendModal(false)} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
                 <button onClick={extendAccess} disabled={saving} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
-                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
-                  Extend
+                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />} Extend
                 </button>
               </div>
             </div>
           </div>
-        </div>,
-        document.body
+        </div>, document.body
       )}
 
       {/* Pause Modal */}
       {showPauseModal && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl">
-            <div className="p-5 border-b border-slate-800 flex items-center gap-3">
-              <AlertTriangle size={20} className="text-red-400" />
-              <h2 className="text-base font-bold text-white">Pause Access</h2>
+          <div className={`w-full max-w-sm ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'} border rounded-2xl shadow-2xl`}>
+            <div className={`p-5 border-b ${t.divider} flex items-center gap-3`}>
+              <div className="w-9 h-9 bg-red-100 rounded-xl flex items-center justify-center"><AlertTriangle size={18} className="text-red-600" /></div>
+              <h2 className={`text-base font-bold ${t.text}`}>Pause Access</h2>
             </div>
             <div className="p-5 space-y-4">
-              <p className="text-sm text-slate-300">
-                This will immediately block <strong className="text-white">{detail.schoolName}</strong> from accessing the app until access is re-granted.
+              <p className={`text-sm ${t.muted}`}>
+                This will immediately block <strong className={t.text}>{detail.schoolName}</strong> from accessing the app until access is re-granted.
               </p>
               <div className="flex gap-3 pt-2">
-                <button onClick={() => setShowPauseModal(false)} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-medium">Cancel</button>
+                <button onClick={() => setShowPauseModal(false)} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
                 <button onClick={pauseAccess} disabled={saving} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
-                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <ShieldOff size={14} />}
-                  Pause
+                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <ShieldOff size={14} />} Pause
                 </button>
               </div>
             </div>
           </div>
-        </div>,
-        document.body
+        </div>, document.body
       )}
     </div>
   );
