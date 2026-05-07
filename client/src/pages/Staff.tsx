@@ -61,49 +61,49 @@ const StaffActions = ({
     <div className="relative flex justify-end" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`p-2 rounded-xl transition-all ${
+        className={`p-1.5 rounded-lg transition-all ${
           isOpen 
-            ? 'bg-indigo-600 text-white shadow-lg ring-2 ring-indigo-500/20' 
+            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20' 
             : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
         }`}
         title="Actions"
       >
-        <Settings size={18} className={isOpen ? 'animate-spin-slow' : ''} />
+        <Settings size={15} className={isOpen ? 'animate-spin-slow' : ''} />
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
-          <div className="px-4 py-2 border-b border-slate-50 dark:border-slate-700/50">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Staff Management</p>
+        <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
+          <div className="px-3 py-1.5 border-b border-slate-50 dark:border-slate-700/50">
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Management</p>
           </div>
-          <div className="p-1.5">
+          <div className="p-1">
             <Link 
               to={`/staff/${staff.id}`}
               onClick={() => setIsOpen(false)}
-              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-xl transition-colors"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-lg transition-colors"
             >
-              <div className="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
-                <Eye size={16} />
+              <div className="w-6 h-6 rounded-md bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
+                <Eye size={13} />
               </div>
               View Details
             </Link>
             <Link 
               to={`/staff/${staff.id}/edit`}
               onClick={() => setIsOpen(false)}
-              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600 dark:hover:text-violet-400 rounded-xl transition-colors"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600 dark:hover:text-violet-400 rounded-lg transition-colors"
             >
-              <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
-                <Edit size={16} />
+              <div className="w-6 h-6 rounded-md bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
+                <Edit size={13} />
               </div>
               Edit Profile
             </Link>
             {staff.email && (
               <button
                 onClick={() => { window.open(`mailto:${staff.email}`, '_blank'); setIsOpen(false); }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-xl transition-colors"
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-lg transition-colors"
               >
-                <div className="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
-                  <Mail size={16} />
+                <div className="w-6 h-6 rounded-md bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
+                  <Mail size={13} />
                 </div>
                 Send Email
               </button>
@@ -111,12 +111,12 @@ const StaffActions = ({
             <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
             <button
               onClick={() => { onDelete(staff.id); setIsOpen(false); }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
             >
-              <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
-                <Trash2 size={16} />
+              <div className="w-6 h-6 rounded-md bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                <Trash2 size={13} />
               </div>
-              Delete Staff
+              Delete
             </button>
           </div>
         </div>

@@ -133,35 +133,35 @@ const InvoiceActions = ({
     <div className="relative flex justify-end" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`p-2 rounded-xl transition-all ${
+        className={`p-1.5 rounded-lg transition-all ${
           isOpen 
-            ? 'bg-indigo-600 text-white shadow-lg ring-2 ring-indigo-500/20' 
+            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20' 
             : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
         }`}
         title="Actions"
       >
-        <Settings size={18} className={isOpen ? 'animate-spin-slow' : ''} />
+        <Settings size={15} className={isOpen ? 'animate-spin-slow' : ''} />
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
-          <div className="p-1.5">
+        <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
+          <div className="p-1">
             <button
               onClick={() => { onView(invoice); setIsOpen(false); }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-xl transition-colors"
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-lg transition-colors"
             >
-              <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center shrink-0 text-indigo-600 dark:text-indigo-400">
-                <Eye size={16} />
+              <div className="w-6 h-6 rounded-md bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center shrink-0 text-indigo-600 dark:text-indigo-400">
+                <Eye size={13} />
               </div>
               View & Share
             </button>
             {invoice.status !== 'paid' && (
               <button
                 onClick={() => { onRecord(invoice.id); setIsOpen(false); }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 rounded-xl transition-colors"
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 rounded-lg transition-colors"
               >
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center shrink-0 text-emerald-600 dark:text-emerald-400">
-                  <DollarSign size={16} />
+                <div className="w-6 h-6 rounded-md bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center shrink-0 text-emerald-600 dark:text-emerald-400">
+                  <DollarSign size={13} />
                 </div>
                 Record Payment
               </button>

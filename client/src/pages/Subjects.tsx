@@ -119,26 +119,26 @@ const SubjectActions = ({
     <div className="relative flex justify-end" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`p-2 rounded-xl transition-all ${
+        className={`p-1.5 rounded-lg transition-all ${
           isOpen 
-            ? 'bg-indigo-600 text-white shadow-lg' 
+            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20' 
             : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
         }`}
         title="Actions"
       >
-        <Settings size={18} className={isOpen ? 'animate-spin-slow' : ''} />
+        <Settings size={14} className={isOpen ? 'animate-spin-slow' : ''} />
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
-          <div className="p-1.5">
+        <div className="absolute right-0 top-full mt-1.5 w-44 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
+          <div className="p-1">
             {group && (
               <button
                 onClick={() => { onEdit(group); setIsOpen(false); }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-xl transition-colors"
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-lg transition-colors"
               >
-                <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center shrink-0">
-                  <Pencil size={14} />
+                <div className="w-5 h-5 rounded bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center shrink-0">
+                  <Pencil size={12} />
                 </div>
                 Edit Subject
               </button>
@@ -146,12 +146,12 @@ const SubjectActions = ({
             <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
             <button
               onClick={() => { onDelete({ name: sub.name, ids: [sub.id] }); setIsOpen(false); }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
             >
-              <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
-                <Trash2 size={14} />
+              <div className="w-5 h-5 rounded bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                <Trash2 size={12} />
               </div>
-              Remove Subject
+              Remove
             </button>
           </div>
         </div>

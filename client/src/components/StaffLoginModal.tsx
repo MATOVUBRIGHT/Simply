@@ -1,6 +1,6 @@
 ﻿import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Shield, Eye, EyeOff, X, LogIn, AlertCircle } from 'lucide-react';
+import { Shield, Eye, EyeOff, X, LogIn, AlertCircle, Building2 } from 'lucide-react';
 import { useStaffAuth } from '../contexts/StaffAuthContext';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -17,16 +17,21 @@ export default function StaffLoginModal({ onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const tenantId = schoolId || user?.id || '';
+  // Use admin's schoolId if available, otherwise staff enters it manually
+  const adminSchoolId = schoolId || user?.id || '';
+  const [manualSchoolId, setManualSchoolId] = useState('');
+  const effectiveSchoolId = adminSchoolId || manualSchoolId.trim();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!staffId.trim() || !password) { setError('Enter your Staff ID and password'); return; }
+    if (!staffId.trim()) { setError('Enter your Staff ID'); return; }
+    if (!password) { setError('Enter your password'); return; }
+    if (!effectiveSchoolId) { setError('Enter your School ID (ask your school admin)'); return; }
     setLoading(true); setError('');
-    const result = await staffLogin(staffId.trim().toUpperCase(), password, tenantId);
+    const result = await staffLogin(staffId.trim().toUpperCase(), password, effectiveSchoolId);
     setLoading(false);
     if (result.success) { onClose(); }
-    else { setError(result.error || 'Login failed'); }
+    else { setError(result.error || 'Login failed. Check your Staff ID and password.'); }
   }
 
   return createPortal(
@@ -50,14 +55,34 @@ export default function StaffLoginModal({ onClose }: Props) {
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {error && (
-            <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl px-3 py-2.5 text-sm">
-              <AlertCircle size={15} className="flex-shrink-0" />{error}
+            <div className="flex items-start gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl px-3 py-2.5 text-sm">
+              <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />{error}
             </div>
           )}
+
+          {/* Only show school ID field if admin is not logged in */}
+          {!adminSchoolId && (
+            <div>
+              <label className="form-label flex items-center gap-1.5">
+                <Building2 size={13} />School ID
+              </label>
+              <input
+                className="form-input font-mono"
+                value={manualSchoolId}
+                onChange={e => setManualSchoolId(e.target.value)}
+                placeholder="Provided by your school admin"
+                autoComplete="organization"
+              />
+              <p className="text-xs text-slate-400 mt-1">Ask your school admin for the School ID</p>
+            </div>
+          )}
+
           <div>
-            <label className="form-label">Staff ID</label>
+            <label className="form-label flex items-center gap-1.5">
+              <Shield size={13} />Staff ID
+            </label>
             <input
-              className="form-input font-mono uppercase"
+              className="form-input font-mono uppercase tracking-wider"
               value={staffId}
               onChange={e => setStaffId(e.target.value.toUpperCase())}
               placeholder="e.g. TCH-001"
@@ -65,6 +90,7 @@ export default function StaffLoginModal({ onClose }: Props) {
               required
             />
           </div>
+
           <div>
             <label className="form-label">Password</label>
             <div className="relative">
@@ -82,12 +108,14 @@ export default function StaffLoginModal({ onClose }: Props) {
               </button>
             </div>
           </div>
+
           <button type="submit" disabled={loading} className="w-full btn btn-primary flex items-center justify-center gap-2 py-3">
             {loading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <LogIn size={16} />}
             {loading ? 'Signing in...' : 'Sign In as Staff'}
           </button>
+
           <p className="text-xs text-center text-slate-400 dark:text-slate-500">
-            Staff ID and password are provided by your school admin
+            Staff ID and password are set by your school admin in Roles & Access
           </p>
         </form>
       </div>
