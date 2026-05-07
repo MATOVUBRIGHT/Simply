@@ -1,12 +1,12 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Eye, EyeOff, AlertCircle } from 'lucide-react';
-import { useAdminAuth } from '../AdminAuthContext';
+import { Shield, Eye, EyeOff, AlertCircle, Info } from 'lucide-react';
+import { useAdminAuth, ADMIN_EMAIL_HINT } from '../AdminAuthContext';
 
 export default function AdminLogin() {
   const { login } = useAdminAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(ADMIN_EMAIL_HINT); // pre-fill with active email
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -17,7 +17,6 @@ export default function AdminLogin() {
     setError('');
     setLoading(true);
 
-    // Small delay to prevent brute-force feel
     setTimeout(() => {
       const result = login(email, password);
       if (result.success) {
@@ -43,7 +42,18 @@ export default function AdminLogin() {
 
         {/* Card */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
-          <h2 className="text-lg font-semibold text-white mb-5">Sign in to continue</h2>
+          <h2 className="text-lg font-semibold text-white mb-1">Sign in to continue</h2>
+          <p className="text-xs text-slate-500 mb-5">
+            Use the credentials set in your Vercel environment variables.
+          </p>
+
+          {/* Hint box — shows active email */}
+          <div className="flex items-start gap-2 bg-indigo-900/20 border border-indigo-800/50 rounded-xl px-3 py-2.5 mb-4">
+            <Info size={14} className="text-indigo-400 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-indigo-300">
+              Active admin email: <span className="font-mono font-bold text-indigo-200">{ADMIN_EMAIL_HINT}</span>
+            </p>
+          </div>
 
           {error && (
             <div className="flex items-center gap-2 bg-red-900/30 border border-red-800 text-red-300 rounded-xl px-4 py-3 mb-4 text-sm">
@@ -63,7 +73,6 @@ export default function AdminLogin() {
                 onChange={e => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                placeholder="admin@schofy.com"
                 className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               />
             </div>
@@ -109,7 +118,15 @@ export default function AdminLogin() {
           </form>
         </div>
 
-        <p className="text-center text-xs text-slate-600 mt-6">
+        {/* Default credentials notice */}
+        <div className="mt-4 bg-amber-900/20 border border-amber-800/40 rounded-xl px-4 py-3">
+          <p className="text-xs text-amber-300 font-medium mb-1">Default credentials (if env vars not set):</p>
+          <p className="text-xs text-amber-200 font-mono">Email: admin@schofy.com</p>
+          <p className="text-xs text-amber-200 font-mono">Password: Schofy@2024!</p>
+          <p className="text-xs text-amber-400 mt-1.5">Set VITE_ADMIN_EMAIL and VITE_ADMIN_PASSWORD in Vercel to override.</p>
+        </div>
+
+        <p className="text-center text-xs text-slate-600 mt-4">
           Schofy Super Admin Portal — Restricted Access
         </p>
       </div>

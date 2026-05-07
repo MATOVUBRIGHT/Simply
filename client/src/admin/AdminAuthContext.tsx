@@ -2,9 +2,14 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 
 const ADMIN_SESSION_KEY = 'schofy_admin_session';
 
-// Admin credentials from env vars (set in Vercel env)
-const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'admin@schofy.com';
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || 'schofy_admin_2024';
+// Credentials baked in at build time from Vercel env vars.
+// If not set, fallback defaults are used.
+// To change: set VITE_ADMIN_EMAIL and VITE_ADMIN_PASSWORD in Vercel → Settings → Environment Variables, then redeploy.
+const ADMIN_EMAIL = (import.meta.env.VITE_ADMIN_EMAIL as string | undefined)?.trim() || 'admin@schofy.com';
+const ADMIN_PASSWORD = (import.meta.env.VITE_ADMIN_PASSWORD as string | undefined) || 'Schofy@2024!';
+
+// Export for debug display on login page (email only, never password)
+export const ADMIN_EMAIL_HINT = ADMIN_EMAIL;
 
 interface AdminUser {
   email: string;
@@ -45,10 +50,10 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   function login(email: string, password: string): { success: boolean; error?: string } {
-    if (
-      email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim() &&
-      password === ADMIN_PASSWORD
-    ) {
+    const emailMatch = email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim();
+    const passMatch = password === ADMIN_PASSWORD;
+
+    if (emailMatch && passMatch) {
       const adminUser: AdminUser = {
         email: email.toLowerCase().trim(),
         name: 'Super Admin',
@@ -58,7 +63,10 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(adminUser));
       return { success: true };
     }
-    return { success: false, error: 'Invalid admin credentials' };
+
+    // Specific error messages to help diagnose
+    if (!emailMatch) return { success: false, error: 'Email not recognised' };
+    return { success: false, error: 'Incorrect password' };
   }
 
   function logout() {
