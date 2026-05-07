@@ -1702,3 +1702,52 @@ textarea.form-input {
 [class*="relative"] > [class*="absolute"][class*="z-"] {
   pointer-events: auto;
 }
+
+/* ============================================================
+   MOBILE PERFORMANCE — disable expensive effects on small screens
+   ============================================================ */
+
+/* Disable backdrop-blur on mobile (GPU-intensive, causes lag) */
+@media (max-width: 768px) {
+  .backdrop-blur-sm,
+  .backdrop-blur,
+  .backdrop-blur-md,
+  .backdrop-blur-lg,
+  .backdrop-blur-xl {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /* Simplify modal animations on mobile */
+  .animate-modal-in {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  /* Disable page transition animations on mobile */
+  .page-shell-enter {
+    animation: none !important;
+  }
+
+  /* Disable hover scale effects on touch devices */
+  .btn:not(:disabled):hover {
+    transform: none !important;
+  }
+
+  /* Disable sidebar hover expand on mobile */
+  .group-hover\:w-\[220px\] {
+    width: auto !important;
+  }
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
