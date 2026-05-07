@@ -35,7 +35,7 @@ export default function StaffLoginModal({ onClose }: Props) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
         <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 p-5 text-white">
           <div className="flex items-center justify-between">

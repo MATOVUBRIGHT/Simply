@@ -53,7 +53,7 @@ export default function DropdownModal({
       style={{ animation: 'fadeIn 0.2s ease-out' }}
     >
       <div 
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm" 
+        className="absolute inset-0 bg-black/50" 
         onClick={onClose}
         style={{ animation: 'fadeIn 0.2s ease-out' }}
       />

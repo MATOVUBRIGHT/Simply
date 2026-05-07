@@ -337,7 +337,7 @@ function Layout({ children }: LayoutProps) {
       {/* Mobile Sidebar Overlay */}
       {mobileSidebarOpen && (
         <div 
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[45] lg:hidden"
+          className="fixed inset-0 bg-slate-900/60 z-[45] lg:hidden"
           onClick={() => setMobileSidebarOpen(false)}
         />
       )}
@@ -346,7 +346,7 @@ function Layout({ children }: LayoutProps) {
       <aside
         onMouseEnter={() => !sidebarOpen && setSidebarHovered(true)}
         onMouseLeave={() => setSidebarHovered(false)}
-        className={`fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl transition-all duration-300 ease-in-out ${
+        className={`fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl transition-[width,transform] duration-150 ${
           mobileSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
         } ${!mobileSidebarOpen && (sidebarOpen || sidebarHovered ? 'w-64' : 'lg:w-20')}`}
       >
@@ -364,7 +364,7 @@ function Layout({ children }: LayoutProps) {
               </div>
               <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
             </label>
-            <div className={`flex-1 min-w-0 transition-all duration-300 ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 hidden'}`}>
+            <div className={`flex-1 min-w-0 ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100' : 'opacity-0 w-0 hidden'}`}>
               <h2 className="font-bold text-sm leading-tight text-slate-800 dark:text-white truncate">
                 {schoolName}
               </h2>
@@ -391,32 +391,17 @@ function Layout({ children }: LayoutProps) {
                     key={item.path}
                     to={item.path}
                     onClick={() => setMobileSidebarOpen(false)}
-                    className={`flex items-center rounded-lg transition-all duration-300 group relative h-11 ${
+                    className={`flex items-center rounded-lg group relative h-11 ${
                       isActive 
-                        ? 'text-white shadow-md' 
+                        ? 'text-white shadow-sm' 
                         : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
                     }`}
-                    style={(isActive && (sidebarOpen || sidebarHovered || mobileSidebarOpen)) ? { backgroundColor: 'var(--primary-color)' } : { zIndex: 1 }}
+                    style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
                   >
-                    {/* Hover stretching container (only active when sidebar is strictly minimized and NOT hovered) */}
-                    <div className={`
-                      flex items-center gap-3 h-full rounded-lg transition-all duration-500 ease-in-out
-                      ${!sidebarOpen && !sidebarHovered && !mobileSidebarOpen 
-                        ? 'absolute left-0 top-0 w-12 px-4 group-hover:w-[220px] group-hover:bg-white group-hover:dark:bg-slate-800 group-hover:shadow-[0_10px_40px_-10px_rgba(0,0,0,0.2)] group-hover:z-[110] group-hover:ring-1 group-hover:ring-slate-200 group-hover:dark:ring-slate-700' 
-                        : 'w-full px-4'
-                      }
-                    `}
-                    style={isActive && !sidebarOpen && !sidebarHovered && !mobileSidebarOpen ? { backgroundColor: 'var(--primary-color)', color: 'white' } : {}}
-                    >
-                      <Icon size={20} className={`shrink-0 transition-colors duration-500 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
-                      
-                      <span className={`
-                        text-sm font-bold whitespace-nowrap transition-all duration-500 ease-in-out overflow-hidden
-                        ${sidebarOpen || sidebarHovered || mobileSidebarOpen 
-                          ? 'opacity-100 w-auto' 
-                          : 'opacity-0 w-0 group-hover:opacity-100 group-hover:w-[160px]'
-                        }
-                      `}>
+                    {/* Simple nav item — no complex hover expand */}
+                    <div className="flex items-center gap-3 h-full w-full px-4">
+                      <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
+                      <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100' : 'opacity-0 w-0'}`}>
                         {item.label}
                       </span>
                     </div>
@@ -446,7 +431,7 @@ function Layout({ children }: LayoutProps) {
       </aside>
 
       {/* Main Content -- offset by sidebar width on large screens */}
-      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${sidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}`}>
+      <div className={`flex-1 flex flex-col min-w-0 transition-[margin] duration-150 ${sidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}`}>
         {/* Header/Top Bar -- sticky at top of main column */}
         <header ref={headerRef} className="sticky top-0 shrink-0 z-30 border-b" style={{ backgroundColor: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}>
           {/* Main header row */}
@@ -654,7 +639,7 @@ function Layout({ children }: LayoutProps) {
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden"
+          className="fixed inset-0 bg-black/60 z-30 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
