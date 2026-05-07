@@ -5,6 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { isStaffEmail } from '../contexts/StaffAuthContext';
+import { useStaffAuth } from '../contexts/StaffAuthContext';
 
 export default function Login() {
   const [isRegister, setIsRegister] = useState(false);
@@ -26,8 +28,14 @@ export default function Login() {
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
   
   const { login, register, user, isOnline } = useAuth();
+  const { staffLoginByEmail, isStaffMode, staffSession } = useStaffAuth();
   const { primaryColor } = useTheme();
   const navigate = useNavigate();
+
+  // If staff is already logged in via email, redirect to dashboard
+  useEffect(() => {
+    if (isStaffMode && staffSession) navigate('/');
+  }, [isStaffMode, staffSession, navigate]);
 
   useEffect(() => {
     if (user) {
@@ -96,6 +104,20 @@ export default function Login() {
         if (!isSupabaseConfigured) {
           setError('Cloud authentication is not available. Please check your configuration.');
           setLoading(false);
+          return;
+        }
+
+        // Detect staff email login (firstname.lastname.staffid@staff.schofy.app)
+        if (isStaffEmail(email.toLowerCase().trim())) {
+          const result = await staffLoginByEmail(email.toLowerCase().trim(), password);
+          if (!result.success) {
+            setError(result.error || 'Staff login failed');
+            setLoading(false);
+            return;
+          }
+          setShowSuccess(true);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          navigate('/');
           return;
         }
 
@@ -293,10 +315,15 @@ export default function Login() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="form-input"
-                placeholder="you@example.com"
+                placeholder="you@example.com or staff email"
                 required
                 autoComplete="email"
               />
+              {isStaffEmail(email.toLowerCase().trim()) && (
+                <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1 flex items-center gap-1">
+                  <Shield size={11}/> Staff account detected — enter your staff password
+                </p>
+              )}
             </div>
 
             <div>

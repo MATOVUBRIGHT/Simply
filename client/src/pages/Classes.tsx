@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash, Clock, Calendar } from 'lucide-react';
+import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash, Clock, Calendar, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class } from '@schofy/shared';
 import { generateUUID } from '../utils/uuid';
@@ -29,6 +29,84 @@ const classColors = [
 function getClassColor(index: number) {
   return classColors[index % classColors.length];
 }
+
+const ClassActions = ({ 
+  classItem, 
+  onTimetable, 
+  onEdit, 
+  onDelete 
+}: {
+  classItem: Class;
+  onTimetable: (id: string) => void;
+  onEdit: (c: Class) => void;
+  onDelete: (id: string) => void;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  return (
+    <div className="relative flex justify-end" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`p-2 rounded-xl transition-all ${
+          isOpen 
+            ? 'bg-indigo-600 text-white shadow-lg ring-2 ring-indigo-500/20' 
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+        title="Actions"
+      >
+        <Settings size={18} className={isOpen ? 'animate-spin-slow' : ''} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
+          <div className="p-1.5">
+            <button
+              onClick={() => { onTimetable(classItem.id); setIsOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600 dark:hover:text-violet-400 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
+                <Clock size={16} />
+              </div>
+              Timetable
+            </button>
+            <button
+              onClick={() => { onEdit(classItem); setIsOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
+                <Edit size={16} />
+              </div>
+              Edit Class
+            </button>
+            <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
+            <button
+              onClick={() => { onDelete(classItem.id); setIsOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                <Trash2 size={16} />
+              </div>
+              Delete Class
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ClassRow = memo(({
   classItem: c,
@@ -101,28 +179,13 @@ const ClassRow = memo(({
 
       {/* Actions */}
       {!selectMode && (
-        <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-          <button
-            onClick={() => onTimetable(c.id)}
-            className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 rounded-lg transition-colors"
-            title="Timetable"
-          >
-            <Clock size={15} />
-          </button>
-          <button
-            onClick={() => onEdit(c)}
-            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 rounded-lg transition-colors"
-            title="Edit"
-          >
-            <Edit size={15} />
-          </button>
-          <button
-            onClick={() => onDelete(c.id)}
-            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
-            title="Delete"
-          >
-            <Trash2 size={15} />
-          </button>
+        <div className="shrink-0" onClick={e => e.stopPropagation()}>
+          <ClassActions 
+            classItem={c}
+            onTimetable={onTimetable}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
         </div>
       )}
     </div>

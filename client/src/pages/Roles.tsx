@@ -4,7 +4,7 @@ import { Users, Plus, Eye, EyeOff, Trash2, Edit2, Shield, History, CheckCircle, 
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { hashPassword } from '../lib/security';
-import { useStaffAuth, logStaffActivity } from '../contexts/StaffAuthContext';
+import { useStaffAuth, logStaffActivity, buildGeneratedEmail } from '../contexts/StaffAuthContext';
 
 const ALL_PAGES = [
   { path: '/', label: 'Dashboard' },
@@ -32,8 +32,9 @@ const ROLE_PRESETS: Record<string, string[]> = {
 
 interface StaffUser {
   id: string; staffId: string; firstName: string; lastName: string;
-  role: string; email: string; phone: string; allowedPages: string[];
-  isActive: boolean; createdAt: string;
+  role: string; email: string; generatedEmail: string; phone: string;
+  allowedPages: string[]; isActive: boolean; isReadOnly: boolean;
+  lastLoginAt: string | null; createdAt: string;
 }
 interface ActivityLog {
   id: string; staffId: string; action: string; description: string; createdAt: string;
@@ -54,7 +55,7 @@ export default function Roles() {
   const [success, setSuccess] = useState('');
   const [copiedId, setCopiedId] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [form, setForm] = useState({ firstName: '', lastName: '', role: 'teacher', email: '', phone: '', password: '', allowedPages: ROLE_PRESETS.teacher });
+  const [form, setForm] = useState({ firstName: '', lastName: '', role: 'teacher', email: '', phone: '', password: '', allowedPages: ROLE_PRESETS.teacher, isReadOnly: false });
 
   useEffect(() => { loadData(); }, [tenantId]);
 
@@ -68,9 +69,12 @@ export default function Roles() {
       ]);
       setStaffList((staffRes.data || []).map((s: any) => ({
         id: s.id, staffId: s.staff_id, firstName: s.first_name, lastName: s.last_name,
-        role: s.role, email: s.email || '', phone: s.phone || '',
+        role: s.role, email: s.email || '',
+        generatedEmail: s.generated_email || buildGeneratedEmail(s.first_name, s.last_name, s.staff_id),
+        phone: s.phone || '',
         allowedPages: Array.isArray(s.allowed_pages) ? s.allowed_pages : [],
-        isActive: s.is_active, createdAt: s.created_at,
+        isActive: s.is_active, isReadOnly: s.is_read_only || false,
+        lastLoginAt: s.last_login_at || null, createdAt: s.created_at,
       })));
       setActivityLog((logRes.data || []).map((l: any) => ({
         id: l.id, staffId: l.staff_id, action: l.action, description: l.description, createdAt: l.created_at,
@@ -85,11 +89,11 @@ export default function Roles() {
   }
 
   function openAdd() {
-    setForm({ firstName:'', lastName:'', role:'teacher', email:'', phone:'', password:'', allowedPages: ROLE_PRESETS.teacher });
+    setForm({ firstName:'', lastName:'', role:'teacher', email:'', phone:'', password:'', allowedPages: ROLE_PRESETS.teacher, isReadOnly: false });
     setEditingStaff(null); setShowAddModal(true); setError(''); setSuccess('');
   }
   function openEdit(s: StaffUser) {
-    setForm({ firstName:s.firstName, lastName:s.lastName, role:s.role, email:s.email, phone:s.phone, password:'', allowedPages:s.allowedPages });
+    setForm({ firstName:s.firstName, lastName:s.lastName, role:s.role, email:s.email, phone:s.phone, password:'', allowedPages:s.allowedPages, isReadOnly: s.isReadOnly });
     setEditingStaff(s); setShowAddModal(true); setError('');
   }
 
@@ -101,23 +105,28 @@ export default function Roles() {
     try {
       const now = new Date().toISOString();
       if (editingStaff) {
-        const update: any = { first_name: form.firstName.trim(), last_name: form.lastName.trim(), role: form.role, email: form.email.trim(), phone: form.phone.trim(), allowed_pages: form.allowedPages, updated_at: now };
+        const update: any = { first_name: form.firstName.trim(), last_name: form.lastName.trim(), role: form.role, email: form.email.trim(), phone: form.phone.trim(), allowed_pages: form.allowedPages, is_read_only: form.isReadOnly, updated_at: now };
         if (form.password.length >= 6) update.password_hash = await hashPassword(form.password);
+        // Regenerate email if name changed
+        const newGenEmail = buildGeneratedEmail(form.firstName.trim(), form.lastName.trim(), editingStaff.staffId);
+        update.generated_email = newGenEmail;
         await supabase.from('school_staff_users').update(update).eq('id', editingStaff.id);
         await logStaffActivity(tenantId, user?.id || '', 'admin', 'edit_staff', 'Edited staff: ' + editingStaff.staffId);
         setSuccess('Staff updated');
       } else {
         const roleCount = staffList.filter(s => s.role === form.role).length;
         const staffId = generateStaffId(form.role, roleCount);
+        const genEmail = buildGeneratedEmail(form.firstName.trim(), form.lastName.trim(), staffId);
         await supabase.from('school_staff_users').insert({
           id: crypto.randomUUID(), school_id: tenantId, staff_id: staffId,
           first_name: form.firstName.trim(), last_name: form.lastName.trim(),
           role: form.role, email: form.email.trim(), phone: form.phone.trim(),
           password_hash: await hashPassword(form.password), allowed_pages: form.allowedPages,
+          is_read_only: form.isReadOnly, generated_email: genEmail,
           is_active: true, created_at: now, updated_at: now,
         });
         await logStaffActivity(tenantId, user?.id || '', 'admin', 'create_staff', 'Created staff: ' + staffId);
-        setSuccess('Staff created. ID: ' + staffId);
+        setSuccess(`Staff created. ID: ${staffId} · Login email: ${genEmail}`);
       }
       setShowAddModal(false); await loadData();
     } catch (e: any) { setError(e.message || 'Failed to save'); }
@@ -189,17 +198,39 @@ export default function Roles() {
                     <p className="font-semibold text-slate-900 dark:text-white">{s.firstName} {s.lastName}</p>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColor[s.role]||roleColor.custom}`}>{s.role}</span>
                     {!s.isActive && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">Inactive</span>}
+                    {s.isReadOnly && <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 flex items-center gap-1"><Eye size={10}/>Read Only</span>}
                   </div>
                   <button onClick={() => copyId(s.staffId)} className="flex items-center gap-1 text-xs font-mono text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 mt-1">
                     <Shield size={11}/>{s.staffId}{copiedId===s.staffId ? <CheckCircle size={11} className="text-green-500"/> : <Copy size={11}/>}
                   </button>
+                  {/* Generated email — click to copy */}
+                  <button onClick={() => copyId(s.generatedEmail)} className="flex items-center gap-1 text-xs text-indigo-500 dark:text-indigo-400 hover:text-indigo-700 mt-0.5 font-mono">
+                    <Shield size={10}/>{s.generatedEmail}{copiedId===s.generatedEmail ? <CheckCircle size={10} className="text-green-500"/> : <Copy size={10}/>}
+                  </button>
+                  {/* Last login */}
+                  {s.lastLoginAt && (
+                    <p className="text-xs text-slate-400 mt-0.5">Last login: {new Date(s.lastLoginAt).toLocaleString()}</p>
+                  )}
                   <div className="flex flex-wrap gap-1 mt-2">
                     {s.allowedPages.slice(0,5).map(p => <span key={p} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{p==='/'?'Dashboard':p.replace('/','')}</span>)}
                     {s.allowedPages.length>5 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500">+{s.allowedPages.length-5} more</span>}
                   </div>
                 </div>
                 {!isStaffMode && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                    {/* Read-only toggle */}
+                    <button
+                      onClick={async () => {
+                        if (!supabase) return;
+                        await supabase.from('school_staff_users').update({ is_read_only: !s.isReadOnly, updated_at: new Date().toISOString() }).eq('id', s.id);
+                        await logStaffActivity(tenantId, user?.id || '', 'admin', 'toggle_readonly', (s.isReadOnly ? 'Removed read-only from' : 'Set read-only on') + ': ' + s.staffId);
+                        await loadData();
+                      }}
+                      title={s.isReadOnly ? 'Remove read-only' : 'Set read-only'}
+                      className={`p-2 rounded-lg text-xs flex items-center gap-1 transition-colors ${s.isReadOnly ? 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 hover:text-amber-600' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-600'}`}
+                    >
+                      <Eye size={14}/>
+                    </button>
                     <button onClick={() => openEdit(s)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-500"><Edit2 size={15}/></button>
                     <button onClick={() => toggleActive(s)} className={`p-2 rounded-lg ${s.isActive?'text-green-500 hover:text-red-500':'text-red-500 hover:text-green-500'}`}>{s.isActive?<CheckCircle size={15}/>:<XCircle size={15}/>}</button>
                     <button onClick={() => deleteStaff(s)} className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-slate-400 hover:text-red-500"><Trash2 size={15}/></button>
@@ -279,6 +310,14 @@ export default function Roles() {
                   ))}
                 </div>
               </div>
+              {/* Read-only toggle */}
+              <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                <input type="checkbox" checked={form.isReadOnly} onChange={e=>setForm(f=>({...f,isReadOnly:e.target.checked}))} className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"/>
+                <div>
+                  <p className="text-sm font-medium text-slate-900 dark:text-white flex items-center gap-1.5"><Eye size={14}/>Read-Only Mode</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Staff can view pages but cannot create, edit, or delete data</p>
+                </div>
+              </label>
               <div className="flex gap-3 pt-2">
                 <button onClick={()=>setShowAddModal(false)} className="flex-1 btn btn-secondary">Cancel</button>
                 <button onClick={saveStaff} disabled={saving} className="flex-1 btn btn-primary flex items-center justify-center gap-2">

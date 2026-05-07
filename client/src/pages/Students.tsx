@@ -1,6 +1,6 @@
 ﻿﻿﻿﻿import { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, CreditCard } from 'lucide-react';
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, CreditCard, MoreHorizontal } from 'lucide-react';
 import { Portal } from '../components/Portal';
 import { useToast } from '../contexts/ToastContext';
 import type { Class, Student } from '@schofy/shared';
@@ -57,6 +57,100 @@ function generateStudentId(firstName: string, lastName: string): string {
   const digits = Math.floor(100 + Math.random() * 900);
   return `${fn}${ln}${digits}`;
 }
+
+const StudentActions = ({ 
+  student, 
+  onMarkCompleted, 
+  onToggleStatus, 
+  onSendEmail, 
+  onDelete 
+}: {
+  student: Student;
+  onMarkCompleted: (id: string) => void;
+  onToggleStatus: (student: Student) => void;
+  onSendEmail: (id: string) => void;
+  onDelete: (id: string) => void;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  return (
+    <div className="relative flex justify-end" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`p-2 rounded-xl transition-all ${
+          isOpen 
+            ? 'bg-indigo-600 text-white shadow-lg ring-2 ring-indigo-500/20' 
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+        title="Actions"
+      >
+        <Settings size={18} className={isOpen ? 'animate-spin-slow' : ''} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
+          <div className="px-4 py-2 border-b border-slate-50 dark:border-slate-700/50">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Student Management</p>
+          </div>
+          <div className="p-1.5">
+            <button
+              onClick={() => { onMarkCompleted(student.id); setIsOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600 dark:hover:text-violet-400 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
+                <Award size={16} />
+              </div>
+              Mark Completed
+            </button>
+            {student.status === 'active' && (
+              <button
+                onClick={() => { onToggleStatus(student); setIsOpen(false); }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-900/20 hover:text-amber-600 dark:hover:text-amber-400 rounded-xl transition-colors"
+              >
+                <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
+                  <UserX size={16} />
+                </div>
+                Deactivate Student
+              </button>
+            )}
+            <button
+              onClick={() => { onSendEmail(student.id); setIsOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
+                <Mail size={16} />
+              </div>
+              Send Email
+            </button>
+            <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
+            <button
+              onClick={() => { onDelete(student.id); setIsOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                <Trash2 size={16} />
+              </div>
+              Delete Record
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const StudentRow = memo(({ 
   student, 
@@ -181,38 +275,13 @@ const StudentRow = memo(({
          <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(finance.balance)}</span>}
       </td>
       <td onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => onMarkCompleted(student.id)}
-            className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors"
-            title="Mark Completed"
-          >
-            <Award size={15} />
-          </button>
-          {student.status === 'active' && (
-            <button
-              onClick={() => onToggleStatus(student)}
-              className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg transition-colors"
-              title="Deactivate"
-            >
-              <UserX size={15} />
-            </button>
-          )}
-          <button
-            onClick={() => onSendEmail(student.id)}
-            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
-            title="Send Email"
-          >
-            <Mail size={15} />
-          </button>
-          <button
-            onClick={() => onDelete(student.id)}
-            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors"
-            title="Delete"
-          >
-            <Trash2 size={15} />
-          </button>
-        </div>
+        <StudentActions 
+          student={student}
+          onMarkCompleted={onMarkCompleted}
+          onToggleStatus={onToggleStatus}
+          onSendEmail={onSendEmail}
+          onDelete={onDelete}
+        />
       </td>
     </tr>
   );

@@ -1,4 +1,7 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+﻿const fs=require('fs');
+
+// ── StaffAuthContext ──────────────────────────────────────────────────────────
+const staffCtx = `import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { verifyPassword, sanitizeText, checkRateLimit, recordFailedAttempt, clearFailedAttempts } from '../lib/security';
 
@@ -136,3 +139,6 @@ async function logActivity(schoolId: string, staffUserId: string, staffId: strin
   try { await supabase.from('staff_activity_log').insert({ id: crypto.randomUUID(), school_id: schoolId, staff_user_id: staffUserId, staff_id: staffId, action, description, created_at: new Date().toISOString() }); } catch {}
 }
 export { logActivity as logStaffActivity };
+`;
+fs.writeFileSync('src/contexts/StaffAuthContext.tsx', staffCtx);
+console.log('StaffAuthContext:', fs.statSync('src/contexts/StaffAuthContext.tsx').size);

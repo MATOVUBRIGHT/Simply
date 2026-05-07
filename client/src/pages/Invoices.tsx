@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, ChevronLeft, ChevronRight, Eye, Share2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, Fee, FeeStructure, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -15,6 +15,7 @@ import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCat
 import { ClassOption } from '../utils/classroom';
 import DropdownModal from '../components/DropdownModal';
 import { SuccessPopup } from '../components/SuccessPopup';
+import InvoiceTemplate, { InvoiceLabels, DEFAULT_INVOICE_LABELS } from '../components/InvoiceTemplate';
 import { usePagination } from '../hooks/usePagination';
 import { useDebounce } from '../hooks/useDebounce';
 
@@ -77,17 +78,17 @@ const StudentInvoiceRow = memo(({
     </td>
     <td>
       {student.status === 'not_invoiced' ? (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+        <span className="badge badge-warning gap-1.5">
           <XCircle size={12} />
           Not Invoiced
         </span>
       ) : student.status === 'paid' ? (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+        <span className="badge badge-success gap-1.5">
           <CheckCircle size={12} />
           Cleared
         </span>
       ) : (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+        <span className="badge badge-danger gap-1.5">
           <Clock size={12} />
           Balance
         </span>
@@ -104,20 +105,90 @@ const StudentInvoiceRow = memo(({
   </tr>
 ));
 
+const InvoiceActions = ({ 
+  invoice, 
+  onRecord, 
+  onView 
+}: {
+  invoice: Invoice;
+  onRecord: (id: string) => void;
+  onView: (invoice: Invoice) => void;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  return (
+    <div className="relative flex justify-end" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`p-2 rounded-xl transition-all ${
+          isOpen 
+            ? 'bg-indigo-600 text-white shadow-lg ring-2 ring-indigo-500/20' 
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+        title="Actions"
+      >
+        <Settings size={18} className={isOpen ? 'animate-spin-slow' : ''} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
+          <div className="p-1.5">
+            <button
+              onClick={() => { onView(invoice); setIsOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center shrink-0 text-indigo-600 dark:text-indigo-400">
+                <Eye size={16} />
+              </div>
+              View & Share
+            </button>
+            {invoice.status !== 'paid' && (
+              <button
+                onClick={() => { onRecord(invoice.id); setIsOpen(false); }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 rounded-xl transition-colors"
+              >
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center shrink-0 text-emerald-600 dark:text-emerald-400">
+                  <DollarSign size={16} />
+                </div>
+                Record Payment
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const InvoiceRow = memo(({ 
   invoice, 
   formatMoney, 
   onRecord,
+  onView,
   statusConfig
 }: { 
   invoice: Invoice; 
   formatMoney: (val: number) => string; 
   onRecord: (id: string) => void;
+  onView: (invoice: Invoice) => void;
   statusConfig: any;
 }) => {
   const StatusIcon = statusConfig[invoice.status].icon;
   return (
-    <tr>
+    <tr className="group">
       <td className="font-medium">{invoice.studentName}</td>
       <td>{invoice.description}</td>
       <td className="font-semibold">{formatMoney(invoice.amount)}</td>
@@ -126,21 +197,18 @@ const InvoiceRow = memo(({
         {formatMoney(invoice.amount - invoice.paidAmount)}
       </td>
       <td>
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${statusConfig[invoice.status].bg} ${statusConfig[invoice.status].color}`}>
+        <span className={`badge ${statusConfig[invoice.status].bg} ${statusConfig[invoice.status].color} gap-1.5`}>
           <StatusIcon size={12} />
           {invoice.status}
         </span>
       </td>
       <td><span className="badge badge-info">Term {invoice.term}</span></td>
-      <td>
-        {invoice.status !== 'paid' && (
-          <button
-            onClick={() => onRecord(invoice.id)}
-            className="btn btn-secondary text-sm py-1.5"
-          >
-            <DollarSign size={14} /> Record
-          </button>
-        )}
+      <td onClick={(e) => e.stopPropagation()}>
+        <InvoiceActions 
+          invoice={invoice}
+          onRecord={onRecord}
+          onView={onView}
+        />
       </td>
     </tr>
   );
@@ -199,6 +267,52 @@ export default function Invoices() {
   const [invoicePayMethod, setInvoicePayMethod] = useState<string>(PaymentMethod.CASH);
   const [isRecordingInvoicePayment, setIsRecordingInvoicePayment] = useState(false);
 
+  // Template Preview
+  const [showTemplate, setShowTemplate] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [isLiveEditing, setIsLiveEditing] = useState(false);
+  const [labels, setLabels] = useState<InvoiceLabels>(() => {
+    try {
+      const saved = localStorage.getItem('schofy_invoice_labels');
+      return saved ? JSON.parse(saved) : DEFAULT_INVOICE_LABELS;
+    } catch { return DEFAULT_INVOICE_LABELS; }
+  });
+
+  // Undo/Redo for labels
+  const [history, setHistory] = useState<InvoiceLabels[]>([]);
+  const [redoStack, setRedoStack] = useState<InvoiceLabels[]>([]);
+
+  const updateLabels = (updates: Partial<InvoiceLabels>) => {
+    // If empty updates, it's just a toggle or initialization call from the button
+    if (Object.keys(updates).length === 0) {
+      setIsLiveEditing(!isLiveEditing);
+      return;
+    }
+    setHistory(prev => [...prev, labels]);
+    setRedoStack([]);
+    const next = { ...labels, ...updates };
+    setLabels(next);
+    localStorage.setItem('schofy_invoice_labels', JSON.stringify(next));
+  };
+
+  const undo = () => {
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    setRedoStack(stack => [labels, ...stack]);
+    setHistory(h => h.slice(0, -1));
+    setLabels(prev);
+    localStorage.setItem('schofy_invoice_labels', JSON.stringify(prev));
+  };
+
+  const redo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[0];
+    setHistory(h => [...h, labels]);
+    setRedoStack(stack => stack.slice(1));
+    setLabels(next);
+    localStorage.setItem('schofy_invoice_labels', JSON.stringify(next));
+  };
+
   const students = useActiveStudents();
   const { students: allStudents } = useStudents();
   const sid = schoolId || user?.id || '';
@@ -206,6 +320,7 @@ export default function Invoices() {
   const { data: paymentsData, refresh: refreshPayments } = useTableData(sid, 'payments');
   const { data: bursariesData } = useTableData(sid, 'bursaries');
   const { data: discountsData } = useTableData(sid, 'discounts');
+  const { data: settingsData } = useTableData(sid, 'settings');
 
   const fees = feesData as any[];
   const payments = paymentsData as any[];
@@ -296,6 +411,56 @@ export default function Invoices() {
 
     return Array.from(invoiceMap.values());
   }, [fees, payments, allStudents]);
+
+  const templateData = useMemo(() => {
+    if (!selectedInvoice) return null;
+    const student = allStudents.find(s => s.id === selectedInvoice.studentId);
+    const sMap: Record<string, any> = {};
+    settingsData.forEach((s: any) => { sMap[s.key] = s.value; });
+    
+    const school = {
+      name: sMap.schoolName || 'School Name',
+      address: sMap.schoolAddress || '',
+      phone: sMap.schoolPhone || '',
+      email: sMap.schoolEmail || '',
+      logo: sMap.schoolLogo || '',
+      motto: sMap.schoolMotto || '',
+    };
+
+    const studentInfo = {
+      name: selectedInvoice.studentName,
+      id: student?.admissionNo || student?.studentId || '',
+      class: classes.find(c => c.id === student?.classId)?.name || '',
+      guardian: student?.guardianName || '',
+      address: student?.address || '',
+      phone: student?.guardianPhone || '',
+      email: student?.guardianEmail || '',
+    };
+
+    const invoiceInfo = {
+      number: selectedInvoice.id.slice(0, 8).toUpperCase(),
+      date: new Date(selectedInvoice.createdAt).toLocaleDateString(),
+      dueDate: selectedInvoice.dueDate ? new Date(selectedInvoice.dueDate).toLocaleDateString() : 'N/A',
+      items: [{ description: selectedInvoice.description, amount: selectedInvoice.amount, qty: 1 }],
+      subtotal: selectedInvoice.amount,
+      tax: 0,
+      total: selectedInvoice.amount,
+      paid: selectedInvoice.paidAmount,
+      balance: selectedInvoice.amount - selectedInvoice.paidAmount,
+      status: selectedInvoice.status,
+      term: selectedInvoice.term,
+      year: selectedInvoice.year,
+    };
+
+    const bankInfo = {
+      accountName: sMap.bankAccountName || sMap.schoolName || '',
+      accountNumber: sMap.bankAccountNumber || '',
+      bankName: sMap.bankName || '',
+      paymentMethod: sMap.paymentMethod || 'BANK TRANSFER',
+    };
+
+    return { school, student: studentInfo, invoice: invoiceInfo, bankInfo };
+  }, [selectedInvoice, allStudents, settingsData, classes]);
 
   const invoiceExpectedFields = [
     { key: 'studentName', label: 'Student Name', required: true },
@@ -788,6 +953,11 @@ export default function Invoices() {
     }
   }
 
+  function handleViewInvoice(invoice: Invoice) {
+    setSelectedInvoice(invoice);
+    setShowTemplate(true);
+  }
+
   const filteredInvoices = useMemo(() => {
      return invoices.filter(inv => {
        if (filterStatus !== 'all' && inv.status !== filterStatus) return false;
@@ -847,12 +1017,12 @@ export default function Invoices() {
           </button>
         </div>
       )}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">
+          <h1 className="text-title">
             Student Invoices
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage and track all student invoices</p>
+          <p className="text-subtitle">Manage and track all student invoices</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <div className="relative" ref={exportMenuRef}>
@@ -922,12 +1092,6 @@ export default function Invoices() {
             <Users size={16} />
             <span className="hidden sm:inline">Invoice All Classes</span>
           </button>
-          <button 
-            onClick={() => setShowStructureModal(true)}
-            className="btn btn-secondary"
-          >
-            <Plus size={18} /> Fee Structures
-          </button>
         </div>
       </div>
 
@@ -938,8 +1102,8 @@ export default function Invoices() {
               <FileText size={24} />
             </div>
             <div>
-              <p className="text-sm text-white/80">Total Invoiced</p>
-              <p className="text-2xl font-bold text-white">
+              <p className="text-label text-white/80">Total Invoiced</p>
+              <p className="text-2xl font-black text-white leading-tight">
                 {formatMoney(stats.total)}
               </p>
             </div>
@@ -951,8 +1115,8 @@ export default function Invoices() {
               <DollarSign size={24} />
             </div>
             <div>
-              <p className="text-sm text-white/80">Collected</p>
-              <p className="text-2xl font-bold text-white">
+              <p className="text-label text-white/80">Collected</p>
+              <p className="text-2xl font-black text-white leading-tight">
                 {formatMoney(stats.collected)}
               </p>
             </div>
@@ -964,8 +1128,8 @@ export default function Invoices() {
               <Clock size={24} />
             </div>
             <div>
-              <p className="text-sm text-white/80">Pending</p>
-              <p className="text-2xl font-bold text-white">
+              <p className="text-label text-white/80">Pending</p>
+              <p className="text-2xl font-black text-white leading-tight">
                 {formatMoney(stats.pending)}
               </p>
             </div>
@@ -977,8 +1141,8 @@ export default function Invoices() {
               <Award size={24} />
             </div>
             <div>
-              <p className="text-sm text-white/80">Bursary</p>
-              <p className="text-2xl font-bold text-white">
+              <p className="text-label text-white/80">Bursary</p>
+              <p className="text-2xl font-black text-white leading-tight">
                 {formatMoney(stats.bursary)}
               </p>
             </div>
@@ -990,8 +1154,8 @@ export default function Invoices() {
               <Percent size={24} />
             </div>
             <div>
-              <p className="text-sm text-white/80">Discount</p>
-              <p className="text-2xl font-bold text-white">
+              <p className="text-label text-white/80">Discount</p>
+              <p className="text-2xl font-black text-white leading-tight">
                 {formatMoney(stats.discount)}
               </p>
             </div>
@@ -1300,10 +1464,11 @@ export default function Invoices() {
                 ) : (paginatedItems as any[]).map(invoice => (
                   <InvoiceRow 
                     key={invoice.id} 
-                    invoice={invoice} 
+                    invoice={invoice as any} 
                     formatMoney={formatMoney} 
-                    onRecord={markAsPaid} 
-                    statusConfig={statusConfig} 
+                    onRecord={markAsPaid}
+                    onView={handleViewInvoice}
+                    statusConfig={statusConfig}
                   />
                 ))}
               </tbody>
@@ -2140,6 +2305,24 @@ export default function Invoices() {
           onClose={() => { setShowSuccess(false); setShowImportSuccess(false); }}
         />
       )}
+      {/* Invoice Template Modal */}
+      {showTemplate && templateData && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 print:p-0 print:bg-white overflow-y-auto" onClick={e => { if (e.target === e.currentTarget) setShowTemplate(false); }}>
+          <div className="w-full max-w-4xl min-h-screen sm:min-h-0 print:m-0 print:shadow-none" onClick={e => e.stopPropagation()}>
+            <InvoiceTemplate 
+              {...templateData}
+              labels={labels}
+              isLiveEditing={isLiveEditing}
+              onUpdateLabels={updateLabels}
+              onUndo={undo}
+              onRedo={redo}
+              canUndo={history.length > 0}
+              canRedo={redoStack.length > 0}
+              onClose={() => setShowTemplate(false)}
+            />
+          </div>
+        </div>
+      , document.body)}
     </div>
   );
 }

@@ -57,6 +57,10 @@ export default function Settings() {
     libraryFee: '50',
     sportsFee: '75',
     schoolType: 'nursery_primary',
+    bankAccountName: '',
+    bankAccountNumber: '',
+    bankName: '',
+    paymentMethod: 'BANK TRANSFER',
   });
 
   const currentCurrency = currencies.find(c => c.code === settings.currency) || currencies[0];
@@ -490,6 +494,37 @@ export default function Settings() {
             <div>
               <label className="form-label">Email</label>
               <input type="email" name="schoolEmail" value={settings.schoolEmail} onChange={handleChange} className="form-input" />
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header flex items-center gap-2">
+            <DollarSign size={20} />
+            <h2 className="font-semibold">Payment Details (for Invoices)</h2>
+          </div>
+          <div className="card-body grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="form-label">Account Name</label>
+              <input name="bankAccountName" value={settings.bankAccountName} onChange={handleChange} className="form-input" placeholder="e.g. Schofy Primary School" />
+            </div>
+            <div>
+              <label className="form-label">Account Number</label>
+              <input name="bankAccountNumber" value={settings.bankAccountNumber} onChange={handleChange} className="form-input" placeholder="e.g. 0123456789" />
+            </div>
+            <div>
+              <label className="form-label">Bank Name</label>
+              <input name="bankName" value={settings.bankName} onChange={handleChange} className="form-input" placeholder="e.g. Stanbic Bank" />
+            </div>
+            <div>
+              <label className="form-label">Preferred Payment Method</label>
+              <select name="paymentMethod" value={settings.paymentMethod} onChange={handleChange} className="form-input">
+                <option value="BANK TRANSFER">Bank Transfer</option>
+                <option value="MOBILE MONEY">Mobile Money</option>
+                <option value="CASH">Cash</option>
+                <option value="DEBIT CARD">Debit Card</option>
+                <option value="ALL">All Methods</option>
+              </select>
             </div>
           </div>
         </div>

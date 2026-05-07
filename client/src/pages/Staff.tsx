@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, StaffRole } from '@schofy/shared';
 import type { Staff, SalaryPayment } from '@schofy/shared';
@@ -34,6 +34,96 @@ function getAvatarColor(name: string) {
   const index = name.charCodeAt(0) % avatarColors.length;
   return avatarColors[index];
 }
+
+const StaffActions = ({ 
+  staff, 
+  onDelete 
+}: {
+  staff: Staff;
+  onDelete: (id: string) => void;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  return (
+    <div className="relative flex justify-end" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`p-2 rounded-xl transition-all ${
+          isOpen 
+            ? 'bg-indigo-600 text-white shadow-lg ring-2 ring-indigo-500/20' 
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+        title="Actions"
+      >
+        <Settings size={18} className={isOpen ? 'animate-spin-slow' : ''} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
+          <div className="px-4 py-2 border-b border-slate-50 dark:border-slate-700/50">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Staff Management</p>
+          </div>
+          <div className="p-1.5">
+            <Link 
+              to={`/staff/${staff.id}`}
+              onClick={() => setIsOpen(false)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
+                <Eye size={16} />
+              </div>
+              View Details
+            </Link>
+            <Link 
+              to={`/staff/${staff.id}/edit`}
+              onClick={() => setIsOpen(false)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600 dark:hover:text-violet-400 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
+                <Edit size={16} />
+              </div>
+              Edit Profile
+            </Link>
+            {staff.email && (
+              <button
+                onClick={() => { window.open(`mailto:${staff.email}`, '_blank'); setIsOpen(false); }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-xl transition-colors"
+              >
+                <div className="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
+                  <Mail size={16} />
+                </div>
+                Send Email
+              </button>
+            )}
+            <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
+            <button
+              onClick={() => { onDelete(staff.id); setIsOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                <Trash2 size={16} />
+              </div>
+              Delete Staff
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const StaffRow = memo(({ 
   staff: s, 
@@ -134,26 +224,10 @@ const StaffRow = memo(({
         </span>
       </td>
       <td onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-1">
-          <Link to={`/staff/${s.id}`} className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 dark:text-sky-400 rounded-lg transition-colors">
-            <Eye size={15} />
-          </Link>
-          <Link to={`/staff/${s.id}/edit`} className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors">
-            <Edit size={15} />
-          </Link>
-          {s.email && (
-            <button 
-              onClick={() => window.open(`mailto:${s.email}`, '_blank')}
-              className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
-              title="Send Email"
-            >
-              <Mail size={15} />
-            </button>
-          )}
-          <button onClick={() => onDelete(s.id)} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors">
-            <Trash2 size={15} />
-          </button>
-        </div>
+        <StaffActions 
+          staff={s}
+          onDelete={onDelete}
+        />
       </td>
     </tr>
   );

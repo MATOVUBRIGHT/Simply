@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, ChevronRight, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash, Pencil, Search } from 'lucide-react';
+import { Plus, Trash2, Book, BookOpen, GraduationCap, Hash, ChevronDown, ChevronRight, Download, Upload, FileText, X, ArrowRight, Check, Square, CheckSquare, Trash, Pencil, Search, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Class, Subject } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -89,6 +89,77 @@ function getSubjectColor(name: string) {
   return subjectColors[index];
 }
 
+const SubjectActions = ({ 
+  sub, 
+  group, 
+  onEdit, 
+  onDelete 
+}: {
+  sub: any;
+  group: any;
+  onEdit: (group: any) => void;
+  onDelete: (payload: { name: string; ids: string[] }) => void;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  return (
+    <div className="relative flex justify-end" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`p-2 rounded-xl transition-all ${
+          isOpen 
+            ? 'bg-indigo-600 text-white shadow-lg' 
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+        title="Actions"
+      >
+        <Settings size={18} className={isOpen ? 'animate-spin-slow' : ''} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
+          <div className="p-1.5">
+            {group && (
+              <button
+                onClick={() => { onEdit(group); setIsOpen(false); }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-xl transition-colors"
+              >
+                <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center shrink-0">
+                  <Pencil size={14} />
+                </div>
+                Edit Subject
+              </button>
+            )}
+            <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
+            <button
+              onClick={() => { onDelete({ name: sub.name, ids: [sub.id] }); setIsOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+            >
+              <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                <Trash2 size={14} />
+              </div>
+              Remove Subject
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SubjectRow = memo(({
   sub,
   i,
@@ -118,25 +189,13 @@ const SubjectRow = memo(({
           {sub.code || <span className="text-slate-400 font-normal italic">no code</span>}
         </span>
       </td>
-      <td className="px-4 py-2.5 text-right">
-        <div className="flex items-center justify-end gap-1">
-          {group && (
-            <button
-              onClick={() => onEdit(group)}
-              className="p-1.5 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 text-indigo-600 rounded-lg transition-colors"
-              title="Edit subject"
-            >
-              <Pencil size={14} />
-            </button>
-          )}
-          <button
-            onClick={() => onDelete({ name: sub.name, ids: [sub.id] })}
-            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 rounded-lg transition-colors"
-            title="Remove from this class"
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
+      <td className="px-4 py-2.5 text-right" onClick={e => e.stopPropagation()}>
+        <SubjectActions 
+          sub={sub}
+          group={group}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
       </td>
     </tr>
   );
@@ -1031,7 +1090,7 @@ export default function Subjects() {
                   </button>
 
                   {isOpen && (
-                    <div className="border-t border-slate-100 dark:border-slate-700/50">
+                    <div className="border-t border-slate-100 dark:border-slate-700/50 overflow-x-auto">
                       <table className="w-full text-sm border-collapse">
                         <thead>
                           <tr className="bg-slate-50 dark:bg-slate-700/50">

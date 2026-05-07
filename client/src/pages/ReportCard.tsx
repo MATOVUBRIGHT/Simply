@@ -2,12 +2,13 @@ import { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, Settings, Check, Building, Palette, Layout, FileText as FileTextIcon, Eye, X, GraduationCap } from 'lucide-react';
+import { ArrowLeft, Download, Settings, Check, Building, Palette, Layout, FileText as FileTextIcon, Eye, X, GraduationCap, RefreshCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useStudents } from '../contexts/StudentsContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useToast } from '../contexts/ToastContext';
+import LiveEditable from '../components/LiveEditable';
 
 // ΓöÇΓöÇ Grade helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function ordinal(n: number): string {
@@ -114,60 +115,6 @@ function saveTemplateLocal(t: ReportTemplate) {
   localStorage.setItem(TEMPLATE_KEY, JSON.stringify(t));
 }
 
-const LiveEditable = ({ 
-  value, 
-  onSave, 
-  isLiveEditing,
-  className = "" 
-}: { 
-  value: string; 
-  onSave: (v: string) => void; 
-  isLiveEditing: boolean;
-  className?: string;
-}) => {
-  const [isInternalEditing, setIsInternalEditing] = useState(false);
-  const [temp, setTemp] = useState(value);
-
-  useEffect(() => {
-    setTemp(value);
-  }, [value]);
-
-  if (isLiveEditing && isInternalEditing) {
-    return (
-      <input 
-        autoFocus
-        value={temp} 
-        onChange={e => setTemp(e.target.value)}
-        onBlur={() => { 
-          setIsInternalEditing(false); 
-          if (temp !== value) onSave(temp); 
-        }}
-        onKeyDown={e => {
-          if (e.key === 'Enter') {
-            setIsInternalEditing(false);
-            if (temp !== value) onSave(temp);
-          }
-        }}
-        className={`bg-white dark:bg-slate-800 border-2 border-primary-500 rounded outline-none px-1 text-slate-900 dark:text-white ${className}`}
-        style={{ width: `${Math.max(value.length, temp.length, 5)}ch` }}
-      />
-    );
-  }
-
-  return (
-    <span 
-      onClick={() => isLiveEditing && setIsInternalEditing(true)} 
-      className={`
-        transition-all duration-200
-        ${isLiveEditing ? 'cursor-edit hover:bg-yellow-100/50 dark:hover:bg-yellow-900/20 ring-1 ring-transparent hover:ring-yellow-400/50 rounded px-1' : ''}
-        ${className}
-      `}
-    >
-      {value}
-    </span>
-  );
-};
-
 export default function ReportCard() {
   const { id: studentId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -183,6 +130,39 @@ export default function ReportCard() {
   const [template, setTemplate] = useState<ReportTemplate>(loadTemplate);
   const [draft, setDraft] = useState<ReportTemplate>(loadTemplate);
   const [saving, setSaving] = useState(false);
+
+  // Undo/Redo History
+  const [history, setHistory] = useState<ReportTemplate[]>([]);
+  const [redoStack, setRedoStack] = useState<ReportTemplate[]>([]);
+
+  const addToHistory = (t: ReportTemplate) => {
+    setHistory(prev => {
+      const next = [...prev, t];
+      if (next.length > 50) return next.slice(1); // Limit history
+      return next;
+    });
+    setRedoStack([]);
+  };
+
+  const undo = () => {
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    setRedoStack(stack => [template, ...stack]);
+    setHistory(h => h.slice(0, -1));
+    setTemplate(prev);
+    saveTemplateLocal(prev);
+    addToast('Undo successful', 'info');
+  };
+
+  const redo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[0];
+    setHistory(h => [...h, template]);
+    setRedoStack(stack => stack.slice(1));
+    setTemplate(next);
+    saveTemplateLocal(next);
+    addToast('Redo successful', 'info');
+  };
 
   const { data: exams } = useTableData(sid, 'exams');
   const { data: examResults } = useTableData(sid, 'examResults');
@@ -480,11 +460,10 @@ export default function ReportCard() {
   const acc = template.accentColor;
 
   const updateTemplate = (updates: Partial<ReportTemplate>) => {
+    addToHistory(template);
     const newTemplate = { ...template, ...updates };
     setTemplate(newTemplate);
     saveTemplateLocal(newTemplate);
-    // Optionally persist to DB if they want it global, but for live edit let's keep it local first 
-    // or provide a "Save All" button.
   };
 
   return (
@@ -506,13 +485,32 @@ export default function ReportCard() {
         </button>
 
         {isLiveEditing && (
-          <button 
-            onClick={() => handleSave(true)} 
-            className="btn btn-primary flex items-center gap-2"
-            disabled={saving}
-          >
-            <Settings size={16} /> {saving ? 'Saving...' : 'Apply to All'}
-          </button>
+          <div className="flex items-center gap-1 border-l dark:border-slate-700 pl-2 ml-1">
+            <button 
+              onClick={undo} 
+              disabled={history.length === 0}
+              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+              title="Undo"
+            >
+              <RefreshCw size={16} className="rotate-[-90deg]" />
+            </button>
+            <button 
+              onClick={redo} 
+              disabled={redoStack.length === 0}
+              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+              title="Redo"
+            >
+              <RefreshCw size={16} className="scale-x-[-1] rotate-[-90deg]" />
+            </button>
+            
+            <button 
+              onClick={() => handleSave(true)} 
+              className="btn btn-primary flex items-center gap-2 ml-2"
+              disabled={saving}
+            >
+              <Settings size={16} /> {saving ? 'Saving...' : 'Apply to All'}
+            </button>
+          </div>
         )}
 
         <button onClick={openEditor} className="btn btn-secondary flex items-center gap-2">
@@ -599,42 +597,44 @@ export default function ReportCard() {
             {/* Marks Table */}
             <div className="px-5 py-3">
               <div className="h-1.5 mb-2 rounded" style={{ backgroundColor: acc }} />
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr style={{ backgroundColor: hdr, color: 'white' }}>
-                    <th className="px-2 py-1.5 text-left font-bold uppercase">Subject</th>
-                    <th className="px-2 py-1.5 text-center font-bold uppercase">Score</th>
-                    <th className="px-2 py-1.5 text-center font-bold uppercase">Max</th>
-                    <th className="px-2 py-1.5 text-center font-bold uppercase">%</th>
-                    <th className="px-2 py-1.5 text-center font-bold uppercase">Grade</th>
-                    <th className="px-2 py-1.5 text-left font-bold uppercase">Remarks</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {studentResults.length === 0 ? (
-                    <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400 text-xs">No results recorded for this exam</td></tr>
-                  ) : studentResults.map((r, i) => (
-                    <tr key={i} style={{ backgroundColor: i % 2 === 0 ? `${acc}18` : 'white' }}>
-                      <td className="px-2 py-1.5 font-medium uppercase text-slate-700">{r.subject}</td>
-                      <td className="px-2 py-1.5 text-center text-slate-700">{r.score ?? '-'}</td>
-                      <td className="px-2 py-1.5 text-center text-slate-500">{r.maxScore}</td>
-                      <td className="px-2 py-1.5 text-center text-slate-700">{r.pct ?? '-'}</td>
-                      <td className="px-2 py-1.5 text-center font-bold" style={{ color: r.grade.startsWith('D') ? '#059669' : r.grade.startsWith('F') ? '#dc2626' : hdr }}>
-                        {r.grade}
-                      </td>
-                      <td className="px-2 py-1.5 text-slate-500">{r.remarks || r.remark}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr style={{ backgroundColor: hdr, color: 'white' }}>
+                      <th className="px-2 py-1.5 text-left font-bold uppercase">Subject</th>
+                      <th className="px-2 py-1.5 text-center font-bold uppercase">Score</th>
+                      <th className="px-2 py-1.5 text-center font-bold uppercase">Max</th>
+                      <th className="px-2 py-1.5 text-center font-bold uppercase">%</th>
+                      <th className="px-2 py-1.5 text-center font-bold uppercase">Grade</th>
+                      <th className="px-2 py-1.5 text-left font-bold uppercase">Remarks</th>
                     </tr>
-                  ))}
-                  <tr style={{ backgroundColor: hdr, color: 'white' }}>
-                    <td className="px-2 py-1.5 font-bold uppercase">Overall</td>
-                    <td className="px-2 py-1.5 text-center font-bold">{totalScore}</td>
-                    <td className="px-2 py-1.5 text-center">{totalMax}</td>
-                    <td className="px-2 py-1.5 text-center font-bold">{overallPct}%</td>
-                    <td className="px-2 py-1.5 text-center font-bold">{overallGrade}</td>
-                    <td className="px-2 py-1.5">{overallRemark}</td>
-                  </tr>
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {studentResults.length === 0 ? (
+                      <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400 text-xs">No results recorded for this exam</td></tr>
+                    ) : studentResults.map((r, i) => (
+                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? `${acc}18` : 'white' }}>
+                        <td className="px-2 py-1.5 font-medium uppercase text-slate-700">{r.subject}</td>
+                        <td className="px-2 py-1.5 text-center text-slate-700">{r.score ?? '-'}</td>
+                        <td className="px-2 py-1.5 text-center text-slate-500">{r.maxScore}</td>
+                        <td className="px-2 py-1.5 text-center text-slate-700">{r.pct ?? '-'}</td>
+                        <td className="px-2 py-1.5 text-center font-bold" style={{ color: r.grade.startsWith('D') ? '#059669' : r.grade.startsWith('F') ? '#dc2626' : hdr }}>
+                          {r.grade}
+                        </td>
+                        <td className="px-2 py-1.5 text-slate-500">{r.remarks || r.remark}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ backgroundColor: hdr, color: 'white' }}>
+                      <td className="px-2 py-1.5 font-bold uppercase">Overall</td>
+                      <td className="px-2 py-1.5 text-center font-bold">{totalScore}</td>
+                      <td className="px-2 py-1.5 text-center">{totalMax}</td>
+                      <td className="px-2 py-1.5 text-center font-bold">{overallPct}%</td>
+                      <td className="px-2 py-1.5 text-center font-bold">{overallGrade}</td>
+                      <td className="px-2 py-1.5">{overallRemark}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Comments */}
@@ -744,26 +744,28 @@ export default function ReportCard() {
 
                 {/* Table Section */}
                 <section>
-                  <table className="w-full border-collapse border border-slate-300 text-sm">
-                    <thead>
-                      <tr className="bg-[#7c2222] text-white">
-                        <th className="border border-slate-300 px-4 py-2 text-left font-bold">Subject</th>
-                        <th className="border border-slate-300 px-4 py-2 text-center font-bold">1st Semester</th>
-                        <th className="border border-slate-300 px-4 py-2 text-center font-bold">2nd Semester</th>
-                        <th className="border border-slate-300 px-4 py-2 text-center font-bold">Final Grade</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {semesterResults.map((r, i) => (
-                        <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                          <td className="border border-slate-300 px-4 py-2 font-medium">{r.subject}</td>
-                          <td className="border border-slate-300 px-4 py-2 text-center">{r.s1 || '-'}</td>
-                          <td className="border border-slate-300 px-4 py-2 text-center">{r.s2 || '-'}</td>
-                          <td className="border border-slate-300 px-4 py-2 text-center font-bold">{r.finalGrade}</td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse border border-slate-300 text-sm">
+                      <thead>
+                        <tr className="bg-[#7c2222] text-white">
+                          <th className="border border-slate-300 px-4 py-2 text-left font-bold">Subject</th>
+                          <th className="border border-slate-300 px-4 py-2 text-center font-bold">1st Semester</th>
+                          <th className="border border-slate-300 px-4 py-2 text-center font-bold">2nd Semester</th>
+                          <th className="border border-slate-300 px-4 py-2 text-center font-bold">Final Grade</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {semesterResults.map((r, i) => (
+                          <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                            <td className="border border-slate-300 px-4 py-2 font-medium">{r.subject}</td>
+                            <td className="border border-slate-300 px-4 py-2 text-center">{r.s1 || '-'}</td>
+                            <td className="border border-slate-300 px-4 py-2 text-center">{r.s2 || '-'}</td>
+                            <td className="border border-slate-300 px-4 py-2 text-center font-bold">{r.finalGrade}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </section>
 
                 {/* Grading & Attendance Grid */}
@@ -937,7 +939,7 @@ export default function ReportCard() {
               </div>
 
               {/* Classic Table */}
-              <div className="mb-8">
+              <div className="mb-8 overflow-x-auto">
                 <table className="w-full text-xs border-2 border-[#1e3a5f]">
                   <thead>
                     <tr className="bg-[#1e3a5f] text-white">
