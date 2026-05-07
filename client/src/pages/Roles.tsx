@@ -235,7 +235,7 @@ export default function Roles() {
         <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700">
           {(['staff', 'history'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
-              className={px-4 py-2 text-sm font-medium border-b-2 transition-colors }>
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === tab ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
               {tab === 'staff'
                 ? <><Users size={14} className="inline mr-1.5" />Staff ({staffList.length})</>
                 : <><History size={14} className="inline mr-1.5" />Activity Log ({activityLog.length})</>}
@@ -301,13 +301,13 @@ export default function Roles() {
                         {/* Role */}
                         <td className="px-4 py-3 hidden md:table-cell">
                           <div className="flex flex-col gap-1">
-                            <span className={	ext-xs px-2 py-0.5 rounded-full font-medium w-fit }>{s.role}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium w-fit ${ROLE_COLORS[s.role] || ROLE_COLORS.custom}`}>{s.role}</span>
                             {s.isReadOnly && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 w-fit flex items-center gap-1"><Eye size={9} />Read Only</span>}
                           </div>
                         </td>
                         {/* Last login */}
                         <td className="px-4 py-3 hidden lg:table-cell">
-                          <p className={	ext-xs font-medium }>
+                          <p className={`text-xs font-medium ${s.lastLoginAt && Date.now() - new Date(s.lastLoginAt).getTime() < 24 * 60 * 60 * 1000 ? 'text-green-600 dark:text-green-400' : 'text-slate-400'}`}>
                             {timeAgo(s.lastLoginAt)}
                           </p>
                           {s.lastLoginAt && <p className="text-[10px] text-slate-400">{new Date(s.lastLoginAt).toLocaleString()}</p>}
@@ -321,7 +321,7 @@ export default function Roles() {
                         </td>
                         {/* Status */}
                         <td className="px-4 py-3">
-                          <span className={inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium }>
+                          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${s.isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>
                             {s.isActive ? <CheckCircle size={10} /> : <XCircle size={10} />}
                             {s.isActive ? 'Active' : 'Inactive'}
                           </span>
@@ -344,11 +344,11 @@ export default function Roles() {
                                 await supabase.from('school_staff_users').update({ is_read_only: !s.isReadOnly, updated_at: new Date().toISOString() }).eq('id', s.id);
                                 await logStaffActivity(tenantId, user?.id || '', 'admin', 'toggle_readonly', (s.isReadOnly ? 'Removed read-only' : 'Set read-only') + ': ' + s.staffId);
                                 await loadData();
-                              }} title={s.isReadOnly ? 'Remove read-only' : 'Set read-only'} className={p-1.5 rounded-lg transition-colors }>
+                              }} title={s.isReadOnly ? 'Remove read-only' : 'Set read-only'} className={`p-1.5 rounded-lg transition-colors ${s.isReadOnly ? 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-600'}`}>
                                 <Eye size={14} />
                               </button>
                               {/* Activate/deactivate */}
-                              <button onClick={() => toggleActive(s)} title={s.isActive ? 'Deactivate' : 'Activate'} className={p-1.5 rounded-lg transition-colors }>
+                              <button onClick={() => toggleActive(s)} title={s.isActive ? 'Deactivate' : 'Activate'} className={`p-1.5 rounded-lg transition-colors ${s.isActive ? 'text-green-500 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500' : 'text-red-500 hover:bg-green-50 dark:hover:bg-green-900/20 hover:text-green-500'}`}>
                                 {s.isActive ? <CheckCircle size={14} /> : <XCircle size={14} />}
                               </button>
                               {/* Delete */}
