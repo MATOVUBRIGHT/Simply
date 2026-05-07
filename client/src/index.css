@@ -1556,3 +1556,149 @@ textarea.form-input {
   object-fit: contain;
   object-position: center center;
 }
+
+/* ============================================================
+   RESPONSIVE LAYOUT FIXES
+   - Action buttons stay horizontal, no shrink on zoom
+   - All pages scroll horizontally on small screens
+   - Filters/dropdowns always visible (not clipped)
+   ============================================================ */
+
+/* Page content wrapper — horizontal scroll without clipping dropdowns */
+.page-content-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Action button rows — always horizontal, never wrap, never shrink */
+.action-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.action-row .btn,
+.action-row button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Filter/toolbar rows — scroll horizontally on small screens */
+.filter-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.filter-row::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-row > * {
+  flex-shrink: 0;
+}
+
+/* Page header rows — keep buttons on same line */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.page-header .page-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.page-header .page-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+/* Tables — always scroll horizontally */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+.table-scroll table {
+  min-width: 600px;
+}
+
+/* Dropdown menus — always on top, never clipped */
+.dropdown-menu {
+  position: absolute;
+  z-index: 9999;
+  background: white;
+}
+
+.dark .dropdown-menu {
+  background: #1e293b;
+}
+
+/* Prevent overflow-hidden from clipping dropdowns on page containers */
+.page-shell > * {
+  overflow: visible;
+}
+
+/* Ensure relative containers for dropdowns don't clip */
+.relative.dropdown-parent {
+  overflow: visible !important;
+}
+
+/* Mobile: ensure all page content scrolls */
+@media (max-width: 768px) {
+  .page-shell {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Buttons never shrink below their natural size */
+  .btn {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  /* Filter buttons row scrolls */
+  .flex.gap-2.flex-wrap,
+  .flex.gap-1.flex-wrap {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .flex.gap-2.flex-wrap::-webkit-scrollbar,
+  .flex.gap-1.flex-wrap::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Zoom-safe: buttons keep their size at any zoom level */
+.btn {
+  min-width: max-content;
+}
+
+/* Ensure dropdowns from relative parents are not clipped */
+[class*="relative"] > [class*="absolute"][class*="z-"] {
+  pointer-events: auto;
+}
