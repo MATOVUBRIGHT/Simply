@@ -1,6 +1,6 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Users, Plus, Eye, EyeOff, Trash2, Edit2, Shield, History, CheckCircle, XCircle, Copy, RefreshCw, Key, Lock, Mail, ChevronDown, ChevronUp, AlertTriangle, UserRoundCheck, UserRoundPlus, Link as LinkIcon } from 'lucide-react';
+import { Users, Plus, Eye, EyeOff, Trash2, Edit2, Shield, History, CheckCircle, XCircle, Copy, RefreshCw, Key, Lock, Mail, Phone, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { hashPassword } from '../lib/security';
@@ -74,7 +74,6 @@ export default function Roles() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [credSaving, setCredSaving] = useState(false);
   const [credError, setCredError] = useState('');
-  const [copiedLink, setCopiedLink] = useState('');
 
   const [form, setForm] = useState({
     firstName: '', lastName: '', role: 'teacher', email: '', phone: '',
@@ -114,19 +113,6 @@ export default function Roles() {
 
   function openAdd() {
     setForm({ firstName: '', lastName: '', role: 'teacher', email: '', phone: '', password: '', allowedPages: ROLE_PRESETS.teacher, isReadOnly: false });
-    setEditingStaff(null); setShowAddModal(true); setError(''); setSuccess('');
-  }
-  function openAddForRole(role: string) {
-    setForm({
-      firstName: '',
-      lastName: '',
-      role,
-      email: '',
-      phone: '',
-      password: '',
-      allowedPages: ROLE_PRESETS[role] || [],
-      isReadOnly: false,
-    });
     setEditingStaff(null); setShowAddModal(true); setError(''); setSuccess('');
   }
   function openEdit(s: StaffUser) {
@@ -214,11 +200,6 @@ export default function Roles() {
     navigator.clipboard.writeText(text).catch(() => {});
     setCopiedId(text); setTimeout(() => setCopiedId(''), 2000);
   }
-  function copyLink(text: string) {
-    navigator.clipboard.writeText(text).catch(() => {});
-    setCopiedLink(text);
-    setTimeout(() => setCopiedLink(''), 2000);
-  }
 
   function timeAgo(iso: string | null) {
     if (!iso) return 'Never';
@@ -230,11 +211,6 @@ export default function Roles() {
     if (hrs < 24) return hrs + 'h ago';
     return new Date(iso).toLocaleDateString();
   }
-
-  const teacherCount = staffList.filter((s) => s.role === 'teacher').length;
-  const otherStaffCount = staffList.filter((s) => s.role !== 'teacher').length;
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-  const staffAccessLink = tenantId ? `${baseUrl}/login?mode=staff&schoolId=${encodeURIComponent(tenantId)}` : `${baseUrl}/login?mode=staff`;
 
   return (
     <div className="space-y-5">
@@ -253,62 +229,6 @@ export default function Roles() {
 
       {error && <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl p-3 text-sm">{error}</div>}
       {success && <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 rounded-xl p-3 text-sm flex items-center gap-2"><CheckCircle size={16} />{success}</div>}
-
-      {!isStaffMode && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="card p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Total Staff</p>
-            <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{staffList.length}</p>
-          </div>
-          <div className="card p-4 border border-blue-200/60 dark:border-blue-800/50">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-blue-600 dark:text-blue-300">Teachers</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{teacherCount}</p>
-              </div>
-              <button onClick={() => openAddForRole('teacher')} className="btn btn-secondary text-xs flex items-center gap-1">
-                <UserRoundPlus size={13} /> Add Teacher
-              </button>
-            </div>
-          </div>
-          <div className="card p-4 border border-emerald-200/60 dark:border-emerald-800/50">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-emerald-600 dark:text-emerald-300">Other Staff</p>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{otherStaffCount}</p>
-              </div>
-              <button onClick={() => openAddForRole('custom')} className="btn btn-secondary text-xs flex items-center gap-1">
-                <UserRoundCheck size={13} /> Add Staff
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!isStaffMode && (
-        <div className="card p-4 space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              <LinkIcon size={14} className="text-primary-500" />
-              Access Links
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Share these links so users can access the platform without admin login.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-3">
-              <p className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Staff Sign-in Link (auto School ID)</p>
-              <div className="flex items-center gap-2">
-                <input readOnly value={staffAccessLink} className="form-input font-mono text-xs" />
-                <button onClick={() => copyLink(staffAccessLink)} className="btn btn-secondary text-xs px-3">
-                  {copiedLink === staffAccessLink ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Tabs */}
       {!isStaffMode && (

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, EyeOff, Loader2, UserPlus, Shield, CheckCircle, Cloud, CloudOff, Wifi, WifiOff, Building2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Eye, EyeOff, Loader2, UserPlus, Shield, CheckCircle, Cloud, CloudOff, Wifi, WifiOff } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { isSupabaseConfigured } from '../lib/supabase';
@@ -9,12 +9,8 @@ import { isStaffEmail } from '../contexts/StaffAuthContext';
 import { useStaffAuth } from '../contexts/StaffAuthContext';
 
 export default function Login() {
-  const [searchParams] = useSearchParams();
   const [isRegister, setIsRegister] = useState(false);
-  const [loginMode, setLoginMode] = useState<'admin' | 'staff'>('admin');
   const [email, setEmail] = useState('');
-  const [staffId, setStaffId] = useState('');
-  const [staffSchoolId, setStaffSchoolId] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -32,7 +28,7 @@ export default function Login() {
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
   
   const { login, register, user, isOnline } = useAuth();
-  const { staffLoginByEmail, staffLogin, isStaffMode, staffSession } = useStaffAuth();
+  const { staffLoginByEmail, isStaffMode, staffSession } = useStaffAuth();
   const { primaryColor } = useTheme();
   const navigate = useNavigate();
 
@@ -40,18 +36,6 @@ export default function Login() {
   useEffect(() => {
     if (isStaffMode && staffSession) navigate('/');
   }, [isStaffMode, staffSession, navigate]);
-
-  useEffect(() => {
-    const mode = searchParams.get('mode');
-    const schoolIdParam = searchParams.get('schoolId');
-    if (mode === 'staff') {
-      setLoginMode('staff');
-      setIsRegister(false);
-    }
-    if (schoolIdParam) {
-      setStaffSchoolId(schoolIdParam);
-    }
-  }, [searchParams]);
 
   useEffect(() => {
     if (user) {
@@ -120,29 +104,6 @@ export default function Login() {
         if (!isSupabaseConfigured) {
           setError('Cloud authentication is not available. Please check your configuration.');
           setLoading(false);
-          return;
-        }
-
-        if (loginMode === 'staff') {
-          if (!staffId.trim()) {
-            setError('Enter your Staff ID');
-            setLoading(false);
-            return;
-          }
-          if (!staffSchoolId.trim()) {
-            setError('Enter your School ID');
-            setLoading(false);
-            return;
-          }
-          const result = await staffLogin(staffId.trim().toUpperCase(), password, staffSchoolId.trim());
-          if (!result.success) {
-            setError(result.error || 'Staff sign in failed');
-            setLoading(false);
-            return;
-          }
-          setShowSuccess(true);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          navigate('/');
           return;
         }
 
@@ -279,28 +240,10 @@ export default function Login() {
         </div>
 
         <div className="card p-8">
-          <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 mb-5">
-            <button
-              type="button"
-              onClick={() => { setLoginMode('admin'); setIsRegister(false); setError(''); }}
-              className={`flex-1 py-2 text-sm rounded-lg font-medium transition-colors ${loginMode === 'admin' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}
-            >
-              Admin / Owner
-            </button>
-            <button
-              type="button"
-              onClick={() => { setLoginMode('staff'); setIsRegister(false); setError(''); }}
-              className={`flex-1 py-2 text-sm rounded-lg font-medium transition-colors ${loginMode === 'staff' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}
-            >
-              Staff / Teacher
-            </button>
-          </div>
-
           <div className="flex mb-6 border-b border-slate-200 dark:border-slate-700">
             <button
               type="button"
               onClick={() => setIsRegister(false)}
-              disabled={loginMode === 'staff'}
               className={`flex-1 pb-3 text-center font-medium transition-colors ${
                 !isRegister
                   ? 'border-b-2 text-slate-800 dark:text-white'
@@ -313,7 +256,6 @@ export default function Login() {
             <button
               type="button"
               onClick={() => setIsRegister(true)}
-              disabled={loginMode === 'staff'}
               className={`flex-1 pb-3 text-center font-medium transition-colors ${
                 isRegister
                   ? 'border-b-2 text-slate-800 dark:text-white'
@@ -366,56 +308,23 @@ export default function Login() {
               </div>
             )}
 
-            {loginMode === 'staff' ? (
-              <>
-                <div>
-                  <label className="form-label flex items-center gap-1.5">
-                    <Building2 size={13} /> School ID
-                  </label>
-                  <input
-                    type="text"
-                    value={staffSchoolId}
-                    onChange={(e) => setStaffSchoolId(e.target.value)}
-                    className="form-input font-mono"
-                    placeholder="Provided by school admin"
-                    required
-                    autoComplete="organization"
-                  />
-                </div>
-                <div>
-                  <label className="form-label flex items-center gap-1.5">
-                    <Shield size={13} /> Staff ID
-                  </label>
-                  <input
-                    type="text"
-                    value={staffId}
-                    onChange={(e) => setStaffId(e.target.value.toUpperCase())}
-                    className="form-input font-mono uppercase tracking-wider"
-                    placeholder="e.g. TCH-001"
-                    required
-                    autoComplete="username"
-                  />
-                </div>
-              </>
-            ) : (
-              <div>
-                <label className="form-label">Email Address</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="form-input"
-                  placeholder="you@example.com or staff email"
-                  required
-                  autoComplete="email"
-                />
-                {isStaffEmail(email.toLowerCase().trim()) && (
-                  <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1 flex items-center gap-1">
-                    <Shield size={11}/> Staff account detected — enter your staff password
-                  </p>
-                )}
-              </div>
-            )}
+            <div>
+              <label className="form-label">Email Address</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="form-input"
+                placeholder="you@example.com or staff email"
+                required
+                autoComplete="email"
+              />
+              {isStaffEmail(email.toLowerCase().trim()) && (
+                <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1 flex items-center gap-1">
+                  <Shield size={11}/> Staff account detected — enter your staff password
+                </p>
+              )}
+            </div>
 
             <div>
               <label className="form-label">Password</label>
@@ -456,7 +365,7 @@ export default function Login() {
               </div>
             )}
 
-            {!isRegister && loginMode !== 'staff' && (
+            {!isRegister && (
               <div className="flex items-center">
                 <input
                   type="checkbox"
@@ -482,7 +391,7 @@ export default function Login() {
                   {isRegister ? 'Creating account...' : 'Signing in...'}
                 </>
               ) : (
-                isRegister ? 'Create Account' : (loginMode === 'staff' ? 'Sign In as Staff' : 'Sign In')
+                isRegister ? 'Create Account' : 'Sign In'
               )}
             </button>
           </form>
