@@ -1,10 +1,14 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AdminAuthProvider, useAdminAuth } from './AdminAuthContext';
+import { AdminThemeProvider } from './AdminThemeContext';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminSchools from './pages/AdminSchools';
 import AdminSchoolDetail from './pages/AdminSchoolDetail';
 import AdminUsers from './pages/AdminUsers';
+import AdminVerifications from './pages/AdminVerifications';
+import AdminAnalytics from './pages/AdminAnalytics';
+import AdminSecurity from './pages/AdminSecurity';
 import AdminLayout from './AdminLayout';
 
 function AdminRoutes() {
@@ -38,6 +42,9 @@ function AdminRoutes() {
         <Route path="/admin/schools" element={<AdminSchools />} />
         <Route path="/admin/schools/:schoolId" element={<AdminSchoolDetail />} />
         <Route path="/admin/users" element={<AdminUsers />} />
+        <Route path="/admin/verifications" element={<AdminVerifications />} />
+        <Route path="/admin/analytics" element={<AdminAnalytics />} />
+        <Route path="/admin/security" element={<AdminSecurity />} />
         <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Routes>
     </AdminLayout>
@@ -46,8 +53,10 @@ function AdminRoutes() {
 
 export default function AdminApp() {
   return (
-    <AdminAuthProvider>
-      <AdminRoutes />
-    </AdminAuthProvider>
+    <AdminThemeProvider>
+      <AdminAuthProvider>
+        <AdminRoutes />
+      </AdminAuthProvider>
+    </AdminThemeProvider>
   );
 }

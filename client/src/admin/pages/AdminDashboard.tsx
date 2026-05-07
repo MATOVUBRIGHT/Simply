@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { School, Users, CheckCircle, XCircle, Clock, TrendingUp, AlertTriangle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { PLAN_DEFINITIONS } from '../../utils/plans';
+import { useAdminTheme } from '../AdminThemeContext';
 
 interface Stats {
   totalSchools: number;
@@ -24,6 +25,8 @@ interface RecentSub {
 }
 
 export default function AdminDashboard() {
+  const { theme } = useAdminTheme();
+  const isDark = theme === 'dark';
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -102,6 +105,12 @@ export default function AdminDashboard() {
     }
   }
 
+  const card = isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
+  const textPrimary = isDark ? 'text-white' : 'text-slate-900';
+  const textMuted = isDark ? 'text-slate-400' : 'text-slate-500';
+  const divider = isDark ? 'border-slate-800' : 'border-slate-200';
+  const rowHover = isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50';
+
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <div className="w-8 h-8 border-4 border-slate-700 border-t-indigo-500 rounded-full animate-spin" />
@@ -135,11 +144,10 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="text-slate-400 text-sm mt-1">Overview of all schools and subscriptions</p>
+        <h1 className={`text-2xl font-bold ${textPrimary}`}>Dashboard</h1>
+        <p className={`text-sm mt-1 ${textMuted}`}>Overview of all schools and subscriptions</p>
       </div>
 
-      {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         {statCards.map(({ label, value, icon: Icon, color }) => (
           <div key={label} className={`rounded-xl border p-4 ${colorMap[color]}`}>
@@ -154,50 +162,43 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      {/* Recent subscriptions */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center gap-2">
+      <div className={`${card} border rounded-xl overflow-hidden`}>
+        <div className={`px-5 py-4 border-b ${divider} flex items-center gap-2`}>
           <AlertTriangle size={16} className="text-amber-400" />
-          <h2 className="text-sm font-semibold text-white">Recent Subscription Activity</h2>
+          <h2 className={`text-sm font-semibold ${textPrimary}`}>Recent Subscription Activity</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-800">
-                <th className="text-left px-5 py-3 text-xs font-medium text-slate-400">School</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-slate-400">Plan</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-slate-400">Status</th>
-                <th className="text-left px-5 py-3 text-xs font-medium text-slate-400">Expires</th>
+              <tr className={`border-b ${divider}`}>
+                <th className={`text-left px-5 py-3 text-xs font-medium ${textMuted}`}>School</th>
+                <th className={`text-left px-5 py-3 text-xs font-medium ${textMuted}`}>Plan</th>
+                <th className={`text-left px-5 py-3 text-xs font-medium ${textMuted}`}>Status</th>
+                <th className={`text-left px-5 py-3 text-xs font-medium ${textMuted}`}>Expires</th>
               </tr>
             </thead>
             <tbody>
               {(stats?.recentSubscriptions || []).map(sub => (
-                <tr key={sub.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                  <td className="px-5 py-3 text-white font-medium">{sub.schoolName}</td>
-                  <td className="px-5 py-3 text-slate-300 capitalize">
+                <tr key={sub.id} className={`border-b ${divider} ${rowHover}`}>
+                  <td className={`px-5 py-3 font-medium ${textPrimary}`}>{sub.schoolName}</td>
+                  <td className={`px-5 py-3 ${textMuted} capitalize`}>
                     {PLAN_DEFINITIONS.find(p => p.id === sub.plan)?.name || sub.plan}
                   </td>
                   <td className="px-5 py-3">
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                      sub.status === 'active'
-                        ? 'bg-green-900/40 text-green-400'
-                        : 'bg-red-900/40 text-red-400'
+                      sub.status === 'active' ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'
                     }`}>
                       {sub.status === 'active' ? <CheckCircle size={10} /> : <XCircle size={10} />}
                       {sub.status}
                     </span>
                   </td>
-                  <td className="px-5 py-3 text-slate-400 text-xs">
+                  <td className={`px-5 py-3 text-xs ${textMuted}`}>
                     {sub.endsAt ? new Date(sub.endsAt).toLocaleDateString() : '—'}
                   </td>
                 </tr>
               ))}
               {!stats?.recentSubscriptions?.length && (
-                <tr>
-                  <td colSpan={4} className="px-5 py-8 text-center text-slate-500 text-sm">
-                    No subscription data yet
-                  </td>
-                </tr>
+                <tr><td colSpan={4} className={`px-5 py-8 text-center text-sm ${textMuted}`}>No subscription data yet</td></tr>
               )}
             </tbody>
           </table>

@@ -212,6 +212,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void userDBManager.openDatabase(userData.schoolId).catch(() => {});
       initializeSyncForUser(userData);
 
+      // Record last login time for admin analytics (fire and forget)
+      if (supabase) {
+        const now = new Date().toISOString();
+        const sid = userData.schoolId;
+        void (async () => {
+          try {
+            const { data } = await supabase!.from('settings').select('value').eq('school_id', sid).eq('key', 'loginCount').single();
+            const count = parseInt(String(data?.value || '0')) + 1;
+            await supabase!.from('settings').upsert([
+              { school_id: sid, key: 'lastLoginAt', value: now, updated_at: now },
+              { school_id: sid, key: 'loginCount', value: String(count), updated_at: now },
+            ], { onConflict: 'school_id,key' });
+          } catch { /* ignore */ }
+        })();
+      }
+
       return { success: true };
     } catch (error: any) {
       console.error('Login error:', error);
