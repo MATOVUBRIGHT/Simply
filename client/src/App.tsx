@@ -22,6 +22,7 @@ import Staff from './pages/Staff';
 import StaffForm from './pages/StaffForm';
 import Payroll from './pages/Payroll';
 import Classes from './pages/Classes';
+import ClassDetail from './pages/ClassDetail';
 import Subjects from './pages/Subjects';
 import Attendance from './pages/Attendance';
 import Finance from './pages/Finance';
@@ -109,6 +110,7 @@ function MainApp() {
                     <Route path="/staff/:id/edit" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
                     <Route path="/payroll" element={<ErrorBoundary inline><Payroll /></ErrorBoundary>} />
                     <Route path="/classes" element={<ErrorBoundary inline><Classes /></ErrorBoundary>} />
+                    <Route path="/classes/:id" element={<ErrorBoundary inline><ClassDetail /></ErrorBoundary>} />
                     <Route path="/subjects" element={<ErrorBoundary inline><Subjects /></ErrorBoundary>} />
                     <Route path="/attendance" element={<ErrorBoundary inline><Attendance /></ErrorBoundary>} />
                     <Route path="/finance" element={<ErrorBoundary inline><Finance /></ErrorBoundary>} />

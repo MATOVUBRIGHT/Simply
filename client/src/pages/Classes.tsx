@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 
 import { Plus, Edit, Trash2, Users, BookOpen, GraduationCap, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Trash, Clock, Calendar, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -13,6 +14,7 @@ import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { sortClassesBySectionThenLevel, groupClassesBySection } from '../utils/classroom';
+import { PortalDropdown } from '../components/PortalDropdown';
 
 const classColors = [
   { card: 'card-coral-light', gradient: 'from-orange-100 to-amber-100', text: 'text-orange-600' },
@@ -43,27 +45,16 @@ const ClassActions = ({
   onDelete: (id: string) => void;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
+  const btnRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div className="relative flex justify-end" ref={dropdownRef}>
+    <>
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        ref={btnRef}
+        onClick={e => { e.stopPropagation(); setIsOpen(v => !v); }}
         className={`p-1.5 rounded-lg transition-all ${
-          isOpen 
-            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20' 
+          isOpen
+            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20'
             : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
         }`}
         title="Actions"
@@ -71,41 +62,14 @@ const ClassActions = ({
         <Settings size={15} className={isOpen ? 'animate-spin-slow' : ''} />
       </button>
 
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
-          <div className="p-1">
-            <button
-              onClick={() => { onTimetable(classItem.id); setIsOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600 dark:hover:text-violet-400 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
-                <Clock size={13} />
-              </div>
-              Timetable
-            </button>
-            <button
-              onClick={() => { onEdit(classItem); setIsOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
-                <Edit size={13} />
-              </div>
-              Edit Class
-            </button>
-            <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
-            <button
-              onClick={() => { onDelete(classItem.id); setIsOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
-                <Trash2 size={13} />
-              </div>
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+      <PortalDropdown triggerRef={btnRef} isOpen={isOpen} onClose={() => setIsOpen(false)}>
+        <PortalDropdown.Item icon={<Clock size={13} />} label="Timetable" onClick={() => { onTimetable(classItem.id); setIsOpen(false); }} />
+        <PortalDropdown.Divider />
+        <PortalDropdown.Item icon={<Edit size={13} />} label="Edit" onClick={() => { onEdit(classItem); setIsOpen(false); }} />
+        <PortalDropdown.Divider />
+        <PortalDropdown.Item icon={<Trash2 size={13} />} label="Delete" danger onClick={() => { onDelete(classItem.id); setIsOpen(false); }} />
+      </PortalDropdown>
+    </>
   );
 };
 
@@ -130,6 +94,7 @@ const ClassRow = memo(({
   onEdit: (c: Class) => void;
   onDelete: (id: string) => void;
 }) => {
+  const navigate = useNavigate();
   const pct = c.capacity > 0 ? Math.round((enrolled / c.capacity) * 100) : 0;
   const full = enrolled >= c.capacity;
   
@@ -137,7 +102,10 @@ const ClassRow = memo(({
     <div
       id={`class-card-${c.id}`}
       className={`flex items-center gap-4 px-4 py-3 cursor-pointer transition-colors ${isSelected ? 'bg-primary-50 dark:bg-primary-900/10 hover:bg-primary-50 dark:hover:bg-primary-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
-      onClick={() => onClick(c.id)}
+      onClick={() => {
+        if (selectMode) { onClick(c.id); return; }
+        navigate(`/classes/${c.id}`);
+      }}
     >
       {/* Select / index */}
       {selectMode ? (
@@ -159,7 +127,7 @@ const ClassRow = memo(({
           <span className="font-semibold text-slate-800 dark:text-white">{c.name}</span>
           {c.stream && <span className="badge badge-info text-xs">Stream {c.stream}</span>}
         </div>
-        <p className="text-xs text-slate-400 mt-0.5">Level {c.level}</p>
+        <p className="text-xs text-slate-400 mt-0.5">Level {c.level} · tap to view</p>
       </div>
 
       {/* Enrollment bar */}
