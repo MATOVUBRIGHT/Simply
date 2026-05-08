@@ -9,6 +9,8 @@ import { useSync } from '../contexts/SyncContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { SuccessPopup } from '../components/SuccessPopup';
+import { sortClassesBySectionThenLevel } from '../utils/classroom';
 
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -39,6 +41,9 @@ export default function Settings() {
   const [promoteNewTerm, setPromoteNewTerm] = useState('1');
   const [promoteNewYear, setPromoteNewYear] = useState(new Date().getFullYear().toString());
   const [isPromoting, setIsPromoting] = useState(false);
+  const [promoteProgress, setPromoteProgress] = useState(0);
+  const [showPromoteSuccess, setShowPromoteSuccess] = useState(false);
+  const [promoteResult, setPromoteResult] = useState({ promoted: 0, graduated: 0 });
   const [settings, setSettings] = useState({
     schoolName: 'My School',
     schoolAddress: '',
@@ -263,17 +268,17 @@ export default function Settings() {
     const id = schoolId || user?.id;
     if (!id) return;
     setIsPromoting(true);
+    setPromoteProgress(0);
     try {
-      // Load all classes sorted by level
+      // Load all classes sorted by section then level
       const allClasses = await dataService.getAll(id, 'classes');
-      const sorted = [...allClasses].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0));
+      const sorted = sortClassesBySectionThenLevel([...allClasses]);
 
       // Build next-class map: classId → nextClassId
       const nextClassMap: Record<string, string> = {};
       for (let i = 0; i < sorted.length - 1; i++) {
         nextClassMap[(sorted[i] as any).id] = (sorted[i + 1] as any).id;
       }
-      // Students in the last class get marked completed
       const lastClassId = sorted.length > 0 ? (sorted[sorted.length - 1] as any).id : null;
 
       // Load all active students
@@ -284,25 +289,29 @@ export default function Settings() {
       let graduated = 0;
       const now = new Date().toISOString();
 
-      for (const student of active) {
-        const currentClassId = (student as any).classId;
-        if (currentClassId === lastClassId) {
-          // Graduate — mark completed
-          await dataService.update(id, 'students', (student as any).id, {
-            status: 'completed',
-            completedYear: parseInt(promoteNewYear),
-            completedTerm: settings.currentTerm,
-            updatedAt: now,
-          } as any);
-          graduated++;
-        } else if (nextClassMap[currentClassId]) {
-          // Promote to next class
-          await dataService.update(id, 'students', (student as any).id, {
-            classId: nextClassMap[currentClassId],
-            updatedAt: now,
-          } as any);
-          promoted++;
-        }
+      // Run in parallel batches of 10 for speed
+      const BATCH = 10;
+      for (let b = 0; b < active.length; b += BATCH) {
+        const batch = active.slice(b, b + BATCH);
+        await Promise.all(batch.map(async (student: any) => {
+          const currentClassId = student.classId;
+          if (currentClassId === lastClassId) {
+            await dataService.update(id, 'students', student.id, {
+              status: 'completed',
+              completedYear: parseInt(promoteNewYear),
+              completedTerm: settings.currentTerm,
+              updatedAt: now,
+            } as any);
+            graduated++;
+          } else if (nextClassMap[currentClassId]) {
+            await dataService.update(id, 'students', student.id, {
+              classId: nextClassMap[currentClassId],
+              updatedAt: now,
+            } as any);
+            promoted++;
+          }
+        }));
+        setPromoteProgress(Math.round(((b + batch.length) / active.length) * 100));
       }
 
       // Update current term in settings
@@ -316,11 +325,13 @@ export default function Settings() {
       window.dispatchEvent(new CustomEvent('studentsUpdated'));
       window.dispatchEvent(new CustomEvent('dataRefresh'));
       setShowPromoteModal(false);
-      addToast(`Term started: ${promoted} students promoted, ${graduated} graduated`, 'success');
+      setPromoteResult({ promoted, graduated });
+      setShowPromoteSuccess(true);
     } catch (err: any) {
       addToast(err?.message || 'Promotion failed', 'error');
     } finally {
       setIsPromoting(false);
+      setPromoteProgress(0);
     }
   }
 
@@ -976,14 +987,29 @@ export default function Settings() {
             </div>
             <div className="flex justify-end gap-3 px-5 pb-5">
               <button type="button" onClick={() => setShowPromoteModal(false)} className="btn btn-secondary" disabled={isPromoting}>Cancel</button>
-              <button type="button" onClick={handlePromoteStudents} className="btn btn-primary bg-amber-500 hover:bg-amber-600 border-amber-500 flex items-center gap-2" disabled={isPromoting}>
-                {isPromoting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <ArrowRight size={16} />}
-                {isPromoting ? 'Promoting...' : 'Confirm & Promote'}
+              <button type="button" onClick={handlePromoteStudents} className="btn btn-primary bg-amber-500 hover:bg-amber-600 border-amber-500 flex items-center gap-2 min-w-[180px]" disabled={isPromoting}>
+                {isPromoting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+                    <span className="flex-1 text-left">Promoting... {promoteProgress}%</span>
+                  </>
+                ) : (
+                  <><ArrowRight size={16} /> Confirm &amp; Promote</>
+                )}
               </button>
             </div>
           </div>
         </div>
       , document.body)}
+
+      {showPromoteSuccess && (
+        <SuccessPopup
+          message="Term Started!"
+          subMessage={`${promoteResult.promoted} promoted · ${promoteResult.graduated} graduated`}
+          onClose={() => setShowPromoteSuccess(false)}
+          duration={3000}
+        />
+      )}
     </div>
   );
 }

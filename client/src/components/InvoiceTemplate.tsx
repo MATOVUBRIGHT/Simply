@@ -121,7 +121,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 min-h-screen sm:min-h-0 sm:rounded-2xl shadow-2xl overflow-hidden max-w-4xl w-full mx-auto animate-modal-in flex flex-col">
+    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-y-auto max-w-4xl w-full mx-auto my-4 animate-modal-in flex flex-col" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
       {/* Header Toolbar */}
       <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 print:hidden">
         <div className="flex items-center gap-4">

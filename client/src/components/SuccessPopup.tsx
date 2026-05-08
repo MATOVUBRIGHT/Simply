@@ -32,7 +32,16 @@ export function SuccessPopup({ message, subMessage, onClose, duration = 2000 }: 
 
   return (
     <Portal>
-      <div className="fixed inset-0 z-[10000] flex items-center justify-center pointer-events-none">
+      <div
+        className="fixed inset-0 z-[10000] flex items-center justify-center"
+        style={{
+          WebkitBackdropFilter: visible ? 'blur(6px)' : 'blur(0px)',
+          backdropFilter: visible ? 'blur(6px)' : 'blur(0px)',
+          backgroundColor: visible ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0)',
+          transition: 'backdrop-filter 0.3s ease, background-color 0.3s ease',
+          pointerEvents: 'none',
+        }}
+      >
         <div 
           className={`bg-white dark:bg-slate-800 rounded-3xl shadow-2xl p-8 flex flex-col items-center gap-4 transition-all duration-300 ease-out transform ${
             visible ? 'scale-100 opacity-100' : 'scale-90 opacity-0'

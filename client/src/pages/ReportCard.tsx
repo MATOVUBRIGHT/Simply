@@ -395,30 +395,28 @@ export default function ReportCard() {
   const overallGrade = getGradeFromScale(overallPct);
   const overallRemark = getRemarkFromScale(overallGrade);
 
-  // Calculate position in class -- rank all class students by total score for same term/year
+  // Calculate position in class — rank all class students by total score for the selected exam
   const classPosition = useMemo(() => {
     if (!studentId || !student?.classId) return null;
-    const targetTerm = exam?.term;
-    const targetYear = exam?.year;
-    if (!targetTerm || !targetYear) return null;
+    if (!exam) return null;
 
     const classStudents = allStudents.filter(s => s.classId === student.classId && s.status === 'active');
     if (classStudents.length < 2) return null;
 
-    // Sum all scores for each student in this class for the same term/year
+    // Sum scores for each student for the selected exam only
     const scores = classStudents.map(s => {
-      const results = (examResults as any[]).filter(r => {
-        if (r.studentId !== s.id) return false;
-        const re = (exams as any[]).find(e => e.id === r.examId);
-        return re && String(re.term) === String(targetTerm) && String(re.year) === String(targetYear);
-      });
+      const results = (examResults as any[]).filter(r => r.studentId === s.id && r.examId === exam.id);
       const total = results.reduce((sum: number, r: any) => sum + (Number(r.score) || 0), 0);
-      return { studentId: s.id, total };
-    }).sort((a, b) => b.total - a.total);
+      return { studentId: s.id, total, hasResults: results.length > 0 };
+    });
 
-    const pos = scores.findIndex(s => s.studentId === studentId) + 1;
-    return pos > 0 ? { position: pos, outOf: classStudents.length } : null;
-  }, [studentId, exam, allStudents, examResults, exams, student]);
+    // Only rank students who have results for this exam
+    const withResults = scores.filter(s => s.hasResults).sort((a, b) => b.total - a.total);
+    if (withResults.length < 2) return null;
+
+    const pos = withResults.findIndex(s => s.studentId === studentId) + 1;
+    return pos > 0 ? { position: pos, outOf: withResults.length } : null;
+  }, [studentId, exam, allStudents, examResults, student]);
 
   function openEditor() {
     setDraft({ ...template });

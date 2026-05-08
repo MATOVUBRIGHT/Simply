@@ -128,7 +128,13 @@ export default function ExamMarks() {
 
       let classStudents = allStudents.filter(s => s.classId === classId && s.status === 'active');
       const extra = allStudents.filter(s => studentIdsWithResults.has(s.id) && !classStudents.find(cs => cs.id === s.id));
-      classStudents = [...classStudents, ...extra];
+      // Deduplicate by student ID
+      const seen = new Set<string>();
+      classStudents = [...classStudents, ...extra].filter(s => {
+        if (seen.has(s.id)) return false;
+        seen.add(s.id);
+        return true;
+      });
 
       if (searchStudent) {
         const q = searchStudent.toLowerCase();

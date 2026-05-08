@@ -59,14 +59,19 @@ interface Discount {
 const StudentInvoiceRow = memo(({ 
   student, 
   formatMoney, 
-  onInvoice 
+  onInvoice,
+  onView,
 }: { 
   student: any; 
   formatMoney: (val: number) => string; 
   onInvoice: (id: string, classId: string) => void;
+  onView: (student: any) => void;
 }) => (
-  <tr>
-    <td className="font-medium">{student.studentName}</td>
+  <tr
+    className="cursor-pointer hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 transition-colors"
+    onClick={() => onView(student)}
+  >
+    <td className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline">{student.studentName}</td>
     <td className="text-slate-500">{student.admissionNo}</td>
     <td>
       <span className="badge badge-info">{student.invoiceCount}</span>
@@ -94,7 +99,7 @@ const StudentInvoiceRow = memo(({
         </span>
       )}
     </td>
-    <td>
+    <td onClick={e => e.stopPropagation()}>
       <button
         onClick={() => onInvoice(student.id, student.classId || '')}
         className="btn btn-secondary text-sm py-1.5"
@@ -242,6 +247,7 @@ export default function Invoices() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [selectedStudentForView, setSelectedStudentForView] = useState<any | null>(null);
   
   const [showStructureModal, setShowStructureModal] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -1421,7 +1427,8 @@ export default function Invoices() {
                     key={student.id} 
                     student={student} 
                     formatMoney={formatMoney} 
-                    onInvoice={handleInvoiceStudent} 
+                    onInvoice={handleInvoiceStudent}
+                    onView={setSelectedStudentForView}
                   />
                 ))}
               </tbody>
@@ -2320,6 +2327,117 @@ export default function Invoices() {
               canRedo={redoStack.length > 0}
               onClose={() => setShowTemplate(false)}
             />
+          </div>
+        </div>
+      , document.body)}
+
+      {/* Student Invoice Detail Modal — all invoices for one student combined */}
+      {selectedStudentForView && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+          onClick={() => setSelectedStudentForView(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-modal-in"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div>
+                <h3 className="font-bold text-white text-lg">{selectedStudentForView.studentName}</h3>
+                <p className="text-white/70 text-sm">{selectedStudentForView.admissionNo} · All Invoices</p>
+              </div>
+              <button onClick={() => setSelectedStudentForView(null)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+
+            {/* Summary bar */}
+            <div className="grid grid-cols-3 divide-x divide-slate-200 dark:divide-slate-700 border-b border-slate-200 dark:border-slate-700">
+              {[
+                { label: 'Total Invoiced', value: formatMoney(selectedStudentForView.totalInvoiced), color: 'text-slate-800 dark:text-white' },
+                { label: 'Total Paid', value: formatMoney(selectedStudentForView.totalPaid), color: 'text-emerald-600 dark:text-emerald-400' },
+                { label: 'Balance', value: formatMoney(selectedStudentForView.balance), color: selectedStudentForView.balance > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400' },
+              ].map(s => (
+                <div key={s.label} className="px-5 py-3 text-center">
+                  <p className="text-xs text-slate-400 mb-0.5">{s.label}</p>
+                  <p className={`font-bold text-base ${s.color}`}>{s.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Invoice list */}
+            <div className="overflow-y-auto flex-1">
+              {(() => {
+                const studentFees = (fees as any[]).filter(f => f.studentId === selectedStudentForView.id);
+                if (studentFees.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center gap-3 py-12">
+                      <FileText size={32} className="text-slate-300" />
+                      <p className="text-slate-400 text-sm">No invoices yet</p>
+                      <button onClick={() => { setSelectedStudentForView(null); handleInvoiceStudent(selectedStudentForView.id, selectedStudentForView.classId || ''); }} className="btn btn-primary text-sm py-1.5">
+                        <Plus size={14} /> Generate Invoice
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                      <tr>
+                        <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Description</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Term</th>
+                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</th>
+                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Paid</th>
+                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Balance</th>
+                        <th className="px-5 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                        <th className="px-5 py-3"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {studentFees.map((fee: any) => {
+                        const feePayments = (payments as any[]).filter(p => p.feeId === fee.id);
+                        const paid = feePayments.reduce((s: number, p: any) => s + p.amount, 0);
+                        const bal = fee.amount - paid;
+                        const status = bal <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
+                        return (
+                          <tr key={fee.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                            <td className="px-5 py-3 font-medium text-slate-800 dark:text-white">{fee.description}</td>
+                            <td className="px-5 py-3"><span className="badge badge-info text-xs">Term {fee.term}</span></td>
+                            <td className="px-5 py-3 text-right font-semibold">{formatMoney(fee.amount)}</td>
+                            <td className="px-5 py-3 text-right text-emerald-600">{formatMoney(paid)}</td>
+                            <td className={`px-5 py-3 text-right font-semibold ${bal > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatMoney(bal)}</td>
+                            <td className="px-5 py-3 text-center">
+                              <span className={`badge text-xs ${status === 'paid' ? 'badge-success' : status === 'partial' ? 'badge-warning' : 'badge-danger'}`}>{status}</span>
+                            </td>
+                            <td className="px-5 py-3 text-right">
+                              <button
+                                onClick={() => { setSelectedStudentForView(null); handleViewInvoice(fee as any); }}
+                                className="text-xs text-indigo-500 hover:underline"
+                              >
+                                View
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+              <button onClick={() => setSelectedStudentForView(null)} className="btn btn-secondary text-sm py-1.5">Close</button>
+              <button
+                onClick={() => { setSelectedStudentForView(null); handleInvoiceStudent(selectedStudentForView.id, selectedStudentForView.classId || ''); }}
+                className="btn btn-primary text-sm py-1.5"
+              >
+                <Plus size={14} /> Add Invoice
+              </button>
+            </div>
           </div>
         </div>
       , document.body)}
