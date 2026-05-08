@@ -142,6 +142,7 @@ export interface Student {
 export interface Staff {
     id: string;
     userId?: string;
+    schoolId?: string;
     employeeId: string;
     firstName: string;
     lastName: string;
@@ -153,6 +154,8 @@ export interface Staff {
     email?: string;
     photoUrl?: string;
     salary?: number;
+    joinDate?: string;
+    qualification?: string;
     status: 'active' | 'inactive';
     subjects?: string[];
     createdAt: string;

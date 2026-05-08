@@ -162,6 +162,8 @@ export interface Staff {
   email?: string;
   photoUrl?: string;
   salary?: number;
+  joinDate?: string;
+  qualification?: string;
   status: 'active' | 'inactive';
   subjects?: string[];
   createdAt: string;
