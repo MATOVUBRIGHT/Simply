@@ -298,15 +298,27 @@ export default function Students() {
   const sid = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
   const confirm = useConfirm();
 
-  // All data from store G-- instant from cache, no separate fetch
+  // All data from store — instant from cache, no separate fetch
   const { data: allStudentsData, loading: studentsLoading } = useTableData(sid, 'students');
   const { data: classesData } = useTableData(sid, 'classes');
   const { data: feesData } = useTableData(sid, 'fees');
   const { data: paymentsData } = useTableData(sid, 'payments');
+  const { data: settingsData } = useTableData(sid, 'settings');
   const { formatMoney } = useCurrency();
 
   const allStudents = allStudentsData as Student[];
   const classes = classesData as Class[];
+
+  // Derive school type from settings store (falls back to localStorage)
+  const schoolType = useMemo(() => {
+    const entry = (settingsData as any[]).find((s: any) => s.key === 'schoolType');
+    if (entry?.value) return entry.value as string;
+    try {
+      const raw = localStorage.getItem(`schofy_settings_${sid}`);
+      if (raw) return JSON.parse(raw).schoolType || 'nursery_primary';
+    } catch { /* ignore */ }
+    return 'nursery_primary';
+  }, [settingsData, sid]);
 
   // Compute invoice status and balance per student
   function getStudentFinance(studentId: string) {
@@ -336,7 +348,8 @@ export default function Students() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
+  const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview' | 'classcheck'>('upload');
+  const [classCheckIssues, setClassCheckIssues] = useState<{ className: string; count: number; action: 'skip' | 'import' }[]>([]);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
@@ -996,6 +1009,7 @@ export default function Students() {
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
+    setClassCheckIssues([]);
     setPlanLimitMessage(null);
     setImportLimitInfo(null);
     setIsImporting(false);
@@ -1112,14 +1126,37 @@ export default function Students() {
           if (newStudentsOnly > remaining) {
             setImportLimitInfo({ allowed: remaining, total: newStudentsOnly, planName: access.plan.name, remaining });
           } else if (remaining < 20) {
-            // Warn when close to limit
             setPlanLimitMessage(`${remaining} slot${remaining !== 1 ? 's' : ''} remaining on your ${access.plan.name} plan. Importing ${newStudentsOnly} student${newStudentsOnly !== 1 ? 's' : ''}.`);
           }
         }
       } catch { /* silent - plan check is non-blocking */ }
     }
 
-    setImportStep('preview');
+    // ── Class-type validation ──────────────────────────────────────────────
+    // Detect classes in the import that don't exist in the school's class list.
+    // Group them so the user can decide: skip those students or proceed anyway.
+    const classIdSet = new Set(classes.map((c: any) => c.id));
+    const unknownClassMap = new Map<string, number>(); // rawClassName → count
+
+    for (const student of mappedData) {
+      const cid = (student as any).classId;
+      if (cid && !classIdSet.has(cid)) {
+        // cid here is the raw name that couldn't be resolved to a known class
+        unknownClassMap.set(cid, (unknownClassMap.get(cid) || 0) + 1);
+      }
+    }
+
+    if (unknownClassMap.size > 0) {
+      const issues = Array.from(unknownClassMap.entries()).map(([className, count]) => ({
+        className,
+        count,
+        action: 'skip' as 'skip' | 'import',
+      }));
+      setClassCheckIssues(issues);
+      setImportStep('classcheck');
+    } else {
+      setImportStep('preview');
+    }
   }
 
   async function executeImport() {
@@ -2174,6 +2211,104 @@ export default function Students() {
                     <button onClick={closeImportModal} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
                     <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
                       Preview <ArrowRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {importStep === 'classcheck' && (
+                <div className="space-y-5">
+                  {/* Header */}
+                  <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
+                      <AlertTriangle size={20} className="text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-amber-800 dark:text-amber-200 text-sm">Unknown Classes Detected</p>
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                        Some students are assigned to classes not found in your school (<span className="font-semibold capitalize">{schoolType.replace(/_/g, ' ')}</span> type).
+                        Choose what to do with each.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Issue list */}
+                  <div className="space-y-2">
+                    {classCheckIssues.map((issue, idx) => (
+                      <div key={issue.className} className="flex items-center justify-between gap-4 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                            <X size={14} className="text-red-500" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-800 dark:text-white text-sm truncate">"{issue.className}"</p>
+                            <p className="text-xs text-slate-400">{issue.count} student{issue.count !== 1 ? 's' : ''} — not in your class list</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            onClick={() => setClassCheckIssues(prev => prev.map((it, i) => i === idx ? { ...it, action: 'skip' } : it))}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${issue.action === 'skip' ? 'bg-red-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-red-50 dark:hover:bg-red-900/20'}`}
+                          >
+                            Skip
+                          </button>
+                          <button
+                            onClick={() => setClassCheckIssues(prev => prev.map((it, i) => i === idx ? { ...it, action: 'import' } : it))}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${issue.action === 'import' ? 'bg-indigo-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}
+                          >
+                            Import anyway
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Bulk actions */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setClassCheckIssues(prev => prev.map(it => ({ ...it, action: 'skip' })))}
+                      className="btn btn-secondary text-xs py-1.5 px-3"
+                    >
+                      Skip all unknown
+                    </button>
+                    <button
+                      onClick={() => setClassCheckIssues(prev => prev.map(it => ({ ...it, action: 'import' })))}
+                      className="btn btn-secondary text-xs py-1.5 px-3"
+                    >
+                      Import all anyway
+                    </button>
+                  </div>
+
+                  {/* Change school type hint */}
+                  <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 flex items-start gap-3">
+                    <GraduationCap size={16} className="text-indigo-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-indigo-700 dark:text-indigo-300">
+                      If these classes belong to a different school level, you can{' '}
+                      <button
+                        onClick={() => { closeImportModal(); navigate('/settings'); }}
+                        className="underline font-semibold hover:text-indigo-900 dark:hover:text-indigo-100"
+                      >
+                        change your school type in Settings
+                      </button>
+                      {' '}— new classes will be auto-created, then re-import.
+                    </p>
+                  </div>
+
+                  {/* Navigation */}
+                  <div className="flex justify-between pt-1">
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-2 px-4 text-sm">Back</button>
+                    <button
+                      onClick={() => {
+                        // Apply skip decisions: remove students whose class is marked 'skip'
+                        const skipClasses = new Set(classCheckIssues.filter(i => i.action === 'skip').map(i => i.className));
+                        if (skipClasses.size > 0) {
+                          setImportPreview(prev => prev.filter(s => !skipClasses.has((s as any).classId)));
+                        }
+                        setImportStep('preview');
+                      }}
+                      className="btn btn-primary py-2 px-4 text-sm flex items-center gap-2"
+                    >
+                      Continue to Preview <ArrowRight size={14} />
                     </button>
                   </div>
                 </div>
