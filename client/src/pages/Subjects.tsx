@@ -164,18 +164,44 @@ const SubjectRow = memo(({
   sub,
   i,
   group,
+  selectMode,
+  isSelected,
+  onSelect,
   onEdit,
-  onDelete
+  onDelete,
+  onDoubleClick,
 }: {
   sub: any;
   i: number;
   group: any;
+  selectMode: boolean;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
   onEdit: (group: any) => void;
   onDelete: (payload: { name: string; ids: string[] }) => void;
+  onDoubleClick: (group: any) => void;
 }) => {
   return (
-    <tr key={sub.id} className={i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
-      <td className="px-4 py-2.5 text-xs text-slate-400">{i + 1}</td>
+    <tr
+      className={`cursor-pointer transition-colors ${
+        isSelected
+          ? 'bg-indigo-50 dark:bg-indigo-900/20'
+          : i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'
+      } hover:bg-slate-50 dark:hover:bg-slate-700/30`}
+      onClick={() => onSelect(sub.id)}
+      onDoubleClick={() => onDoubleClick(group || { name: sub.name, ids: [sub.id] })}
+    >
+      <td className="px-4 py-2.5 text-xs text-slate-400">
+        {selectMode ? (
+          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+            isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300 dark:border-slate-600'
+          }`}>
+            {isSelected && <Check size={10} className="text-white" />}
+          </div>
+        ) : (
+          i + 1
+        )}
+      </td>
       <td className="px-4 py-2.5">
         <div className="flex items-center gap-2.5">
           <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${getSubjectColor(sub.name)} flex items-center justify-center shrink-0`}>
@@ -190,7 +216,7 @@ const SubjectRow = memo(({
         </span>
       </td>
       <td className="px-4 py-2.5 text-right" onClick={e => e.stopPropagation()}>
-        <SubjectActions 
+        <SubjectActions
           sub={sub}
           group={group}
           onEdit={onEdit}
@@ -789,7 +815,15 @@ export default function Subjects() {
           )
         : classSubjects;
       if (filtered.length === 0) return null;
-      return { cls, subjects: filtered.sort((a: any, b: any) => a.name.localeCompare(b.name)) };
+      // Deduplicate by name within each class — keep the first occurrence
+      const seen = new Set<string>();
+      const deduped = filtered.filter((s: any) => {
+        const key = s.name?.toLowerCase().trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return { cls, subjects: deduped.sort((a: any, b: any) => a.name.localeCompare(b.name)) };
     }).filter(Boolean) as { cls: any; subjects: any[] }[];
   }, [classesSorted, subjects, searchTerm]);
 
@@ -1132,8 +1166,12 @@ export default function Subjects() {
                               sub={sub}
                               i={i}
                               group={groupedSubjects.find(g => g.name.toLowerCase() === sub.name.toLowerCase())}
+                              selectMode={selectMode}
+                              isSelected={selectedSubjects.has(sub.id)}
+                              onSelect={handleRowClick}
                               onEdit={openEditGroup}
                               onDelete={handleDeleteGroup}
+                              onDoubleClick={(group) => handleDeleteGroup(group)}
                             />
                           ))}
                         </tbody>
