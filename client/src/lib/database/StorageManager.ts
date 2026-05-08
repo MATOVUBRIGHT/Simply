@@ -92,14 +92,13 @@ export async function requestPersistentStorage(): Promise<boolean> {
     if (navigator.storage?.persist) {
       const granted = await navigator.storage.persist();
       if (granted) {
-        console.log('[StorageManager] Persistent storage granted — data will not be evicted');
-      } else {
-        console.warn('[StorageManager] Persistent storage not granted — data may be evicted under pressure');
+        console.log('[StorageManager] Persistent storage granted');
       }
+      // Not granted is normal on non-installed PWAs — no warning needed
       return granted;
     }
-  } catch (e) {
-    console.warn('[StorageManager] Could not request persistent storage:', e);
+  } catch {
+    // Silently ignore — persistent storage is a best-effort enhancement
   }
   return false;
 }

@@ -10,8 +10,8 @@
  * - Cache is versioned — old caches are deleted on activate
  */
 
-const CACHE_VERSION = 'schofy-v6';
-const ASSET_CACHE = 'schofy-assets-v6';
+const CACHE_VERSION = 'schofy-v7';
+const ASSET_CACHE = 'schofy-assets-v7';
 
 // Core files to pre-cache on install
 const PRECACHE_URLS = [
@@ -122,17 +122,32 @@ self.addEventListener('fetch', event => {
   if (isAsset) {
     event.respondWith(
       caches.match(req).then(cached => {
-        // Serve from cache immediately if available
+        // Vite hashes filenames — if we have it cached it's the right version.
+        // But for JS/CSS chunks, always try network first so new deployments
+        // are picked up immediately; fall back to cache if offline.
+        const isHashedChunk = url.pathname.startsWith('/assets/') &&
+          (url.pathname.endsWith('.js') || url.pathname.endsWith('.css'));
+
+        if (isHashedChunk) {
+          // Network-first for JS/CSS chunks — ensures new deployments load correctly
+          return fetch(req).then(res => {
+            if (res.ok && res.status === 200 && res.type !== 'opaque') {
+              const clone = res.clone();
+              caches.open(ASSET_CACHE).then(c => c.put(req, clone)).catch(() => {});
+            }
+            return res;
+          }).catch(() => cached || new Response('', { status: 503 }));
+        }
+
+        // Cache-first for images, fonts, sounds — these don't change between deploys
         const networkFetch = fetch(req).then(res => {
-          // Cache valid complete responses only (not partial/opaque)
           if (res.ok && res.status === 200 && res.type !== 'opaque') {
             const clone = res.clone();
             caches.open(ASSET_CACHE).then(c => c.put(req, clone)).catch(() => {});
           }
           return res;
-        }).catch(() => cached); // If network fails, fall back to cache
+        }).catch(() => cached);
 
-        // Return cached immediately, update in background
         return cached || networkFetch;
       })
     );
