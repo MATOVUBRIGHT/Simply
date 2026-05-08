@@ -565,7 +565,7 @@ export default function Students() {
     const name = student ? `${student.firstName} ${student.lastName}` : 'this student';
     const ok = await confirm({
       title: 'Delete Student',
-      description: `This will permanently delete ${name} and move them to the recycle bin. This cannot be undone.`,
+      description: `This will permanently delete ${name} and all their records (fees, payments, attendance, invoices, exam results). This cannot be undone.`,
       confirmLabel: 'Delete',
       variant: 'danger',
     });
@@ -582,14 +582,48 @@ export default function Students() {
         });
       }
 
-      // Execute delete without awaiting for instant feedback
-      dataService.delete(authId, 'students', id).then(result => {
-        if (!result.success) {
-          addToast('Failed to sync deletion, will retry in background', 'warning');
-        }
-      });
+      // Delete student + all related records in parallel (cascade)
+      void Promise.all([
+        dataService.delete(authId, 'students', id),
+        // Delete all fees for this student
+        dataService.getAll(authId, 'fees').then(fees => {
+          const studentFees = fees.filter((f: any) => f.studentId === id);
+          return Promise.all(studentFees.map((f: any) => dataService.delete(authId, 'fees', f.id)));
+        }),
+        // Delete all payments for this student
+        dataService.getAll(authId, 'payments').then(payments => {
+          const studentPayments = payments.filter((p: any) => p.studentId === id);
+          return Promise.all(studentPayments.map((p: any) => dataService.delete(authId, 'payments', p.id)));
+        }),
+        // Delete all attendance records for this student
+        dataService.getAll(authId, 'attendance').then(attendance => {
+          const studentAttendance = attendance.filter((a: any) => a.entityId === id);
+          return Promise.all(studentAttendance.map((a: any) => dataService.delete(authId, 'attendance', a.id)));
+        }),
+        // Delete all invoices for this student
+        dataService.getAll(authId, 'invoices').then(invoices => {
+          const studentInvoices = invoices.filter((inv: any) => inv.studentId === id);
+          return Promise.all(studentInvoices.map((inv: any) => dataService.delete(authId, 'invoices', inv.id)));
+        }),
+        // Delete all exam results for this student
+        dataService.getAll(authId, 'examResults').then(results => {
+          const studentResults = results.filter((r: any) => r.studentId === id);
+          return Promise.all(studentResults.map((r: any) => dataService.delete(authId, 'examResults', r.id)));
+        }),
+        // Delete transport assignments for this student
+        dataService.getAll(authId, 'transportRoutes').then(() =>
+          dataService.where(authId, 'transportAssignments', 'studentId', id).then(assignments =>
+            Promise.all(assignments.map((a: any) => dataService.delete(authId, 'transportAssignments', a.id)))
+          )
+        ),
+        // Delete bursaries for this student
+        dataService.getAll(authId, 'bursaries').then(bursaries => {
+          const studentBursaries = bursaries.filter((b: any) => b.studentId === id);
+          return Promise.all(studentBursaries.map((b: any) => dataService.delete(authId, 'bursaries', b.id)));
+        }),
+      ]);
       
-      addToast('Student deleted', 'success');
+      addToast('Student and all related records deleted', 'success');
     } catch (error) {
       addToast('Failed to delete student', 'error');
     }
@@ -708,7 +742,7 @@ export default function Students() {
     if (!id || selectedStudents.size === 0) return;
     const ok = await confirm({
       title: `Delete ${selectedStudents.size} Student${selectedStudents.size > 1 ? 's' : ''}`,
-      description: `Permanently delete ${selectedStudents.size} student${selectedStudents.size > 1 ? 's' : ''} and move them to the recycle bin? This cannot be undone.`,
+      description: `Permanently delete ${selectedStudents.size} student${selectedStudents.size > 1 ? 's' : ''} and all their records (fees, payments, attendance, invoices, exam results)? This cannot be undone.`,
       confirmLabel: 'Delete All',
       variant: 'danger',
     });
@@ -717,7 +751,8 @@ export default function Students() {
     try {
       const now = new Date().toISOString();
       const idsToDelete = Array.from(selectedStudents);
-      const studentsToDelete = idsToDelete.map(id => students.find(s => s.id === id)).filter(Boolean);
+      const idsSet = new Set(idsToDelete);
+      const studentsToDelete = idsToDelete.map(sid => students.find(s => s.id === sid)).filter(Boolean);
       
       // Clear selection and close mode immediately for instant UI feedback
       setSelectedStudents(new Set());
@@ -734,14 +769,36 @@ export default function Students() {
         })));
       }
 
-      // Execute delete without awaiting for instant feedback
-      dataService.batchDelete(id, 'students', idsToDelete).then(result => {
-        if (!result.success) {
-          addToast('Failed to sync some deletions, will retry in background', 'warning');
-        }
-      });
+      // Delete students + all related records in parallel
+      void Promise.all([
+        dataService.batchDelete(id, 'students', idsToDelete),
+        dataService.getAll(id, 'fees').then(fees => {
+          const ids = fees.filter((f: any) => idsSet.has(f.studentId)).map((f: any) => f.id);
+          return ids.length ? dataService.batchDelete(id, 'fees', ids) : null;
+        }),
+        dataService.getAll(id, 'payments').then(payments => {
+          const ids = payments.filter((p: any) => idsSet.has(p.studentId)).map((p: any) => p.id);
+          return ids.length ? dataService.batchDelete(id, 'payments', ids) : null;
+        }),
+        dataService.getAll(id, 'attendance').then(attendance => {
+          const ids = attendance.filter((a: any) => idsSet.has(a.entityId)).map((a: any) => a.id);
+          return ids.length ? dataService.batchDelete(id, 'attendance', ids) : null;
+        }),
+        dataService.getAll(id, 'invoices').then(invoices => {
+          const ids = invoices.filter((inv: any) => idsSet.has(inv.studentId)).map((inv: any) => inv.id);
+          return ids.length ? dataService.batchDelete(id, 'invoices', ids) : null;
+        }),
+        dataService.getAll(id, 'examResults').then(results => {
+          const ids = results.filter((r: any) => idsSet.has(r.studentId)).map((r: any) => r.id);
+          return ids.length ? dataService.batchDelete(id, 'examResults', ids) : null;
+        }),
+        dataService.getAll(id, 'bursaries').then(bursaries => {
+          const ids = bursaries.filter((b: any) => idsSet.has(b.studentId)).map((b: any) => b.id);
+          return ids.length ? dataService.batchDelete(id, 'bursaries', ids) : null;
+        }),
+      ]);
       
-      addToast(`${idsToDelete.length} students deleted`, 'success');
+      addToast(`${idsToDelete.length} students and all related records deleted`, 'success');
     } catch (error) {
       console.error('Bulk delete error:', error);
       addToast('Failed to delete students', 'error');
@@ -1086,19 +1143,14 @@ export default function Students() {
       }
 
       const now = new Date().toISOString();
-      let successCount = 0;
-      let skippedCount = 0;
-      let replacedCount = 0;
-
-      const getImportStatus = () => {
+      const importStatus = (() => {
         switch (viewFilter) {
           case 'active': return 'active';
           case 'deactivated': return 'inactive';
           case 'completed': return 'completed';
           default: return 'active';
         }
-      };
-      const importStatus = getImportStatus();
+      })();
 
       const previewSnapshot = [...importPreview];
       const flaggedSnapshot = { ...flaggedItems };
@@ -1119,101 +1171,88 @@ export default function Students() {
         }
         return raw;
       }
-      
-      // Don't close modal immediately, show progress
+
+      // Build all operations first, then fire in parallel batches of 10
+      const ops: Array<() => Promise<void>> = [];
+
       for (let i = 0; i < previewSnapshot.length; i++) {
         const data = previewSnapshot[i];
-        const studentId = (data as any).id;
         const flagged = flaggedSnapshot[i];
+        const idx = i;
 
-        if (flagged) {
-          if (flagged.action === 'skip') {
-            skippedCount++;
-            continue;
-          } else if (flagged.action === 'duplicate') {
-            let newId = studentId;
-            let counter = 1;
-            while (students.find(s => s.id === newId)) {
-              const fn = ((data as any).firstName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
-              const ln = ((data as any).lastName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
-              newId = `${fn}${ln}${100 + counter}`;
-              counter++;
-            }
-            const genderValue = ((data as any).gender as string)?.toLowerCase();
-            const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-            const student: Student = {
-              id: newId, schoolId: id, studentId: newId, admissionNo: newId,
-              firstName: ((data as any).firstName as string) || 'Unknown',
-              lastName: ((data as any).lastName as string) || 'Unknown',
-              dob: ((data as any).dob as string) || '2000-01-01',
-              gender: validGender,
-              classId: resolveClassId(((data as any).classId as string) || ''),
-              address: ((data as any).address as string) || '',
-              guardianName: ((data as any).guardianName as string) || '',
-              guardianPhone: ((data as any).guardianPhone as string) || '',
-              guardianEmail: (data as any).guardianEmail as string | undefined,
-              medicalInfo: (data as any).medicalInfo as string | undefined,
-              tuitionFee: (data as any).tuitionFee ? parseFloat(String((data as any).tuitionFee)) || undefined : undefined,
-              boardingFee: (data as any).boardingFee ? parseFloat(String((data as any).boardingFee)) || undefined : undefined,
-              status: importStatus as any,
-              completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
-              completedTerm: importStatus === 'completed' ? 'Final' : undefined,
-              createdAt: now, updatedAt: now,
-            };
-            await dataService.create(id, 'students', student);
-            successCount++;
-          } else if (flagged.action === 'replace' && flagged.existingId) {
-            const genderValue = ((data as any).gender as string)?.toLowerCase();
-            const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-            await dataService.update(id, 'students', flagged.existingId, {
-              firstName: ((data as any).firstName as string) || 'Unknown',
-              lastName: ((data as any).lastName as string) || 'Unknown',
-              dob: ((data as any).dob as string) || '2000-01-01',
-              gender: validGender,
-              classId: resolveClassId(((data as any).classId as string) || ''),
-              address: ((data as any).address as string) || '',
-              guardianName: ((data as any).guardianName as string) || '',
-              guardianPhone: ((data as any).guardianPhone as string) || '',
-              guardianEmail: (data as any).guardianEmail as string | undefined,
-              medicalInfo: (data as any).medicalInfo as string | undefined,
-              tuitionFee: (data as any).tuitionFee ? parseFloat(String((data as any).tuitionFee)) || undefined : undefined,
-              boardingFee: (data as any).boardingFee ? parseFloat(String((data as any).boardingFee)) || undefined : undefined,
-              status: importStatus as any,
-              completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
-              completedTerm: importStatus === 'completed' ? 'Final' : undefined,
-              updatedAt: now,
-            } as any);
-            replacedCount++;
-          }
-        } else {
+        if (flagged?.action === 'skip') continue;
+
+        if (flagged?.action === 'replace' && flagged.existingId) {
           const genderValue = ((data as any).gender as string)?.toLowerCase();
           const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-          const studentIdLocal = (data as any).id || generateUUID();
-          const student: Student = {
-            id: studentIdLocal, schoolId: id,
-            studentId: (data as any).studentId || generateStudentId((data.firstName as string) || '', (data.lastName as string) || ''),
-            admissionNo: (data as any).admissionNo || studentIdLocal,
-            firstName: (data.firstName as string) || 'Unknown',
-            lastName: (data.lastName as string) || 'Unknown',
+          ops.push(() => dataService.update(id, 'students', flagged.existingId!, {
+            firstName: ((data as any).firstName as string) || 'Unknown',
+            lastName: ((data as any).lastName as string) || 'Unknown',
+            dob: ((data as any).dob as string) || '2000-01-01',
             gender: validGender,
-            dob: (data.dob as string) || '2000-01-01',
-            classId: resolveClassId((data.classId as string) || ''),
-            address: (data.address as string) || '',
-            guardianName: (data.guardianName as string) || '',
-            guardianPhone: (data.guardianPhone as string) || '',
-            guardianEmail: data.guardianEmail as string | undefined,
+            classId: resolveClassId(((data as any).classId as string) || ''),
+            address: ((data as any).address as string) || '',
+            guardianName: ((data as any).guardianName as string) || '',
+            guardianPhone: ((data as any).guardianPhone as string) || '',
+            guardianEmail: (data as any).guardianEmail as string | undefined,
             medicalInfo: (data as any).medicalInfo as string | undefined,
             tuitionFee: (data as any).tuitionFee ? parseFloat(String((data as any).tuitionFee)) || undefined : undefined,
             boardingFee: (data as any).boardingFee ? parseFloat(String((data as any).boardingFee)) || undefined : undefined,
             status: importStatus as any,
-            completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
-            completedTerm: importStatus === 'completed' ? 'Final' : undefined,
-            createdAt: now, updatedAt: now,
-          };
-          await dataService.create(id, 'students', student as any);
-          successCount++;
+            updatedAt: now,
+          } as any).then(() => {
+            setImportProgress(Math.round(((idx + 1) / previewSnapshot.length) * 100));
+          }));
+          continue;
         }
-        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
+
+        // New student (or duplicate with 'duplicate' action)
+        const genderValue = ((data as any).gender as string)?.toLowerCase();
+        const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
+        let studentIdLocal = (data as any).id || generateUUID();
+
+        if (flagged?.action === 'duplicate') {
+          // Generate a unique ID that doesn't clash
+          let counter = 1;
+          while (students.find(s => s.id === studentIdLocal)) {
+            const fn = ((data as any).firstName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
+            const ln = ((data as any).lastName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
+            studentIdLocal = `${fn}${ln}${100 + counter}`;
+            counter++;
+          }
+        }
+
+        const student: Student = {
+          id: studentIdLocal, schoolId: id,
+          studentId: (data as any).studentId || generateStudentId((data.firstName as string) || '', (data.lastName as string) || ''),
+          admissionNo: (data as any).admissionNo || studentIdLocal,
+          firstName: (data.firstName as string) || 'Unknown',
+          lastName: (data.lastName as string) || 'Unknown',
+          gender: validGender,
+          dob: (data.dob as string) || '2000-01-01',
+          classId: resolveClassId((data.classId as string) || ''),
+          address: (data.address as string) || '',
+          guardianName: (data.guardianName as string) || '',
+          guardianPhone: (data.guardianPhone as string) || '',
+          guardianEmail: data.guardianEmail as string | undefined,
+          medicalInfo: (data as any).medicalInfo as string | undefined,
+          tuitionFee: (data as any).tuitionFee ? parseFloat(String((data as any).tuitionFee)) || undefined : undefined,
+          boardingFee: (data as any).boardingFee ? parseFloat(String((data as any).boardingFee)) || undefined : undefined,
+          status: importStatus as any,
+          completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
+          completedTerm: importStatus === 'completed' ? 'Final' : undefined,
+          createdAt: now, updatedAt: now,
+        };
+
+        ops.push(() => dataService.create(id, 'students', student as any).then(() => {
+          setImportProgress(Math.round(((idx + 1) / previewSnapshot.length) * 100));
+        }));
+      }
+
+      // Run in parallel batches of 10 for speed without overwhelming the queue
+      const BATCH_SIZE = 10;
+      for (let b = 0; b < ops.length; b += BATCH_SIZE) {
+        await Promise.all(ops.slice(b, b + BATCH_SIZE).map(op => op()));
       }
 
       setIsImporting(false);

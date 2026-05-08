@@ -210,6 +210,9 @@ const DELETED_KEY = 'schofy_deleted_ids';
 
 interface DeletedRegistry { [key: string]: string[] }
 
+// In-memory set for instant filtering — prevents any race with background merge
+const _deletedMemory = new Map<string, Set<string>>();
+
 function loadDeletedRegistry(): DeletedRegistry {
   try { return JSON.parse(localStorage.getItem(DELETED_KEY) || '{}'); } catch { return {}; }
 }
@@ -218,31 +221,45 @@ function saveDeletedRegistry(reg: DeletedRegistry) {
 }
 
 function markDeleted(sid: string, tableName: string, id: string) {
-  // Async IDB write (primary) + sync LS write (fallback)
+  // 1. In-memory (instant — prevents race with background merge)
+  const memKey = `${sid}:${tableName}`;
+  if (!_deletedMemory.has(memKey)) _deletedMemory.set(memKey, new Set());
+  _deletedMemory.get(memKey)!.add(id);
+  // 2. Async IDB write (primary)
   void _markDeleted(sid, tableName, id);
+  // 3. Sync localStorage write (fallback)
   const reg = loadDeletedRegistry();
-  const key = `${sid}:${tableName}`;
-  if (!reg[key]) reg[key] = [];
-  if (!reg[key].includes(id)) { reg[key].push(id); saveDeletedRegistry(reg); }
+  if (!reg[memKey]) reg[memKey] = [];
+  if (!reg[memKey].includes(id)) { reg[memKey].push(id); saveDeletedRegistry(reg); }
 }
 
 function markBatchDeleted(sid: string, tableName: string, ids: string[]) {
   if (!ids.length) return;
-  // Async IDB write (primary) + sync LS write (fallback)
+  // 1. In-memory (instant)
+  const memKey = `${sid}:${tableName}`;
+  if (!_deletedMemory.has(memKey)) _deletedMemory.set(memKey, new Set());
+  const memSet = _deletedMemory.get(memKey)!;
+  for (const id of ids) memSet.add(id);
+  // 2. Async IDB write (primary)
   void _markBatchDeleted(sid, tableName, ids);
+  // 3. Sync localStorage write (fallback)
   const reg = loadDeletedRegistry();
-  const key = `${sid}:${tableName}`;
-  if (!reg[key]) reg[key] = [];
+  if (!reg[memKey]) reg[memKey] = [];
   for (const id of ids) {
-    if (!reg[key].includes(id)) reg[key].push(id);
+    if (!reg[memKey].includes(id)) reg[memKey].push(id);
   }
   saveDeletedRegistry(reg);
 }
 
 function getDeletedIds(sid: string, tableName: string): Set<string> {
-  // Sync read from localStorage (fast path); IDB is the durable store
+  const memKey = `${sid}:${tableName}`;
+  // Check in-memory first (fastest, always up-to-date after any delete)
+  if (_deletedMemory.has(memKey)) return _deletedMemory.get(memKey)!;
+  // Fall back to localStorage and populate memory cache
   const reg = loadDeletedRegistry();
-  return new Set(reg[`${sid}:${tableName}`] || []);
+  const ids = new Set<string>(reg[memKey] || []);
+  _deletedMemory.set(memKey, ids);
+  return ids;
 }
 
 // Filter out any records whose IDs are in the deleted registry
