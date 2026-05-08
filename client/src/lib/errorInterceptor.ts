@@ -22,6 +22,9 @@ const SUPPRESS_PATTERNS = [
   /cross-origin/i,
   /supabase.*rate limit/i,
   /JWT expired/i,
+  /not found/i,
+  /404/,
+  /PGRST116/i, // Supabase "no rows" error code
 ];
 
 // Messages that should show as a warning (not error)
@@ -42,7 +45,6 @@ function friendlyMessage(raw: string): string {
   if (/offline|network|connection/i.test(raw)) return 'You appear to be offline. Changes are saved locally.';
   if (/timeout/i.test(raw)) return 'Request timed out. Will retry when online.';
   if (/permission|unauthorized|403/i.test(raw)) return 'Permission denied. Please check your access.';
-  if (/not found|404/i.test(raw)) return 'Resource not found.';
   if (/storage|quota/i.test(raw)) return 'Storage is full. Some data may not be saved.';
   return 'Something went wrong. Please try again.';
 }
