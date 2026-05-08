@@ -12,6 +12,7 @@ import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { sortClassesBySectionThenLevel, groupClassesBySection } from '../utils/classroom';
 
 const classColors = [
   { card: 'card-coral-light', gradient: 'from-orange-100 to-amber-100', text: 'text-orange-600' },
@@ -199,9 +200,9 @@ export default function Classes() {
   const { data: classesData, loading } = useTableData(sid, 'classes');
   const { data: allStudentsData } = useTableData(sid, 'students');
 
-  // Sort classes by level
+  // Sort classes by section (Nursery → Primary → Secondary) then level
   const classes = useMemo(
-    () => [...classesData].sort((a: any, b: any) => a.level - b.level),
+    () => sortClassesBySectionThenLevel([...classesData]) as any[],
     [classesData]
   );
 
@@ -793,20 +794,30 @@ export default function Classes() {
             </button>
           </div>
         ) : (
-          <div className="divide-y divide-slate-100 dark:divide-slate-700">
-            {classes.map((c, index) => (
-              <ClassRow
-                key={c.id}
-                classItem={c}
-                index={index}
-                isSelected={selectedClasses.has(c.id)}
-                selectMode={selectMode}
-                enrolled={classEnrollmentCounts[c.id] || 0}
-                onClick={handleRowClick}
-                onTimetable={(id: string) => { setTimetableClassId(id); setShowTimetable(true); }}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-              />
+          <div>
+            {groupClassesBySection(classes).map(({ label, classes: sectionClasses }) => (
+              <div key={label}>
+                <div className="px-5 py-2 bg-slate-50 dark:bg-slate-800/60 border-y border-slate-100 dark:border-slate-700 flex items-center gap-2">
+                  <span className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">{label}</span>
+                  <span className="text-xs text-slate-400">({sectionClasses.length})</span>
+                </div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  {sectionClasses.map((c: any, index: number) => (
+                    <ClassRow
+                      key={c.id}
+                      classItem={c}
+                      index={index}
+                      isSelected={selectedClasses.has(c.id)}
+                      selectMode={selectMode}
+                      enrolled={classEnrollmentCounts[c.id] || 0}
+                      onClick={handleRowClick}
+                      onTimetable={(id: string) => { setTimetableClassId(id); setShowTimetable(true); }}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}

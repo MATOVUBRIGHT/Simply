@@ -6,7 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import { Class, Subject } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
-import { getClassDisplayName } from '../utils/classroom';
+import { getClassDisplayName, sortClassesBySectionThenLevel } from '../utils/classroom';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
@@ -372,9 +372,9 @@ export default function Subjects() {
     return `${base}${suffix}`;
   }
 
-  const classesForSelectedLevel = classes
-    .filter((c) => getClassLevel(c.id) === selectedLevel)
-    .sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0));
+  const classesForSelectedLevel = sortClassesBySectionThenLevel(
+    classes.filter((c) => getClassLevel(c.id) === selectedLevel)
+  );
 
   function resetSubjectForm() {
     setShowForm(false);
@@ -816,7 +816,7 @@ export default function Subjects() {
 
   // Group subjects by class for accordion view
   const classesSorted = useMemo(() =>
-    [...classes].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)) as any[],
+    sortClassesBySectionThenLevel([...classes]) as any[],
     [classes]
   );
 
@@ -1250,8 +1250,7 @@ export default function Subjects() {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-52 overflow-y-auto pr-1">
-                    {(editLevel ? classes.filter(c => getClassLevel(c.id) === editLevel) : classes)
-                      .sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0))
+                    {sortClassesBySectionThenLevel(editLevel ? classes.filter(c => getClassLevel(c.id) === editLevel) : classes)
                       .map(cls => {
                         const sel = editClassIds.includes(cls.id);
                         const isOriginal = editGroup.classIds.includes(cls.id);

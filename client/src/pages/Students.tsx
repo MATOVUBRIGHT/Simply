@@ -9,7 +9,7 @@ import { Gender } from '@schofy/shared';
 import ImageModal from '../components/ImageModal';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
-import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments } from '../utils/classroom';
+import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments, sortClassesBySectionThenLevel } from '../utils/classroom';
 import { addToRecycleBin, addBatchToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
@@ -421,10 +421,20 @@ export default function Students() {
   const students = paginatedStudents;
   const loading = studentsLoading && allStudents.length === 0 && !localStorage.getItem('schofy_data_cache');
 
-  const availableClassIds = Array.from(new Set([
-    ...classes.map((classItem) => classItem.id),
-    ...allStudents.map((student) => student.classId).filter(Boolean),
-  ]));
+  // All class IDs that appear in students or class list, sorted by section then level
+  const availableClassIds = useMemo(() => {
+    const allIds = new Set([
+      ...classes.map((c: any) => c.id),
+      ...allStudents.map((s: any) => s.classId).filter(Boolean),
+    ]);
+    // Build class objects for sorting (use known classes; unknown IDs go to end)
+    const knownClasses = classes.filter((c: any) => allIds.has(c.id));
+    const unknownIds = [...allIds].filter(id => !classes.find((c: any) => c.id === id));
+    return [
+      ...sortClassesBySectionThenLevel(knownClasses).map((c: any) => c.id),
+      ...unknownIds,
+    ];
+  }, [classes, allStudents]);
 
   const getCompletedStudents = () => {
     return students.filter(s => s.status === 'completed').sort((a, b) => {

@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useStudents } from '../contexts/StudentsContext';
 import { exportToExcel } from '../utils/export';
+import { sortClassesBySectionThenLevel } from '../utils/classroom';
 
 function getGrade(score: number): string {
   if (score >= 90) return 'D1';
@@ -57,7 +58,7 @@ export default function ExamMarks() {
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const sortedClasses = useMemo(() =>
-    [...classes].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)),
+    sortClassesBySectionThenLevel([...classes]),
     [classes]
   );
 
@@ -110,11 +111,9 @@ export default function ExamMarks() {
 
     const targetClassIds = filterClass
       ? (classIdsWithResults.has(filterClass) ? [filterClass] : [])
-      : [...classIdsWithResults].sort((a, b) => {
-          const la = (classes as any[]).find(c => c.id === a)?.level ?? 0;
-          const lb = (classes as any[]).find(c => c.id === b)?.level ?? 0;
-          return la - lb;
-        });
+      : sortClassesBySectionThenLevel(
+          [...classIdsWithResults].map(id => (classes as any[]).find(c => c.id === id)).filter(Boolean)
+        ).map((c: any) => c.id);
 
     return targetClassIds.map(classId => {
       const cls = (classes as any[]).find(c => c.id === classId);

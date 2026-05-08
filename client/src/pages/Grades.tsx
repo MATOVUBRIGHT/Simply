@@ -13,6 +13,7 @@ import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { sortClassesBySectionThenLevel } from '../utils/classroom';
 
 interface StudentGrade extends ExamResult {
   studentName: string;
@@ -652,7 +653,7 @@ export default function Grades() {
 
   // Group filtered grades by class
   const classesSorted = useMemo(() =>
-    [...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)) as any[],
+    sortClassesBySectionThenLevel([...allClassesData]) as any[],
     [allClassesData]
   );
 
@@ -856,7 +857,7 @@ export default function Grades() {
                         All Classes
                         {filterClass === 'all' && <Check size={14} className="ml-auto" />}
                       </button>
-                      {[...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)).map((cls: any) => (
+                      {sortClassesBySectionThenLevel([...allClassesData]).map((cls: any) => (
                         <button key={cls.id}
                           onClick={() => { setFilterClass(cls.id); setShowClassFilter(false); }}
                           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${filterClass === cls.id ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
@@ -1077,7 +1078,7 @@ export default function Grades() {
                     onChange={e => { setBulkForm(p => ({ ...p, classId: e.target.value, studentId: '' })); setBulkScores({}); }}
                     className="form-input" required>
                     <option value="">- Select Class -</option>
-                    {[...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)).map((c: any) => (
+                    {sortClassesBySectionThenLevel([...allClassesData]).map((c: any) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
@@ -1354,7 +1355,7 @@ export default function Grades() {
                       className="form-input"
                     >
                       <option value="">- Choose a class -</option>
-                      {[...allClassesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)).map((c: any) => (
+                      {sortClassesBySectionThenLevel([...allClassesData]).map((c: any) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>

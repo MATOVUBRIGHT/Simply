@@ -11,6 +11,7 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { sortClassesBySectionThenLevel } from '../utils/classroom';
 
 const avatarColors = [
   'from-orange-500 to-red-400',
@@ -33,7 +34,7 @@ export default function Attendance() {
   const { data: classesData } = useTableData(sid, 'classes');
   const { data: studentsData } = useTableData(sid, 'students');
   const { data: attendanceData } = useTableData(sid, 'attendance');
-  const classes = useMemo(() => [...classesData].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0)), [classesData]);
+  const classes = useMemo(() => sortClassesBySectionThenLevel([...classesData]), [classesData]);
 
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedClass, setSelectedClass] = useState('');
