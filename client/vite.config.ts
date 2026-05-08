@@ -40,14 +40,28 @@ export default defineConfig(({ mode }) => ({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
-    chunkSizeWarningLimit: 700,
+    chunkSizeWarningLimit: 1000, // Raised to 1MB since we have good chunking
     target: 'es2020',
     minify: 'esbuild',
     rollupOptions: {
       output: {
         // Granular manual chunks — keeps initial bundle tiny
         manualChunks: (id) => {
-          if (!id.includes('node_modules')) return undefined;
+          // App code chunking by route
+          if (!id.includes('node_modules')) {
+            if (id.includes('/pages/')) {
+              // Split large page bundles
+              if (id.includes('Students.tsx') || id.includes('StudentForm.tsx') || id.includes('StudentProfile.tsx')) return 'pages-students';
+              if (id.includes('Staff.tsx') || id.includes('StaffForm.tsx')) return 'pages-staff';
+              if (id.includes('Finance.tsx') || id.includes('Invoices.tsx') || id.includes('Payroll.tsx')) return 'pages-finance';
+              if (id.includes('Grades.tsx') || id.includes('ExamMarks.tsx') || id.includes('ReportCard.tsx')) return 'pages-academic';
+              if (id.includes('Reports.tsx') || id.includes('Dashboard.tsx')) return 'pages-reports';
+              return 'pages-other';
+            }
+            if (id.includes('/admin/')) return 'admin';
+            return undefined; // Let Vite decide for other app code
+          }
+          // Vendor chunking
           if (id.includes('lucide-react')) return 'vendor-icons';
           if (id.includes('jspdf') || id.includes('jspdf-autotable')) return 'vendor-jspdf';
           if (id.includes('xlsx')) return 'vendor-xlsx';
