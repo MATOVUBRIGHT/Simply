@@ -5,6 +5,7 @@ import { RealtimeSyncProvider } from './realtime/RealtimeSync';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import UpdateBanner from './components/UpdateBanner';
+import StorageWarning from './components/StorageWarning';
 import SubscriptionGate from './components/SubscriptionGate';
 import StaffSessionBanner from './components/StaffSessionBanner';
 import { StaffAuthProvider, useStaffAuth } from './contexts/StaffAuthContext';
@@ -131,6 +132,7 @@ function MainApp() {
             </Layout>
           </SubscriptionGate>
           <UpdateBanner />
+          <StorageWarning />
           <StaffSessionBanner />
         </RealtimeSyncProvider>
       </StudentsProvider>

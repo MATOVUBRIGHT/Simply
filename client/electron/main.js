@@ -1,9 +1,24 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } = require('electron');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 
 let mainWindow;
 let tray;
+
+// ── Native backup directory ───────────────────────────────────────────────────
+// Stores JSON backups in the app's userData directory — persists across updates,
+// survives browser cache clears, and occupies real disk space like a desktop app.
+function getBackupDir() {
+  const dir = path.join(app.getPath('userData'), 'schofy-backup');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function sanitizeKey(key) {
+  // Prevent path traversal
+  return key.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 100);
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -14,6 +29,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
     },
     icon: path.join(__dirname, '../public/favicon.svg'),
     show: false,
@@ -141,4 +157,30 @@ ipcMain.handle('check-online', async () => {
       resolve(false);
     });
   });
+});
+
+// ── Native file backup IPC handlers ───────────────────────────────────────────
+
+ipcMain.handle('write-backup', async (event, key, data) => {
+  try {
+    const safe = sanitizeKey(key);
+    const filePath = path.join(getBackupDir(), `${safe}.json`);
+    fs.writeFileSync(filePath, data, 'utf8');
+    return { success: true };
+  } catch (error) {
+    console.error('[backup] Write failed:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('read-backup', async (event, key) => {
+  try {
+    const safe = sanitizeKey(key);
+    const filePath = path.join(getBackupDir(), `${safe}.json`);
+    if (!fs.existsSync(filePath)) return null;
+    return fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    console.error('[backup] Read failed:', error);
+    return null;
+  }
 });

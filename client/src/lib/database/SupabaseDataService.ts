@@ -13,6 +13,17 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { generateUUID } from '../../utils/uuid';
 import { addToRecycleBin } from '../../utils/recycleBin';
+import {
+  getStorageDB,
+  enqueueItem,
+  dequeueItem,
+  loadQueue,
+  markDeleted as _markDeleted,
+  markBatchDeleted as _markBatchDeleted,
+  filterDeleted as _filterDeleted,
+  getDeletedIds as _getDeletedIds,
+  writeElectronBackup,
+} from './StorageManager';
 
 export type SyncStatus = 'synced' | 'pending' | 'failed';
 
@@ -194,6 +205,7 @@ function recycleBinType(t: string): string | null {
 // ── Persistent deleted IDs registry ─────────────────────────────────────────
 // Tracks IDs deleted locally so they are NEVER re-added from remote sync.
 // Keyed by `${sid}:${tableName}` → Set of deleted IDs.
+// Now backed by IndexedDB via StorageManager (localStorage fallback retained).
 const DELETED_KEY = 'schofy_deleted_ids';
 
 interface DeletedRegistry { [key: string]: string[] }
@@ -206,15 +218,18 @@ function saveDeletedRegistry(reg: DeletedRegistry) {
 }
 
 function markDeleted(sid: string, tableName: string, id: string) {
+  // Async IDB write (primary) + sync LS write (fallback)
+  void _markDeleted(sid, tableName, id);
   const reg = loadDeletedRegistry();
   const key = `${sid}:${tableName}`;
   if (!reg[key]) reg[key] = [];
-  if (!reg[key].includes(id)) reg[key].push(id);
-  saveDeletedRegistry(reg);
+  if (!reg[key].includes(id)) { reg[key].push(id); saveDeletedRegistry(reg); }
 }
 
 function markBatchDeleted(sid: string, tableName: string, ids: string[]) {
   if (!ids.length) return;
+  // Async IDB write (primary) + sync LS write (fallback)
+  void _markBatchDeleted(sid, tableName, ids);
   const reg = loadDeletedRegistry();
   const key = `${sid}:${tableName}`;
   if (!reg[key]) reg[key] = [];
@@ -225,6 +240,7 @@ function markBatchDeleted(sid: string, tableName: string, ids: string[]) {
 }
 
 function getDeletedIds(sid: string, tableName: string): Set<string> {
+  // Sync read from localStorage (fast path); IDB is the durable store
   const reg = loadDeletedRegistry();
   return new Set(reg[`${sid}:${tableName}`] || []);
 }
@@ -240,31 +256,19 @@ function filterDeleted(sid: string, tableName: string, records: any[]): any[] {
 const PERSIST_KEY = 'schofy_data_cache';
 const IDB_DB_NAME = 'schofy_cache';
 const IDB_STORE = 'data';
-const IDB_VERSION = 1;
+const IDB_VERSION = 2; // v2 — queue and deleted_ids stores added in StorageManager
 
 interface CacheEntry { data: any[]; ts: number; }
 const memCache = new Map<string, CacheEntry>();
 
 // ── IndexedDB cache database ──────────────────────────────────────────────────
+// Use the shared StorageManager DB (schofy_cache v2) — same connection, same upgrade path
 let _cacheDB: IDBDatabase | null = null;
 let _cacheDBReady: Promise<IDBDatabase> | null = null;
 
 function getCacheDB(): Promise<IDBDatabase> {
-  if (_cacheDB) return Promise.resolve(_cacheDB);
-  if (_cacheDBReady) return _cacheDBReady;
-  _cacheDBReady = new Promise((resolve, reject) => {
-    try {
-      const req = indexedDB.open(IDB_DB_NAME, IDB_VERSION);
-      req.onupgradeneeded = () => {
-        if (!req.result.objectStoreNames.contains(IDB_STORE)) {
-          req.result.createObjectStore(IDB_STORE);
-        }
-      };
-      req.onsuccess = () => { _cacheDB = req.result; resolve(_cacheDB); };
-      req.onerror = () => reject(req.error);
-    } catch (e) { reject(e); }
-  });
-  return _cacheDBReady;
+  // Delegate to StorageManager which owns the DB lifecycle
+  return getStorageDB();
 }
 
 // ── Load persisted cache on startup (async, non-blocking) ────────────────────
@@ -326,6 +330,8 @@ function _flushCache() {
     getCacheDB().then(db => {
       const tx = db.transaction(IDB_STORE, 'readwrite');
       tx.objectStore(IDB_STORE).put(obj, PERSIST_KEY);
+      // Also write Electron native backup (no-op in browser)
+      void writeElectronBackup('schofy_data_cache', obj);
     }).catch(() => {
       try { localStorage.setItem(PERSIST_KEY, JSON.stringify(obj)); } catch {}
     });
@@ -338,6 +344,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', _flushCache);
 }
 // ── Offline queue ─────────────────────────────────────────────────────────────
+// Now backed by IndexedDB via StorageManager. localStorage retained as fallback.
 const QUEUE_KEY = 'schofy_offline_queue';
 
 interface QueueItem {
@@ -352,19 +359,25 @@ interface QueueItem {
   ts: number;
 }
 
-function loadQueue(): QueueItem[] {
+function loadQueueSync(): QueueItem[] {
   try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; }
 }
-function saveQueue(q: QueueItem[]) {
-  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+function saveQueueSync(q: QueueItem[]) {
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch {}
 }
 function enqueue(item: Omit<QueueItem, 'id' | 'ts'>) {
-  const q = loadQueue();
-  q.push({ ...item, id: generateUUID(), ts: Date.now() });
-  saveQueue(q);
+  // Primary: async IDB write
+  void enqueueItem(item as any);
+  // Fallback: sync localStorage write
+  const q = loadQueueSync();
+  q.push({ ...item, id: generateUUID(), ts: Date.now() } as QueueItem);
+  saveQueueSync(q);
 }
 function dequeue(id: string) {
-  saveQueue(loadQueue().filter(i => i.id !== id));
+  // Primary: async IDB delete
+  void dequeueItem(id);
+  // Fallback: sync localStorage delete
+  saveQueueSync(loadQueueSync().filter(i => i.id !== id));
 }
 
 function isOnline() { return navigator.onLine; }
@@ -504,7 +517,7 @@ class SupabaseDataService {
       }
 
       const pendingIds = new Set(
-        loadQueue()
+        loadQueueSync()
           .filter(q => q.tableName === tableName)
           .map(q => q.recordId || q.data?.id)
           .filter(Boolean)
@@ -633,7 +646,7 @@ class SupabaseDataService {
 
         // Build set of IDs with pending local queue entries — don't overwrite these
         const pendingIds = new Set(
-          loadQueue()
+          loadQueueSync()
             .filter(q => q.tableName === tableName && q.userId === sid)
             .map(q => q.recordId || q.data?.id)
             .filter(Boolean)
@@ -942,7 +955,8 @@ class SupabaseDataService {
   // ── Offline queue flush with exponential backoff ─────────────────────────
   async flushOfflineQueue(): Promise<void> {
     if (!isOnline() || !this.ok) return;
-    const queue = loadQueue();
+    // Load from IDB (primary) — falls back to localStorage automatically
+    const queue = await loadQueue() as QueueItem[];
     if (queue.length === 0) return;
     console.log(`[offline] Flushing ${queue.length} queued operations`);
 
