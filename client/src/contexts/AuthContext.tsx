@@ -99,6 +99,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     prefetchCriticalTables(userData.schoolId || userData.id);
 
+    // Pre-hydrate recycle bin from IndexedDB so first read is instant
+    import('../utils/recycleBin').then(({ hydrateRecycleBin }) => {
+      void hydrateRecycleBin(userData.schoolId || userData.id);
+    });
+
     // Apply persisted settings immediately
     try {
       const raw = localStorage.getItem(`schofy_settings_${userData.schoolId}`);
