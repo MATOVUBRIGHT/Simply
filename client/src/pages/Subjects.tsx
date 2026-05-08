@@ -101,27 +101,40 @@ const SubjectActions = ({
   onDelete: (payload: { name: string; ids: string[] }) => void;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
 
   useEffect(() => {
+    if (!isOpen) return;
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
+      const target = event.target as Node;
+      if (btnRef.current && !btnRef.current.contains(target)) {
+        // Check if click is inside the portal panel
+        const panel = document.getElementById(`subject-actions-${sub.id}`);
+        if (!panel || !panel.contains(target)) setIsOpen(false);
       }
     }
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
+    document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
+  }, [isOpen, sub.id]);
+
+  function openMenu() {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      // Position panel to the left of the button so it doesn't go off-screen
+      setPos({ top: rect.bottom + 6, left: rect.right });
+    }
+    setIsOpen(v => !v);
+  }
 
   return (
-    <div className="relative flex justify-end" ref={dropdownRef}>
+    <>
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        ref={btnRef}
+        onClick={e => { e.stopPropagation(); openMenu(); }}
         className={`p-1.5 rounded-lg transition-all ${
-          isOpen 
-            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20' 
+          isOpen
+            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20'
             : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
         }`}
         title="Actions"
@@ -129,34 +142,36 @@ const SubjectActions = ({
         <Settings size={14} className={isOpen ? 'animate-spin-slow' : ''} />
       </button>
 
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1.5 w-44 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
-          <div className="p-1">
-            {group && (
-              <button
-                onClick={() => { onEdit(group); setIsOpen(false); }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-lg transition-colors"
-              >
-                <div className="w-5 h-5 rounded bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center shrink-0">
-                  <Pencil size={12} />
-                </div>
-                Edit Subject
-              </button>
-            )}
-            <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
+      {isOpen && createPortal(
+        <div
+          id={`subject-actions-${sub.id}`}
+          className="fixed z-[99999] flex items-center gap-1 p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 animate-dropdown-in"
+          style={{ top: pos.top, right: `calc(100vw - ${pos.left}px)` }}
+          onClick={e => e.stopPropagation()}
+        >
+          {group && (
             <button
-              onClick={() => { onDelete({ name: sub.name, ids: [sub.id] }); setIsOpen(false); }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-[11px] font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+              onClick={() => { onEdit(group); setIsOpen(false); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors whitespace-nowrap"
+              title="Edit Subject"
             >
-              <div className="w-5 h-5 rounded bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
-                <Trash2 size={12} />
-              </div>
-              Remove
+              <Pencil size={13} />
+              Edit
             </button>
-          </div>
-        </div>
+          )}
+          <div className="w-px h-5 bg-slate-200 dark:bg-slate-600" />
+          <button
+            onClick={() => { onDelete({ name: sub.name, ids: [sub.id] }); setIsOpen(false); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors whitespace-nowrap"
+            title="Remove Subject"
+          >
+            <Trash2 size={13} />
+            Remove
+          </button>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 };
 
