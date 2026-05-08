@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight } from 'lucide-react';
@@ -407,8 +407,8 @@ export default function Finance() {
                   const status = balance <= 0 ? 'Paid' : totalPaid > 0 ? 'Partial' : 'Pending';
                   const badge: Record<string, string> = { Paid: 'badge-success', Partial: 'badge-warning', Pending: 'badge-danger' };
                   return (
-                    <>
-                      <tr key={student.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40" onClick={() => toggleInvoice(student.id)}>
+                    <React.Fragment key={student.id}>
+                      <tr className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40" onClick={() => toggleInvoice(student.id)}>
                         <td><ChevronRight size={16} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} /></td>
                         <td className="font-medium">{student.firstName} {student.lastName}</td>
                         <td><span className="badge badge-info">{sf.length}</span></td>
@@ -439,7 +439,7 @@ export default function Finance() {
                           </tr>
                         );
                       })}
-                    </>
+                    </React.Fragment>
                   );
                 })}
               </tbody>

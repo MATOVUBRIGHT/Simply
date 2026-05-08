@@ -586,13 +586,19 @@ export default function Subjects() {
   function downloadTemplate() {
     import('xlsx').then(({ utils, writeFile }) => {
       const headers = subjectExpectedFields.map(f => f.label);
+      // Use actual class names from the school
+      const classNames = (classes as any[]).map((c: any) => c.name);
+      const sampleClasses = classNames.length >= 3
+        ? [classNames[0], classNames[0], classNames[1]]
+        : ['P.4', 'P.4', 'P.5'];
+      const classListHint = classNames.length > 0 ? classNames.join(', ') : 'P.1, P.2, P.3, S.1, S.2';
       const sampleRows = [
-        ['Mathematics', 'MATH', 'P.4'],
-        ['English Language', 'ENG', 'P.4'],
-        ['Science', 'SCI', 'P.5'],
+        ['Mathematics', 'MATH', sampleClasses[0]],
+        ['English Language', 'ENG', sampleClasses[1]],
+        ['Science', 'SCI', sampleClasses[2]],
       ];
       const ws = utils.aoa_to_sheet([
-        ['// Example: Fill in your subjects below. Class Name must match exactly.'],
+        [`// SUBJECT IMPORT TEMPLATE - Class Name must match one of: ${classListHint}`],
         headers,
         ...sampleRows,
       ]);
@@ -684,6 +690,24 @@ export default function Subjects() {
     if (importPreview.length === 0 || !id) { addToast('No valid subjects to import', 'error'); return; }
     setIsImporting(true);
     setImportProgress(0);
+
+    // Build case-insensitive class name → ID lookup
+    const normClass = (s: string) => s.toLowerCase().replace(/[\s._\-]/g, '');
+    const classLookup = new Map<string, string>();
+    (classes as any[]).forEach((c: any) => {
+      classLookup.set(normClass(c.name), c.id);
+      classLookup.set(c.id, c.id);
+    });
+    function resolveClassId(raw: string): string {
+      if (!raw) return '';
+      const key = normClass(raw);
+      if (classLookup.has(key)) return classLookup.get(key)!;
+      for (const [k, v] of classLookup) {
+        if (k.includes(key) || key.includes(k)) return v;
+      }
+      return raw;
+    }
+
     try {
       const now = new Date().toISOString();
       let successCount = 0;
@@ -691,11 +715,12 @@ export default function Subjects() {
       
       for (let i = 0; i < previewSnapshot.length; i++) {
         const data = previewSnapshot[i];
+        const resolvedClassId = resolveClassId((data.classId as string) || '');
         const subject: Subject = {
           id: uuidv4(),
           name: (data.name as string) || 'Unknown',
           code: (data.code as string) || '',
-          classId: (data.classId as string) || '',
+          classId: resolvedClassId,
           createdAt: now,
         };
         await dataService.create(id, 'subjects', subject as any);

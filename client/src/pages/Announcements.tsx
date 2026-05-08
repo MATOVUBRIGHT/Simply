@@ -508,13 +508,16 @@ export default function Announcements() {
                     <div className="flex items-center gap-4 mt-4 text-sm text-slate-500">
                       <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/50 dark:bg-slate-800/50">
                         <Clock size={14} />
-                        {new Date(a.createdAt).toLocaleString('en-US', { 
+                        {new Date(a.updatedAt || a.createdAt).toLocaleString('en-US', { 
                           month: 'short', 
                           day: 'numeric',
                           year: 'numeric',
                           hour: '2-digit',
                           minute: '2-digit'
                         })}
+                        {a.updatedAt && a.updatedAt !== a.createdAt && (
+                          <span className="text-[10px] text-slate-400 ml-1">(edited)</span>
+                        )}
                       </span>
                       {(a as any).eventDate && (
                         <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-medium">

@@ -1243,6 +1243,7 @@ textarea.form-input {
 /* Modal Styles */
 .modal-overlay {
   @apply fixed inset-0 bg-black/50 flex items-center justify-center z-50;
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
 }
 

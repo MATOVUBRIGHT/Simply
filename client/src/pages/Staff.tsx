@@ -546,6 +546,10 @@ export default function StaffPage() {
     { key: 'phone', label: 'Phone', required: false },
     { key: 'email', label: 'Email', required: false },
     { key: 'address', label: 'Address', required: false },
+    { key: 'salary', label: 'Salary', required: false },
+    { key: 'joinDate', label: 'Join Date (YYYY-MM-DD)', required: false },
+    { key: 'qualification', label: 'Qualification', required: false },
+    { key: 'status', label: 'Status (active/inactive)', required: false },
   ];
 
   function handleExportCSV() {
@@ -579,9 +583,9 @@ export default function StaffPage() {
     import('xlsx').then(({ utils, writeFile }) => {
       const headers = staffExpectedFields.map(f => f.label);
       const sampleRows = [
-        ['EMP-001', 'John', 'Doe', 'teacher', 'Academic', '0771234567', 'john.doe@school.com', '123 Main Street'],
-        ['EMP-002', 'Jane', 'Smith', 'admin', 'Administration', '0782345678', 'jane.smith@school.com', '45 Park Avenue'],
-        ['EMP-003', 'Peter', 'Okello', 'teacher', 'Sciences', '0753456789', '', ''],
+        ['EMP-001', 'John', 'Doe', 'teacher', 'Academic', '0771234567', 'john.doe@school.com', '123 Main Street', '1500000', '2023-01-15', 'B.Ed', 'active'],
+        ['EMP-002', 'Jane', 'Smith', 'admin', 'Administration', '0782345678', 'jane.smith@school.com', '45 Park Avenue', '1200000', '2022-09-01', 'MBA', 'active'],
+        ['EMP-003', 'Peter', 'Okello', 'teacher', 'Sciences', '0753456789', '', '', '1400000', '', 'BSc', 'active'],
       ];
       const ws = utils.aoa_to_sheet([
         ['// Role options: teacher, admin, principal, librarian, nurse, driver, cook, security, other'],
@@ -684,6 +688,8 @@ export default function StaffPage() {
       
       for (let i = 0; i < previewSnapshot.length; i++) {
         const data = previewSnapshot[i];
+        const statusValue = ((data as any).status as string)?.toLowerCase();
+        const validStatus = statusValue === 'inactive' ? 'inactive' : 'active';
         const staffMember: Staff = {
           id: crypto.randomUUID(), schoolId: id,
           employeeId: (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
@@ -692,7 +698,10 @@ export default function StaffPage() {
           role: (data.role as any) || 'teacher',
           department: data.department, phone: (data.phone as string) || '',
           email: data.email as string | undefined, address: data.address as string | undefined,
-          status: 'active', createdAt: now, updatedAt: now,
+          salary: (data as any).salary ? parseFloat(String((data as any).salary)) || undefined : undefined,
+          joinDate: (data as any).joinDate as string | undefined,
+          qualification: (data as any).qualification as string | undefined,
+          status: validStatus, createdAt: now, updatedAt: now,
         };
         const result = await dataService.create(id, 'staff', staffMember as any);
         if (!result.success) console.error('Import failed for', staffMember.firstName, result.error);

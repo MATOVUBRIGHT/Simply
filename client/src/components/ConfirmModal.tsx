@@ -97,6 +97,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
             style={{
               backgroundColor: visible ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0)',
+              WebkitBackdropFilter: visible ? 'blur(4px)' : 'blur(0px)',
               backdropFilter: visible ? 'blur(4px)' : 'blur(0px)',
               transition: 'background-color 0.2s ease, backdrop-filter 0.2s ease',
             }}

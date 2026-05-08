@@ -46,7 +46,11 @@ const expectedFields = [
   { key: 'guardianName', label: 'Guardian Name', required: false },
   { key: 'guardianPhone', label: 'Guardian Phone', required: false },
   { key: 'guardianEmail', label: 'Guardian Email', required: false },
+  { key: 'guardianRelation', label: 'Guardian Relation', required: false },
+  { key: 'guardianOccupation', label: 'Guardian Occupation', required: false },
   { key: 'medicalInfo', label: 'Medical Info', required: false },
+  { key: 'previousSchool', label: 'Previous School', required: false },
+  { key: 'previousClass', label: 'Previous Class', required: false },
   { key: 'tuitionFee', label: 'Tuition Fee', required: false },
   { key: 'boardingFee', label: 'Boarding Fee', required: false },
 ];
@@ -907,14 +911,16 @@ export default function Students() {
   function downloadTemplate() {
     import('xlsx').then(({ utils, writeFile }) => {
       const headers = expectedFields.map(f => f.label);
+      // Build class list hint from actual classes
+      const classNames = classes.map((c: any) => c.name).join(', ') || 'P.1, P.2, P.3, P.4, S.1, S.2';
       const sampleRows = [
-        ['John', 'Doe', 'male', '2010-01-15', 'P.4', 'ADM-001', '123 Main Street', 'Jane Doe', '0771234567', 'jane@example.com', '', '500000', ''],
-        ['Mary', 'Smith', 'female', '2011-03-20', 'P.3', 'ADM-002', '45 Park Avenue', 'Peter Smith', '0782345678', '', 'Asthma - has inhaler', '450000', '200000'],
-        ['James', 'Okello', 'male', '2009-07-10', 'S.1', '', '', 'Grace Okello', '0753456789', 'grace@email.com', '', '800000', '600000'],
+        ['John', 'Doe', 'male', '2010-01-15', classes[0]?.name || 'P.4', 'ADM-001', '123 Main Street', 'Jane Doe', '0771234567', 'jane@example.com', 'Parent', 'Teacher', '', '', '', '500000', ''],
+        ['Mary', 'Smith', 'female', '2011-03-20', classes[1]?.name || 'P.3', 'ADM-002', '45 Park Avenue', 'Peter Smith', '0782345678', '', 'Guardian', 'Farmer', 'Asthma - has inhaler', 'Sunrise Primary', 'P.2', '450000', '200000'],
+        ['James', 'Okello', 'male', '2009-07-10', classes[2]?.name || 'S.1', '', '', 'Grace Okello', '0753456789', 'grace@email.com', 'Parent', '', '', '', '', '800000', '600000'],
       ];
       const ws = utils.aoa_to_sheet([
         ['// STUDENT IMPORT TEMPLATE - Fill in all required fields (marked *)'],
-        ['// Class: must match exactly (e.g. P.4, S.1, Baby, Nursery). Gender: male or female. Date: YYYY-MM-DD. Fees: numbers only (no currency symbol).'],
+        [`// Class: use exact class name from your school (available: ${classNames}). Gender: male/female/other. Date: YYYY-MM-DD. Fees: numbers only.`],
         headers,
         ...sampleRows,
       ]);
@@ -977,6 +983,26 @@ export default function Students() {
   async function processMapping() {
     const mappedData: Partial<Student>[] = [];
     const newFlaggedItems: Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }> = {};
+
+    // Build a case-insensitive class name → ID lookup
+    const normClass = (s: string) => s.toLowerCase().replace(/[\s._\-]/g, '');
+    const classLookup = new Map<string, string>();
+    classes.forEach((c: any) => {
+      classLookup.set(normClass(c.name), c.id);
+      // also index by id in case user already put the id
+      classLookup.set(c.id, c.id);
+    });
+
+    function resolveClassId(raw: string): string {
+      if (!raw) return '';
+      const key = normClass(raw);
+      if (classLookup.has(key)) return classLookup.get(key)!;
+      // partial match fallback
+      for (const [k, v] of classLookup) {
+        if (k.includes(key) || key.includes(k)) return v;
+      }
+      return raw; // keep raw if no match found
+    }
     
     for (let i = 0; i < csvData.length; i++) {
       const row = csvData[i];
@@ -991,6 +1017,11 @@ export default function Students() {
           }
         }
       });
+
+      // Resolve class name → classId
+      if ((student as any).classId) {
+        (student as any).classId = resolveClassId((student as any).classId);
+      }
       
       if (student.firstName || student.lastName) {
         const fn = (student.firstName as string) || '';
@@ -1071,6 +1102,23 @@ export default function Students() {
 
       const previewSnapshot = [...importPreview];
       const flaggedSnapshot = { ...flaggedItems };
+
+      // Build case-insensitive class name → ID lookup for executeImport
+      const normClass = (s: string) => s.toLowerCase().replace(/[\s._\-]/g, '');
+      const classLookup = new Map<string, string>();
+      classes.forEach((c: any) => {
+        classLookup.set(normClass(c.name), c.id);
+        classLookup.set(c.id, c.id);
+      });
+      function resolveClassId(raw: string): string {
+        if (!raw) return '';
+        const key = normClass(raw);
+        if (classLookup.has(key)) return classLookup.get(key)!;
+        for (const [k, v] of classLookup) {
+          if (k.includes(key) || key.includes(k)) return v;
+        }
+        return raw;
+      }
       
       // Don't close modal immediately, show progress
       for (let i = 0; i < previewSnapshot.length; i++) {
@@ -1099,11 +1147,14 @@ export default function Students() {
               lastName: ((data as any).lastName as string) || 'Unknown',
               dob: ((data as any).dob as string) || '2000-01-01',
               gender: validGender,
-              classId: ((data as any).classId as string) || 'primary-1',
+              classId: resolveClassId(((data as any).classId as string) || ''),
               address: ((data as any).address as string) || '',
               guardianName: ((data as any).guardianName as string) || '',
               guardianPhone: ((data as any).guardianPhone as string) || '',
               guardianEmail: (data as any).guardianEmail as string | undefined,
+              medicalInfo: (data as any).medicalInfo as string | undefined,
+              tuitionFee: (data as any).tuitionFee ? parseFloat(String((data as any).tuitionFee)) || undefined : undefined,
+              boardingFee: (data as any).boardingFee ? parseFloat(String((data as any).boardingFee)) || undefined : undefined,
               status: importStatus as any,
               completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
               completedTerm: importStatus === 'completed' ? 'Final' : undefined,
@@ -1119,11 +1170,14 @@ export default function Students() {
               lastName: ((data as any).lastName as string) || 'Unknown',
               dob: ((data as any).dob as string) || '2000-01-01',
               gender: validGender,
-              classId: ((data as any).classId as string) || 'primary-1',
+              classId: resolveClassId(((data as any).classId as string) || ''),
               address: ((data as any).address as string) || '',
               guardianName: ((data as any).guardianName as string) || '',
               guardianPhone: ((data as any).guardianPhone as string) || '',
               guardianEmail: (data as any).guardianEmail as string | undefined,
+              medicalInfo: (data as any).medicalInfo as string | undefined,
+              tuitionFee: (data as any).tuitionFee ? parseFloat(String((data as any).tuitionFee)) || undefined : undefined,
+              boardingFee: (data as any).boardingFee ? parseFloat(String((data as any).boardingFee)) || undefined : undefined,
               status: importStatus as any,
               completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
               completedTerm: importStatus === 'completed' ? 'Final' : undefined,
@@ -1143,7 +1197,7 @@ export default function Students() {
             lastName: (data.lastName as string) || 'Unknown',
             gender: validGender,
             dob: (data.dob as string) || '2000-01-01',
-            classId: (data.classId as string) || 'primary-1',
+            classId: resolveClassId((data.classId as string) || ''),
             address: (data.address as string) || '',
             guardianName: (data.guardianName as string) || '',
             guardianPhone: (data.guardianPhone as string) || '',
