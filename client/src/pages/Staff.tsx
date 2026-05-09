@@ -1,8 +1,6 @@
-import { useEffect, useState, useRef, useMemo, memo } from 'react';
-import { createPortal } from 'react-dom';
-
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, StaffRole } from '@schofy/shared';
 import type { Staff, SalaryPayment } from '@schofy/shared';
@@ -16,9 +14,6 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
-import { SuccessPopup } from '../components/SuccessPopup';
-import { usePagination } from '../hooks/usePagination';
-import { useDebounce } from '../hooks/useDebounce';
 
 const avatarColors = [
   'bg-violet-500',
@@ -35,204 +30,6 @@ function getAvatarColor(name: string) {
   return avatarColors[index];
 }
 
-const StaffActions = ({ 
-  staff, 
-  onDelete 
-}: {
-  staff: Staff;
-  onDelete: (id: string) => void;
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
-
-  return (
-    <div className="relative flex justify-end" ref={dropdownRef}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={`p-1.5 rounded-lg transition-all ${
-          isOpen 
-            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20' 
-            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
-        }`}
-        title="Actions"
-      >
-        <Settings size={15} className={isOpen ? 'animate-spin-slow' : ''} />
-      </button>
-
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
-          <div className="px-3 py-1.5 border-b border-slate-50 dark:border-slate-700/50">
-            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Management</p>
-          </div>
-          <div className="p-1">
-            <Link 
-              to={`/staff/${staff.id}`}
-              onClick={() => setIsOpen(false)}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
-                <Eye size={13} />
-              </div>
-              View Details
-            </Link>
-            <Link 
-              to={`/staff/${staff.id}/edit`}
-              onClick={() => setIsOpen(false)}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600 dark:hover:text-violet-400 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
-                <Edit size={13} />
-              </div>
-              Edit Profile
-            </Link>
-            {staff.email && (
-              <button
-                onClick={() => { window.open(`mailto:${staff.email}`, '_blank'); setIsOpen(false); }}
-                className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-lg transition-colors"
-              >
-                <div className="w-6 h-6 rounded-md bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
-                  <Mail size={13} />
-                </div>
-                Send Email
-              </button>
-            )}
-            <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
-            <button
-              onClick={() => { onDelete(staff.id); setIsOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
-                <Trash2 size={13} />
-              </div>
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const StaffRow = memo(({ 
-  staff: s, 
-  index, 
-  currentPage, 
-  selectMode, 
-  isSelected, 
-  onSingleClick, 
-  onDoubleClick, 
-  onPreviewImage, 
-  onDelete,
-  pageSize
-}: {
-  staff: Staff;
-  index: number;
-  currentPage: number;
-  selectMode: boolean;
-  isSelected: boolean;
-  onSingleClick: (id: string) => void;
-  onDoubleClick: (id: string) => void;
-  onPreviewImage: (img: { src: string; alt: string }) => void;
-  onDelete: (id: string) => void;
-  pageSize: number;
-}) => {
-  return (
-    <tr 
-      className={`group cursor-pointer transition-colors ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
-      onClick={() => onSingleClick(s.id)}
-      onDoubleClick={() => onDoubleClick(s.id)}
-    >
-      <td className="text-center text-xs text-slate-400 dark:text-slate-500">
-        {(currentPage - 1) * pageSize + index + 1}
-      </td>
-      {selectMode && (
-        <td className="text-center">
-          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-            isSelected 
-              ? 'bg-primary-600 border-primary-600' 
-              : 'border-slate-300 dark:border-slate-600'
-          }`}>
-            {isSelected && (
-              <Check size={12} className="text-white" />
-            )}
-          </div>
-        </td>
-      )}
-      <td>
-        <div className="flex items-center gap-3">
-          {s.photoUrl ? (
-            <button 
-              onClick={(e) => { e.stopPropagation(); onPreviewImage({ src: s.photoUrl!, alt: `${s.firstName} ${s.lastName}` }); }}
-              className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
-            >
-              <img 
-                src={s.photoUrl} 
-                alt={`${s.firstName} ${s.lastName}`}
-                className="w-full h-full object-cover object-top"
-              />
-            </button>
-          ) : (
-            <div className={`w-9 h-9 rounded-lg ${getAvatarColor(s.firstName)} flex items-center justify-center`}>
-              <span className="text-xs font-bold text-white">
-                {s.firstName[0]}{s.lastName[0]}
-              </span>
-            </div>
-          )}
-          <div>
-            <p className="font-medium text-slate-800 dark:text-white">
-              {s.firstName} {s.lastName}
-            </p>
-            <p className="text-xs text-slate-400">{s.department || 'Staff Member'}</p>
-          </div>
-        </div>
-      </td>
-      <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
-        {s.employeeId}
-      </td>
-      <td>
-        <span className="badge badge-violet capitalize">{s.role}</span>
-      </td>
-      <td>
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
-            <Phone size={12} className="text-slate-400" />
-            <span>{s.phone || 'N/A'}</span>
-          </div>
-          {s.email && (
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 truncate max-w-[140px]">
-              <Mail size={12} />
-              <span>{s.email}</span>
-            </div>
-          )}
-        </div>
-      </td>
-      <td>
-        <span className={`badge ${s.status === 'active' ? 'badge-success' : 'badge-gray'}`}>
-          {s.status}
-        </span>
-      </td>
-      <td onClick={(e) => e.stopPropagation()}>
-        <StaffActions 
-          staff={s}
-          onDelete={onDelete}
-        />
-      </td>
-    </tr>
-  );
-});
-
 export default function StaffPage() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
@@ -246,27 +43,6 @@ export default function StaffPage() {
   const salaryPayments = salaryPaymentsData as SalaryPayment[];
 
   const [search, setSearch] = useState('');
-  const [debouncedSearch] = useDebounce(search, 300);
-
-  const filteredStaff = useMemo(() => {
-    return staff.filter((s) =>
-      s.firstName.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-      s.lastName.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-      (s.employeeId || '').toLowerCase().includes(debouncedSearch.toLowerCase())
-    );
-  }, [staff, debouncedSearch]);
-
-  const {
-    items: paginatedStaff,
-    currentPage,
-    totalPages,
-    pageSize,
-    goToPage,
-    nextPage,
-    prevPage,
-    totalItems: totalCount
-  } = usePagination(filteredStaff, { pageSize: 10 });
-
   const { addToast } = useToast();
   const { formatMoney } = useCurrency();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -275,9 +51,6 @@ export default function StaffPage() {
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
-  const [isImporting, setIsImporting] = useState(false);
-  const [showImportSuccess, setShowImportSuccess] = useState(false);
-  const [importProgress, setImportProgress] = useState(0);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
@@ -490,6 +263,12 @@ export default function StaffPage() {
     }
   }
 
+  const filteredStaff = staff.filter((s) =>
+    s.firstName.toLowerCase().includes(search.toLowerCase()) ||
+    s.lastName.toLowerCase().includes(search.toLowerCase()) ||
+    s.employeeId.toLowerCase().includes(search.toLowerCase())
+  );
+
   async function handleDelete(id: string) {
     const authId = schoolId || user?.id;
     if (!authId) return;
@@ -505,15 +284,9 @@ export default function StaffPage() {
     if (staffMember) {
       addToRecycleBin(authId, { id: `staff-${Date.now()}`, type: 'staff', name: `${staffMember.firstName} ${staffMember.lastName}`, data: staffMember, deletedAt: new Date().toISOString() });
     }
-    
-    // Execute delete without awaiting for instant feedback
-    dataService.delete(authId, 'staff', id).then(result => {
-      if (!result.success) {
-        addToast('Failed to sync deletion, will retry in background', 'warning');
-      }
-    });
-    
     addToast('Staff member moved to recycle bin', 'success');
+    const result = await dataService.delete(authId, 'staff', id);
+    if (!result.success) addToast('Failed to delete: ' + result.error, 'error');
   }
 
   const staffCSVColumns = [
@@ -546,10 +319,6 @@ export default function StaffPage() {
     { key: 'phone', label: 'Phone', required: false },
     { key: 'email', label: 'Email', required: false },
     { key: 'address', label: 'Address', required: false },
-    { key: 'salary', label: 'Salary', required: false },
-    { key: 'joinDate', label: 'Join Date (YYYY-MM-DD)', required: false },
-    { key: 'qualification', label: 'Qualification', required: false },
-    { key: 'status', label: 'Status (active/inactive)', required: false },
   ];
 
   function handleExportCSV() {
@@ -580,24 +349,28 @@ export default function StaffPage() {
   }, []);
 
   function downloadTemplate() {
-    import('xlsx').then(({ utils, writeFile }) => {
-      const headers = staffExpectedFields.map(f => f.label);
-      const sampleRows = [
-        ['EMP-001', 'John', 'Doe', 'teacher', 'Academic', '0771234567', 'john.doe@school.com', '123 Main Street', '1500000', '2023-01-15', 'B.Ed', 'active'],
-        ['EMP-002', 'Jane', 'Smith', 'admin', 'Administration', '0782345678', 'jane.smith@school.com', '45 Park Avenue', '1200000', '2022-09-01', 'MBA', 'active'],
-        ['EMP-003', 'Peter', 'Okello', 'teacher', 'Sciences', '0753456789', '', '', '1400000', '', 'BSc', 'active'],
-      ];
-      const ws = utils.aoa_to_sheet([
-        ['// Role options: teacher, admin, principal, librarian, nurse, driver, cook, security, other'],
-        headers,
-        ...sampleRows,
-      ]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 16) }));
-      const wb = utils.book_new();
-      utils.book_append_sheet(wb, ws, 'Staff');
-      writeFile(wb, 'staff-import-template.xlsx');
-      addToast('Template downloaded', 'success');
+    const headers = staffExpectedFields.map(f => f.label);
+    const sampleRow = staffExpectedFields.map(f => {
+      switch (f.key) {
+        case 'employeeId': return 'EMP-001';
+        case 'firstName': return 'John';
+        case 'lastName': return 'Doe';
+        case 'role': return 'teacher';
+        case 'department': return 'Academic';
+        case 'phone': return '0771234567';
+        case 'email': return 'john.doe@school.com';
+        case 'address': return '123 Main Street';
+        default: return '';
+      }
     });
+    const csv = [headers.join(','), sampleRow.join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'staff-import-template.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
+    addToast('Template downloaded', 'success');
   }
 
   function closeImportModal() {
@@ -607,8 +380,6 @@ export default function StaffPage() {
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
-    setIsImporting(false);
-    setImportProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -616,41 +387,65 @@ export default function StaffPage() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const { read, utils } = await import('xlsx');
-      const buffer = await file.arrayBuffer();
-      const wb = read(buffer);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
-      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
-      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
-      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
-      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
-
-      // Smart auto-mapping: normalize by stripping spaces/underscores and camelCase
-      const norm = (s: string) => s.toLowerCase().replace(/[\s_\-()\/]/g, '').replace(/[^a-z0-9]/g, '');
-      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
-      const autoMapping: Record<string, string> = {};
-      staffExpectedFields.forEach(field => {
-        const nKey = norm(field.key);
-        const nLabel = norm(field.label);
-        const nCamel = camelWords(field.key);
-        const matchingHeader = headers.find(h => {
-          const nH = norm(h);
-          return nH === nKey || nH === nLabel || nH === nCamel ||
-            nH.includes(nKey) || nKey.includes(nH) ||
-            nH.includes(nLabel) || nLabel.includes(nH);
-        });
-        if (matchingHeader) autoMapping[field.key] = matchingHeader;
-      });
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      if (lines.length < 2) {
+        addToast('CSV must have headers and at least one data row', 'error');
+        return;
+      }
+      const headers = parseCSVHeaders(lines[0]);
+      const data = lines.slice(1).map(line => parseCSVLine(line));
       setCsvHeaders(headers);
       setCsvData(data);
+      const autoMapping: Record<string, string> = {};
+      staffExpectedFields.forEach(field => {
+        const matchingHeader = headers.find(h => 
+          h.toLowerCase() === field.label.toLowerCase() ||
+          h.toLowerCase() === field.key.toLowerCase() ||
+          h.toLowerCase().includes(field.key.toLowerCase()) ||
+          field.label.toLowerCase().includes(h.toLowerCase())
+        );
+        if (matchingHeader) autoMapping[field.key] = matchingHeader;
+      });
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
     } catch (error) {
-      addToast('Failed to read Excel file', 'error');
+      addToast('Failed to read CSV file', 'error');
     }
     event.target.value = '';
+  }
+
+  function parseCSVHeaders(line: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') inQuotes = !inQuotes;
+      else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else current += char;
+    }
+    result.push(current.trim());
+    return result;
+  }
+
+  function parseCSVLine(line: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') inQuotes = !inQuotes;
+      else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else current += char;
+    }
+    result.push(current.trim());
+    return result;
   }
 
   function processMapping() {
@@ -679,45 +474,36 @@ export default function StaffPage() {
     if (!id || submittingRef.current) return;
     if (importPreview.length === 0) { addToast('No valid staff to import', 'error'); return; }
     submittingRef.current = true;
-    setIsImporting(true);
-    setImportProgress(0);
     try {
       const now = new Date().toISOString();
       let successCount = 0;
-      const previewSnapshot = [...importPreview];
-      
-      for (let i = 0; i < previewSnapshot.length; i++) {
-        const data = previewSnapshot[i];
-        const statusValue = ((data as any).status as string)?.toLowerCase();
-        const validStatus = statusValue === 'inactive' ? 'inactive' : 'active';
+      const newStaff: Staff[] = [];
+      for (const data of importPreview) {
         const staffMember: Staff = {
           id: crypto.randomUUID(), schoolId: id,
-          employeeId: (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+          employeeId: (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           firstName: (data.firstName as string) || 'Unknown',
           lastName: (data.lastName as string) || 'Unknown',
           role: (data.role as any) || 'teacher',
           department: data.department, phone: (data.phone as string) || '',
           email: data.email as string | undefined, address: data.address as string | undefined,
-          salary: (data as any).salary ? parseFloat(String((data as any).salary)) || undefined : undefined,
-          joinDate: (data as any).joinDate as string | undefined,
-          qualification: (data as any).qualification as string | undefined,
-          status: validStatus, createdAt: now, updatedAt: now,
+          status: 'active', createdAt: now, updatedAt: now,
         };
-        const result = await dataService.create(id, 'staff', staffMember as any);
-        if (!result.success) console.error('Import failed for', staffMember.firstName, result.error);
-        else successCount++;
-        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
+        newStaff.push(staffMember);
+        successCount++;
       }
-
-      setIsImporting(false);
+      // Optimistic update
+      addToast(`Imported ${successCount} staff`, 'success');
       closeImportModal();
-      setShowImportSuccess(true);
+      // Fire to Supabase in background
+      for (const s of newStaff) {
+        const result = await dataService.create(id, 'staff', s as any);
+        if (!result.success) console.error('Import failed for', s.firstName, result.error);
+      }
     } catch (error) {
-      setIsImporting(false);
       addToast('Failed to import staff', 'error');
-    } finally {
-      submittingRef.current = false;
     }
+    submittingRef.current = false;
   }
 
   const [showTeachersPanel, setShowTeachersPanel] = useState(false);
@@ -742,7 +528,7 @@ export default function StaffPage() {
               <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
             </button>
             {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-[9999] overflow-hidden">
+              <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
                 <button onClick={handleExportPDF} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
                   <FileText size={14} /> Export PDF
                 </button>
@@ -759,7 +545,7 @@ export default function StaffPage() {
             <Upload size={16} />
             <span className="hidden sm:inline">Import</span>
           </button>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls" className="hidden" />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".csv" className="hidden" />
           <Link to="/staff/new" className="btn btn-primary">
             <Plus size={16} />
             Add Staff
@@ -817,7 +603,7 @@ export default function StaffPage() {
         </div>
       </div>
 
-      {/* Teachers Panel - only shown when Teachers card is clicked */}
+      {/* Teachers Panel — only shown when Teachers card is clicked */}
       {showTeachersPanel && (
         <div className="card">
           <div className="card-header flex items-center justify-between">
@@ -955,7 +741,7 @@ export default function StaffPage() {
                     </div>
                   </td>
                 </tr>
-              ) : paginatedStaff.length === 0 ? (
+              ) : filteredStaff.length === 0 ? (
                 <tr>
                   <td colSpan={selectMode ? 8 : 7} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
@@ -970,95 +756,110 @@ export default function StaffPage() {
                   </td>
                 </tr>
               ) : (
-                paginatedStaff.map((s, index) => (
-                  <StaffRow
+                filteredStaff.map((s, index) => (
+                  <tr 
                     key={s.id}
-                    staff={s}
-                    index={index}
-                    currentPage={currentPage}
-                    selectMode={selectMode}
-                    isSelected={selectedStaff.has(s.id)}
-                    onSingleClick={handleRowSingleClick}
-                    onDoubleClick={handleRowDoubleClick}
-                    onPreviewImage={setPreviewImage}
-                    onDelete={handleDelete}
-                    pageSize={pageSize}
-                  />
+                    className={`group cursor-pointer transition-colors ${selectedStaff.has(s.id) ? 'bg-violet-50 dark:bg-violet-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+                    onClick={() => handleRowSingleClick(s.id)}
+                    onDoubleClick={() => handleRowDoubleClick(s.id)}
+                  >
+                    <td className="text-center text-xs text-slate-400 dark:text-slate-500">
+                      {index + 1}
+                    </td>
+                    {selectMode && (
+                      <td className="text-center">
+                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                          selectedStaff.has(s.id) 
+                            ? 'bg-violet-600 border-violet-600' 
+                            : 'border-slate-300 dark:border-slate-600'
+                        }`}>
+                          {selectedStaff.has(s.id) && (
+                            <Check size={12} className="text-white" />
+                          )}
+                        </div>
+                      </td>
+                    )}
+                    <td>
+                      <div className="flex items-center gap-3">
+                        {s.photoUrl ? (
+                          <button 
+                            onClick={() => setPreviewImage({ src: s.photoUrl!, alt: `${s.firstName} ${s.lastName}` })}
+                            className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
+                          >
+                            <img 
+                              src={s.photoUrl} 
+                              alt={`${s.firstName} ${s.lastName}`}
+                              className="w-full h-full object-cover object-top"
+                            />
+                          </button>
+                        ) : (
+                          <div className={`w-9 h-9 rounded-lg ${getAvatarColor(s.firstName)} flex items-center justify-center`}>
+                            <span className="text-xs font-bold text-white">
+                              {s.firstName[0]}{s.lastName[0]}
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-medium text-slate-800 dark:text-white">
+                            {s.firstName} {s.lastName}
+                          </p>
+                          <p className="text-xs text-slate-400">{s.department || 'Staff Member'}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
+                      {s.employeeId}
+                    </td>
+                    <td>
+                      <span className="badge badge-violet capitalize">{s.role}</span>
+                    </td>
+                    <td>
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
+                          <Phone size={12} className="text-slate-400" />
+                          <span>{s.phone || 'N/A'}</span>
+                        </div>
+                        {s.email && (
+                          <div className="flex items-center gap-1.5 text-xs text-slate-500 truncate max-w-[140px]">
+                            <Mail size={12} />
+                            <span>{s.email}</span>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`badge ${s.status === 'active' ? 'badge-success' : 'badge-gray'}`}>
+                        {s.status}
+                      </span>
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1">
+                        <Link to={`/staff/${s.id}`} className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 dark:text-sky-400 rounded-lg transition-colors">
+                          <Eye size={15} />
+                        </Link>
+                        <Link to={`/staff/${s.id}/edit`} className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors">
+                          <Edit size={15} />
+                        </Link>
+                        {s.email && (
+                          <button 
+                            onClick={() => window.open(`mailto:${s.email}`, '_blank')}
+                            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
+                            title="Send Email"
+                          >
+                            <Mail size={15} />
+                          </button>
+                        )}
+                        <button onClick={() => handleDelete(s.id)} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
-
-        {totalPages > 1 && (
-          <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-            <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * pageSize + 1}</span> to{' '}
-              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * pageSize, totalCount)}</span> of{' '}
-              <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> staff members
-            </p>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => goToPage(1)}
-                disabled={currentPage === 1}
-                className="btn btn-secondary p-2 disabled:opacity-40"
-                title="First page"
-              >
-                <ChevronLeft size={14} />
-                <ChevronLeft size={14} className="-ml-2" />
-              </button>
-              <button
-                onClick={prevPage}
-                disabled={currentPage === 1}
-                className="btn btn-secondary p-2 disabled:opacity-40"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              {/* Page number buttons */}
-              {Array.from({ length: totalPages }, (_, i) => i + 1)
-                .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
-                .reduce<(number | '...')[]>((acc, p, i, arr) => {
-                  if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push('...');
-                  acc.push(p);
-                  return acc;
-                }, [])
-                .map((p, i) =>
-                  p === '...' ? (
-                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">...</span>
-                  ) : (
-                    <button
-                      key={p}
-                      onClick={() => goToPage(p as number)}
-                      className={`min-w-[2rem] h-8 px-2 rounded-lg text-sm font-medium transition-colors ${
-                        currentPage === p
-                          ? 'text-white shadow-sm'
-                          : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600'
-                      }`}
-                      style={currentPage === p ? { backgroundColor: 'var(--primary-color)' } : {}}
-                    >
-                      {p}
-                    </button>
-                  )
-                )}
-              <button
-                onClick={nextPage}
-                disabled={currentPage === totalPages}
-                className="btn btn-secondary p-2 disabled:opacity-40"
-              >
-                <ChevronRight size={16} />
-              </button>
-              <button
-                onClick={() => goToPage(totalPages)}
-                disabled={currentPage === totalPages}
-                className="btn btn-secondary p-2 disabled:opacity-40"
-                title="Last page"
-              >
-                <ChevronRight size={14} />
-                <ChevronRight size={14} className="-ml-2" />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
       {previewImage && (
         <ImageModal 
@@ -1069,9 +870,9 @@ export default function StaffPage() {
         />
       )}
 
-      {showImportModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
@@ -1092,7 +893,7 @@ export default function StaffPage() {
                   <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors cursor-pointer text-center"
                     onClick={() => fileInputRef.current?.click()}>
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
@@ -1119,30 +920,18 @@ export default function StaffPage() {
                   </div>
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
-                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
-                        </tr>
-                      </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {csvHeaders.map((header, idx) => {
-                          const sample = csvData[0]?.[idx] || '';
-                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
-                          return (
-                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
-                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
-                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
-                              <td className="px-3 py-2">
-                                <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">- Skip -</option>
-                                  {staffExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
-                                </select>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {staffExpectedFields.filter(f => f.required).map(field => (
+                          <tr key={field.key}>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">{field.label}*</td>
+                            <td className="px-2 py-1.5">
+                              <select value={fieldMapping[field.key] || ''} onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))} className="w-full form-input py-1 px-2 text-xs">
+                                <option value="">-- Skip --</option>
+                                {csvHeaders.map(header => (<option key={header} value={header}>{header}</option>))}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -1188,27 +977,20 @@ export default function StaffPage() {
                     )}
                   </div>
                   <div className="flex justify-between pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
-                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
-                      {isImporting ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={14} /> Import {importPreview.length}</>}
-                    </button>
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
+                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1"><Check size={14} /> Import {importPreview.length}</button>
                   </div>
-                  {isImporting && (
-                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-2">
-                      <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
-                    </div>
-                  )}
                 </div>
               )}
             </div>
           </div>
         </div>
-      , document.body)}
+      )}
 
       {/* Generate Payroll Modal */}
-      {showPayrollModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div className="modal-card w-full max-w-md max-h-[85vh] overflow-hidden animate-modal-in">
+      {showPayrollModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Settings size={18} className="text-white" />
@@ -1250,7 +1032,7 @@ export default function StaffPage() {
             </div>
           </div>
         </div>
-      , document.body)}
+      )}
 
       {/* Mark as Paid Modal */}
       <DropdownModal
@@ -1385,14 +1167,6 @@ export default function StaffPage() {
           )}
         </div>
       </DropdownModal>
-
-      {showImportSuccess && (
-        <SuccessPopup 
-          message="Import Complete!" 
-          subMessage="Staff records have been updated."
-          onClose={() => setShowImportSuccess(false)}
-        />
-      )}
     </div>
   );
 }

@@ -1,7 +1,5 @@
-import { useEffect, useState, useRef, useMemo, memo } from 'react';
-import { createPortal } from 'react-dom';
-
-import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, ChevronLeft, ChevronRight, Eye, Share2 } from 'lucide-react';
+import { useEffect, useState, useRef, useMemo } from 'react';
+import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, Fee, FeeStructure, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -14,10 +12,6 @@ import { useTableData } from '../lib/store';
 import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor, generateInvoicesFromStructure } from '../utils/feeStructures';
 import { ClassOption } from '../utils/classroom';
 import DropdownModal from '../components/DropdownModal';
-import { SuccessPopup } from '../components/SuccessPopup';
-import InvoiceTemplate, { InvoiceLabels, DEFAULT_INVOICE_LABELS } from '../components/InvoiceTemplate';
-import { usePagination } from '../hooks/usePagination';
-import { useDebounce } from '../hooks/useDebounce';
 
 interface Invoice {
   id: string;
@@ -45,10 +39,8 @@ interface Bursary {
 
 interface Discount {
   id: string;
-  classId?: string;
-  className?: string;
-  studentId?: string;
-  studentName?: string;
+  classId: string;
+  className: string;
   amount: number;
   type: 'fixed' | 'percentage';
   term: string;
@@ -56,170 +48,6 @@ interface Discount {
   createdAt: string;
 }
 
-const StudentInvoiceRow = memo(({ 
-  student, 
-  formatMoney, 
-  onInvoice,
-  onView,
-}: { 
-  student: any; 
-  formatMoney: (val: number) => string; 
-  onInvoice: (id: string, classId: string) => void;
-  onView: (student: any) => void;
-}) => (
-  <tr
-    className="cursor-pointer hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 transition-colors"
-    onClick={() => onView(student)}
-  >
-    <td className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline">{student.studentName}</td>
-    <td className="text-slate-500">{student.admissionNo}</td>
-    <td>
-      <span className="badge badge-info">{student.invoiceCount}</span>
-    </td>
-    <td className="font-semibold">{formatMoney(student.totalInvoiced)}</td>
-    <td className="text-emerald-600 font-semibold">{formatMoney(student.totalPaid)}</td>
-    <td className={student.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>
-      {formatMoney(student.balance)}
-    </td>
-    <td>
-      {student.status === 'not_invoiced' ? (
-        <span className="badge badge-warning gap-1.5">
-          <XCircle size={12} />
-          Not Invoiced
-        </span>
-      ) : student.status === 'paid' ? (
-        <span className="badge badge-success gap-1.5">
-          <CheckCircle size={12} />
-          Cleared
-        </span>
-      ) : (
-        <span className="badge badge-danger gap-1.5">
-          <Clock size={12} />
-          Balance
-        </span>
-      )}
-    </td>
-    <td onClick={e => e.stopPropagation()}>
-      <button
-        onClick={() => onInvoice(student.id, student.classId || '')}
-        className="btn btn-secondary text-sm py-1.5"
-      >
-        <Plus size={14} /> Invoice
-      </button>
-    </td>
-  </tr>
-));
-
-const InvoiceActions = ({ 
-  invoice, 
-  onRecord, 
-  onView 
-}: {
-  invoice: Invoice;
-  onRecord: (id: string) => void;
-  onView: (invoice: Invoice) => void;
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
-
-  return (
-    <div className="relative flex justify-end" ref={dropdownRef}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={`p-1.5 rounded-lg transition-all ${
-          isOpen 
-            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20' 
-            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
-        }`}
-        title="Actions"
-      >
-        <Settings size={15} className={isOpen ? 'animate-spin-slow' : ''} />
-      </button>
-
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
-          <div className="p-1">
-            <button
-              onClick={() => { onView(invoice); setIsOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center shrink-0 text-indigo-600 dark:text-indigo-400">
-                <Eye size={13} />
-              </div>
-              View & Share
-            </button>
-            {invoice.status !== 'paid' && (
-              <button
-                onClick={() => { onRecord(invoice.id); setIsOpen(false); }}
-                className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-600 dark:hover:text-emerald-400 rounded-lg transition-colors"
-              >
-                <div className="w-6 h-6 rounded-md bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center shrink-0 text-emerald-600 dark:text-emerald-400">
-                  <DollarSign size={13} />
-                </div>
-                Record Payment
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const InvoiceRow = memo(({ 
-  invoice, 
-  formatMoney, 
-  onRecord,
-  onView,
-  statusConfig
-}: { 
-  invoice: Invoice; 
-  formatMoney: (val: number) => string; 
-  onRecord: (id: string) => void;
-  onView: (invoice: Invoice) => void;
-  statusConfig: any;
-}) => {
-  const StatusIcon = statusConfig[invoice.status].icon;
-  return (
-    <tr className="group">
-      <td className="font-medium">{invoice.studentName}</td>
-      <td>{invoice.description}</td>
-      <td className="font-semibold">{formatMoney(invoice.amount)}</td>
-      <td className="text-emerald-600 font-semibold">{formatMoney(invoice.paidAmount)}</td>
-      <td className={invoice.amount - invoice.paidAmount > 0 ? 'text-red-600 font-semibold' : ''}>
-        {formatMoney(invoice.amount - invoice.paidAmount)}
-      </td>
-      <td>
-        <span className={`badge ${statusConfig[invoice.status].bg} ${statusConfig[invoice.status].color} gap-1.5`}>
-          <StatusIcon size={12} />
-          {invoice.status}
-        </span>
-      </td>
-      <td><span className="badge badge-info">Term {invoice.term}</span></td>
-      <td onClick={(e) => e.stopPropagation()}>
-        <InvoiceActions 
-          invoice={invoice}
-          onRecord={onRecord}
-          onView={onView}
-        />
-      </td>
-    </tr>
-  );
-});
-
-// Build: 2026-05-05
 export default function Invoices() {
   const { user, schoolId } = useAuth();
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -227,7 +55,6 @@ export default function Invoices() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterTerm, setFilterTerm] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [debouncedSearch] = useDebounce(searchTerm, 300);
   const [showStatusFilter, setShowStatusFilter] = useState(false);
   const [showTermFilter, setShowTermFilter] = useState(false);
   const { addToast } = useToast();
@@ -244,10 +71,6 @@ export default function Invoices() {
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<'invoices' | 'students'>('invoices');
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [showImportSuccess, setShowImportSuccess] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const [selectedStudentForView, setSelectedStudentForView] = useState<any | null>(null);
   
   const [showStructureModal, setShowStructureModal] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -260,78 +83,23 @@ export default function Invoices() {
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [showBursaryModal, setShowBursaryModal] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
-  const [newBursary, setNewBursary] = useState({ studentId: '', amount: 0, reason: '' });
-  const [newDiscount, setNewDiscount] = useState({ studentId: '', amount: 0, type: 'fixed' as 'fixed' | 'percentage' });
+  const [bursaries, setBursaries] = useState<Bursary[]>([]);
+  const [discounts, setDiscounts] = useState<Discount[]>([]);
+  const [newBursary, setNewBursary] = useState({ studentId: '', amount: 0 });
+  const [newDiscount, setNewDiscount] = useState({ classId: '', amount: 0, type: 'fixed' as 'fixed' | 'percentage' });
   const [searchStudent, setSearchStudent] = useState('');
   const [filterBursaryClass, setFilterBursaryClass] = useState<string>('all');
   const [termSettings, setTermSettings] = useState<Record<string, string>>({});
   const [showPromotionBanner, setShowPromotionBanner] = useState(false);
   const [expiredTerm, setExpiredTerm] = useState('');
-  // Payment modal
-  const [invoicePayModal, setInvoicePayModal] = useState<{ invoiceId: string; studentName: string; description: string; remaining: number } | null>(null);
-  const [invoicePayAmount, setInvoicePayAmount] = useState('');
-  const [invoicePayMethod, setInvoicePayMethod] = useState<string>(PaymentMethod.CASH);
-  const [isRecordingInvoicePayment, setIsRecordingInvoicePayment] = useState(false);
-
-  // Template Preview
-  const [showTemplate, setShowTemplate] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [isLiveEditing, setIsLiveEditing] = useState(false);
-  const [labels, setLabels] = useState<InvoiceLabels>(() => {
-    try {
-      const saved = localStorage.getItem('schofy_invoice_labels');
-      return saved ? JSON.parse(saved) : DEFAULT_INVOICE_LABELS;
-    } catch { return DEFAULT_INVOICE_LABELS; }
-  });
-
-  // Undo/Redo for labels
-  const [history, setHistory] = useState<InvoiceLabels[]>([]);
-  const [redoStack, setRedoStack] = useState<InvoiceLabels[]>([]);
-
-  const updateLabels = (updates: Partial<InvoiceLabels>) => {
-    // If empty updates, it's just a toggle or initialization call from the button
-    if (Object.keys(updates).length === 0) {
-      setIsLiveEditing(!isLiveEditing);
-      return;
-    }
-    setHistory(prev => [...prev, labels]);
-    setRedoStack([]);
-    const next = { ...labels, ...updates };
-    setLabels(next);
-    localStorage.setItem('schofy_invoice_labels', JSON.stringify(next));
-  };
-
-  const undo = () => {
-    if (history.length === 0) return;
-    const prev = history[history.length - 1];
-    setRedoStack(stack => [labels, ...stack]);
-    setHistory(h => h.slice(0, -1));
-    setLabels(prev);
-    localStorage.setItem('schofy_invoice_labels', JSON.stringify(prev));
-  };
-
-  const redo = () => {
-    if (redoStack.length === 0) return;
-    const next = redoStack[0];
-    setHistory(h => [...h, labels]);
-    setRedoStack(stack => stack.slice(1));
-    setLabels(next);
-    localStorage.setItem('schofy_invoice_labels', JSON.stringify(next));
-  };
 
   const students = useActiveStudents();
   const { students: allStudents } = useStudents();
   const sid = schoolId || user?.id || '';
   const { data: feesData, refresh: refreshFees } = useTableData(sid, 'fees');
   const { data: paymentsData, refresh: refreshPayments } = useTableData(sid, 'payments');
-  const { data: bursariesData } = useTableData(sid, 'bursaries');
-  const { data: discountsData } = useTableData(sid, 'discounts');
-  const { data: settingsData } = useTableData(sid, 'settings');
-
   const fees = feesData as any[];
   const payments = paymentsData as any[];
-  const bursaries = bursariesData as any[];
-  const discounts = discountsData as any[];
 
   function refreshInvoices() {
     refreshFees();
@@ -366,17 +134,15 @@ export default function Invoices() {
     });
   }, [allStudents, fees, payments]);
 
-  const filteredStudentSummary = useMemo(() => {
-    return studentInvoiceSummary.filter(s => {
-      const search = debouncedSearch.toLowerCase();
-      if (search && !s.studentName.toLowerCase().includes(search)) return false;
-      if (filterStatus === 'invoiced' && !s.isInvoiced) return false;
-      if (filterStatus === 'not_invoiced' && s.isInvoiced) return false;
-      if (filterStatus === 'paid' && s.status !== 'paid') return false;
-      if (filterStatus === 'pending' && s.balance <= 0) return false;
-      return true;
-    });
-  }, [studentInvoiceSummary, debouncedSearch, filterStatus]);
+  const filteredStudentSummary = studentInvoiceSummary.filter(s => {
+    const search = searchTerm.toLowerCase();
+    if (search && !s.studentName.toLowerCase().includes(search)) return false;
+    if (filterStatus === 'invoiced' && !s.isInvoiced) return false;
+    if (filterStatus === 'not_invoiced' && s.isInvoiced) return false;
+    if (filterStatus === 'paid' && s.status !== 'paid') return false;
+    if (filterStatus === 'pending' && s.balance <= 0) return false;
+    return true;
+  });
 
   // Realtime: fee structures reload when class selection changes
   useEffect(() => {
@@ -418,56 +184,6 @@ export default function Invoices() {
     return Array.from(invoiceMap.values());
   }, [fees, payments, allStudents]);
 
-  const templateData = useMemo(() => {
-    if (!selectedInvoice) return null;
-    const student = allStudents.find(s => s.id === selectedInvoice.studentId);
-    const sMap: Record<string, any> = {};
-    settingsData.forEach((s: any) => { sMap[s.key] = s.value; });
-    
-    const school = {
-      name: sMap.schoolName || 'School Name',
-      address: sMap.schoolAddress || '',
-      phone: sMap.schoolPhone || '',
-      email: sMap.schoolEmail || '',
-      logo: sMap.schoolLogo || '',
-      motto: sMap.schoolMotto || '',
-    };
-
-    const studentInfo = {
-      name: selectedInvoice.studentName,
-      id: student?.admissionNo || student?.studentId || '',
-      class: classes.find(c => c.id === student?.classId)?.name || '',
-      guardian: student?.guardianName || '',
-      address: student?.address || '',
-      phone: student?.guardianPhone || '',
-      email: student?.guardianEmail || '',
-    };
-
-    const invoiceInfo = {
-      number: selectedInvoice.id.slice(0, 8).toUpperCase(),
-      date: new Date(selectedInvoice.createdAt).toLocaleDateString(),
-      dueDate: selectedInvoice.dueDate ? new Date(selectedInvoice.dueDate).toLocaleDateString() : 'N/A',
-      items: [{ description: selectedInvoice.description, amount: selectedInvoice.amount, qty: 1 }],
-      subtotal: selectedInvoice.amount,
-      tax: 0,
-      total: selectedInvoice.amount,
-      paid: selectedInvoice.paidAmount,
-      balance: selectedInvoice.amount - selectedInvoice.paidAmount,
-      status: selectedInvoice.status,
-      term: selectedInvoice.term,
-      year: selectedInvoice.year,
-    };
-
-    const bankInfo = {
-      accountName: sMap.bankAccountName || sMap.schoolName || '',
-      accountNumber: sMap.bankAccountNumber || '',
-      bankName: sMap.bankName || '',
-      paymentMethod: sMap.paymentMethod || 'BANK TRANSFER',
-    };
-
-    return { school, student: studentInfo, invoice: invoiceInfo, bankInfo };
-  }, [selectedInvoice, allStudents, settingsData, classes]);
-
   const invoiceExpectedFields = [
     { key: 'studentName', label: 'Student Name', required: true },
     { key: 'description', label: 'Description', required: true },
@@ -506,7 +222,18 @@ export default function Invoices() {
   }, [selectedClassId, selectedTerm, selectedYear, user]);
 
   async function loadBursariesAndDiscounts() {
-    // Now using store - no-op kept for compatibility
+    const id = schoolId || user?.id;
+    if (!id) return;
+    try {
+      const [bursaryData, discountData] = await Promise.all([
+        dataService.getAll(id, 'bursaries'),
+        dataService.getAll(id, 'discounts'),
+      ]);
+      setBursaries(bursaryData);
+      setDiscounts(discountData);
+    } catch (error) {
+      console.error('Failed to load bursaries and discounts:', error);
+    }
   }
 
   async function loadTermSettings() {
@@ -517,7 +244,7 @@ export default function Invoices() {
       const obj: Record<string, string> = {};
       stored.forEach((s: any) => { obj[s.key] = s.value; });
       setTermSettings(obj);
-      // Check if current term has ended ? prompt class promotion
+      // Check if current term has ended → prompt class promotion
       const currentTerm = obj.currentTerm || '1';
       const endKey = `term${currentTerm}End`;
       const endDate = obj[endKey];
@@ -695,7 +422,7 @@ export default function Invoices() {
     if (!id || !classId) { addToast('Student has no class assigned', 'error'); return; }
     const structures = await getFeeStructuresByClass(id, classId, selectedTerm, selectedYear);
     if (structures.length === 0) {
-      // No fee structures - open the structure modal for this class
+      // No fee structures — open the structure modal for this class
       setSelectedClassId(classId);
       setShowStructureModal(true);
       addToast('No fee structures found. Please set up fees for this class first.', 'info');
@@ -713,8 +440,10 @@ export default function Invoices() {
         return;
       }
 
-      const allBursaries = bursaries;
-      const allDiscounts = discounts;
+      const [allBursaries, allDiscounts] = await Promise.all([
+        dataService.getAll(id, 'bursaries'),
+        dataService.getAll(id, 'discounts'),
+      ]);
       const bursary = allBursaries.find((b: any) => b.studentId === studentId && b.term === selectedTerm && b.year === selectedYear);
       const discount = allDiscounts.find((d: any) => d.classId === classId && d.term === selectedTerm && d.year === selectedYear);
       const applicable = structures.filter(s => s.isRequired || s.category === 'tuition' || s.category === 'boarding');
@@ -763,41 +492,31 @@ export default function Invoices() {
     finally { (window as any).__bulkInvoicing = false; }
   }
 
-  function markAsPaid(invoiceId: string) {
+  async function markAsPaid(invoiceId: string) {
+    const id = schoolId || user?.id;
+    if (!id) return;
     const invoice = invoices.find(i => i.id === invoiceId);
     if (!invoice) return;
-    const remaining = invoice.amount - invoice.paidAmount;
-    setInvoicePayModal({
-      invoiceId,
-      studentName: invoice.studentName,
-      description: invoice.description,
-      remaining,
-    });
-    setInvoicePayAmount(String(remaining));
-    setInvoicePayMethod(PaymentMethod.CASH);
-  }
 
-  async function submitInvoicePayment() {
-    const id = schoolId || user?.id;
-    if (!id || !invoicePayModal) return;
-    const amount = parseFloat(invoicePayAmount);
-    if (isNaN(amount) || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
-    setIsRecordingInvoicePayment(true);
+    const remainingAmount = invoice.amount - invoice.paidAmount;
+    const paymentAmount = prompt(`Enter payment amount (remaining: ${formatMoney(remainingAmount)}):`, remainingAmount.toString());
+    if (!paymentAmount || isNaN(parseFloat(paymentAmount))) return;
+
     try {
       await dataService.create(id, 'payments', {
         id: uuidv4(),
-        feeId: invoicePayModal.invoiceId,
-        studentId: invoices.find(i => i.id === invoicePayModal.invoiceId)?.studentId,
-        amount,
-        method: invoicePayMethod as any,
+        feeId: invoiceId,
+        studentId: invoice.studentId,
+        amount: parseFloat(paymentAmount),
+        method: PaymentMethod.CASH,
         date: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       } as any);
       addToast('Payment recorded', 'success');
-      setInvoicePayModal(null);
       refreshInvoices();
-    } catch { addToast('Failed to record payment', 'error'); }
-    finally { setIsRecordingInvoicePayment(false); }
+    } catch (error) {
+      addToast('Failed to record payment', 'error');
+    }
   }
 
   function handleExportCSV() {
@@ -839,16 +558,16 @@ export default function Invoices() {
   }
 
   function downloadTemplate() {
-    import('xlsx').then(({ utils, writeFile }) => {
-      const headers = invoiceExpectedFields.map(f => f.label);
-      const sampleRows = [['John Doe', 'Term 1 Tuition', '50000', '1']];
-      const ws = utils.aoa_to_sheet([headers, ...sampleRows]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
-      const wb = utils.book_new();
-      utils.book_append_sheet(wb, ws, 'Invoices');
-      writeFile(wb, 'invoices-import-template.xlsx');
-      addToast('Template downloaded', 'success');
-    });
+    const headers = invoiceExpectedFields.map(f => f.label);
+    const sampleRows = [['John Doe', 'Term 1 Tuition', '50000', '1']];
+    const csv = [headers.join(','), ...sampleRows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'invoices-import-template.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
+    addToast('Template downloaded', 'success');
   }
 
   function closeImportModal() {
@@ -879,29 +598,22 @@ export default function Invoices() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const { read, utils } = await import('xlsx');
-      const buffer = await file.arrayBuffer();
-      const wb = read(buffer);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
-      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
-      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
-      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
-      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
+      const headers = parseCSVLine(lines[0]);
+      const data = lines.slice(1).map(line => parseCSVLine(line));
       setCsvHeaders(headers);
       setCsvData(data);
-      const norm = (s: string) => s.toLowerCase().replace(/[\s_()\-\/]/g, '').replace(/[^a-z0-9]/g, '');
-      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
       const autoMapping: Record<string, string> = {};
       invoiceExpectedFields.forEach(field => {
-        const nKey = norm(field.key); const nLabel = norm(field.label); const nCamel = camelWords(field.key);
-        const matchingHeader = headers.find(h => { const nH = norm(h); return nH === nKey || nH === nLabel || nH === nCamel || nH.includes(nKey) || nKey.includes(nH) || nH.includes(nLabel) || nLabel.includes(nH); });
+        const matchingHeader = headers.find(h => h.toLowerCase() === field.label.toLowerCase() || h.toLowerCase().includes(field.key.toLowerCase()));
         if (matchingHeader) autoMapping[field.key] = matchingHeader;
       });
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
-    } catch (error) { addToast('Failed to read Excel file', 'error'); }
+    } catch (error) { addToast('Failed to read CSV file', 'error'); }
     event.target.value = '';
   }
 
@@ -926,7 +638,6 @@ export default function Invoices() {
 
   async function executeImport() {
     if (importPreview.length === 0 || !user?.id) { addToast('No valid invoices to import', 'error'); return; }
-    setIsImporting(true);
     try {
       const now = new Date().toISOString();
       const year = new Date().getFullYear().toString();
@@ -949,46 +660,24 @@ export default function Invoices() {
         await dataService.create(id, 'fees', fee as any);
         successCount++;
       }
-      setIsImporting(false);
+      addToast(`Successfully imported ${successCount} invoices`, 'success');
       closeImportModal();
-      setShowImportSuccess(true);
       refreshInvoices();
-    } catch (error) {
-      setIsImporting(false);
-      addToast('Failed to import invoices', 'error');
+    } catch (error) { addToast('Failed to import invoices', 'error'); }
+  }
+
+  const filteredInvoices = invoices.filter(inv => {
+    if (filterStatus !== 'all' && inv.status !== filterStatus) return false;
+    if (filterTerm !== 'all' && inv.term !== filterTerm) return false;
+    if (searchTerm) {
+      const search = searchTerm.toLowerCase();
+      if (!inv.studentName.toLowerCase().includes(search) && 
+          !inv.description.toLowerCase().includes(search)) {
+        return false;
+      }
     }
-  }
-
-  function handleViewInvoice(invoice: Invoice) {
-    setSelectedInvoice(invoice);
-    setShowTemplate(true);
-  }
-
-  const filteredInvoices = useMemo(() => {
-     return invoices.filter(inv => {
-       if (filterStatus !== 'all' && inv.status !== filterStatus) return false;
-       if (filterTerm !== 'all' && inv.term !== filterTerm) return false;
-       if (debouncedSearch) {
-         const search = debouncedSearch.toLowerCase();
-         if (!inv.studentName.toLowerCase().includes(search) && 
-             !inv.description.toLowerCase().includes(search)) {
-           return false;
-         }
-       }
-       return true;
-     });
-   }, [invoices, filterStatus, filterTerm, debouncedSearch]);
-
-   const {
-      items: paginatedItems,
-      currentPage,
-      totalPages,
-      goToPage,
-      nextPage,
-      prevPage,
-      hasNextPage,
-      hasPrevPage
-    } = usePagination(viewMode === 'students' ? filteredStudentSummary : (filteredInvoices as any[]), { pageSize: 10 });
+    return true;
+  });
 
   const stats = {
     total: invoices.reduce((sum, i) => sum + i.amount, 0),
@@ -1008,7 +697,7 @@ export default function Invoices() {
 
   return (
     <div className="space-y-6">
-      {/* Term ended - class promotion banner */}
+      {/* Term ended — class promotion banner */}
       {showPromotionBanner && (
         <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl">
           <GraduationCap size={20} className="text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
@@ -1023,12 +712,12 @@ export default function Invoices() {
           </button>
         </div>
       )}
-      <div className="page-header">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-title">
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">
             Student Invoices
           </h1>
-          <p className="text-subtitle">Manage and track all student invoices</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage and track all student invoices</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <div className="relative" ref={exportMenuRef}>
@@ -1042,7 +731,7 @@ export default function Invoices() {
               <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
             </button>
             {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-[9999] overflow-hidden">
+              <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
                 <button
                   onClick={handleExportPDF}
                   className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
@@ -1075,7 +764,7 @@ export default function Invoices() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".xlsx,.xls"
+            accept=".csv"
             className="hidden"
           />
           <button onClick={() => setShowStructureModal(true)} className="btn btn-secondary">
@@ -1098,6 +787,12 @@ export default function Invoices() {
             <Users size={16} />
             <span className="hidden sm:inline">Invoice All Classes</span>
           </button>
+          <button 
+            onClick={() => setShowStructureModal(true)}
+            className="btn btn-primary shadow-lg shadow-primary-500/25"
+          >
+            <Plus size={18} /> Generate Invoices
+          </button>
         </div>
       </div>
 
@@ -1108,8 +803,8 @@ export default function Invoices() {
               <FileText size={24} />
             </div>
             <div>
-              <p className="text-label text-white/80">Total Invoiced</p>
-              <p className="text-2xl font-black text-white leading-tight">
+              <p className="text-sm text-white/80">Total Invoiced</p>
+              <p className="text-2xl font-bold text-white">
                 {formatMoney(stats.total)}
               </p>
             </div>
@@ -1121,8 +816,8 @@ export default function Invoices() {
               <DollarSign size={24} />
             </div>
             <div>
-              <p className="text-label text-white/80">Collected</p>
-              <p className="text-2xl font-black text-white leading-tight">
+              <p className="text-sm text-white/80">Collected</p>
+              <p className="text-2xl font-bold text-white">
                 {formatMoney(stats.collected)}
               </p>
             </div>
@@ -1134,8 +829,8 @@ export default function Invoices() {
               <Clock size={24} />
             </div>
             <div>
-              <p className="text-label text-white/80">Pending</p>
-              <p className="text-2xl font-black text-white leading-tight">
+              <p className="text-sm text-white/80">Pending</p>
+              <p className="text-2xl font-bold text-white">
                 {formatMoney(stats.pending)}
               </p>
             </div>
@@ -1147,8 +842,8 @@ export default function Invoices() {
               <Award size={24} />
             </div>
             <div>
-              <p className="text-label text-white/80">Bursary</p>
-              <p className="text-2xl font-black text-white leading-tight">
+              <p className="text-sm text-white/80">Bursary</p>
+              <p className="text-2xl font-bold text-white">
                 {formatMoney(stats.bursary)}
               </p>
             </div>
@@ -1160,8 +855,8 @@ export default function Invoices() {
               <Percent size={24} />
             </div>
             <div>
-              <p className="text-label text-white/80">Discount</p>
-              <p className="text-2xl font-black text-white leading-tight">
+              <p className="text-sm text-white/80">Discount</p>
+              <p className="text-2xl font-bold text-white">
                 {formatMoney(stats.discount)}
               </p>
             </div>
@@ -1171,8 +866,8 @@ export default function Invoices() {
 
       <div className="card">
         <div className="card-header">
-          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-            <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => { setViewMode('invoices'); setFilterStatus('all'); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -1180,8 +875,7 @@ export default function Invoices() {
                 }`}
               >
                 <FileText size={16} />
-                <span className="hidden sm:inline">Invoice List</span>
-                <span className="sm:hidden">Invoices</span>
+                Invoice List
               </button>
               <button
                 onClick={() => { setViewMode('students'); setFilterStatus('all'); }}
@@ -1190,11 +884,10 @@ export default function Invoices() {
                 }`}
               >
                 <Users size={16} />
-                <span className="hidden sm:inline">Student View</span>
-                <span className="sm:hidden">Students</span>
+                Student View
               </button>
             </div>
-            <div className="relative flex-1 min-w-0 w-full sm:max-w-xs">
+            <div className="relative flex-1 w-full sm:max-w-xs">
               <Search size={18} className="search-input-icon" />
               <input
                 type="text"
@@ -1204,7 +897,7 @@ export default function Invoices() {
                 className="search-input"
               />
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowStatusFilter(true)}
                 className={`btn btn-secondary flex items-center gap-2 ${filterStatus !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
@@ -1422,14 +1115,45 @@ export default function Invoices() {
                       </div>
                     </td>
                   </tr>
-                ) : (paginatedItems as any[]).map(student => (
-                  <StudentInvoiceRow 
-                    key={student.id} 
-                    student={student} 
-                    formatMoney={formatMoney} 
-                    onInvoice={handleInvoiceStudent}
-                    onView={setSelectedStudentForView}
-                  />
+                ) : filteredStudentSummary.map(student => (
+                  <tr key={student.id}>
+                    <td className="font-medium">{student.studentName}</td>
+                    <td className="text-slate-500">{student.admissionNo}</td>
+                    <td>
+                      <span className="badge badge-info">{student.invoiceCount}</span>
+                    </td>
+                    <td className="font-semibold">{formatMoney(student.totalInvoiced)}</td>
+                    <td className="text-emerald-600 font-semibold">{formatMoney(student.totalPaid)}</td>
+                    <td className={student.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>
+                      {formatMoney(student.balance)}
+                    </td>
+                    <td>
+                      {student.status === 'not_invoiced' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+                          <XCircle size={12} />
+                          Not Invoiced
+                        </span>
+                      ) : student.status === 'paid' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                          <CheckCircle size={12} />
+                          Cleared
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                          <Clock size={12} />
+                          Balance
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => handleInvoiceStudent(student.id, student.classId || '')}
+                        className="btn btn-secondary text-sm py-1.5"
+                      >
+                        <Plus size={14} /> Invoice
+                      </button>
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -1468,79 +1192,45 @@ export default function Invoices() {
                       </div>
                     </td>
                   </tr>
-                ) : (paginatedItems as any[]).map(invoice => (
-                  <InvoiceRow 
-                    key={invoice.id} 
-                    invoice={invoice as any} 
-                    formatMoney={formatMoney} 
-                    onRecord={markAsPaid}
-                    onView={handleViewInvoice}
-                    statusConfig={statusConfig}
-                  />
-                ))}
+                ) : filteredInvoices.map(invoice => {
+                  const StatusIcon = statusConfig[invoice.status].icon;
+                  return (
+                    <tr key={invoice.id}>
+                      <td className="font-medium">{invoice.studentName}</td>
+                      <td>{invoice.description}</td>
+                      <td className="font-semibold">{formatMoney(invoice.amount)}</td>
+                      <td className="text-emerald-600 font-semibold">{formatMoney(invoice.paidAmount)}</td>
+                      <td className={invoice.amount - invoice.paidAmount > 0 ? 'text-red-600 font-semibold' : ''}>
+                        {formatMoney(invoice.amount - invoice.paidAmount)}
+                      </td>
+                      <td>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${statusConfig[invoice.status].bg} ${statusConfig[invoice.status].color}`}>
+                          <StatusIcon size={12} />
+                          {invoice.status}
+                        </span>
+                      </td>
+                      <td><span className="badge badge-info">Term {invoice.term}</span></td>
+                      <td>
+                        {invoice.status !== 'paid' && (
+                          <button
+                            onClick={() => markAsPaid(invoice.id)}
+                            className="btn btn-secondary text-sm py-1.5"
+                          >
+                            <DollarSign size={14} /> Record
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
-        
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 dark:border-slate-700">
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Showing page <span className="font-medium text-slate-700 dark:text-slate-200">{currentPage}</span> of <span className="font-medium text-slate-700 dark:text-slate-200">{totalPages}</span>
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={prevPage}
-                disabled={!hasPrevPage}
-                className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft size={18} />
-              </button>
-              
-              <div className="flex items-center gap-1">
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  let pageNum;
-                  if (totalPages <= 5) {
-                    pageNum = i + 1;
-                  } else if (currentPage <= 3) {
-                    pageNum = i + 1;
-                  } else if (currentPage >= totalPages - 2) {
-                    pageNum = totalPages - 4 + i;
-                  } else {
-                    pageNum = currentPage - 2 + i;
-                  }
-                  
-                  return (
-                    <button
-                      key={pageNum}
-                      onClick={() => goToPage(pageNum)}
-                      className={`w-9 h-9 rounded-lg text-sm font-medium transition-colors ${
-                        currentPage === pageNum
-                          ? 'bg-primary-600 text-white'
-                          : 'hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-600 dark:text-slate-400'
-                      }`}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button
-                onClick={nextPage}
-                disabled={!hasNextPage}
-                className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight size={18} />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {showCreateModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      {showCreateModal && (
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
               <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -1647,11 +1337,11 @@ export default function Invoices() {
             </div>
           </div>
         </div>
-      , document.body)}
+      )}
 
-      {showImportModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
+      {showImportModal && (
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
@@ -1676,7 +1366,7 @@ export default function Invoices() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
 
@@ -1706,30 +1396,26 @@ export default function Invoices() {
 
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
-                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
-                        </tr>
-                      </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {csvHeaders.map((header, idx) => {
-                          const sample = csvData[0]?.[idx] || '';
-                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
-                          return (
-                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
-                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
-                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
-                              <td className="px-3 py-2">
-                                <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">- Skip -</option>
-                                  {invoiceExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
-                                </select>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {invoiceExpectedFields.filter(f => f.required).map(field => (
+                          <tr key={field.key}>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">
+                              {field.label}*
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <select
+                                value={fieldMapping[field.key] || ''}
+                                onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
+                                className="w-full form-input py-1 px-2 text-xs"
+                              >
+                                <option value="">-- Skip --</option>
+                                {csvHeaders.map(header => (
+                                  <option key={header} value={header}>{header}</option>
+                                ))}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -1796,10 +1482,10 @@ export default function Invoices() {
             </div>
           </div>
         </div>
-      , document.body)}
+      )}
 
-      {showStructureModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      {showStructureModal && (
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
@@ -2023,103 +1709,146 @@ export default function Invoices() {
             </div>
           </div>
         </div>
-      , document.body)}
+      )}
 
-      {showBursaryModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
-          <div className="w-full max-w-2xl animate-modal-in max-h-[90vh] flex flex-col" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
-            {/* Header */}
-            <div className="shrink-0 px-7 pt-7 pb-0">
-              <div className="flex items-start gap-4 mb-6">
-                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#D1FAE5' }}>
-                  <Award size={20} className="text-emerald-600" />
+      {showBursaryModal && (
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+            <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                  <Award size={24} className="text-amber-500" />
+                  Bursary Management
+                </h2>
+                <p className="text-sm text-slate-500 mt-1">Manage student bursaries/scholarships</p>
+              </div>
+              <button onClick={() => setShowBursaryModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+              <div className="flex gap-4 items-end">
+                <div className="flex-1">
+                  <label className="form-label">Search Student</label>
+                  <div className="relative">
+                    <SearchIcon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchStudent}
+                      onChange={(e) => setSearchStudent(e.target.value)}
+                      className="form-input pl-10"
+                      placeholder="Search by name or ID..."
+                    />
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0 pt-0.5">
-                  <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Bursary / Scholarship</h3>
-                  <p className="text-[14px] text-slate-500 mt-1">Grant a bursary to a student — reduces their invoice.</p>
+                <div className="w-40">
+                  <label className="form-label">Class Filter</label>
+                  <select 
+                    value={filterBursaryClass} 
+                    onChange={(e) => setFilterBursaryClass(e.target.value)}
+                    className="form-input"
+                  >
+                    <option value="all">All Classes</option>
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
                 </div>
-                <button onClick={() => setShowBursaryModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
-                  <X size={16} className="text-slate-400" />
+              </div>
+              
+              <div className="mt-4 flex gap-4 items-end">
+                <div className="flex-1">
+                  <label className="form-label">Select Student</label>
+                  <select 
+                    value={newBursary.studentId} 
+                    onChange={(e) => setNewBursary({...newBursary, studentId: e.target.value})}
+                    className="form-input"
+                  >
+                    <option value="">Select a student...</option>
+                    {students
+                      .filter(s => {
+                        if (filterBursaryClass !== 'all' && s.classId !== filterBursaryClass) return false;
+                        if (searchStudent) {
+                          const search = searchStudent.toLowerCase();
+                          return s.firstName.toLowerCase().includes(search) || 
+                                 s.lastName.toLowerCase().includes(search) ||
+                                 (s.studentId || s.admissionNo || '').toLowerCase().includes(search);
+                        }
+                        return true;
+                      })
+                      .slice(0, 20)
+                      .map(s => (
+                        <option key={s.id} value={s.id}>{s.firstName} {s.lastName} - {s.studentId || s.admissionNo}</option>
+                      ))
+                    }
+                  </select>
+                </div>
+                <div className="w-40">
+                  <label className="form-label">Amount ({currency.symbol})</label>
+                  <input
+                    type="number"
+                    value={newBursary.amount || ''}
+                    onChange={(e) => setNewBursary({...newBursary, amount: parseFloat(e.target.value) || 0})}
+                    className="form-input"
+                    placeholder="0.00"
+                  />
+                </div>
+                <button 
+                  onClick={async () => {
+                    if (!newBursary.studentId || newBursary.amount <= 0) {
+                      addToast('Please select a student and enter amount', 'error');
+                      return;
+                    }
+                    const student = students.find(s => s.id === newBursary.studentId);
+                    const bursary: Bursary = {
+                      id: uuidv4(),
+                      studentId: newBursary.studentId,
+                      studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
+                      amount: newBursary.amount,
+                      term: selectedTerm,
+                      year: selectedYear,
+                      createdAt: new Date().toISOString(),
+                    };
+                    await dataService.create(user!.id, 'bursaries', bursary as any);
+                    setBursaries([...bursaries, bursary]);
+                    setNewBursary({ studentId: '', amount: 0 });
+                    addToast('Bursary added successfully', 'success');
+                  }}
+                  className="btn btn-primary"
+                >
+                  <UserPlus size={16} /> Add
                 </button>
               </div>
             </div>
 
-            {/* Bursary add form */}
-            <div className="px-7 py-4 border-b border-slate-100 bg-slate-50 space-y-3 shrink-0">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="form-label">Class Filter</label>
-                  <select value={filterBursaryClass} onChange={e => setFilterBursaryClass(e.target.value)} className="form-input">
-                    <option value="all">All Classes</option>
-                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Search Student</label>
-                  <div className="relative">
-                    <SearchIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input type="text" value={searchStudent} onChange={e => setSearchStudent(e.target.value)} className="form-input pl-9" placeholder="Name or ID..." />
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                <div>
-                  <label className="form-label">Student *</label>
-                  <select value={newBursary.studentId} onChange={e => setNewBursary({ ...newBursary, studentId: e.target.value })} className="form-input">
-                    <option value="">- Select student -</option>
-                    {students.filter(s => {
-                      if (filterBursaryClass !== 'all' && s.classId !== filterBursaryClass) return false;
-                      if (searchStudent) { const q = searchStudent.toLowerCase(); return `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || (s.studentId || s.admissionNo || '').toLowerCase().includes(q); }
-                      return true;
-                    }).slice(0, 30).map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName} - {s.studentId || s.admissionNo}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Amount ({currency.symbol}) *</label>
-                  <input type="number" value={newBursary.amount || ''} onChange={e => setNewBursary({ ...newBursary, amount: parseFloat(e.target.value) || 0 })} className="form-input" placeholder="0.00" min="0" />
-                </div>
-                <div>
-                  <label className="form-label">Reason</label>
-                  <input type="text" value={newBursary.reason} onChange={e => setNewBursary({ ...newBursary, reason: e.target.value })} className="form-input" placeholder="e.g. Scholarship" />
-                </div>
-              </div>
-              <button
-                onClick={async () => {
-                  if (!newBursary.studentId || newBursary.amount <= 0) { addToast('Select a student and enter amount', 'error'); return; }
-                  const id = schoolId || user?.id; if (!id) return;
-                  const student = students.find(s => s.id === newBursary.studentId);
-                  const now = new Date().toISOString();
-                  const existing = bursaries.find(b => b.studentId === newBursary.studentId && String(b.term) === String(selectedTerm) && String(b.year) === String(selectedYear));
-                  if (existing) await dataService.delete(id, 'bursaries', existing.id);
-                  await dataService.create(id, 'bursaries', { id: uuidv4(), studentId: newBursary.studentId, studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown', amount: newBursary.amount, reason: newBursary.reason, term: selectedTerm, year: selectedYear, createdAt: now } as any);
-                  const studentFee = fees.find(f => f.studentId === newBursary.studentId && String(f.term) === String(selectedTerm) && String(f.year) === String(selectedYear));
-                  if (studentFee) {
-                    const newAmt = Math.max(0, studentFee.amount - newBursary.amount);
-                    await dataService.update(id, 'fees', studentFee.id, { amount: newAmt, description: (studentFee.description || 'School Fees') + ` (Bursary: ${formatMoney(newBursary.amount)})` } as any);
-                    addToast(`Bursary applied - invoice updated to ${formatMoney(newAmt)}`, 'success');
-                  } else { addToast('Bursary saved. Will apply when invoice is created.', 'success'); }
-                  setNewBursary({ studentId: '', amount: 0, reason: '' });
-                }}
-                className="btn btn-primary"
-              >
-                <UserPlus size={15} /> Apply Bursary
-              </button>
-            </div>
-
-            <div className="px-7 py-4 flex-1 overflow-y-auto">
+            <div className="p-5 max-h-[40vh] overflow-y-auto">
               {bursaries.length === 0 ? (
-                <div className="text-center py-8 text-slate-400"><Award size={36} className="mx-auto mb-2 opacity-40" /><p className="text-sm">No bursaries yet</p></div>
+                <div className="text-center py-8">
+                  <Award size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                  <p className="text-slate-500 font-medium">No bursaries added</p>
+                  <p className="text-sm text-slate-400 mt-1">Add bursaries to reduce invoiced amounts</p>
+                </div>
               ) : (
                 <div className="space-y-2">
                   {bursaries.map(b => (
-                    <div key={b.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:bg-slate-50">
+                    <div key={b.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                       <div>
-                        <p className="font-medium text-slate-800">{b.studentName}</p>
-                        <p className="text-xs text-slate-500">Term {b.term} {b.year}{(b as any).reason ? ` - ${(b as any).reason}` : ''}</p>
+                        <p className="font-medium text-slate-800 dark:text-white">{b.studentName}</p>
+                        <p className="text-xs text-slate-500">Term {b.term}, {b.year}</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-amber-600">{formatMoney(b.amount)}</span>
-                        <button onClick={async () => { await dataService.delete(user!.id, 'bursaries', b.id); addToast('Bursary removed', 'success'); }} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                        <button
+                          onClick={async () => {
+                            await dataService.delete(user!.id, 'bursaries', b.id);
+                            setBursaries(bursaries.filter(br => br.id !== b.id));
+                            addToast('Bursary removed', 'success');
+                          }}
+                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -2127,114 +1856,129 @@ export default function Invoices() {
               )}
             </div>
 
-            <div className="px-7 py-4 border-t border-slate-200 flex justify-between items-center shrink-0">
-              <p className="text-sm font-medium text-slate-600">Total: <span className="text-amber-600 font-bold">{formatMoney(bursaries.reduce((s, b) => s + b.amount, 0))}</span></p>
-              <button onClick={() => setShowBursaryModal(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Close</button>
+            <div className="p-5 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+              <div className="flex justify-between items-center">
+                <p className="font-medium text-slate-700 dark:text-slate-300">
+                  Total Bursary: <span className="text-amber-600 font-bold">{formatMoney(bursaries.reduce((sum, b) => sum + b.amount, 0))}</span>
+                </p>
+                <button onClick={() => setShowBursaryModal(false)} className="btn btn-secondary">Close</button>
+              </div>
             </div>
           </div>
         </div>
-      , document.body)}
+      )}
 
-      {showDiscountModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
-          <div className="w-full max-w-2xl animate-modal-in max-h-[90vh] flex flex-col" style={{ background: '#fff', borderRadius: '20px', boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07)', border: '1px solid rgba(0,0,0,0.05)', overflow: 'hidden' }}>
-            {/* Header */}
-            <div className="shrink-0 px-7 pt-7 pb-0">
-              <div className="flex items-start gap-4 mb-6">
-                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: '#CFFAFE' }}>
-                  <Percent size={20} className="text-cyan-600" />
-                </div>
-                <div className="flex-1 min-w-0 pt-0.5">
-                  <h3 className="font-bold text-slate-900 text-[17px] leading-snug">Student Discount</h3>
-                  <p className="text-[14px] text-slate-500 mt-1">Apply a discount to a student — updates their invoice.</p>
-                </div>
-                <button onClick={() => setShowDiscountModal(false)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors shrink-0">
-                  <X size={16} className="text-slate-400" />
-                </button>
+      {showDiscountModal && (
+        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+            <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                  <Percent size={24} className="text-cyan-500" />
+                  Class Discount Management
+                </h2>
+                <p className="text-sm text-slate-500 mt-1">Set percentage or fixed amount discounts per class</p>
               </div>
+              <button onClick={() => setShowDiscountModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
+                <X size={20} />
+              </button>
             </div>
-
-            {/* Discount add form */}
-            <div className="px-7 py-4 border-b border-slate-100 bg-slate-50 space-y-3 shrink-0">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="form-label">Class Filter</label>
-                  <select value={filterBursaryClass} onChange={e => setFilterBursaryClass(e.target.value)} className="form-input">
-                    <option value="all">All Classes</option>
-                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            
+            <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+              <div className="flex gap-4 items-end">
+                <div className="flex-1">
+                  <label className="form-label">Class</label>
+                  <select 
+                    value={newDiscount.classId} 
+                    onChange={(e) => setNewDiscount({...newDiscount, classId: e.target.value})}
+                    className="form-input"
+                  >
+                    <option value="">Select a class...</option>
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
                   </select>
                 </div>
-                <div>
-                  <label className="form-label">Search Student</label>
-                  <div className="relative">
-                    <SearchIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input type="text" value={searchStudent} onChange={e => setSearchStudent(e.target.value)} className="form-input pl-9" placeholder="Name or ID..." />
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                <div>
-                  <label className="form-label">Student *</label>
-                  <select value={newDiscount.studentId} onChange={e => setNewDiscount({ ...newDiscount, studentId: e.target.value })} className="form-input">
-                    <option value="">- Select student -</option>
-                    {students.filter(s => {
-                      if (filterBursaryClass !== 'all' && s.classId !== filterBursaryClass) return false;
-                      if (searchStudent) { const q = searchStudent.toLowerCase(); return `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || (s.studentId || s.admissionNo || '').toLowerCase().includes(q); }
-                      return true;
-                    }).slice(0, 30).map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName} - {s.studentId || s.admissionNo}</option>)}
-                  </select>
-                </div>
-                <div>
+                <div className="w-32">
                   <label className="form-label">Type</label>
-                  <select value={newDiscount.type} onChange={e => setNewDiscount({ ...newDiscount, type: e.target.value as 'fixed' | 'percentage' })} className="form-input">
-                    <option value="fixed">Fixed ({currency.symbol})</option>
+                  <select 
+                    value={newDiscount.type} 
+                    onChange={(e) => setNewDiscount({...newDiscount, type: e.target.value as 'fixed' | 'percentage'})}
+                    className="form-input"
+                  >
+                    <option value="fixed">Fixed Amount</option>
                     <option value="percentage">Percentage (%)</option>
                   </select>
                 </div>
-                <div>
-                  <label className="form-label">{newDiscount.type === 'percentage' ? 'Percent (%)' : `Amount (${currency.symbol})`} *</label>
-                  <input type="number" value={newDiscount.amount || ''} onChange={e => setNewDiscount({ ...newDiscount, amount: parseFloat(e.target.value) || 0 })} className="form-input" placeholder={newDiscount.type === 'percentage' ? '10' : '0.00'} min="0" max={newDiscount.type === 'percentage' ? 100 : undefined} />
+                <div className="w-32">
+                  <label className="form-label">{newDiscount.type === 'percentage' ? 'Percent' : 'Amount'} ({newDiscount.type === 'percentage' ? '%' : currency.symbol})</label>
+                  <input
+                    type="number"
+                    value={newDiscount.amount || ''}
+                    onChange={(e) => setNewDiscount({...newDiscount, amount: parseFloat(e.target.value) || 0})}
+                    className="form-input"
+                    placeholder={newDiscount.type === 'percentage' ? '10' : '0.00'}
+                    max={newDiscount.type === 'percentage' ? 100 : undefined}
+                  />
                 </div>
+                <button 
+                  onClick={async () => {
+                    if (!newDiscount.classId || newDiscount.amount <= 0) {
+                      addToast('Please select a class and enter amount', 'error');
+                      return;
+                    }
+                    const cls = classes.find(c => c.id === newDiscount.classId);
+                    const discount: Discount = {
+                      id: uuidv4(),
+                      classId: newDiscount.classId,
+                      className: cls ? cls.name : 'Unknown',
+                      amount: newDiscount.amount,
+                      type: newDiscount.type,
+                      term: selectedTerm,
+                      year: selectedYear,
+                      createdAt: new Date().toISOString(),
+                    };
+                    await dataService.create(user!.id, 'discounts', discount as any);
+                    setDiscounts([...discounts, discount]);
+                    setNewDiscount({ classId: '', amount: 0, type: 'fixed' });
+                    addToast('Discount added successfully', 'success');
+                  }}
+                  className="btn btn-primary"
+                >
+                  <Plus size={16} /> Add
+                </button>
               </div>
-              <button
-                onClick={async () => {
-                  if (!newDiscount.studentId || newDiscount.amount <= 0) { addToast('Select a student and enter amount', 'error'); return; }
-                  const id = schoolId || user?.id; if (!id) return;
-                  const student = students.find(s => s.id === newDiscount.studentId);
-                  const now = new Date().toISOString();
-                  const existing = discounts.find(d => d.studentId === newDiscount.studentId && String(d.term) === String(selectedTerm) && String(d.year) === String(selectedYear));
-                  if (existing) await dataService.delete(id, 'discounts', existing.id);
-                  await dataService.create(id, 'discounts', { id: uuidv4(), studentId: newDiscount.studentId, studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown', amount: newDiscount.amount, type: newDiscount.type, term: selectedTerm, year: selectedYear, createdAt: now } as any);
-                  const studentFee = fees.find(f => f.studentId === newDiscount.studentId && String(f.term) === String(selectedTerm) && String(f.year) === String(selectedYear));
-                  if (studentFee) {
-                    const discAmt = newDiscount.type === 'percentage' ? (studentFee.amount * newDiscount.amount) / 100 : newDiscount.amount;
-                    const newAmt = Math.max(0, studentFee.amount - discAmt);
-                    const label = newDiscount.type === 'percentage' ? `${newDiscount.amount}% off` : formatMoney(discAmt);
-                    await dataService.update(id, 'fees', studentFee.id, { amount: newAmt, description: (studentFee.description || 'School Fees') + ` (Discount: ${label})` } as any);
-                    addToast(`Discount applied - invoice updated to ${formatMoney(newAmt)}`, 'success');
-                  } else { addToast('Discount saved. Will apply when invoice is created.', 'success'); }
-                  setNewDiscount({ studentId: '', amount: 0, type: 'fixed' });
-                }}
-                className="btn btn-primary"
-              >
-                <Plus size={15} /> Apply Discount
-              </button>
             </div>
 
-            <div className="px-7 py-4 flex-1 overflow-y-auto">
+            <div className="p-5 max-h-[40vh] overflow-y-auto">
               {discounts.length === 0 ? (
-                <div className="text-center py-8 text-slate-400"><Percent size={36} className="mx-auto mb-2 opacity-40" /><p className="text-sm">No discounts yet</p></div>
+                <div className="text-center py-8">
+                  <Percent size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                  <p className="text-slate-500 font-medium">No discounts added</p>
+                  <p className="text-sm text-slate-400 mt-1">Add discounts to reduce class invoiced amounts</p>
+                </div>
               ) : (
                 <div className="space-y-2">
                   {discounts.map(d => (
-                    <div key={d.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:bg-slate-50">
+                    <div key={d.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                       <div>
-                        <p className="font-medium text-slate-800">{(d as any).studentName || d.className || '-'}</p>
-                        <p className="text-xs text-slate-500">Term {d.term} {d.year}</p>
+                        <p className="font-medium text-slate-800 dark:text-white">{d.className}</p>
+                        <p className="text-xs text-slate-500">Term {d.term}, {d.year}</p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="font-bold text-cyan-600">{d.type === 'percentage' ? `${d.amount}%` : formatMoney(d.amount)}</span>
-                        <button onClick={async () => { await dataService.delete(user!.id, 'discounts', d.id); addToast('Discount removed', 'success'); }} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                        <span className="font-bold text-cyan-600">
+                          {d.type === 'percentage' ? `${d.amount}%` : formatMoney(d.amount)}
+                        </span>
+                        <button
+                          onClick={async () => {
+                            await dataService.delete(user!.id, 'discounts', d.id);
+                            setDiscounts(discounts.filter(disc => disc.id !== d.id));
+                            addToast('Discount removed', 'success');
+                          }}
+                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -2242,205 +1986,17 @@ export default function Invoices() {
               )}
             </div>
 
-            <div className="px-7 py-4 border-t border-slate-200 flex justify-between items-center shrink-0">
-              <p className="text-sm font-medium text-slate-600">Total fixed: <span className="text-cyan-600 font-bold">{formatMoney(discounts.reduce((s, d) => d.type === 'percentage' ? s : s + d.amount, 0))}</span></p>
-              <button onClick={() => setShowDiscountModal(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Close</button>
-            </div>
-          </div>
-        </div>
-      , document.body)}
-
-      {/* Invoice Payment Modal */}
-      {invoicePayModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setInvoicePayModal(null); }}>
-          <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <h3 className="font-bold text-white flex items-center gap-2">
-                <CheckIcon size={18} /> Record Payment
-              </h3>
-              <button onClick={() => setInvoicePayModal(null)} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-                <XCircle size={18} className="text-white" />
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 space-y-1">
-                <p className="text-sm font-semibold text-slate-800 dark:text-white">{invoicePayModal.studentName}</p>
-                <p className="text-xs text-slate-500">{invoicePayModal.description}</p>
-                <p className="text-xs text-slate-500">Remaining: <span className="font-semibold text-slate-700 dark:text-slate-200">{formatMoney(invoicePayModal.remaining)}</span></p>
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Amount</label>
-                <input
-                  type="number"
-                  value={invoicePayAmount}
-                  onChange={e => setInvoicePayAmount(e.target.value)}
-                  className="form-input"
-                  placeholder="Enter amount"
-                  min="0"
-                  step="0.01"
-                  autoFocus
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="form-label">Method</label>
-                <select value={invoicePayMethod} onChange={e => setInvoicePayMethod(e.target.value)} className="form-input">
-                  <option value={PaymentMethod.CASH}>Cash</option>
-                  <option value={PaymentMethod.BANK_TRANSFER}>Bank Transfer</option>
-                </select>
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button onClick={() => setInvoicePayModal(null)} className="btn btn-secondary flex-1" disabled={isRecordingInvoicePayment}>Cancel</button>
-                <button
-                  onClick={submitInvoicePayment}
-                  disabled={isRecordingInvoicePayment || !invoicePayAmount || isNaN(parseFloat(invoicePayAmount)) || parseFloat(invoicePayAmount) <= 0}
-                  className="btn btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-70"
-                >
-                  {isRecordingInvoicePayment
-                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
-                    : <><CheckIcon size={16} /> Record</>}
-                </button>
+            <div className="p-5 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+              <div className="flex justify-between items-center">
+                <p className="font-medium text-slate-700 dark:text-slate-300">
+                  Total Discount Value: <span className="text-cyan-600 font-bold">{formatMoney(discounts.reduce((sum, d) => d.type === 'percentage' ? sum : sum + d.amount, 0))}</span>
+                </p>
+                <button onClick={() => setShowDiscountModal(false)} className="btn btn-secondary">Close</button>
               </div>
             </div>
           </div>
         </div>
-      , document.body)}
-
-      {(showSuccess || showImportSuccess) && (
-        <SuccessPopup 
-          message={showImportSuccess ? "Import Complete!" : "Record Saved!"} 
-          subMessage={showImportSuccess ? "Invoice records have been updated." : undefined}
-          onClose={() => { setShowSuccess(false); setShowImportSuccess(false); }}
-        />
       )}
-      {/* Invoice Template Modal */}
-      {showTemplate && templateData && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 print:p-0 print:bg-white overflow-y-auto" onClick={e => { if (e.target === e.currentTarget) setShowTemplate(false); }}>
-          <div className="w-full max-w-4xl min-h-screen sm:min-h-0 print:m-0 print:shadow-none" onClick={e => e.stopPropagation()}>
-            <InvoiceTemplate 
-              {...templateData}
-              labels={labels}
-              isLiveEditing={isLiveEditing}
-              onUpdateLabels={updateLabels}
-              onUndo={undo}
-              onRedo={redo}
-              canUndo={history.length > 0}
-              canRedo={redoStack.length > 0}
-              onClose={() => setShowTemplate(false)}
-            />
-          </div>
-        </div>
-      , document.body)}
-
-      {/* Student Invoice Detail Modal — all invoices for one student combined */}
-      {selectedStudentForView && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
-          onClick={() => setSelectedStudentForView(null)}
-        >
-          <div
-            className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-modal-in"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div>
-                <h3 className="font-bold text-white text-lg">{selectedStudentForView.studentName}</h3>
-                <p className="text-white/70 text-sm">{selectedStudentForView.admissionNo} · All Invoices</p>
-              </div>
-              <button onClick={() => setSelectedStudentForView(null)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
-            </div>
-
-            {/* Summary bar */}
-            <div className="grid grid-cols-3 divide-x divide-slate-200 dark:divide-slate-700 border-b border-slate-200 dark:border-slate-700">
-              {[
-                { label: 'Total Invoiced', value: formatMoney(selectedStudentForView.totalInvoiced), color: 'text-slate-800 dark:text-white' },
-                { label: 'Total Paid', value: formatMoney(selectedStudentForView.totalPaid), color: 'text-emerald-600 dark:text-emerald-400' },
-                { label: 'Balance', value: formatMoney(selectedStudentForView.balance), color: selectedStudentForView.balance > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400' },
-              ].map(s => (
-                <div key={s.label} className="px-5 py-3 text-center">
-                  <p className="text-xs text-slate-400 mb-0.5">{s.label}</p>
-                  <p className={`font-bold text-base ${s.color}`}>{s.value}</p>
-                </div>
-              ))}
-            </div>
-
-            {/* Invoice list */}
-            <div className="overflow-y-auto flex-1">
-              {(() => {
-                const studentFees = (fees as any[]).filter(f => f.studentId === selectedStudentForView.id);
-                if (studentFees.length === 0) {
-                  return (
-                    <div className="flex flex-col items-center gap-3 py-12">
-                      <FileText size={32} className="text-slate-300" />
-                      <p className="text-slate-400 text-sm">No invoices yet</p>
-                      <button onClick={() => { setSelectedStudentForView(null); handleInvoiceStudent(selectedStudentForView.id, selectedStudentForView.classId || ''); }} className="btn btn-primary text-sm py-1.5">
-                        <Plus size={14} /> Generate Invoice
-                      </button>
-                    </div>
-                  );
-                }
-                return (
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
-                      <tr>
-                        <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Description</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Term</th>
-                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</th>
-                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Paid</th>
-                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Balance</th>
-                        <th className="px-5 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                        <th className="px-5 py-3"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                      {studentFees.map((fee: any) => {
-                        const feePayments = (payments as any[]).filter(p => p.feeId === fee.id);
-                        const paid = feePayments.reduce((s: number, p: any) => s + p.amount, 0);
-                        const bal = fee.amount - paid;
-                        const status = bal <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
-                        return (
-                          <tr key={fee.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                            <td className="px-5 py-3 font-medium text-slate-800 dark:text-white">{fee.description}</td>
-                            <td className="px-5 py-3"><span className="badge badge-info text-xs">Term {fee.term}</span></td>
-                            <td className="px-5 py-3 text-right font-semibold">{formatMoney(fee.amount)}</td>
-                            <td className="px-5 py-3 text-right text-emerald-600">{formatMoney(paid)}</td>
-                            <td className={`px-5 py-3 text-right font-semibold ${bal > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatMoney(bal)}</td>
-                            <td className="px-5 py-3 text-center">
-                              <span className={`badge text-xs ${status === 'paid' ? 'badge-success' : status === 'partial' ? 'badge-warning' : 'badge-danger'}`}>{status}</span>
-                            </td>
-                            <td className="px-5 py-3 text-right">
-                              <button
-                                onClick={() => { setSelectedStudentForView(null); handleViewInvoice(fee as any); }}
-                                className="text-xs text-indigo-500 hover:underline"
-                              >
-                                View
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                );
-              })()}
-            </div>
-
-            {/* Footer */}
-            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
-              <button onClick={() => setSelectedStudentForView(null)} className="btn btn-secondary text-sm py-1.5">Close</button>
-              <button
-                onClick={() => { setSelectedStudentForView(null); handleInvoiceStudent(selectedStudentForView.id, selectedStudentForView.classId || ''); }}
-                className="btn btn-primary text-sm py-1.5"
-              >
-                <Plus size={14} /> Add Invoice
-              </button>
-            </div>
-          </div>
-        </div>
-      , document.body)}
     </div>
   );
 }

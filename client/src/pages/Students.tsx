@@ -1,24 +1,20 @@
-﻿﻿import { useEffect, useState, useRef, useMemo, memo } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, CreditCard, MoreHorizontal, Settings } from 'lucide-react';
-import { Portal } from '../components/Portal';
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import type { Class, Student } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { Gender } from '@schofy/shared';
 import ImageModal from '../components/ImageModal';
+import { useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
-import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments, sortClassesBySectionThenLevel } from '../utils/classroom';
-import { addToRecycleBin, addBatchToRecycleBin } from '../utils/recycleBin';
+import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments } from '../utils/classroom';
+import { addToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
 import { useConfirm } from '../components/ConfirmModal';
-import { getSubscriptionAccessState } from '../utils/plans';
-import { SuccessPopup } from '../components/SuccessPopup';
-import { usePagination } from '../hooks/usePagination';
-import { useDebounce } from '../hooks/useDebounce';
 
 const avatarColors = [
   'bg-rose-500',
@@ -41,18 +37,10 @@ const expectedFields = [
   { key: 'gender', label: 'Gender (male/female)', required: true },
   { key: 'dob', label: 'Date of Birth (YYYY-MM-DD)', required: false },
   { key: 'classId', label: 'Class', required: true },
-  { key: 'admissionNo', label: 'Admission Number', required: false },
   { key: 'address', label: 'Address', required: false },
   { key: 'guardianName', label: 'Guardian Name', required: false },
   { key: 'guardianPhone', label: 'Guardian Phone', required: false },
   { key: 'guardianEmail', label: 'Guardian Email', required: false },
-  { key: 'guardianRelation', label: 'Guardian Relation', required: false },
-  { key: 'guardianOccupation', label: 'Guardian Occupation', required: false },
-  { key: 'medicalInfo', label: 'Medical Info', required: false },
-  { key: 'previousSchool', label: 'Previous School', required: false },
-  { key: 'previousClass', label: 'Previous Class', required: false },
-  { key: 'tuitionFee', label: 'Tuition Fee', required: false },
-  { key: 'boardingFee', label: 'Boarding Fee', required: false },
 ];
 
 function generateStudentId(firstName: string, lastName: string): string {
@@ -62,263 +50,16 @@ function generateStudentId(firstName: string, lastName: string): string {
   return `${fn}${ln}${digits}`;
 }
 
-const StudentActions = ({ 
-  student, 
-  onMarkCompleted, 
-  onToggleStatus, 
-  onSendEmail, 
-  onDelete 
-}: {
-  student: Student;
-  onMarkCompleted: (id: string) => void;
-  onToggleStatus: (student: Student) => void;
-  onSendEmail: (id: string) => void;
-  onDelete: (id: string) => void;
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
-
-  return (
-    <div className="relative flex justify-end" ref={dropdownRef}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={`p-1.5 rounded-lg transition-all ${
-          isOpen 
-            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20' 
-            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
-        }`}
-        title="Actions"
-      >
-        <Settings size={15} className={isOpen ? 'animate-spin-slow' : ''} />
-      </button>
-
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1.5 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 z-[100] overflow-hidden animate-dropdown-in">
-          <div className="px-3 py-1.5 border-b border-slate-50 dark:border-slate-700/50">
-            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Management</p>
-          </div>
-          <div className="p-1">
-            <button
-              onClick={() => { onMarkCompleted(student.id); setIsOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600 dark:hover:text-violet-400 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
-                <Award size={13} />
-              </div>
-              Mark Completed
-            </button>
-            {student.status === 'active' && (
-              <button
-                onClick={() => { onToggleStatus(student); setIsOpen(false); }}
-                className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-900/20 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-colors"
-              >
-                <div className="w-6 h-6 rounded-md bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
-                  <UserX size={13} />
-                </div>
-                Deactivate
-              </button>
-            )}
-            <button
-              onClick={() => { onSendEmail(student.id); setIsOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 hover:text-sky-600 dark:hover:text-sky-400 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-sky-100 dark:bg-sky-900/30 flex items-center justify-center shrink-0">
-                <Mail size={13} />
-              </div>
-              Send Email
-            </button>
-            <div className="my-1 border-t border-slate-50 dark:border-slate-700/50" />
-            <button
-              onClick={() => { onDelete(student.id); setIsOpen(false); }}
-              className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-            >
-              <div className="w-6 h-6 rounded-md bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
-                <Trash2 size={13} />
-              </div>
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const StudentRow = memo(({ 
-  student, 
-  index, 
-  currentPage, 
-  selectMode, 
-  isSelected, 
-  onSingleClick, 
-  onDoubleClick, 
-  onPreviewImage, 
-  onMarkCompleted, 
-  onToggleStatus, 
-  onSendEmail, 
-  onDelete,
-  classes,
-  finance,
-  formatMoney,
-  pageSize
-}: {
-  student: Student;
-  index: number;
-  currentPage: number;
-  selectMode: boolean;
-  isSelected: boolean;
-  onSingleClick: (id: string) => void;
-  onDoubleClick: (id: string) => void;
-  onPreviewImage: (img: { src: string; alt: string }) => void;
-  onMarkCompleted: (id: string) => void;
-  onToggleStatus: (student: Student) => void;
-  onSendEmail: (id: string) => void;
-  onDelete: (id: string) => void;
-  classes: Class[];
-  finance: { status: string; balance: number; invoiced: number };
-  formatMoney: (val: number) => string;
-  pageSize: number;
-}) => {
-  return (
-    <tr 
-      className={`group cursor-pointer transition-colors ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
-      onClick={() => onSingleClick(student.id)}
-      onDoubleClick={() => onDoubleClick(student.id)}
-    >
-      <td className="text-center text-xs text-slate-400 dark:text-slate-500">
-        {(currentPage - 1) * pageSize + index + 1}
-      </td>
-      {selectMode && (
-        <td className="text-center">
-          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-            isSelected 
-              ? 'bg-primary-600 border-primary-600' 
-              : 'border-slate-300 dark:border-slate-600'
-          }`}>
-            {isSelected && (
-              <Check size={12} className="text-white" />
-            )}
-          </div>
-        </td>
-      )}
-      <td>
-        <div className="flex items-center gap-3">
-          {student.photoUrl ? (
-            <button 
-              onClick={(e) => { e.stopPropagation(); onPreviewImage({ src: student.photoUrl!, alt: `${student.firstName} ${student.lastName}` }); }}
-              className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
-            >
-              <img 
-                src={student.photoUrl} 
-                alt={`${student.firstName} ${student.lastName}`}
-                className="w-full h-full object-cover object-top"
-              />
-            </button>
-          ) : (
-            <div className={`w-9 h-9 rounded-lg ${getAvatarColor(student.firstName)} flex items-center justify-center`}>
-              <span className="text-xs font-bold text-white">
-                {student.firstName[0]}
-                {student.lastName[0]}
-              </span>
-            </div>
-          )}
-          <div>
-            <p className="font-medium text-slate-800 dark:text-white">
-              {student.firstName} {student.lastName}
-            </p>
-            <p className="text-xs text-slate-400">{student.guardianEmail || 'No guardian email'}</p>
-          </div>
-        </div>
-      </td>
-      <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
-        {student.studentId || student.admissionNo}
-      </td>
-      <td>
-        <span className="badge badge-info">{getClassDisplayName(student.classId, classes)}</span>
-      </td>
-      <td className="capitalize">
-        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${
-          student.gender === 'male' 
-            ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' 
-            : 'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300'
-        }`}>
-          {student.gender}
-        </span>
-      </td>
-      <td>
-        <div>
-          <p className="text-sm font-medium">{student.guardianName}</p>
-          <p className="text-xs text-slate-400">{student.guardianPhone}</p>
-        </div>
-      </td>
-      <td>
-        <span className={`badge text-xs ${
-          finance.status === 'paid'    ? 'badge-success' :
-          finance.status === 'partial' ? 'badge-warning' :
-          finance.status === 'pending' ? 'badge-danger'  :
-          'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
-        }`}>
-          {finance.status === 'none' ? 'No invoice' : finance.status}
-        </span>
-      </td>
-      <td onClick={(e) => e.stopPropagation()}>
-        {finance.status === 'none' ? <span className="text-xs text-slate-400">-</span> : 
-         finance.balance <= 0 ? <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span> :
-         <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(finance.balance)}</span>}
-      </td>
-      <td onClick={(e) => e.stopPropagation()}>
-        <StudentActions 
-          student={student}
-          onMarkCompleted={onMarkCompleted}
-          onToggleStatus={onToggleStatus}
-          onSendEmail={onSendEmail}
-          onDelete={onDelete}
-        />
-      </td>
-    </tr>
-  );
-});
-
-// Build: 2026-05-05
 export default function Students() {
   const { user, schoolId } = useAuth();
-  // Use localStorage fallback so students load before AuthContext sets user
-  const sid = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
+  const sid = schoolId || user?.id || '';
   const confirm = useConfirm();
-
-  // All data from store — instant from cache, no separate fetch
-  const { data: allStudentsData, loading: studentsLoading } = useTableData(sid, 'students');
-  const { data: classesData } = useTableData(sid, 'classes');
+  // All students from store — always up to date, used for stats cards
+  const { data: allStudentsData } = useTableData(sid, 'students');
+  const allStudents = allStudentsData as Student[];
   const { data: feesData } = useTableData(sid, 'fees');
   const { data: paymentsData } = useTableData(sid, 'payments');
-  const { data: settingsData } = useTableData(sid, 'settings');
   const { formatMoney } = useCurrency();
-
-  const allStudents = allStudentsData as Student[];
-  const classes = classesData as Class[];
-
-  // Derive school type from settings store (falls back to localStorage)
-  const schoolType = useMemo(() => {
-    const entry = (settingsData as any[]).find((s: any) => s.key === 'schoolType');
-    if (entry?.value) return entry.value as string;
-    try {
-      const raw = localStorage.getItem(`schofy_settings_${sid}`);
-      if (raw) return JSON.parse(raw).schoolType || 'nursery_primary';
-    } catch { /* ignore */ }
-    return 'nursery_primary';
-  }, [settingsData, sid]);
 
   // Compute invoice status and balance per student
   function getStudentFinance(studentId: string) {
@@ -334,13 +75,16 @@ export default function Students() {
     return { status, balance, invoiced };
   }
 
+  const { loadPage, searchStudents } = useStudents();
+  const [students, setStudents] = useState<Student[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [debouncedSearch] = useDebounce(search, 300);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [selectedClass, setSelectedClass] = useState('');
-  const [searchResults, setSearchResults] = useState<Student[] | null>(null); // null = not searching
-  const [isSearching, setIsSearching] = useState(false);
-  const [studentView, setStudentView] = useState<'table' | 'list'>('table');
-  const [showAll, setShowAll] = useState(false);
+  const itemsPerPage = 10;
   const { addToast } = useToast();
   // ... rest of state stays same
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -348,8 +92,7 @@ export default function Students() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview' | 'classcheck'>('upload');
-  const [classCheckIssues, setClassCheckIssues] = useState<{ className: string; count: number; action: 'skip' | 'import' }[]>([]);
+  const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
@@ -363,78 +106,76 @@ export default function Students() {
   const [showClassFilter, setShowClassFilter] = useState(false);
   const [completedYearFilter, setCompletedYearFilter] = useState<string>('');
   const [planLimitMessage, setPlanLimitMessage] = useState<string | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState(0);
-  const [showImportSuccess, setShowImportSuccess] = useState(false);
-  const [importLimitInfo, setImportLimitInfo] = useState<{ allowed: number; total: number; planName: string; remaining: number } | null>(null);
   const navigate = useNavigate();
   const statusFilterRef = useRef<HTMLDivElement>(null);
   const classFilterRef = useRef<HTMLDivElement>(null);
+  const isReloadingRef = useRef(false);
 
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
 
-  // Search via store (cache-based, instant)
   useEffect(() => {
-    if (!debouncedSearch) {
-      setSearchResults(null);
-      setIsSearching(false);
-      return;
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const loadClasses = useCallback(async () => {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    try {
+      const classesData = await dataService.getAll(id, 'classes');
+      setClasses(classesData);
+    } catch (error) {
+      console.error('Failed to load classes:', error);
     }
-    setIsSearching(true);
-    const q = debouncedSearch.toLowerCase();
-    const results = allStudents.filter(s =>
-      s.firstName?.toLowerCase().includes(q) ||
-      s.lastName?.toLowerCase().includes(q) ||
-      s.admissionNo?.toLowerCase().includes(q) ||
-      s.studentId?.toLowerCase().includes(q)
-    );
-    setSearchResults(results);
-    setIsSearching(false);
-  }, [debouncedSearch, allStudents]);
+  }, [user?.id]);
 
-  // Derive filtered students directly from store G-- no separate fetch
-  const filteredStudents = useMemo(() => {
-    const base = searchResults !== null ? searchResults : allStudents;
-    return base.filter(s => {
-      const matchesClass = !selectedClass || s.classId === selectedClass;
-      const matchesView =
-        viewFilter === 'all' ? s.status !== 'completed' :
-        viewFilter === 'active' ? s.status === 'active' :
-        viewFilter === 'deactivated' ? s.status === 'inactive' :
-        viewFilter === 'completed' ? s.status === 'completed' : true;
-      return matchesClass && matchesView;
-    });
-  }, [allStudents, searchResults, selectedClass, viewFilter]);
+  const loadData = useCallback(async () => {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    setLoading(true);
+    try {
+      // Load classes first
+      await loadClasses();
+      
+      if (debouncedSearch) {
+        const results = await searchStudents(debouncedSearch);
+        // Apply class and view filters to search results
+        const filtered = results.filter(student => {
+          const matchesClass = !selectedClass || student.classId === selectedClass;
+          const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
+          return matchesClass && matchesView;
+        });
+        setStudents(filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
+        setTotalCount(filtered.length);
+      } else {
+        const filter = (student: Student) => {
+          const matchesClass = !selectedClass || student.classId === selectedClass;
+          const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
+          return matchesClass && matchesView;
+        };
+        const { items, total } = await loadPage(currentPage, itemsPerPage, filter);
+        setStudents(items);
+        setTotalCount(total);
+      }
+    } catch (error) {
+      console.error('Failed to load students:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id, schoolId, debouncedSearch, selectedClass, viewFilter, currentPage, loadPage, searchStudents, loadClasses]);
 
-  const {
-    items: paginatedStudents,
-    currentPage,
-    totalPages,
-    pageSize,
-    goToPage,
-    nextPage,
-    prevPage,
-    totalItems: totalCount
-  } = usePagination(filteredStudents, { pageSize: showAll ? filteredStudents.length || 1 : 10 });
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
-  const students = paginatedStudents;
-  const loading = studentsLoading && allStudents.length === 0 && !localStorage.getItem('schofy_data_cache');
-
-  // All class IDs that appear in students or class list, sorted by section then level
-  const availableClassIds = useMemo(() => {
-    const allIds = new Set([
-      ...classes.map((c: any) => c.id),
-      ...allStudents.map((s: any) => s.classId).filter(Boolean),
-    ]);
-    // Build class objects for sorting (use known classes; unknown IDs go to end)
-    const knownClasses = classes.filter((c: any) => allIds.has(c.id));
-    const unknownIds = [...allIds].filter(id => !classes.find((c: any) => c.id === id));
-    return [
-      ...sortClassesBySectionThenLevel(knownClasses).map((c: any) => c.id),
-      ...unknownIds,
-    ];
-  }, [classes, allStudents]);
+  const availableClassIds = Array.from(new Set([
+    ...classes.map((classItem) => classItem.id),
+    ...students.map((student) => student.classId).filter(Boolean),
+  ]));
 
   const getCompletedStudents = () => {
     return students.filter(s => s.status === 'completed').sort((a, b) => {
@@ -489,10 +230,58 @@ export default function Students() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectMode]);
 
-  // Classes update from store automatically G-- no manual reload needed
+  // Real-time updates for classes - with debounce to prevent infinite loops
   useEffect(() => {
-    return () => {}; // cleanup placeholder
-  }, []);
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    
+    const handleClassesUpdated = () => {
+      if (isReloadingRef.current) return;
+      console.log('🔄 Classes updated, reloading...');
+      isReloadingRef.current = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadClasses().finally(() => {
+          isReloadingRef.current = false;
+        });
+      }, 100);
+    };
+    const handleClassesDataChanged = () => {
+      if (isReloadingRef.current) return;
+      console.log('🔄 Classes data changed, reloading students...');
+      isReloadingRef.current = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        await loadClasses();
+        await loadData();
+        isReloadingRef.current = false;
+      }, 100);
+    };
+    const handleDataRefresh = () => {
+      if (isReloadingRef.current) return;
+      console.log('🔄 General data refresh, reloading classes...');
+      isReloadingRef.current = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadClasses().finally(() => {
+          isReloadingRef.current = false;
+        });
+      }, 100);
+    };
+    
+    window.addEventListener('classesUpdated', handleClassesUpdated);
+    window.addEventListener('ClassesUpdated', handleClassesUpdated);
+    window.addEventListener('classesDataChanged', handleClassesDataChanged);
+    
+    return () => {
+      window.removeEventListener('classesUpdated', handleClassesUpdated);
+      window.removeEventListener('ClassesUpdated', handleClassesUpdated);
+      window.removeEventListener('classesDataChanged', handleClassesDataChanged);
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, [loadClasses, loadData]);
+
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
+  const paginatedStudents = students;
 
   async function cleanupOrphanedRecords() {
     const id = schoolId || user?.id;
@@ -501,7 +290,7 @@ export default function Students() {
       addToast('Cleaning up...', 'info');
       const allStudentsRaw = await dataService.getAll(id, 'students');
 
-      // G--G-- 1. Remove duplicate students (same firstName+lastName, keep oldest) G--G--
+      // ── 1. Remove duplicate students (same firstName+lastName, keep oldest) ──
       const seen = new Map<string, any>();
       const duplicateIds: string[] = [];
       // Sort oldest first so we keep the first-created record
@@ -520,7 +309,7 @@ export default function Students() {
         await dataService.batchDelete(id, 'students', duplicateIds);
       }
 
-      // G--G-- 2. Remove orphaned related records G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--G--
+      // ── 2. Remove orphaned related records ────────────────────────────────
       const validIds = new Set(allStudentsRaw.map((s: any) => s.id).filter((i: string) => !duplicateIds.includes(i)));
       let cleanedCount = 0;
 
@@ -571,6 +360,7 @@ export default function Students() {
         if (ok) {
           const result = await fixInvalidClassAssignments(id);
           addToast(result.message, result.fixed > 0 ? 'success' : 'info');
+          await loadData();
         }
       } else {
         addToast('All class assignments are valid', 'success');
@@ -588,13 +378,16 @@ export default function Students() {
     const name = student ? `${student.firstName} ${student.lastName}` : 'this student';
     const ok = await confirm({
       title: 'Delete Student',
-      description: `This will permanently delete ${name} and all their records (fees, payments, attendance, invoices, exam results). This cannot be undone.`,
+      description: `This will permanently delete ${name} and move them to the recycle bin. This cannot be undone.`,
       confirmLabel: 'Delete',
       variant: 'danger',
     });
     if (!ok) return;
     try {
-      // Add to recycle bin immediately
+      const result = await dataService.delete(authId, 'students', id);
+      if (!result.success) throw new Error(result.error || 'Failed to delete');
+      setStudents(prev => prev.filter(s => s.id !== id));
+      setTotalCount(prev => prev - 1);
       if (student) {
         addToRecycleBin(authId, {
           id: `student-${Date.now()}`,
@@ -604,49 +397,7 @@ export default function Students() {
           deletedAt: new Date().toISOString(),
         });
       }
-
-      // Delete student + all related records in parallel (cascade)
-      void Promise.all([
-        dataService.delete(authId, 'students', id),
-        // Delete all fees for this student
-        dataService.getAll(authId, 'fees').then(fees => {
-          const studentFees = fees.filter((f: any) => f.studentId === id);
-          return Promise.all(studentFees.map((f: any) => dataService.delete(authId, 'fees', f.id)));
-        }),
-        // Delete all payments for this student
-        dataService.getAll(authId, 'payments').then(payments => {
-          const studentPayments = payments.filter((p: any) => p.studentId === id);
-          return Promise.all(studentPayments.map((p: any) => dataService.delete(authId, 'payments', p.id)));
-        }),
-        // Delete all attendance records for this student
-        dataService.getAll(authId, 'attendance').then(attendance => {
-          const studentAttendance = attendance.filter((a: any) => a.entityId === id);
-          return Promise.all(studentAttendance.map((a: any) => dataService.delete(authId, 'attendance', a.id)));
-        }),
-        // Delete all invoices for this student
-        dataService.getAll(authId, 'invoices').then(invoices => {
-          const studentInvoices = invoices.filter((inv: any) => inv.studentId === id);
-          return Promise.all(studentInvoices.map((inv: any) => dataService.delete(authId, 'invoices', inv.id)));
-        }),
-        // Delete all exam results for this student
-        dataService.getAll(authId, 'examResults').then(results => {
-          const studentResults = results.filter((r: any) => r.studentId === id);
-          return Promise.all(studentResults.map((r: any) => dataService.delete(authId, 'examResults', r.id)));
-        }),
-        // Delete transport assignments for this student
-        dataService.getAll(authId, 'transportRoutes').then(() =>
-          dataService.where(authId, 'transportAssignments', 'studentId', id).then(assignments =>
-            Promise.all(assignments.map((a: any) => dataService.delete(authId, 'transportAssignments', a.id)))
-          )
-        ),
-        // Delete bursaries for this student
-        dataService.getAll(authId, 'bursaries').then(bursaries => {
-          const studentBursaries = bursaries.filter((b: any) => b.studentId === id);
-          return Promise.all(studentBursaries.map((b: any) => dataService.delete(authId, 'bursaries', b.id)));
-        }),
-      ]);
-      
-      addToast('Student and all related records deleted', 'success');
+      addToast('Student deleted', 'success');
     } catch (error) {
       addToast('Failed to delete student', 'error');
     }
@@ -753,10 +504,10 @@ export default function Students() {
   }
 
   function handleSelectAll() {
-    if (selectedStudents.size === filteredStudents.length) {
+    if (selectedStudents.size === paginatedStudents.length) {
       setSelectedStudents(new Set());
     } else {
-      setSelectedStudents(new Set(filteredStudents.map(s => s.id)));
+      setSelectedStudents(new Set(paginatedStudents.map(s => s.id)));
     }
   }
 
@@ -765,7 +516,7 @@ export default function Students() {
     if (!id || selectedStudents.size === 0) return;
     const ok = await confirm({
       title: `Delete ${selectedStudents.size} Student${selectedStudents.size > 1 ? 's' : ''}`,
-      description: `Permanently delete ${selectedStudents.size} student${selectedStudents.size > 1 ? 's' : ''} and all their records (fees, payments, attendance, invoices, exam results)? This cannot be undone.`,
+      description: `Permanently delete ${selectedStudents.size} student${selectedStudents.size > 1 ? 's' : ''} and move them to the recycle bin? This cannot be undone.`,
       confirmLabel: 'Delete All',
       variant: 'danger',
     });
@@ -773,60 +524,37 @@ export default function Students() {
     
     try {
       const now = new Date().toISOString();
-      const idsToDelete = Array.from(selectedStudents);
-      const idsSet = new Set(idsToDelete);
-      const studentsToDelete = idsToDelete.map(sid => students.find(s => s.id === sid)).filter(Boolean);
+      let deletedCount = 0;
       
-      // Clear selection and close mode immediately for instant UI feedback
+      for (const studentId of selectedStudents) {
+        const student = students.find(s => s.id === studentId);
+        const result = await dataService.delete(id, 'students', studentId);
+        
+        if (result.success && student) {
+          deletedCount++;
+          addToRecycleBin(id, {
+            id: `student-${Date.now()}-${Math.random()}`,
+            type: 'student',
+            name: `${student.firstName} ${student.lastName}`,
+            data: student,
+            deletedAt: now
+          });
+        }
+      }
+      
+      if (deletedCount > 0) {
+        window.dispatchEvent(new Event('studentsUpdated'));
+      }
+      
       setSelectedStudents(new Set());
       setSelectMode(false);
-
-      // Add to recycle bin in batch
-      if (studentsToDelete.length > 0) {
-        addBatchToRecycleBin(id, studentsToDelete.map(student => ({
-          id: `student-${Date.now()}-${Math.random()}`,
-          type: 'student',
-          name: `${student!.firstName} ${student!.lastName}`,
-          data: student,
-          deletedAt: now,
-        })));
-      }
-
-      // Delete students + all related records in parallel
-      void Promise.all([
-        dataService.batchDelete(id, 'students', idsToDelete),
-        dataService.getAll(id, 'fees').then(fees => {
-          const ids = fees.filter((f: any) => idsSet.has(f.studentId)).map((f: any) => f.id);
-          return ids.length ? dataService.batchDelete(id, 'fees', ids) : null;
-        }),
-        dataService.getAll(id, 'payments').then(payments => {
-          const ids = payments.filter((p: any) => idsSet.has(p.studentId)).map((p: any) => p.id);
-          return ids.length ? dataService.batchDelete(id, 'payments', ids) : null;
-        }),
-        dataService.getAll(id, 'attendance').then(attendance => {
-          const ids = attendance.filter((a: any) => idsSet.has(a.entityId)).map((a: any) => a.id);
-          return ids.length ? dataService.batchDelete(id, 'attendance', ids) : null;
-        }),
-        dataService.getAll(id, 'invoices').then(invoices => {
-          const ids = invoices.filter((inv: any) => idsSet.has(inv.studentId)).map((inv: any) => inv.id);
-          return ids.length ? dataService.batchDelete(id, 'invoices', ids) : null;
-        }),
-        dataService.getAll(id, 'examResults').then(results => {
-          const ids = results.filter((r: any) => idsSet.has(r.studentId)).map((r: any) => r.id);
-          return ids.length ? dataService.batchDelete(id, 'examResults', ids) : null;
-        }),
-        dataService.getAll(id, 'bursaries').then(bursaries => {
-          const ids = bursaries.filter((b: any) => idsSet.has(b.studentId)).map((b: any) => b.id);
-          return ids.length ? dataService.batchDelete(id, 'bursaries', ids) : null;
-        }),
-      ]);
-      
-      addToast(`${idsToDelete.length} students and all related records deleted`, 'success');
+      addToast(`${deletedCount} students deleted`, 'success');
     } catch (error) {
       console.error('Bulk delete error:', error);
       addToast('Failed to delete students', 'error');
     }
   }
+
   async function handleBulkMarkCompleted() {
     const id = schoolId || user?.id;
     if (!id) return;
@@ -989,27 +717,31 @@ export default function Students() {
   }, []);
 
   function downloadTemplate() {
-    import('xlsx').then(({ utils, writeFile }) => {
-      const headers = expectedFields.map(f => f.label);
-      // Build class list hint from actual classes
-      const classNames = classes.map((c: any) => c.name).join(', ') || 'P.1, P.2, P.3, P.4, S.1, S.2';
-      const sampleRows = [
-        ['John', 'Doe', 'male', '2010-01-15', classes[0]?.name || 'P.4', 'ADM-001', '123 Main Street', 'Jane Doe', '0771234567', 'jane@example.com', 'Parent', 'Teacher', '', '', '', '500000', ''],
-        ['Mary', 'Smith', 'female', '2011-03-20', classes[1]?.name || 'P.3', 'ADM-002', '45 Park Avenue', 'Peter Smith', '0782345678', '', 'Guardian', 'Farmer', 'Asthma - has inhaler', 'Sunrise Primary', 'P.2', '450000', '200000'],
-        ['James', 'Okello', 'male', '2009-07-10', classes[2]?.name || 'S.1', '', '', 'Grace Okello', '0753456789', 'grace@email.com', 'Parent', '', '', '', '', '800000', '600000'],
-      ];
-      const ws = utils.aoa_to_sheet([
-        ['// STUDENT IMPORT TEMPLATE - Fill in all required fields (marked *)'],
-        [`// Class: use exact class name from your school (available: ${classNames}). Gender: male/female/other. Date: YYYY-MM-DD. Fees: numbers only.`],
-        headers,
-        ...sampleRows,
-      ]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 18) }));
-      const wb = utils.book_new();
-      utils.book_append_sheet(wb, ws, 'Students');
-      writeFile(wb, 'student-import-template.xlsx');
-      addToast('Template downloaded', 'success');
+    const headers = expectedFields.map(f => f.label);
+    const sampleRow = expectedFields.map(f => {
+      switch (f.key) {
+        case 'studentId': return 'JODO123';
+        case 'firstName': return 'John';
+        case 'lastName': return 'Doe';
+        case 'gender': return 'male';
+        case 'dob': return '2010-01-15';
+        case 'classId': return 'primary-1';
+        case 'address': return '123 Main Street';
+        case 'guardianName': return 'Jane Doe';
+        case 'guardianPhone': return '0771234567';
+        case 'guardianEmail': return 'jane@example.com';
+        default: return '';
+      }
     });
+    
+    const csv = [headers.join(','), sampleRow.join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'student-import-template.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
+    addToast('Template downloaded', 'success');
   }
 
   function closeImportModal() {
@@ -1019,10 +751,7 @@ export default function Students() {
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
-    setClassCheckIssues([]);
     setPlanLimitMessage(null);
-    setImportLimitInfo(null);
-    setIsImporting(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -1031,59 +760,88 @@ export default function Students() {
   async function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+
     try {
-      const { read, utils } = await import('xlsx');
-      const buffer = await file.arrayBuffer();
-      const wb = read(buffer);
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows: any[][] = utils.sheet_to_json(ws, { header: 1, defval: '' });
-      // Skip comment rows (starting with //)
-      const dataRows = rows.filter((r: any[]) => !String(r[0] ?? '').startsWith('//'));
-      if (dataRows.length < 2) { addToast('File must have headers and at least one data row', 'error'); return; }
-      const headers = dataRows[0].map((h: any) => String(h ?? '').trim()).filter(Boolean);
-      const data = dataRows.slice(1).map((row: any[]) => headers.map((_: any, i: number) => String(row[i] ?? '').trim()));
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      
+      if (lines.length < 2) {
+        addToast('CSV file must have headers and at least one data row', 'error');
+        return;
+      }
+
+      const headers = parseCSVHeaders(lines[0]);
+      const data = lines.slice(1).map(line => parseCSVLine(line));
+      
       setCsvHeaders(headers);
       setCsvData(data);
-      const norm = (s: string) => s.toLowerCase().replace(/[\s_()\-\/]/g, '').replace(/[^a-z0-9]/g, '');
-      const camelWords = (s: string) => s.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/[\s_\-]/g, '');
+      
       const autoMapping: Record<string, string> = {};
       expectedFields.forEach(field => {
-        const nKey = norm(field.key); const nLabel = norm(field.label); const nCamel = camelWords(field.key);
-        const matchingHeader = headers.find(h => { const nH = norm(h); return nH === nKey || nH === nLabel || nH === nCamel || nH.includes(nKey) || nKey.includes(nH) || nH.includes(nLabel) || nLabel.includes(nH); });
-        if (matchingHeader) autoMapping[field.key] = matchingHeader;
+        const matchingHeader = headers.find(h => 
+          h.toLowerCase() === field.label.toLowerCase() ||
+          h.toLowerCase() === field.key.toLowerCase() ||
+          h.toLowerCase().includes(field.key.toLowerCase()) ||
+          field.label.toLowerCase().includes(h.toLowerCase())
+        );
+        if (matchingHeader) {
+          autoMapping[field.key] = matchingHeader;
+        }
       });
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
     } catch (error) {
-      addToast('Failed to read Excel file', 'error');
+      console.error('File read error:', error);
+      addToast('Failed to read CSV file', 'error');
     }
+
     event.target.value = '';
   }
 
-  async function processMapping() {
+  function parseCSVHeaders(line: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  }
+
+  function parseCSVLine(line: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  }
+
+  function processMapping() {
     const mappedData: Partial<Student>[] = [];
     const newFlaggedItems: Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }> = {};
-
-    // Build a case-insensitive class name → ID lookup
-    const normClass = (s: string) => s.toLowerCase().replace(/[\s._\-]/g, '');
-    const classLookup = new Map<string, string>();
-    classes.forEach((c: any) => {
-      classLookup.set(normClass(c.name), c.id);
-      // also index by id in case user already put the id
-      classLookup.set(c.id, c.id);
-    });
-
-    function resolveClassId(raw: string): string {
-      if (!raw) return '';
-      const key = normClass(raw);
-      if (classLookup.has(key)) return classLookup.get(key)!;
-      // partial match fallback
-      for (const [k, v] of classLookup) {
-        if (k.includes(key) || key.includes(k)) return v;
-      }
-      return raw; // keep raw if no match found
-    }
     
     for (let i = 0; i < csvData.length; i++) {
       const row = csvData[i];
@@ -1098,24 +856,27 @@ export default function Students() {
           }
         }
       });
-
-      // Resolve class name → classId
-      if ((student as any).classId) {
-        (student as any).classId = resolveClassId((student as any).classId);
-      }
       
       if (student.firstName || student.lastName) {
         const fn = (student.firstName as string) || '';
         const ln = (student.lastName as string) || '';
         const generatedId = generateStudentId(fn, ln);
+        
         (student as any).id = generatedId;
+        
         const existingStudent = students.find(s => 
           s.firstName.toLowerCase() === fn.toLowerCase() && 
           s.lastName.toLowerCase() === ln.toLowerCase()
         );
+        
         if (existingStudent) {
-          newFlaggedItems[i] = { action: 'skip', existingId: existingStudent.id, existingStudent };
+          newFlaggedItems[i] = {
+            action: 'skip',
+            existingId: existingStudent.id,
+            existingStudent: existingStudent
+          };
         }
+        
         mappedData.push(student);
       }
     }
@@ -1123,50 +884,7 @@ export default function Students() {
     setImportPreview(mappedData);
     setFlaggedItems(newFlaggedItems);
     setPlanLimitMessage(null);
-    setImportLimitInfo(null);
-
-    // Check plan limit immediately so user sees it before clicking Import
-    const id = schoolId || user?.id;
-    if (id) {
-      try {
-        const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
-        if (access.plan && access.plan.studentLimit > 0) {
-          const newStudentsOnly = mappedData.filter((_, i) => !newFlaggedItems[i]).length;
-          const remaining = Math.max(0, access.plan.studentLimit - access.used);
-          if (newStudentsOnly > remaining) {
-            setImportLimitInfo({ allowed: remaining, total: newStudentsOnly, planName: access.plan.name, remaining });
-          } else if (remaining < 20) {
-            setPlanLimitMessage(`${remaining} slot${remaining !== 1 ? 's' : ''} remaining on your ${access.plan.name} plan. Importing ${newStudentsOnly} student${newStudentsOnly !== 1 ? 's' : ''}.`);
-          }
-        }
-      } catch { /* silent - plan check is non-blocking */ }
-    }
-
-    // ── Class-type validation ──────────────────────────────────────────────
-    // Detect classes in the import that don't exist in the school's class list.
-    // Group them so the user can decide: skip those students or proceed anyway.
-    const classIdSet = new Set(classes.map((c: any) => c.id));
-    const unknownClassMap = new Map<string, number>(); // rawClassName → count
-
-    for (const student of mappedData) {
-      const cid = (student as any).classId;
-      if (cid && !classIdSet.has(cid)) {
-        // cid here is the raw name that couldn't be resolved to a known class
-        unknownClassMap.set(cid, (unknownClassMap.get(cid) || 0) + 1);
-      }
-    }
-
-    if (unknownClassMap.size > 0) {
-      const issues = Array.from(unknownClassMap.entries()).map(([className, count]) => ({
-        className,
-        count,
-        action: 'skip' as 'skip' | 'import',
-      }));
-      setClassCheckIssues(issues);
-      setImportStep('classcheck');
-    } else {
-      setImportStep('preview');
-    }
+    setImportStep('preview');
   }
 
   async function executeImport() {
@@ -1176,143 +894,136 @@ export default function Students() {
       return;
     }
 
-    setIsImporting(true);
     try {
-      const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
-      if (access.plan && access.plan.studentLimit > 0) {
-        const remaining = Math.max(0, access.plan.studentLimit - access.used);
-        const newStudentsOnly = importPreview.filter((_, i) => !flaggedItems[i]).length;
-        if (newStudentsOnly > remaining) {
-          setImportLimitInfo({ allowed: remaining, total: newStudentsOnly, planName: access.plan.name, remaining });
-          setIsImporting(false);
-          return;
-        }
-      }
-
       const now = new Date().toISOString();
-      const importStatus = (() => {
+      let successCount = 0;
+      let skippedCount = 0;
+      let replacedCount = 0;
+
+      const getImportStatus = () => {
         switch (viewFilter) {
           case 'active': return 'active';
           case 'deactivated': return 'inactive';
           case 'completed': return 'completed';
           default: return 'active';
         }
-      })();
+      };
 
-      const previewSnapshot = [...importPreview];
-      const flaggedSnapshot = { ...flaggedItems };
+      const importStatus = getImportStatus();
 
-      // Build case-insensitive class name → ID lookup for executeImport
-      const normClass = (s: string) => s.toLowerCase().replace(/[\s._\-]/g, '');
-      const classLookup = new Map<string, string>();
-      classes.forEach((c: any) => {
-        classLookup.set(normClass(c.name), c.id);
-        classLookup.set(c.id, c.id);
-      });
-      function resolveClassId(raw: string): string {
-        if (!raw) return '';
-        const key = normClass(raw);
-        if (classLookup.has(key)) return classLookup.get(key)!;
-        for (const [k, v] of classLookup) {
-          if (k.includes(key) || key.includes(k)) return v;
-        }
-        return raw;
-      }
+      for (let i = 0; i < importPreview.length; i++) {
+        const data = importPreview[i];
+        const studentId = (data as any).id;
+        const flagged = flaggedItems[i];
 
-      // Build all operations first, then fire in parallel batches of 10
-      const ops: Array<() => Promise<void>> = [];
-
-      for (let i = 0; i < previewSnapshot.length; i++) {
-        const data = previewSnapshot[i];
-        const flagged = flaggedSnapshot[i];
-        const idx = i;
-
-        if (flagged?.action === 'skip') continue;
-
-        if (flagged?.action === 'replace' && flagged.existingId) {
+        if (flagged) {
+          if (flagged.action === 'skip') {
+            skippedCount++;
+            continue;
+          } else if (flagged.action === 'duplicate') {
+            let newId = studentId;
+            let counter = 1;
+            while (students.find(s => s.id === newId)) {
+              const fn = ((data as any).firstName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
+              const ln = ((data as any).lastName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
+              newId = `${fn}${ln}${100 + counter}`;
+              counter++;
+            }
+            
+            const genderValue = ((data as any).gender as string)?.toLowerCase();
+            const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
+            
+            const student: Student = {
+              id: newId,
+              schoolId: id,
+              studentId: newId,
+              admissionNo: newId,
+              firstName: ((data as any).firstName as string) || 'Unknown',
+              lastName: ((data as any).lastName as string) || 'Unknown',
+              dob: ((data as any).dob as string) || '2000-01-01',
+              gender: validGender,
+              classId: ((data as any).classId as string) || 'primary-1',
+              address: ((data as any).address as string) || '',
+              guardianName: ((data as any).guardianName as string) || '',
+              guardianPhone: ((data as any).guardianPhone as string) || '',
+              guardianEmail: (data as any).guardianEmail as string | undefined,
+              status: importStatus as any,
+              completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
+              completedTerm: importStatus === 'completed' ? 'Final' : undefined,
+              createdAt: now,
+              updatedAt: now,
+            };
+            
+            await dataService.create(id, 'students', student);
+            successCount++;
+          } else if (flagged.action === 'replace' && flagged.existingId) {
+            const genderValue = ((data as any).gender as string)?.toLowerCase();
+            const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
+            
+            await dataService.update(id, 'students', flagged.existingId, {
+              firstName: ((data as any).firstName as string) || 'Unknown',
+              lastName: ((data as any).lastName as string) || 'Unknown',
+              dob: ((data as any).dob as string) || '2000-01-01',
+              gender: validGender,
+              classId: ((data as any).classId as string) || 'primary-1',
+              address: ((data as any).address as string) || '',
+              guardianName: ((data as any).guardianName as string) || '',
+              guardianPhone: ((data as any).guardianPhone as string) || '',
+              guardianEmail: (data as any).guardianEmail as string | undefined,
+              status: importStatus as any,
+              completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
+              completedTerm: importStatus === 'completed' ? 'Final' : undefined,
+              updatedAt: now,
+            } as any);
+            replacedCount++;
+          }
+        } else {
+          // Regular new student
           const genderValue = ((data as any).gender as string)?.toLowerCase();
           const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-          ops.push(() => dataService.update(id, 'students', flagged.existingId!, {
-            firstName: ((data as any).firstName as string) || 'Unknown',
-            lastName: ((data as any).lastName as string) || 'Unknown',
-            dob: ((data as any).dob as string) || '2000-01-01',
+
+          const studentIdLocal = (data as any).id || generateUUID();
+
+          const student: Student = {
+            id: studentIdLocal,
+            schoolId: id,
+            studentId: (data as any).studentId || generateStudentId((data.firstName as string) || '', (data.lastName as string) || ''),
+            admissionNo: (data as any).admissionNo || studentIdLocal,
+            firstName: (data.firstName as string) || 'Unknown',
+            lastName: (data.lastName as string) || 'Unknown',
             gender: validGender,
-            classId: resolveClassId(((data as any).classId as string) || ''),
-            address: ((data as any).address as string) || '',
-            guardianName: ((data as any).guardianName as string) || '',
-            guardianPhone: ((data as any).guardianPhone as string) || '',
-            guardianEmail: (data as any).guardianEmail as string | undefined,
-            medicalInfo: (data as any).medicalInfo as string | undefined,
-            tuitionFee: (data as any).tuitionFee ? parseFloat(String((data as any).tuitionFee)) || undefined : undefined,
-            boardingFee: (data as any).boardingFee ? parseFloat(String((data as any).boardingFee)) || undefined : undefined,
+            dob: (data.dob as string) || '2000-01-01',
+            classId: (data.classId as string) || 'primary-1',
+            address: (data.address as string) || '',
+            guardianName: (data.guardianName as string) || '',
+            guardianPhone: (data.guardianPhone as string) || '',
+            guardianEmail: data.guardianEmail as string | undefined,
             status: importStatus as any,
+            completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
+            completedTerm: importStatus === 'completed' ? 'Final' : undefined,
+            createdAt: now,
             updatedAt: now,
-          } as any).then(() => {
-            setImportProgress(Math.round(((idx + 1) / previewSnapshot.length) * 100));
-          }));
-          continue;
+          };
+          
+          await dataService.create(id, 'students', student as any);
+          successCount++;
         }
-
-        // New student (or duplicate with 'duplicate' action)
-        const genderValue = ((data as any).gender as string)?.toLowerCase();
-        const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-        let studentIdLocal = (data as any).id || generateUUID();
-
-        if (flagged?.action === 'duplicate') {
-          // Generate a unique ID that doesn't clash
-          let counter = 1;
-          while (students.find(s => s.id === studentIdLocal)) {
-            const fn = ((data as any).firstName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
-            const ln = ((data as any).lastName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
-            studentIdLocal = `${fn}${ln}${100 + counter}`;
-            counter++;
-          }
-        }
-
-        const student: Student = {
-          id: studentIdLocal, schoolId: id,
-          studentId: (data as any).studentId || generateStudentId((data.firstName as string) || '', (data.lastName as string) || ''),
-          admissionNo: (data as any).admissionNo || studentIdLocal,
-          firstName: (data.firstName as string) || 'Unknown',
-          lastName: (data.lastName as string) || 'Unknown',
-          gender: validGender,
-          dob: (data.dob as string) || '2000-01-01',
-          classId: resolveClassId((data.classId as string) || ''),
-          address: (data.address as string) || '',
-          guardianName: (data.guardianName as string) || '',
-          guardianPhone: (data.guardianPhone as string) || '',
-          guardianEmail: data.guardianEmail as string | undefined,
-          medicalInfo: (data as any).medicalInfo as string | undefined,
-          tuitionFee: (data as any).tuitionFee ? parseFloat(String((data as any).tuitionFee)) || undefined : undefined,
-          boardingFee: (data as any).boardingFee ? parseFloat(String((data as any).boardingFee)) || undefined : undefined,
-          status: importStatus as any,
-          completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
-          completedTerm: importStatus === 'completed' ? 'Final' : undefined,
-          createdAt: now, updatedAt: now,
-        };
-
-        ops.push(() => dataService.create(id, 'students', student as any).then(() => {
-          setImportProgress(Math.round(((idx + 1) / previewSnapshot.length) * 100));
-        }));
       }
 
-      // Run in parallel batches of 10 for speed without overwhelming the queue
-      const BATCH_SIZE = 10;
-      for (let b = 0; b < ops.length; b += BATCH_SIZE) {
-        await Promise.all(ops.slice(b, b + BATCH_SIZE).map(op => op()));
-      }
-
-      setIsImporting(false);
+      const parts: string[] = [];
+      if (successCount > 0) parts.push(`${successCount} imported`);
+      if (replacedCount > 0) parts.push(`${replacedCount} replaced`);
+      if (skippedCount > 0) parts.push(`${skippedCount} skipped`);
+      
+      addToast(parts.join(', ') || 'Import complete', 'success');
       closeImportModal();
-      setShowImportSuccess(true);
     } catch (error) {
       console.error('Import error:', error);
-      setIsImporting(false);
       addToast('Failed to import students', 'error');
     }
   }
 
-  // Stats use ALL students (not just current page) - always accurate
+  // Stats use ALL students (not just current page) — always accurate
   const activeCount = allStudents.filter(s => s.status === 'active').length;
   const deactivatedCount = allStudents.filter(s => s.status === 'inactive').length;
   const completedCount = allStudents.filter(s => s.status === 'completed').length;
@@ -1348,7 +1059,7 @@ export default function Students() {
               <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
             </button>
             {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-[9999] overflow-hidden animate-dropdown-in">
+              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden animate-dropdown-in">
                 <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
                   Exporting: {getExportLabel()}
                 </div>
@@ -1404,7 +1115,7 @@ export default function Students() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".xlsx,.xls"
+            accept=".csv"
             className="hidden"
           />
           <Link to="/admission" className="btn btn-primary">
@@ -1567,37 +1278,6 @@ export default function Students() {
                 )}
               </div>
 
-              {/* View Toggle */}
-              <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-1 shrink-0">
-                <button
-                  onClick={() => setStudentView('table')}
-                  className={`p-1.5 rounded-md transition-all ${studentView === 'table' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                  title="Table View"
-                >
-                  <FileText size={18} />
-                </button>
-                <button
-                  onClick={() => setStudentView('list')}
-                  className={`p-1.5 rounded-md transition-all ${studentView === 'list' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                  title="List View"
-                >
-                  <Users size={18} />
-                </button>
-              </div>
-
-              {/* View All Toggle */}
-              <button
-                onClick={() => setShowAll(!showAll)}
-                className={`btn flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                  showAll 
-                    ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/30' 
-                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                {showAll ? <CheckSquare size={14} /> : <Square size={14} />}
-                View All ({filteredStudents.length})
-              </button>
-
               {/* Class Filter Dropdown */}
               <div className="relative" ref={classFilterRef}>
                 <button
@@ -1611,7 +1291,7 @@ export default function Students() {
                 </button>
                 {showClassFilter && (
                   <div 
-                    className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden"
+                    className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden"
                     style={{ 
                       animationDuration: '400ms',
                       animationTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
@@ -1663,7 +1343,7 @@ export default function Students() {
                   onClick={handleSelectAll}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
                 >
-                  {selectedStudents.size === filteredStudents.length ? 'Deselect All' : 'Select All'}
+                  {selectedStudents.size === paginatedStudents.length ? 'Deselect All' : 'Select All'}
                 </button>
                 {viewFilter !== 'deactivated' && (
                   <button
@@ -1726,7 +1406,7 @@ export default function Students() {
                   onClick={handleSelectAll}
                   className="text-xs text-violet-600 dark:text-violet-400 hover:underline"
                 >
-                  {selectedStudents.size === filteredStudents.length ? 'Deselect All' : 'Select All'}
+                  {selectedStudents.size === paginatedStudents.length ? 'Deselect All' : 'Select All'}
                 </button>
                 <button
                   onClick={handleBulkMarkActive}
@@ -1785,168 +1465,189 @@ export default function Students() {
           )}
           
           {viewFilter !== 'completed' ? (
-            studentView === 'table' ? (
-              <div className="overflow-x-auto">
-                <table className="min-w-full">
-                  <thead>
-                    <tr>
-                    <th className="w-10">#</th>
-                    {selectMode && <th className="w-10">
-                      <button onClick={handleSelectAll} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">
-                        {selectedStudents.size === filteredStudents.length && filteredStudents.length > 0 ? (
-                          <CheckSquare size={16} className="text-primary-600" />
-                        ) : (
-                          <Square size={16} className="text-slate-400" />
-                        )}
-                      </button>
-                    </th>}
-                    <th>Student</th>
-                    <th>ID Number</th>
-                    <th>Class</th>
-                    <th>Gender</th>
-                    <th>Guardian</th>
-                    <th>Invoice Status</th>
-                    <th>Fees Balance</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr>
-                      <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
-                        <div className="flex flex-col items-center gap-2 text-slate-400">
-                          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                          <p className="text-sm">Loading...</p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : paginatedStudents.length === 0 ? (
-                    <tr>
-                      <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
-                        <div className="flex flex-col items-center gap-2">
-                          <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                            <Users size={24} className="text-slate-400" />
-                          </div>
-                          <p className="text-slate-500 font-medium">No students found</p>
-                          <Link to="/admission" className="text-blue-500 hover:text-blue-600 text-sm font-medium">
-                            Add your first student
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedStudents.map((student, index) => (
-                      <StudentRow
-                        key={student.id}
-                        student={student}
-                        index={index}
-                        currentPage={currentPage}
-                        selectMode={selectMode}
-                        isSelected={selectedStudents.has(student.id)}
-                        onSingleClick={handleRowSingleClick}
-                        onDoubleClick={handleRowDoubleClick}
-                        onPreviewImage={setPreviewImage}
-                        onMarkCompleted={handleMarkCompleted}
-                        onToggleStatus={handleToggleStatus}
-                        onSendEmail={handleSendEmail}
-                        onDelete={handleDelete}
-                        classes={classes}
-                        finance={getStudentFinance(student.id)}
-                        formatMoney={formatMoney}
-                        pageSize={pageSize}
-                      />
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+            <table>
+              <thead>
+                <tr>
+                  <th className="w-10">#</th>
+                  {selectMode && <th className="w-10">
+                    <button onClick={handleSelectAll} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">
+                      {selectedStudents.size === paginatedStudents.length && paginatedStudents.length > 0 ? (
+                        <CheckSquare size={16} className="text-primary-600" />
+                      ) : (
+                        <Square size={16} className="text-slate-400" />
+                      )}
+                    </button>
+                  </th>}
+                  <th>Student</th>
+                  <th>ID Number</th>
+                  <th>Class</th>
+                  <th>Gender</th>
+                  <th>Guardian</th>
+                  <th>Invoice Status</th>
+                  <th>Fees Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
                 {loading ? (
-                  <div className="text-center py-12">
-                    <div className="flex flex-col items-center gap-2 text-slate-400">
-                      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                      <p className="text-sm">Loading...</p>
-                    </div>
-                  </div>
-                ) : paginatedStudents.length === 0 ? (
-                  <div className="text-center py-12">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                        <Users size={24} className="text-slate-400" />
+                  <tr>
+                    <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
+                      <div className="flex flex-col items-center gap-2 text-slate-400">
+                        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-sm">Loading...</p>
                       </div>
-                      <p className="text-slate-500 font-medium">No students found</p>
-                    </div>
-                  </div>
+                    </td>
+                  </tr>
+                ) : paginatedStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                          <Users size={24} className="text-slate-400" />
+                        </div>
+                        <p className="text-slate-500 font-medium">No students found</p>
+                        <Link to="/admission" className="text-blue-500 hover:text-blue-600 text-sm font-medium">
+                          Add your first student
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
                 ) : (
-                  paginatedStudents.map((student, index) => {
-                    const finance = getStudentFinance(student.id);
-                    const isSelected = selectedStudents.has(student.id);
-                    return (
-                      <div 
-                        key={student.id}
-                        onClick={() => handleRowSingleClick(student.id)}
-                        className={`p-4 flex items-center gap-4 cursor-pointer transition-colors ${isSelected ? 'bg-primary-50 dark:bg-primary-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
-                      >
-                        <span className="text-xs text-slate-400 w-6 text-center">{(currentPage - 1) * pageSize + index + 1}</span>
-                        
-                        {selectMode && (
-                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-primary-600 border-primary-600' : 'border-slate-300 dark:border-slate-600'}`}>
-                            {isSelected && <Check size={12} className="text-white" />}
+                  paginatedStudents.map((student, index) => (
+                    <tr 
+                      key={student.id} 
+                      className={`group cursor-pointer transition-colors ${selectedStudents.has(student.id) ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+                      onClick={() => handleRowSingleClick(student.id)}
+                      onDoubleClick={() => handleRowDoubleClick(student.id)}
+                    >
+                      <td className="text-center text-xs text-slate-400 dark:text-slate-500">
+                        {(currentPage - 1) * itemsPerPage + index + 1}
+                      </td>
+                      {selectMode && (
+                        <td className="text-center">
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                            selectedStudents.has(student.id) 
+                              ? 'bg-primary-600 border-primary-600' 
+                              : 'border-slate-300 dark:border-slate-600'
+                          }`}>
+                            {selectedStudents.has(student.id) && (
+                              <Check size={12} className="text-white" />
+                            )}
                           </div>
-                        )}
-
-                        <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0">
+                        </td>
+                      )}
+                      <td>
+                        <div className="flex items-center gap-3">
                           {student.photoUrl ? (
-                            <img src={student.photoUrl} alt="" className="w-full h-full object-cover" />
+                            <button 
+                              onClick={() => setPreviewImage({ src: student.photoUrl!, alt: `${student.firstName} ${student.lastName}` })}
+                              className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
+                            >
+                              <img 
+                                src={student.photoUrl} 
+                                alt={`${student.firstName} ${student.lastName}`}
+                                className="w-full h-full object-cover object-top"
+                              />
+                            </button>
                           ) : (
-                            <div className={`w-full h-full flex items-center justify-center text-white font-bold text-sm ${getAvatarColor(student.firstName)}`}>
-                              {student.firstName[0]}{student.lastName[0]}
+                            <div className={`w-9 h-9 rounded-lg ${getAvatarColor(student.firstName)} flex items-center justify-center`}>
+                              <span className="text-xs font-bold text-white">
+                                {student.firstName[0]}
+                                {student.lastName[0]}
+                              </span>
                             </div>
                           )}
+                          <div>
+                            <p className="font-medium text-slate-800 dark:text-white">
+                              {student.firstName} {student.lastName}
+                            </p>
+                            <p className="text-xs text-slate-400">{student.guardianEmail || 'No guardian email'}</p>
+                          </div>
                         </div>
-
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-slate-800 dark:text-white truncate">
-                            {student.firstName} {student.lastName}
-                          </p>
-                          <p className="text-xs text-slate-500 truncate">
-                            {student.studentId || student.admissionNo} • {getClassDisplayName(student.classId, classes)}
-                          </p>
+                      </td>
+                      <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
+                        {student.studentId || student.admissionNo}
+                      </td>
+                      <td>
+                        <span className="badge badge-info">{getClassDisplayName(student.classId, classes)}</span>
+                      </td>
+                      <td className="capitalize">
+                        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${
+                          student.gender === 'male' 
+                            ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' 
+                            : 'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300'
+                        }`}>
+                          {student.gender}
+                        </span>
+                      </td>
+                      <td>
+                        <div>
+                          <p className="text-sm font-medium">{student.guardianName}</p>
+                          <p className="text-xs text-slate-400">{student.guardianPhone}</p>
                         </div>
-
-                        <div className="hidden md:block text-right shrink-0 px-4">
-                          <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{student.guardianName}</p>
-                          <p className="text-[10px] text-slate-500">{student.guardianPhone}</p>
-                        </div>
-
-                        <div className="shrink-0 text-right min-w-[80px]">
-                          <p className={`text-xs font-bold ${finance.balance > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                            {finance.balance > 0 ? formatMoney(finance.balance) : 'Cleared'}
-                          </p>
-                          <span className={`text-[10px] uppercase font-bold tracking-wider ${
-                            finance.status === 'paid' ? 'text-emerald-500' : 
-                            finance.status === 'partial' ? 'text-amber-500' : 
-                            'text-red-500'
-                          }`}>
-                            {finance.status}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => handleSendEmail(student.id)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-500" title="Email">
-                            <Mail size={16} />
+                      </td>
+                      <td>
+                        {(() => {
+                          const { status } = getStudentFinance(student.id);
+                          return (
+                            <span className={`badge text-xs ${
+                              status === 'paid'    ? 'badge-success' :
+                              status === 'partial' ? 'badge-warning' :
+                              status === 'pending' ? 'badge-danger'  :
+                              'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+                            }`}>
+                              {status === 'none' ? 'No invoice' : status}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        {(() => {
+                          const { status, balance } = getStudentFinance(student.id);
+                          if (status === 'none') return <span className="text-xs text-slate-400">—</span>;
+                          if (balance <= 0) return <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>;
+                          return <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(balance)}</span>;
+                        })()}
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleMarkCompleted(student.id)}
+                            className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors"
+                            title="Mark Completed"
+                          >
+                            <Award size={15} />
                           </button>
-                          <button onClick={() => handleRowDoubleClick(student.id)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-500" title="View Profile">
-                            <ArrowRight size={16} />
+                          {student.status === 'active' && (
+                            <button
+                              onClick={() => handleToggleStatus(student)}
+                              className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg transition-colors"
+                              title="Deactivate"
+                            >
+                              <UserX size={15} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleSendEmail(student.id)}
+                            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
+                            title="Send Email"
+                          >
+                            <Mail size={15} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(student.id)}
+                            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 size={15} />
                           </button>
                         </div>
-                      </div>
-                    );
-                  })
+                      </td>
+                    </tr>
+                  ))
                 )}
-              </div>
-            )
+              </tbody>
+            </table>
           ) : (
             <div className="p-4">
               {loading ? (
@@ -2050,16 +1751,16 @@ export default function Students() {
           )}
         </div>
 
-        {totalPages > 1 && viewFilter !== 'completed' && !showAll && (
+        {totalPages > 1 && viewFilter !== 'completed' && (
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * pageSize + 1}</span> to{' '}
-              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * pageSize, totalCount)}</span> of{' '}
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>–
+              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span> of{' '}
               <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students
             </p>
             <div className="flex items-center gap-1">
               <button
-                onClick={() => goToPage(1)}
+                onClick={() => setCurrentPage(1)}
                 disabled={currentPage === 1}
                 className="btn btn-secondary p-2 disabled:opacity-40"
                 title="First page"
@@ -2068,13 +1769,13 @@ export default function Students() {
                 <ChevronLeft size={14} className="-ml-2" />
               </button>
               <button
-                onClick={prevPage}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
                 className="btn btn-secondary p-2 disabled:opacity-40"
               >
                 <ChevronLeft size={16} />
               </button>
-              {/* Page number buttons - show up to 5 around current page */}
+              {/* Page number buttons — show up to 5 around current page */}
               {Array.from({ length: totalPages }, (_, i) => i + 1)
                 .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
                 .reduce<(number | '...')[]>((acc, p, i, arr) => {
@@ -2084,11 +1785,11 @@ export default function Students() {
                 }, [])
                 .map((p, i) =>
                   p === '...' ? (
-                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">...</span>
+                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-sm">…</span>
                   ) : (
                     <button
                       key={p}
-                      onClick={() => goToPage(p as number)}
+                      onClick={() => setCurrentPage(p as number)}
                       className={`min-w-[2rem] h-8 px-2 rounded-lg text-sm font-medium transition-colors ${
                         currentPage === p
                           ? 'text-white shadow-sm'
@@ -2101,14 +1802,14 @@ export default function Students() {
                   )
                 )}
               <button
-                onClick={nextPage}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
                 className="btn btn-secondary p-2 disabled:opacity-40"
               >
                 <ChevronRight size={16} />
               </button>
               <button
-                onClick={() => goToPage(totalPages)}
+                onClick={() => setCurrentPage(totalPages)}
                 disabled={currentPage === totalPages}
                 className="btn btn-secondary p-2 disabled:opacity-40"
                 title="Last page"
@@ -2130,9 +1831,8 @@ export default function Students() {
       )}
 
       {showImportModal && (
-        <Portal>
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
@@ -2159,7 +1859,7 @@ export default function Students() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
 
@@ -2189,30 +1889,26 @@ export default function Students() {
 
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
-                      <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">File Column</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Sample</th>
-                          <th className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-300">Maps To</th>
-                        </tr>
-                      </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {csvHeaders.map((header, idx) => {
-                          const sample = csvData[0]?.[idx] || '';
-                          const currentMapping = Object.entries(fieldMapping).find(([, v]) => v === header)?.[0] || '';
-                          return (
-                            <tr key={header} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
-                              <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
-                              <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
-                              <td className="px-3 py-2">
-                                <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">Skip</option>
-                                  {expectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
-                                </select>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {expectedFields.filter(f => f.required).map(field => (
+                          <tr key={field.key}>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">
+                              {field.label}*
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <select
+                                value={fieldMapping[field.key] || ''}
+                                onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
+                                className="w-full form-input py-1 px-2 text-xs"
+                              >
+                                <option value="">-- Skip --</option>
+                                {csvHeaders.map(header => (
+                                  <option key={header} value={header}>{header}</option>
+                                ))}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -2221,104 +1917,6 @@ export default function Students() {
                     <button onClick={closeImportModal} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
                     <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
                       Preview <ArrowRight size={14} />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {importStep === 'classcheck' && (
-                <div className="space-y-5">
-                  {/* Header */}
-                  <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
-                    <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
-                      <AlertTriangle size={20} className="text-amber-600 dark:text-amber-400" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-amber-800 dark:text-amber-200 text-sm">Unknown Classes Detected</p>
-                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-                        Some students are assigned to classes not found in your school (<span className="font-semibold capitalize">{schoolType.replace(/_/g, ' ')}</span> type).
-                        Choose what to do with each.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Issue list */}
-                  <div className="space-y-2">
-                    {classCheckIssues.map((issue, idx) => (
-                      <div key={issue.className} className="flex items-center justify-between gap-4 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
-                            <X size={14} className="text-red-500" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-semibold text-slate-800 dark:text-white text-sm truncate">"{issue.className}"</p>
-                            <p className="text-xs text-slate-400">{issue.count} student{issue.count !== 1 ? 's' : ''} — not in your class list</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          <button
-                            onClick={() => setClassCheckIssues(prev => prev.map((it, i) => i === idx ? { ...it, action: 'skip' } : it))}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${issue.action === 'skip' ? 'bg-red-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-red-50 dark:hover:bg-red-900/20'}`}
-                          >
-                            Skip
-                          </button>
-                          <button
-                            onClick={() => setClassCheckIssues(prev => prev.map((it, i) => i === idx ? { ...it, action: 'import' } : it))}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${issue.action === 'import' ? 'bg-indigo-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}
-                          >
-                            Import anyway
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Bulk actions */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setClassCheckIssues(prev => prev.map(it => ({ ...it, action: 'skip' })))}
-                      className="btn btn-secondary text-xs py-1.5 px-3"
-                    >
-                      Skip all unknown
-                    </button>
-                    <button
-                      onClick={() => setClassCheckIssues(prev => prev.map(it => ({ ...it, action: 'import' })))}
-                      className="btn btn-secondary text-xs py-1.5 px-3"
-                    >
-                      Import all anyway
-                    </button>
-                  </div>
-
-                  {/* Change school type hint */}
-                  <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 flex items-start gap-3">
-                    <GraduationCap size={16} className="text-indigo-500 mt-0.5 shrink-0" />
-                    <p className="text-xs text-indigo-700 dark:text-indigo-300">
-                      If these classes belong to a different school level, you can{' '}
-                      <button
-                        onClick={() => { closeImportModal(); navigate('/settings'); }}
-                        className="underline font-semibold hover:text-indigo-900 dark:hover:text-indigo-100"
-                      >
-                        change your school type in Settings
-                      </button>
-                      {' '}— new classes will be auto-created, then re-import.
-                    </p>
-                  </div>
-
-                  {/* Navigation */}
-                  <div className="flex justify-between pt-1">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-2 px-4 text-sm">Back</button>
-                    <button
-                      onClick={() => {
-                        // Apply skip decisions: remove students whose class is marked 'skip'
-                        const skipClasses = new Set(classCheckIssues.filter(i => i.action === 'skip').map(i => i.className));
-                        if (skipClasses.size > 0) {
-                          setImportPreview(prev => prev.filter(s => !skipClasses.has((s as any).classId)));
-                        }
-                        setImportStep('preview');
-                      }}
-                      className="btn btn-primary py-2 px-4 text-sm flex items-center gap-2"
-                    >
-                      Continue to Preview <ArrowRight size={14} />
                     </button>
                   </div>
                 </div>
@@ -2334,7 +1932,7 @@ export default function Students() {
                       <ArrowRight size={12} />
                       <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3 Review</span>
                     </div>
-                    <div className="flex gap-3 ml-auto flex-wrap">
+                    <div className="flex gap-3 ml-auto">
                       <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-3 py-1">
                         <p className="text-sm text-emerald-700 dark:text-emerald-300">
                           <strong>{importPreview.length - Object.keys(flaggedItems).length}</strong> new
@@ -2347,75 +1945,12 @@ export default function Students() {
                           </p>
                         </div>
                       )}
-                      <div className="bg-slate-100 dark:bg-slate-700 rounded-lg px-3 py-1">
-                        <p className="text-sm text-slate-600 dark:text-slate-300">
-                          <strong>{importPreview.length}</strong> total in file
-                        </p>
-                      </div>
                     </div>
                   </div>
 
                   {planLimitMessage && (
                     <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-2.5 mx-5 mt-3">
                       <p className="text-sm text-red-700 dark:text-red-300">{planLimitMessage}</p>
-                    </div>
-                  )}
-
-                  {importLimitInfo && (
-                    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                      <div className="modal-card w-full max-w-sm">
-                        <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-red-50 dark:bg-red-900/20">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
-                              <AlertTriangle size={20} className="text-red-600" />
-                            </div>
-                            <div>
-                              <h3 className="font-bold text-slate-800 dark:text-white">Plan Limit Reached</h3>
-                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{importLimitInfo.planName} plan</p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="p-5 space-y-4">
-                          <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 space-y-2">
-                            <div className="flex justify-between text-sm">
-                              <span className="text-slate-500">Trying to import</span>
-                              <span className="font-semibold text-slate-800 dark:text-white">{importLimitInfo.total} students</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                              <span className="text-slate-500">Slots remaining</span>
-                              <span className={`font-semibold ${importLimitInfo.remaining === 0 ? 'text-red-600' : 'text-amber-600'}`}>{importLimitInfo.remaining}</span>
-                            </div>
-                          </div>
-                          <p className="text-sm text-slate-600 dark:text-slate-300">
-                            {importLimitInfo.remaining === 0 ? 'Your plan is full. Upgrade to import more students.' : `Only ${importLimitInfo.remaining} of ${importLimitInfo.total} students can be imported. Upgrade to import all.`}
-                          </p>
-                          <div className="flex flex-col gap-2">
-                            {importLimitInfo.remaining > 0 && (
-                              <button
-                                onClick={() => {
-                                  const newOnly = importPreview.map((s, i) => ({ s, i })).filter(({ i }) => !flaggedItems[i]);
-                                  const allowed = newOnly.slice(0, importLimitInfo.remaining).map(({ i }) => i);
-                                  const trimmed = importPreview.filter((_, i) => flaggedItems[i] || allowed.includes(i));
-                                  setImportPreview(trimmed);
-                                  setImportLimitInfo(null);
-                                }}
-                                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-semibold transition-colors"
-                              >
-                                Import {importLimitInfo.remaining} (within limit)
-                              </button>
-                            )}
-                            <button
-                              onClick={() => { setImportLimitInfo(null); closeImportModal(); navigate('/plans'); }}
-                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2"
-                            >
-                              <CreditCard size={16} /> Upgrade Plan
-                            </button>
-                            <button onClick={() => setImportLimitInfo(null)} className="w-full py-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-sm transition-colors">
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      </div>
                     </div>
                   )}
 
@@ -2491,31 +2026,15 @@ export default function Students() {
 
                   <div className="flex justify-between px-5 py-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
                     <button onClick={() => setImportStep('map')} className="btn btn-secondary py-2 px-4">Back to Mapping</button>
-                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-2 px-4 flex items-center gap-2 disabled:opacity-70">
-                      {isImporting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={16} /> Import Selected</>}
+                    <button onClick={executeImport} className="btn btn-primary py-2 px-4 flex items-center gap-2">
+                      <Check size={16} /> Import Selected
                     </button>
                   </div>
-                  {isImporting && (
-                    <div className="px-5 pb-4">
-                      <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5">
-                        <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
           </div>
         </div>
-      </Portal>
-      )}
-
-      {showImportSuccess && (
-        <SuccessPopup 
-          message="Import Complete!" 
-          subMessage="Your student records have been updated."
-          onClose={() => setShowImportSuccess(false)}
-        />
       )}
     </div>
   );

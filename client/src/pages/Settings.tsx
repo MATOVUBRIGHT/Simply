@@ -1,6 +1,4 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-
 import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
@@ -9,8 +7,6 @@ import { useSync } from '../contexts/SyncContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { dataService } from '../lib/database/SupabaseDataService';
-import { SuccessPopup } from '../components/SuccessPopup';
-import { sortClassesBySectionThenLevel } from '../utils/classroom';
 
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -41,9 +37,6 @@ export default function Settings() {
   const [promoteNewTerm, setPromoteNewTerm] = useState('1');
   const [promoteNewYear, setPromoteNewYear] = useState(new Date().getFullYear().toString());
   const [isPromoting, setIsPromoting] = useState(false);
-  const [promoteProgress, setPromoteProgress] = useState(0);
-  const [showPromoteSuccess, setShowPromoteSuccess] = useState(false);
-  const [promoteResult, setPromoteResult] = useState({ promoted: 0, graduated: 0 });
   const [settings, setSettings] = useState({
     schoolName: 'My School',
     schoolAddress: '',
@@ -62,10 +55,6 @@ export default function Settings() {
     libraryFee: '50',
     sportsFee: '75',
     schoolType: 'nursery_primary',
-    bankAccountName: '',
-    bankAccountNumber: '',
-    bankName: '',
-    paymentMethod: 'BANK TRANSFER',
   });
 
   const currentCurrency = currencies.find(c => c.code === settings.currency) || currencies[0];
@@ -169,7 +158,7 @@ export default function Settings() {
         return;
       }
 
-      await autoCreateClasses(sid, settings.schoolType);
+      await autoCreateClasses(sid);
       window.dispatchEvent(new CustomEvent('classesUpdated'));
       window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
       addToast('Settings saved', 'success');
@@ -181,8 +170,8 @@ export default function Settings() {
     }
   }
 
-  async function autoCreateClasses(sid: string, schoolTypeOverride?: string) {
-    const schoolType = schoolTypeOverride || settings.schoolType || 'nursery_primary';
+  async function autoCreateClasses(sid: string) {
+    const schoolType = settings.schoolType || 'nursery_primary';
 
     const CLASS_MAP: Record<string, { name: string; level: number }[]> = {
       nursery: [
@@ -229,19 +218,17 @@ export default function Settings() {
     }
 
     const existingClasses = await dataService.getAll(sid, 'classes');
-    // Check by name (case-insensitive) — don't create if already exists
-    const existingNames = new Set(existingClasses.map((c: any) => c.name.toLowerCase().trim()));
+    const existingNames = new Set(existingClasses.map((c: any) => c.name));
 
     let createdCount = 0;
     for (const cls of classesToCreate) {
-      if (!existingNames.has(cls.name.toLowerCase().trim())) {
+      if (!existingNames.has(cls.name)) {
         await dataService.create(sid, 'classes', { name: cls.name, level: cls.level, capacity: 40 } as any);
         createdCount++;
       }
     }
 
     if (createdCount > 0) addToast(`${createdCount} classes auto-created`, 'info');
-    else if (schoolTypeOverride) addToast('All classes for this school type already exist', 'info');
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) {
@@ -253,12 +240,6 @@ export default function Settings() {
       setCurrency(value as any);
     }
 
-    // Auto-generate classes immediately when school type changes
-    if (name === 'schoolType') {
-      const sid = schoolId || user?.id;
-      if (sid) void autoCreateClasses(sid, value);
-    }
-
     // Debounced auto-save — fires 1s after last keystroke
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => void autoSave(newSettings), 1000);
@@ -268,17 +249,17 @@ export default function Settings() {
     const id = schoolId || user?.id;
     if (!id) return;
     setIsPromoting(true);
-    setPromoteProgress(0);
     try {
-      // Load all classes sorted by section then level
+      // Load all classes sorted by level
       const allClasses = await dataService.getAll(id, 'classes');
-      const sorted = sortClassesBySectionThenLevel([...allClasses]);
+      const sorted = [...allClasses].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0));
 
       // Build next-class map: classId → nextClassId
       const nextClassMap: Record<string, string> = {};
       for (let i = 0; i < sorted.length - 1; i++) {
         nextClassMap[(sorted[i] as any).id] = (sorted[i + 1] as any).id;
       }
+      // Students in the last class get marked completed
       const lastClassId = sorted.length > 0 ? (sorted[sorted.length - 1] as any).id : null;
 
       // Load all active students
@@ -289,29 +270,25 @@ export default function Settings() {
       let graduated = 0;
       const now = new Date().toISOString();
 
-      // Run in parallel batches of 10 for speed
-      const BATCH = 10;
-      for (let b = 0; b < active.length; b += BATCH) {
-        const batch = active.slice(b, b + BATCH);
-        await Promise.all(batch.map(async (student: any) => {
-          const currentClassId = student.classId;
-          if (currentClassId === lastClassId) {
-            await dataService.update(id, 'students', student.id, {
-              status: 'completed',
-              completedYear: parseInt(promoteNewYear),
-              completedTerm: settings.currentTerm,
-              updatedAt: now,
-            } as any);
-            graduated++;
-          } else if (nextClassMap[currentClassId]) {
-            await dataService.update(id, 'students', student.id, {
-              classId: nextClassMap[currentClassId],
-              updatedAt: now,
-            } as any);
-            promoted++;
-          }
-        }));
-        setPromoteProgress(Math.round(((b + batch.length) / active.length) * 100));
+      for (const student of active) {
+        const currentClassId = (student as any).classId;
+        if (currentClassId === lastClassId) {
+          // Graduate — mark completed
+          await dataService.update(id, 'students', (student as any).id, {
+            status: 'completed',
+            completedYear: parseInt(promoteNewYear),
+            completedTerm: settings.currentTerm,
+            updatedAt: now,
+          } as any);
+          graduated++;
+        } else if (nextClassMap[currentClassId]) {
+          // Promote to next class
+          await dataService.update(id, 'students', (student as any).id, {
+            classId: nextClassMap[currentClassId],
+            updatedAt: now,
+          } as any);
+          promoted++;
+        }
       }
 
       // Update current term in settings
@@ -325,13 +302,11 @@ export default function Settings() {
       window.dispatchEvent(new CustomEvent('studentsUpdated'));
       window.dispatchEvent(new CustomEvent('dataRefresh'));
       setShowPromoteModal(false);
-      setPromoteResult({ promoted, graduated });
-      setShowPromoteSuccess(true);
+      addToast(`Term started: ${promoted} students promoted, ${graduated} graduated`, 'success');
     } catch (err: any) {
       addToast(err?.message || 'Promotion failed', 'error');
     } finally {
       setIsPromoting(false);
-      setPromoteProgress(0);
     }
   }
 
@@ -505,37 +480,6 @@ export default function Settings() {
             <div>
               <label className="form-label">Email</label>
               <input type="email" name="schoolEmail" value={settings.schoolEmail} onChange={handleChange} className="form-input" />
-            </div>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-header flex items-center gap-2">
-            <DollarSign size={20} />
-            <h2 className="font-semibold">Payment Details (for Invoices)</h2>
-          </div>
-          <div className="card-body grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="form-label">Account Name</label>
-              <input name="bankAccountName" value={settings.bankAccountName} onChange={handleChange} className="form-input" placeholder="e.g. Schofy Primary School" />
-            </div>
-            <div>
-              <label className="form-label">Account Number</label>
-              <input name="bankAccountNumber" value={settings.bankAccountNumber} onChange={handleChange} className="form-input" placeholder="e.g. 0123456789" />
-            </div>
-            <div>
-              <label className="form-label">Bank Name</label>
-              <input name="bankName" value={settings.bankName} onChange={handleChange} className="form-input" placeholder="e.g. Stanbic Bank" />
-            </div>
-            <div>
-              <label className="form-label">Preferred Payment Method</label>
-              <select name="paymentMethod" value={settings.paymentMethod} onChange={handleChange} className="form-input">
-                <option value="BANK TRANSFER">Bank Transfer</option>
-                <option value="MOBILE MONEY">Mobile Money</option>
-                <option value="CASH">Cash</option>
-                <option value="DEBIT CARD">Debit Card</option>
-                <option value="ALL">All Methods</option>
-              </select>
             </div>
           </div>
         </div>
@@ -896,47 +840,46 @@ export default function Settings() {
             </p>
             
             {showDeleteConfirm ? (
-              <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-                <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center gap-3 px-5 py-4 border-b border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
-                    <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center shrink-0">
-                      <AlertTriangle size={20} className="text-red-600" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-red-700 dark:text-red-300">Delete All Data</h3>
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">This action cannot be undone</p>
-                    </div>
-                  </div>
-                  <div className="p-5 space-y-4">
-                    <p className="text-sm text-slate-600 dark:text-slate-400">
-                      This will permanently delete <strong>ALL</strong> your school data. Enter your <strong>password</strong> to confirm:
-                    </p>
-                    <input
-                      type="password"
-                      value={deletePassword}
-                      onChange={(e) => { setDeletePassword(e.target.value); setDeleteError(''); }}
-                      className="form-input"
-                      placeholder="Enter your password"
-                      autoFocus
-                    />
-                    {deleteError && <p className="text-red-500 text-sm">{deleteError}</p>}
-                    <div className="flex gap-2 pt-1">
-                      <button
-                        onClick={() => { setShowDeleteConfirm(false); setDeletePassword(''); setDeleteError(''); }}
-                        className="btn btn-secondary flex-1"
-                        disabled={isDeleting}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleDeleteAllData}
-                        disabled={!deletePassword || isDeleting}
-                        className="btn bg-red-600 hover:bg-red-700 text-white flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
-                      >
-                        {isDeleting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Deleting...</> : <><Trash2 size={16} /> Delete All</>}
-                      </button>
-                    </div>
-                  </div>
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertTriangle size={20} className="text-red-500" />
+                  <p className="font-medium text-red-700 dark:text-red-300">This will delete ALL your data!</p>
+                </div>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
+                  Enter your <strong>password</strong> to confirm:
+                </p>
+                <input
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => {
+                    setDeletePassword(e.target.value);
+                    setDeleteError('');
+                  }}
+                  className="form-input mb-3"
+                  placeholder="Enter your password"
+                  autoFocus
+                />
+                {deleteError && (
+                  <p className="text-red-500 text-sm mb-3">{deleteError}</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleDeleteAllData}
+                    disabled={!deletePassword || isDeleting}
+                    className="btn bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isDeleting ? 'Deleting...' : 'Delete All Data'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowDeleteConfirm(false);
+                      setDeletePassword('');
+                      setDeleteError('');
+                    }}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
             ) : (
@@ -953,9 +896,9 @@ export default function Settings() {
       </form>
 
       {/* Promote Students Modal */}
-      {showPromoteModal && createPortal(
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
+      {showPromoteModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center gap-3 p-5 border-b border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/20">
               <GraduationCap size={22} className="text-amber-600" />
               <div>
@@ -980,35 +923,20 @@ export default function Settings() {
               </div>
               <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-3 space-y-1.5 text-sm text-amber-800 dark:text-amber-300">
                 <div className="flex items-center gap-2 font-semibold"><Users size={14} /> What will happen:</div>
-                <p>- Each active student moves to the next class (by level)</p>
-                <p>- Students in the final class are graduated (marked completed)</p>
-                <p>- Current term is updated to Term {promoteNewTerm} / {promoteNewYear}</p>
+                <p>• Each active student moves to the next class (by level)</p>
+                <p>• Students in the final class are graduated (marked completed)</p>
+                <p>• Current term is updated to Term {promoteNewTerm} / {promoteNewYear}</p>
               </div>
             </div>
             <div className="flex justify-end gap-3 px-5 pb-5">
               <button type="button" onClick={() => setShowPromoteModal(false)} className="btn btn-secondary" disabled={isPromoting}>Cancel</button>
-              <button type="button" onClick={handlePromoteStudents} className="btn btn-primary bg-amber-500 hover:bg-amber-600 border-amber-500 flex items-center gap-2 min-w-[180px]" disabled={isPromoting}>
-                {isPromoting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
-                    <span className="flex-1 text-left">Promoting... {promoteProgress}%</span>
-                  </>
-                ) : (
-                  <><ArrowRight size={16} /> Confirm &amp; Promote</>
-                )}
+              <button type="button" onClick={handlePromoteStudents} className="btn btn-primary bg-amber-500 hover:bg-amber-600 border-amber-500 flex items-center gap-2" disabled={isPromoting}>
+                {isPromoting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <ArrowRight size={16} />}
+                {isPromoting ? 'Promoting...' : 'Confirm & Promote'}
               </button>
             </div>
           </div>
         </div>
-      , document.body)}
-
-      {showPromoteSuccess && (
-        <SuccessPopup
-          message="Term Started!"
-          subMessage={`${promoteResult.promoted} promoted · ${promoteResult.graduated} graduated`}
-          onClose={() => setShowPromoteSuccess(false)}
-          duration={3000}
-        />
       )}
     </div>
   );
