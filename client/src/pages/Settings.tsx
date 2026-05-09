@@ -55,6 +55,18 @@ export default function Settings() {
     libraryFee: '50',
     sportsFee: '75',
     schoolType: 'nursery_primary',
+    bankAccountName: '',
+    bankAccountNumber: '',
+    bankName: '',
+    paymentMethod: 'BANK TRANSFER',
+    bankAccountName2: '',
+    bankAccountNumber2: '',
+    bankName2: '',
+    paymentMethod2: '',
+    bankAccountName3: '',
+    bankAccountNumber3: '',
+    bankName3: '',
+    paymentMethod3: '',
   });
 
   const currentCurrency = currencies.find(c => c.code === settings.currency) || currencies[0];
@@ -481,6 +493,51 @@ export default function Settings() {
               <label className="form-label">Email</label>
               <input type="email" name="schoolEmail" value={settings.schoolEmail} onChange={handleChange} className="form-input" />
             </div>
+          </div>
+        </div>
+
+        {/* Payment Accounts */}
+        <div className="card">
+          <div className="card-header flex items-center gap-2">
+            <DollarSign size={20} />
+            <h2 className="font-semibold">Payment Accounts</h2>
+          </div>
+          <div className="card-body space-y-6">
+            <p className="text-sm text-slate-500 dark:text-slate-400">These accounts will appear on all invoices. Add up to 3 payment options.</p>
+            {[
+              { suffix: '', label: 'Primary Account' },
+              { suffix: '2', label: 'Secondary Account (optional)' },
+              { suffix: '3', label: 'Third Account (optional)' },
+            ].map(({ suffix, label }) => (
+              <div key={suffix} className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{label}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <label className="form-label">Account Name</label>
+                    <input name={`bankAccountName${suffix}`} value={(settings as any)[`bankAccountName${suffix}`]} onChange={handleChange} className="form-input" placeholder="e.g. School Name" />
+                  </div>
+                  <div>
+                    <label className="form-label">Account Number</label>
+                    <input name={`bankAccountNumber${suffix}`} value={(settings as any)[`bankAccountNumber${suffix}`]} onChange={handleChange} className="form-input" placeholder="e.g. 0123456789" />
+                  </div>
+                  <div>
+                    <label className="form-label">Bank Name</label>
+                    <input name={`bankName${suffix}`} value={(settings as any)[`bankName${suffix}`]} onChange={handleChange} className="form-input" placeholder="e.g. Stanbic Bank" />
+                  </div>
+                  <div>
+                    <label className="form-label">Payment Method</label>
+                    <select name={`paymentMethod${suffix}`} value={(settings as any)[`paymentMethod${suffix}`]} onChange={handleChange} className="form-input">
+                      {suffix !== '' && <option value="">— None —</option>}
+                      <option value="BANK TRANSFER">Bank Transfer</option>
+                      <option value="MOBILE MONEY">Mobile Money</option>
+                      <option value="CASH">Cash</option>
+                      <option value="DEBIT CARD">Debit Card</option>
+                      <option value="ALL">All Methods</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 

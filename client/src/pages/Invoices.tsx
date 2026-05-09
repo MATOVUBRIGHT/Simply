@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, Fee, FeeStructure, FeeCategory } from '@schofy/shared';
@@ -71,6 +72,7 @@ export default function Invoices() {
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<'invoices' | 'students'>('invoices');
+  const [selectedStudentForView, setSelectedStudentForView] = useState<any | null>(null);
   
   const [showStructureModal, setShowStructureModal] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -98,8 +100,32 @@ export default function Invoices() {
   const sid = schoolId || user?.id || '';
   const { data: feesData, refresh: refreshFees } = useTableData(sid, 'fees');
   const { data: paymentsData, refresh: refreshPayments } = useTableData(sid, 'payments');
+  const { data: settingsData } = useTableData(sid, 'settings');
   const fees = feesData as any[];
   const payments = paymentsData as any[];
+
+  // Derive bank accounts from settings for invoice display
+  const bankAccounts = useMemo(() => {
+    const obj: Record<string, string> = {};
+    (settingsData as any[]).forEach((s: any) => { obj[s.key] = s.value; });
+    const accounts = [];
+    for (const suffix of ['', '2', '3']) {
+      const name = obj[`bankAccountName${suffix}`];
+      const number = obj[`bankAccountNumber${suffix}`];
+      const bank = obj[`bankName${suffix}`];
+      const method = obj[`paymentMethod${suffix}`];
+      if (name || number || bank) {
+        accounts.push({ accountName: name || '', accountNumber: number || '', bankName: bank || '', paymentMethod: method || '' });
+      }
+    }
+    return accounts;
+  }, [settingsData]);
+
+  const schoolSettings = useMemo(() => {
+    const obj: Record<string, string> = {};
+    (settingsData as any[]).forEach((s: any) => { obj[s.key] = s.value; });
+    return obj;
+  }, [settingsData]);
 
   function refreshInvoices() {
     refreshFees();
@@ -1116,8 +1142,12 @@ export default function Invoices() {
                     </td>
                   </tr>
                 ) : filteredStudentSummary.map(student => (
-                  <tr key={student.id}>
-                    <td className="font-medium">{student.studentName}</td>
+                  <tr
+                    key={student.id}
+                    className="cursor-pointer hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 transition-colors"
+                    onClick={() => setSelectedStudentForView(student)}
+                  >
+                    <td className="font-medium text-indigo-600 dark:text-indigo-400">{student.studentName}</td>
                     <td className="text-slate-500">{student.admissionNo}</td>
                     <td>
                       <span className="badge badge-info">{student.invoiceCount}</span>
@@ -1145,7 +1175,7 @@ export default function Invoices() {
                         </span>
                       )}
                     </td>
-                    <td>
+                    <td onClick={e => e.stopPropagation()}>
                       <button
                         onClick={() => handleInvoiceStudent(student.id, student.classId || '')}
                         className="btn btn-secondary text-sm py-1.5"
@@ -1997,6 +2027,125 @@ export default function Invoices() {
           </div>
         </div>
       )}
+
+      {/* Student Invoice Detail Modal — all invoices + payment accounts */}
+      {selectedStudentForView && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+          onClick={() => setSelectedStudentForView(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-modal-in"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div>
+                <h3 className="font-bold text-white text-lg">{selectedStudentForView.studentName}</h3>
+                <p className="text-white/70 text-sm">{selectedStudentForView.admissionNo} · All Invoices</p>
+              </div>
+              <button onClick={() => setSelectedStudentForView(null)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+
+            {/* Summary bar */}
+            <div className="grid grid-cols-3 divide-x divide-slate-200 dark:divide-slate-700 border-b border-slate-200 dark:border-slate-700">
+              {[
+                { label: 'Total Invoiced', value: formatMoney(selectedStudentForView.totalInvoiced), color: 'text-slate-800 dark:text-white' },
+                { label: 'Total Paid', value: formatMoney(selectedStudentForView.totalPaid), color: 'text-emerald-600 dark:text-emerald-400' },
+                { label: 'Balance', value: formatMoney(selectedStudentForView.balance), color: selectedStudentForView.balance > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400' },
+              ].map(s => (
+                <div key={s.label} className="px-5 py-3 text-center">
+                  <p className="text-xs text-slate-400 mb-0.5">{s.label}</p>
+                  <p className={`font-bold text-base ${s.color}`}>{s.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Invoice list */}
+            <div className="overflow-y-auto flex-1">
+              {(() => {
+                const studentFees = fees.filter(f => f.studentId === selectedStudentForView.id);
+                if (studentFees.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center gap-3 py-12">
+                      <FileText size={32} className="text-slate-300" />
+                      <p className="text-slate-400 text-sm">No invoices yet</p>
+                      <button onClick={() => { setSelectedStudentForView(null); handleInvoiceStudent(selectedStudentForView.id, selectedStudentForView.classId || ''); }} className="btn btn-primary text-sm py-1.5">
+                        <Plus size={14} /> Generate Invoice
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
+                      <tr>
+                        <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Description</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Term</th>
+                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</th>
+                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Paid</th>
+                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Balance</th>
+                        <th className="px-5 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {studentFees.map((fee: any) => {
+                        const feePayments = payments.filter(p => p.feeId === fee.id);
+                        const paid = feePayments.reduce((s: number, p: any) => s + p.amount, 0);
+                        const bal = fee.amount - paid;
+                        const status = bal <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
+                        return (
+                          <tr key={fee.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                            <td className="px-5 py-3 font-medium text-slate-800 dark:text-white">{fee.description}</td>
+                            <td className="px-5 py-3"><span className="badge badge-info text-xs">Term {fee.term}</span></td>
+                            <td className="px-5 py-3 text-right font-semibold">{formatMoney(fee.amount)}</td>
+                            <td className="px-5 py-3 text-right text-emerald-600">{formatMoney(paid)}</td>
+                            <td className={`px-5 py-3 text-right font-semibold ${bal > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatMoney(bal)}</td>
+                            <td className="px-5 py-3 text-center">
+                              <span className={`badge text-xs ${status === 'paid' ? 'badge-success' : status === 'partial' ? 'badge-warning' : 'badge-danger'}`}>{status}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              })()}
+
+              {/* Payment Accounts */}
+              {bankAccounts.length > 0 && (
+                <div className="px-5 py-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Payment Accounts</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {bankAccounts.map((acc, i) => (
+                      <div key={i} className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                        <p className="font-semibold text-slate-800 dark:text-white text-sm">{acc.bankName}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{acc.accountName}</p>
+                        <p className="font-mono text-sm font-bold text-indigo-600 dark:text-indigo-400 mt-1">{acc.accountNumber}</p>
+                        {acc.paymentMethod && <span className="badge badge-info text-[10px] mt-1">{acc.paymentMethod}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+              <button onClick={() => setSelectedStudentForView(null)} className="btn btn-secondary text-sm py-1.5">Close</button>
+              <button
+                onClick={() => { setSelectedStudentForView(null); handleInvoiceStudent(selectedStudentForView.id, selectedStudentForView.classId || ''); }}
+                className="btn btn-primary text-sm py-1.5"
+              >
+                <Plus size={14} /> Add Invoice
+              </button>
+            </div>
+          </div>
+        </div>
+      , document.body)}
     </div>
   );
 }
