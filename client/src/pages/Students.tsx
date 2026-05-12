@@ -1610,38 +1610,13 @@ export default function Students() {
                         })()}
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleMarkCompleted(student.id)}
-                            className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors"
-                            title="Mark Completed"
-                          >
-                            <Award size={15} />
-                          </button>
-                          {student.status === 'active' && (
-                            <button
-                              onClick={() => handleToggleStatus(student)}
-                              className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg transition-colors"
-                              title="Deactivate"
-                            >
-                              <UserX size={15} />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleSendEmail(student.id)}
-                            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
-                            title="Send Email"
-                          >
-                            <Mail size={15} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(student.id)}
-                            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
+                        <StudentActions
+                          student={student}
+                          onMarkCompleted={handleMarkCompleted}
+                          onToggleStatus={handleToggleStatus}
+                          onSendEmail={handleSendEmail}
+                          onDelete={handleDelete}
+                        />
                       </td>
                     </tr>
                   ))

@@ -1514,9 +1514,9 @@ export default function Invoices() {
         </div>
       )}
 
-      {showStructureModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+      {showStructureModal && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }} onClick={e => { if (e.target === e.currentTarget) setShowStructureModal(false); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700 my-4" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -1739,11 +1739,11 @@ export default function Invoices() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showBursaryModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+      {showBursaryModal && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }} onClick={e => { if (e.target === e.currentTarget) setShowBursaryModal(false); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700 my-4" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -1896,11 +1896,11 @@ export default function Invoices() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {showDiscountModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+      {showDiscountModal && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }} onClick={e => { if (e.target === e.currentTarget) setShowDiscountModal(false); }}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700 my-4" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -2026,7 +2026,7 @@ export default function Invoices() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* Student Invoice Detail Modal — all invoices + payment accounts */}
       {selectedStudentForView && createPortal(

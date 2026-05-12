@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight } from 'lucide-react';
+import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight, Building2, Plus, Trash2, Edit, Save } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -15,7 +15,7 @@ import { SuccessPopup } from '../components/SuccessPopup';
 
 export default function Finance() {
   const { user, schoolId } = useAuth();
-  const [activeTab, setActiveTab] = useState<'students' | 'invoices' | 'payments'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'invoices' | 'payments' | 'accounts'>('students');
   const { addToast } = useToast();
   const { formatMoney } = useCurrency();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -45,6 +45,24 @@ export default function Finance() {
   const sid = schoolId || user?.id || '';
   const { data: fees } = useTableData(sid, 'fees');
   const { data: payments } = useTableData(sid, 'payments');
+  const { data: settingsData } = useTableData(sid, 'settings');
+
+  // Derive payment accounts from settings
+  const bankAccounts = useMemo(() => {
+    const obj: Record<string, string> = {};
+    (settingsData as any[]).forEach((s: any) => { obj[s.key] = s.value; });
+    const accounts = [];
+    for (const suffix of ['', '2', '3']) {
+      const name = obj[`bankAccountName${suffix}`];
+      const number = obj[`bankAccountNumber${suffix}`];
+      const bank = obj[`bankName${suffix}`];
+      const method = obj[`paymentMethod${suffix}`];
+      if (name || number || bank) {
+        accounts.push({ accountName: name || '', accountNumber: number || '', bankName: bank || '', paymentMethod: method || '' });
+      }
+    }
+    return accounts;
+  }, [settingsData]);
 
   function toggleInvoice(id: string) {
     setExpandedInvoices(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -250,6 +268,7 @@ export default function Finance() {
     { id: 'students', label: 'Students', icon: Users },
     { id: 'invoices', label: 'Invoices', icon: FileText },
     { id: 'payments', label: 'Payments', icon: Receipt },
+    { id: 'accounts', label: 'Accounts', icon: Building2 },
   ];
 
   return (
@@ -494,6 +513,80 @@ export default function Finance() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Accounts Tab — payment accounts embedded on invoices */}
+        {activeTab === 'accounts' && (
+          <div className="p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 dark:text-white">Payment Accounts</h2>
+                <p className="text-sm text-slate-500 mt-0.5">These accounts appear on all student invoices as payment destinations.</p>
+              </div>
+              <a href="/settings" className="btn btn-secondary text-sm py-1.5 flex items-center gap-2">
+                <Edit size={14} /> Edit in Settings
+              </a>
+            </div>
+
+            {bankAccounts.length === 0 ? (
+              <div className="flex flex-col items-center gap-4 py-16 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
+                <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                  <Building2 size={28} className="text-slate-400" />
+                </div>
+                <div className="text-center">
+                  <p className="font-semibold text-slate-700 dark:text-slate-200">No payment accounts configured</p>
+                  <p className="text-sm text-slate-400 mt-1">Add bank accounts in Settings → Payment Accounts</p>
+                </div>
+                <a href="/settings" className="btn btn-primary text-sm py-1.5">
+                  <Plus size={14} /> Add Accounts in Settings
+                </a>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {bankAccounts.map((acc, i) => (
+                  <div key={i} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
+                        <Building2 size={18} className="text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-slate-800 dark:text-white truncate">{acc.bankName || 'Bank Account'}</p>
+                        <p className="text-sm text-slate-500 truncate">{acc.accountName}</p>
+                      </div>
+                      <span className="text-xs font-bold text-slate-400">#{i + 1}</span>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-400 uppercase tracking-wider">Account No.</span>
+                        <span className="font-mono text-sm font-bold text-indigo-600 dark:text-indigo-400">{acc.accountNumber || '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-400 uppercase tracking-wider">Method</span>
+                        <span className="badge badge-info text-[10px]">{acc.paymentMethod || 'BANK TRANSFER'}</span>
+                      </div>
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700">
+                      <p className="text-xs text-slate-400 flex items-center gap-1">
+                        <FileText size={11} /> Appears on all student invoices
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {bankAccounts.length > 0 && (
+              <div className="p-4 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 flex items-start gap-3">
+                <CreditCard size={18} className="text-indigo-500 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">Invoice Integration</p>
+                  <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">
+                    All {bankAccounts.length} account{bankAccounts.length > 1 ? 's are' : ' is'} automatically embedded on student invoices in the Payment Details section. To update accounts, go to <a href="/settings" className="underline font-semibold">Settings → Payment Accounts</a>.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

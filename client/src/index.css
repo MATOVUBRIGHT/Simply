@@ -460,6 +460,16 @@ html {
   background: var(--bg-primary);
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
+  /* Ensure scroll works on all devices */
+  overscroll-behavior-x: contain;
+}
+
+/* Ensure tables inside cards also scroll */
+.card .table-container,
+.card > .overflow-x-auto {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
 }
 
 table {
