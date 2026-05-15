@@ -2,7 +2,7 @@ import { ReactNode, useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, School, Users, LogOut, Menu, X, Shield,
-  Sun, Moon, ClipboardCheck, BarChart2, ShieldAlert, Search,
+  Sun, Moon, ClipboardCheck, BarChart2, ShieldAlert, Search, MessageSquare,
 } from 'lucide-react';
 import { useAdminAuth } from './AdminAuthContext';
 import { useAdminTheme } from './AdminThemeContext';
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/admin/users',         icon: Users,           label: 'Users',           color: 'text-violet-400' },
   { to: '/admin/verifications', icon: ClipboardCheck,  label: 'Verifications',   color: 'text-amber-400' },
   { to: '/admin/analytics',     icon: BarChart2,       label: 'Analytics',       color: 'text-cyan-400' },
+  { to: '/admin/messages',      icon: MessageSquare,   label: 'Messages',        color: 'text-emerald-400' },
   { to: '/admin/security',      icon: ShieldAlert,     label: 'Security',        color: 'text-rose-400' },
 ];
 

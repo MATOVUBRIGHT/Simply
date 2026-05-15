@@ -8,6 +8,7 @@ import AdminSchoolDetail from './pages/AdminSchoolDetail';
 import AdminUsers from './pages/AdminUsers';
 import AdminVerifications from './pages/AdminVerifications';
 import AdminAnalytics from './pages/AdminAnalytics';
+import AdminMessages from './pages/AdminMessages';
 import AdminSecurity from './pages/AdminSecurity';
 import AdminLayout from './AdminLayout';
 
@@ -44,6 +45,7 @@ function AdminRoutes() {
         <Route path="/admin/users" element={<AdminUsers />} />
         <Route path="/admin/verifications" element={<AdminVerifications />} />
         <Route path="/admin/analytics" element={<AdminAnalytics />} />
+        <Route path="/admin/messages" element={<AdminMessages />} />
         <Route path="/admin/security" element={<AdminSecurity />} />
         <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Routes>
