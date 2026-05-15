@@ -183,7 +183,11 @@ export default function ExamMarks() {
             const result = sub.id.startsWith('name:')
               ? resultsForExam.find(r => r.subjectName === sub.name)
               : resultsForExam.find(r => r.subjectId === sub.id);
-            const score = result ? Number(result.score) : null;
+            const rawScore = result ? Number(result.score) : null;
+            const maxScore = result ? Number(result.maxScore || 100) : 100;
+            const score = (rawScore !== null && rawScore !== undefined && maxScore > 0)
+              ? Math.round((rawScore / maxScore) * 100)
+              : null;
             row[`${exam.id}::${sub.id}`] = score;
             if (score !== null) { examTotal += score; examCount++; grandTotal += score; grandCount++; }
           }
@@ -335,7 +339,7 @@ export default function ExamMarks() {
                         return (
                           <td key={`${exam.id}-${sub.id}`} className="px-2 py-2 text-center border-l border-slate-100 dark:border-slate-700">
                             {score !== null && score !== undefined
-                              ? <span className="font-medium">{score}</span>
+                              ? <span className="font-medium">{score}%</span>
                               : <span className="text-slate-300">-</span>}
                           </td>
                         );

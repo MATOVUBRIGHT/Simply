@@ -69,8 +69,11 @@ export default function SubscriptionGate({ children }: Props) {
 
     const tenantId = schoolId || user.id;
 
+    // Always read local cache first — works 100% offline
+    const state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
+
     try {
-      // Check Supabase for latest subscription row
+      // Check Supabase for latest subscription row (online only)
       let isPaused  = false;
       let isPending = false;
       let tid: string | null = null;
@@ -89,13 +92,9 @@ export default function SubscriptionGate({ children }: Props) {
           isPaused  = sub.status === 'paused';
           isPending = sub.status === 'pending' || (meta.source === 'client' && !meta.approvedByAdmin && !meta.grantedByAdmin && !meta.extendedByAdmin && sub.status !== 'active');
           tid = meta.transactionId || null;
-
-          // Also check if ends_at is in the past and status was set to paused by admin
           if (!isPaused && meta.pausedByAdmin) isPaused = true;
         }
       }
-
-      const state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
 
       // Cache for offline
       cacheSubscriptionLocally(state, isPending);
@@ -122,16 +121,25 @@ export default function SubscriptionGate({ children }: Props) {
         setPendingTid(null);
       }
     } catch {
-      // Offline fallback
-      const { blocked, reason, planId, pending } = getOfflineStatus();
-      if (blocked || pending) {
+      // Offline — use the local state we already loaded above
+      cacheSubscriptionLocally(state);
+      if (state.status === 'expired' || state.status === 'incomplete') {
         setBlocked(true);
-        setBlockReason(reason);
-        setPlanName(planId ? (PLAN_DEFINITIONS.find(p => p.id === planId)?.name || planId) : null);
-        setExpiryDate(localStorage.getItem(OFFLINE_EXPIRY_KEY));
-        setPendingTid(pending ? localStorage.getItem('schofy_sub_tid') : null);
+        setBlockReason(state.status as BlockReason);
+        setPlanName(state.plan?.name || null);
+        setExpiryDate(state.expiryDate);
+        setPendingTid(null);
       } else {
-        setBlocked(false);
+        // Check localStorage pending flag
+        const pending = localStorage.getItem(OFFLINE_PENDING_KEY) === '1';
+        if (pending) {
+          setBlocked(true); setBlockReason('pending');
+          setPlanName(state.plan?.name || null);
+          setPendingTid(localStorage.getItem('schofy_sub_tid'));
+          setExpiryDate(null);
+        } else {
+          setBlocked(false);
+        }
       }
     } finally {
       setChecking(false);

@@ -17,6 +17,16 @@ function ordinal(n: number): string {
   return s[(v - 20) % 10] || s[v] || s[0];
 }
 
+function normalizeSubjectKey(value: string | undefined | null) {
+  return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function getSubjectIdentity(subject: any, fallbackName?: string, fallbackId?: string) {
+  const nameKey = normalizeSubjectKey(subject?.name || fallbackName);
+  const codeKey = normalizeSubjectKey(subject?.code);
+  return nameKey || codeKey || fallbackId || '';
+}
+
 // ΓöÇΓöÇ Template ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 const TEMPLATE_KEY = 'schofy_report_template';
 
@@ -195,9 +205,18 @@ export default function ReportCard() {
   const displayEmail = template.schoolEmail || settingsMap.schoolEmail || '';
   const academicYear = settingsMap.academicYear || new Date().getFullYear().toString();
 
-  const classSubjects = useMemo(() =>
-    subjects.filter((s: any) => s.classId === student?.classId),
-    [subjects, student]);
+  const subjectById = useMemo(() => new Map((subjects as any[]).map((subject) => [subject.id, subject])), [subjects]);
+
+  const classSubjects = useMemo(() => {
+    const seen = new Set<string>();
+    return subjects.filter((s: any) => {
+      if (s.classId !== student?.classId) return false;
+      const key = getSubjectIdentity(s, s.name, s.id);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [subjects, student]);
 
   const getGradeFromScale = (pct: number) => {
     const scale = [...template.gradingScale].sort((a, b) => b.min - a.min);
@@ -228,7 +247,7 @@ export default function ReportCard() {
 
     const resultMap = new Map<string, any>();
     for (const r of relevantResults) {
-      const key = r.subjectId || r.subjectName || r.id;
+      const key = getSubjectIdentity(subjectById.get(r.subjectId), r.subjectName, r.subjectId || r.id);
       const existing = resultMap.get(key);
       if (!existing || (Number(r.score) ?? 0) > (Number(existing.score) ?? 0)) {
         resultMap.set(key, r);
@@ -239,18 +258,19 @@ export default function ReportCard() {
     const usedKeys = new Set<string>();
 
     for (const sub of classSubjects) {
-      const result = resultMap.get((sub as any).id) as any;
+      const subjectKey = getSubjectIdentity(sub, (sub as any).name, (sub as any).id);
+      const result = resultMap.get(subjectKey) as any;
       const score = (result && result.score !== null && result.score !== undefined) ? Number(result.score) : null;
       const maxScore = result ? Number(result.maxScore || 100) : 100;
       const pct = (score !== null && !isNaN(score) && maxScore > 0) ? Math.round((score / maxScore) * 100) : null;
       const grade = pct !== null ? getGradeFromScale(pct) : '-';
       rows.push({ subject: (sub as any).name, code: (sub as any).code || '', score, maxScore, pct, grade, remark: pct !== null ? getRemarkFromScale(grade) : '-', remarks: result?.remarks || '' });
-      if (result) usedKeys.add((sub as any).id);
+      if (result) usedKeys.add(subjectKey);
     }
 
     for (const [key, result] of resultMap) {
       if (usedKeys.has(key)) continue;
-      const sub = subjects.find((s: any) => s.id === key) as any;
+      const sub = subjects.find((s: any) => getSubjectIdentity(s, s.name, s.id) === key) as any;
       const subjectName = sub?.name || result.subjectName || key;
       const score = (result.score !== null && result.score !== undefined) ? Number(result.score) : 0;
       const maxScore = Number(result.maxScore || 100);
@@ -260,7 +280,40 @@ export default function ReportCard() {
     }
 
     return rows;
-  }, [classSubjects, examResults, examId, studentId, exam, exams, subjects, template.gradingScale]);
+  }, [classSubjects, examResults, examId, studentId, exam, exams, subjects, subjectById, template.gradingScale]);
+
+  // Ensure ReportCard computes class position using normalized totals (percentages)
+  const classPosition = useMemo(() => {
+    if (!studentId || !student?.classId) return null;
+    if (!exam) return null;
+
+    const classStudents = allStudents.filter(s => s.classId === student.classId && s.status === 'active');
+    if (classStudents.length < 2) return null;
+
+    // Include all exams that share the same name+term+year for this class (matches ExamMarks grouping)
+    const groupedExams = exams.filter((e: any) => (
+      e.name === exam.name && String(e.term) === String(exam.term) && String(e.year) === String(exam.year) && (e.classId === exam.classId || !e.classId)
+    ));
+    const groupedIds = new Set(groupedExams.map(e => e.id));
+
+    const scores = classStudents.map(s => {
+      const results = (examResults as any[]).filter(r => r.studentId === s.id && groupedIds.has(r.examId));
+      const totalPct = results.reduce((sum: number, r: any) => {
+        const sc = Number(r.score) || 0;
+        const mx = Number(r.maxScore || 100) || 100;
+        const pct = mx > 0 ? (sc / mx) * 100 : 0;
+        return sum + pct;
+      }, 0);
+      const hasResults = results.length > 0;
+      return { studentId: s.id, total: Math.round(totalPct), hasResults };
+    });
+
+    const withResults = scores.filter(s => s.hasResults).sort((a, b) => b.total - a.total);
+    if (withResults.length < 2) return null;
+
+    const pos = withResults.findIndex(s => s.studentId === studentId) + 1;
+    return pos > 0 ? { position: pos, outOf: withResults.length } : null;
+  }, [studentId, exam, allStudents, examResults, student, exams]);
 
   // Yearly results for Classic Template (Quarters)
   const yearlyResults = useMemo(() => {
@@ -282,7 +335,7 @@ export default function ReportCard() {
       const re = examMap.get(r.examId);
       if (!re) continue;
       const term = String(re.term);
-      const subjectKey = r.subjectId || r.subjectName || r.id;
+      const subjectKey = getSubjectIdentity(subjectById.get(r.subjectId), r.subjectName, r.subjectId || r.id);
       if (!resultMap.has(subjectKey)) resultMap.set(subjectKey, {});
       const subjectResults = resultMap.get(subjectKey)!;
       if (!subjectResults[term] || Number(r.score) > Number(subjectResults[term].score)) {
@@ -292,11 +345,11 @@ export default function ReportCard() {
 
     const rows: any[] = [];
     const subjectsToProcess = new Set<string>();
-    classSubjects.forEach((s: any) => subjectsToProcess.add(s.id));
+    classSubjects.forEach((s: any) => subjectsToProcess.add(getSubjectIdentity(s, s.name, s.id)));
     resultMap.forEach((_, key) => subjectsToProcess.add(key));
 
     for (const key of subjectsToProcess) {
-      const sub = subjects.find((s: any) => s.id === key) as any;
+      const sub = subjects.find((s: any) => getSubjectIdentity(s, s.name, s.id) === key) as any;
       const termResults = resultMap.get(key) || {};
       const subjectName = sub?.name || (Object.values(termResults)[0] as any)?.subjectName || key;
       
@@ -322,7 +375,7 @@ export default function ReportCard() {
       rows.push({ subject: subjectName, q1, q2, q3, q4, remark });
     }
     return rows;
-  }, [studentId, exam, exams, examResults, subjects, classSubjects, template.gradingScale]);
+  }, [studentId, exam, exams, examResults, subjects, subjectById, classSubjects, template.gradingScale]);
 
   // Semester results for High School Template
   const semesterResults = useMemo(() => {
@@ -343,7 +396,7 @@ export default function ReportCard() {
       const re = examMap.get(r.examId);
       if (!re) continue;
       const term = String(re.term);
-      const subjectKey = r.subjectId || r.subjectName || r.id;
+      const subjectKey = getSubjectIdentity(subjectById.get(r.subjectId), r.subjectName, r.subjectId || r.id);
       if (!resultMap.has(subjectKey)) resultMap.set(subjectKey, {});
       const subjectResults = resultMap.get(subjectKey)!;
       if (!subjectResults[term] || Number(r.score) > Number(subjectResults[term].score)) {
@@ -353,11 +406,11 @@ export default function ReportCard() {
 
     const rows: any[] = [];
     const subjectsToProcess = new Set<string>();
-    classSubjects.forEach((s: any) => subjectsToProcess.add(s.id));
+    classSubjects.forEach((s: any) => subjectsToProcess.add(getSubjectIdentity(s, s.name, s.id)));
     resultMap.forEach((_, key) => subjectsToProcess.add(key));
 
     for (const key of subjectsToProcess) {
-      const sub = subjects.find((s: any) => s.id === key) as any;
+      const sub = subjects.find((s: any) => getSubjectIdentity(s, s.name, s.id) === key) as any;
       const termResults = resultMap.get(key) || {};
       const subjectName = sub?.name || (Object.values(termResults)[0] as any)?.subjectName || key;
       
@@ -387,7 +440,7 @@ export default function ReportCard() {
       rows.push({ subject: subjectName, s1, s2, finalGrade });
     }
     return rows;
-  }, [studentId, exam, exams, examResults, subjects, classSubjects, template.gradingScale]);
+  }, [studentId, exam, exams, examResults, subjects, subjectById, classSubjects, template.gradingScale]);
 
   const totalScore = studentResults.reduce((s, r) => s + (r.score ?? 0), 0);
   const totalMax = studentResults.reduce((s, r) => s + r.maxScore, 0);
@@ -395,28 +448,7 @@ export default function ReportCard() {
   const overallGrade = getGradeFromScale(overallPct);
   const overallRemark = getRemarkFromScale(overallGrade);
 
-  // Calculate position in class — rank all class students by total score for the selected exam
-  const classPosition = useMemo(() => {
-    if (!studentId || !student?.classId) return null;
-    if (!exam) return null;
-
-    const classStudents = allStudents.filter(s => s.classId === student.classId && s.status === 'active');
-    if (classStudents.length < 2) return null;
-
-    // Sum scores for each student for the selected exam only
-    const scores = classStudents.map(s => {
-      const results = (examResults as any[]).filter(r => r.studentId === s.id && r.examId === exam.id);
-      const total = results.reduce((sum: number, r: any) => sum + (Number(r.score) || 0), 0);
-      return { studentId: s.id, total, hasResults: results.length > 0 };
-    });
-
-    // Only rank students who have results for this exam
-    const withResults = scores.filter(s => s.hasResults).sort((a, b) => b.total - a.total);
-    if (withResults.length < 2) return null;
-
-    const pos = withResults.findIndex(s => s.studentId === studentId) + 1;
-    return pos > 0 ? { position: pos, outOf: withResults.length } : null;
-  }, [studentId, exam, allStudents, examResults, student]);
+  
 
   function openEditor() {
     setDraft({ ...template });

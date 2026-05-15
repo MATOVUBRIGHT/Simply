@@ -14,6 +14,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
+import { PortalDropdown } from '../components/PortalDropdown';
 
 const avatarColors = [
   'bg-violet-500',
@@ -28,6 +29,54 @@ const avatarColors = [
 function getAvatarColor(name: string) {
   const index = name.charCodeAt(0) % avatarColors.length;
   return avatarColors[index];
+}
+
+function StaffActions({
+  staff,
+  onView,
+  onEdit,
+  onEmail,
+  onDelete,
+}: {
+  staff: Staff;
+  onView: (id: string) => void;
+  onEdit: (id: string) => void;
+  onEmail: (email: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={e => { e.stopPropagation(); setIsOpen(v => !v); }}
+        className={`p-1.5 rounded-lg transition-all ${
+          isOpen
+            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20'
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+        title="Actions"
+      >
+        <Settings size={15} className={isOpen ? 'animate-spin-slow' : ''} />
+      </button>
+
+      <PortalDropdown triggerRef={btnRef} isOpen={isOpen} onClose={() => setIsOpen(false)}>
+        <PortalDropdown.Item icon={<Eye size={13} />} label="View" onClick={() => { onView(staff.id); setIsOpen(false); }} />
+        <PortalDropdown.Divider />
+        <PortalDropdown.Item icon={<Edit size={13} />} label="Edit" onClick={() => { onEdit(staff.id); setIsOpen(false); }} />
+        {staff.email && (
+          <>
+            <PortalDropdown.Divider />
+            <PortalDropdown.Item icon={<Mail size={13} />} label="Email" onClick={() => { onEmail(staff.email!); setIsOpen(false); }} />
+          </>
+        )}
+        <PortalDropdown.Divider />
+        <PortalDropdown.Item icon={<Trash2 size={13} />} label="Delete" danger onClick={() => { onDelete(staff.id); setIsOpen(false); }} />
+      </PortalDropdown>
+    </>
+  );
 }
 
 export default function StaffPage() {
@@ -833,26 +882,13 @@ export default function StaffPage() {
                       </span>
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-1">
-                        <Link to={`/staff/${s.id}`} className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-600 dark:text-sky-400 rounded-lg transition-colors">
-                          <Eye size={15} />
-                        </Link>
-                        <Link to={`/staff/${s.id}/edit`} className="p-1.5 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-lg transition-colors">
-                          <Edit size={15} />
-                        </Link>
-                        {s.email && (
-                          <button 
-                            onClick={() => window.open(`mailto:${s.email}`, '_blank')}
-                            className="p-1.5 hover:bg-sky-100 dark:hover:bg-sky-900/30 text-sky-500 dark:text-sky-400 rounded-lg transition-colors"
-                            title="Send Email"
-                          >
-                            <Mail size={15} />
-                          </button>
-                        )}
-                        <button onClick={() => handleDelete(s.id)} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors">
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
+                      <StaffActions
+                        staff={s}
+                        onView={(staffId) => navigate(`/staff/${staffId}`)}
+                        onEdit={(staffId) => navigate(`/staff/${staffId}/edit`)}
+                        onEmail={(email) => window.open(`mailto:${email}`, '_blank')}
+                        onDelete={handleDelete}
+                      />
                     </td>
                   </tr>
                 ))

@@ -65,6 +65,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const handleForceSignOut = () => {
+      clearSession();
+      setUser(null);
+      setSchoolId(null);
+    };
+    window.addEventListener('forceSignOutAllUsers', handleForceSignOut);
+
     let active = true;
     const stale = () => !active;
 
@@ -80,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false;
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('forceSignOutAllUsers', handleForceSignOut);
     };
   }, []);
 

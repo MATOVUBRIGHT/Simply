@@ -333,7 +333,7 @@ function Layout({ children }: LayoutProps) {
   const filteredMenuItems = user ? menuItems : [];
 
   return (
-    <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950">
+    <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950 overflow-x-auto">
       {/* Mobile Sidebar Overlay */}
       {mobileSidebarOpen && (
         <div 

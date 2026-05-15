@@ -18,6 +18,7 @@ import { sortClassesBySectionThenLevel } from '../utils/classroom';
 interface StudentGrade extends ExamResult {
   studentName: string;
   subjectName: string;
+  subjectKey: string;
   term: string;
   year: string;
   examType: string;
@@ -38,6 +39,16 @@ const ugandaGrades = [
 function getGrade(score: number): { grade: string; remark: string; points: number } {
   const entry = ugandaGrades.find(g => score >= g.min && score <= g.max);
   return entry || { grade: 'F9', remark: 'Fail', points: 9 };
+}
+
+function normalizeSubjectKey(value: string | undefined | null) {
+  return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function getSubjectIdentity(subject: any, fallbackName?: string, fallbackId?: string) {
+  const nameKey = normalizeSubjectKey(subject?.name || fallbackName);
+  const codeKey = normalizeSubjectKey(subject?.code);
+  return nameKey || codeKey || fallbackId || '';
 }
 
 export default function Grades() {
@@ -86,22 +97,32 @@ export default function Grades() {
 
   // All active students across all classes
   const students = activeStudents;
+  const subjectById = useMemo(() => new Map((subjects as any[]).map((subject) => [subject.id, subject])), [subjects]);
 
   const grades = useMemo(() => {
-    return examResults.map((g: any) => {
+    const deduped = new Map<string, StudentGrade>();
+    for (const g of examResults as any[]) {
       const student = allStudents.find(s => s.id === g.studentId);
-      const subject = subjects.find((s: any) => s.id === g.subjectId);
+      const subject = subjectById.get(g.subjectId);
       const exam = examsData.find((e: any) => e.id === g.examId) as any;
-      return {
+      const subjectKey = getSubjectIdentity(subject, g.subjectName, g.subjectId);
+      const row = {
         ...g,
         studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
         subjectName: subject ? (subject as any).name : (g.subjectName || 'Unknown'),
+        subjectKey,
         term: exam?.term || g.term || '1',
         year: exam?.year || g.year || new Date().getFullYear().toString(),
         examType: g.examType || 'Exam',
       } as StudentGrade;
-    });
-  }, [examResults, allStudents, subjects, examsData]);
+      const key = `${row.studentId}:${row.examId || row.examType}:${row.term}:${row.year}:${subjectKey}`;
+      const existing = deduped.get(key);
+      const rowTime = new Date((row as any).updatedAt || (row as any).createdAt || 0).getTime();
+      const existingTime = existing ? new Date((existing as any).updatedAt || (existing as any).createdAt || 0).getTime() : -1;
+      if (!existing || rowTime >= existingTime) deduped.set(key, row);
+    }
+    return Array.from(deduped.values());
+  }, [examResults, allStudents, subjectById, examsData]);
 
   const gradeExpectedFields = [
     { key: 'studentId', label: 'Student ID', required: true },
@@ -131,7 +152,14 @@ export default function Grades() {
   // Subjects for selected class
   const subjectsForBulkClass = useMemo(() => {
     if (!bulkForm.classId) return [];
-    return (subjects as any[]).filter(s => s.classId === bulkForm.classId);
+    const seen = new Set<string>();
+    return (subjects as any[]).filter(s => {
+      if (s.classId !== bulkForm.classId) return false;
+      const key = getSubjectIdentity(s, s.name, s.id);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [bulkForm.classId, subjects]);
 
   // Pre-fill existing scores when student changes
@@ -148,7 +176,11 @@ export default function Grades() {
     const existing: Record<string, string> = {};
     (examResults as any[])
       .filter(r => r.studentId === studentId && r.examId === existingExam.id)
-      .forEach(r => { if (r.subjectId) existing[r.subjectId] = String(r.score); });
+      .forEach(r => {
+        const resultKey = getSubjectIdentity(subjectById.get(r.subjectId), r.subjectName, r.subjectId);
+        const matchingSubject = subjectsForBulkClass.find((subject: any) => getSubjectIdentity(subject, subject.name, subject.id) === resultKey);
+        if (matchingSubject) existing[matchingSubject.id] = String(r.score);
+      });
     setBulkScores(existing);
   }
 
@@ -188,12 +220,15 @@ export default function Grades() {
       for (const [subjectId, scoreStr] of entries) {
         const score = parseFloat(scoreStr);
         if (isNaN(score)) continue;
-        const sub = (subjects as any[]).find(s => s.id === subjectId);
+        const sub = subjectById.get(subjectId);
+        const subjectKey = getSubjectIdentity(sub, sub?.name, subjectId);
         const pct = Math.round((score / maxScore) * 100);
         const gradeInfo = getGrade(pct);
         // Check if result already exists for this student/exam/subject
         const existing = (examResults as any[]).find(r =>
-          r.studentId === bulkForm.studentId && r.examId === examId && r.subjectId === subjectId
+          r.studentId === bulkForm.studentId &&
+          r.examId === examId &&
+          getSubjectIdentity(subjectById.get(r.subjectId), r.subjectName, r.subjectId) === subjectKey
         );
         if (existing) {
           await dataService.update(id, 'examResults', existing.id, {
@@ -572,7 +607,8 @@ export default function Grades() {
       let successCount = 0;
       for (const data of importPreview) {
         const student = allStudents.find(s => s.id === (data as any).studentId);
-        const subject = (subjects as any[]).find(s => s.id === (data as any).subjectId);
+        const subject = subjectById.get((data as any).subjectId);
+        const subjectKey = getSubjectIdentity(subject, subject?.name, (data as any).subjectId);
         const score = (data as any).score as number;
         const maxScore = (data as any).maxScore as number || 100;
         const pct = Math.round((score / maxScore) * 100);
@@ -582,7 +618,7 @@ export default function Grades() {
         const existing = (examResults as any[]).find(r =>
           r.studentId === (data as any).studentId &&
           r.examId === examId &&
-          r.subjectId === (data as any).subjectId
+          getSubjectIdentity(subjectById.get(r.subjectId), r.subjectName, r.subjectId) === subjectKey
         );
 
         if (existing) {
@@ -679,11 +715,14 @@ export default function Grades() {
         return { studentId, studentName, grades: sg, avg, grade: getGrade(avg) };
       }).sort((a, b) => a.studentName.localeCompare(b.studentName));
 
-      const uniqueSubjects = [...new Map(classGrades.map(g => [g.subjectId || g.subjectName, { id: g.subjectId, name: g.subjectName, code: (subjects as any[]).find(s => s.id === g.subjectId)?.code || '' }])).values()];
+      const uniqueSubjects = [...new Map(classGrades.map(g => [
+        g.subjectKey,
+        { key: g.subjectKey, id: g.subjectId, name: g.subjectName, code: subjectById.get(g.subjectId)?.code || '' }
+      ])).values()];
 
       return { cls, studentList, uniqueSubjects, totalGrades: classGrades.length };
     }).filter(Boolean) as { cls: any; studentList: any[]; uniqueSubjects: any[]; totalGrades: number }[];
-  }, [classesSorted, filteredGrades, allStudents, subjects]);
+  }, [classesSorted, filteredGrades, allStudents, subjectById]);
 
   return (
     <div className="space-y-6">
@@ -987,7 +1026,7 @@ export default function Grades() {
                         <tr className="bg-slate-100 dark:bg-slate-700/60">
                           <th className="px-4 py-2.5 text-left font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">Student</th>
                           {uniqueSubjects.map(sub => (
-                            <th key={sub.id || sub.name} className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap text-xs">
+                            <th key={sub.key || sub.id || sub.name} className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap text-xs">
                               {sub.name}
                               {sub.code && <div className="font-normal text-[10px] text-slate-400">{sub.code}</div>}
                             </th>
@@ -1005,15 +1044,15 @@ export default function Grades() {
                             </td>
                             {uniqueSubjects.map(sub => {
                               const g = student.grades.find((gr: StudentGrade) =>
-                                sub.id ? gr.subjectId === sub.id : gr.subjectName === sub.name
+                                gr.subjectKey === sub.key
                               );
                               if (!g) return (
-                                <td key={sub.id || sub.name} className="px-3 py-2.5 text-center text-slate-300 dark:text-slate-600">-</td>
+                                <td key={sub.key || sub.id || sub.name} className="px-3 py-2.5 text-center text-slate-300 dark:text-slate-600">-</td>
                               );
                               const pct = Math.round((g.score / g.maxScore) * 100);
                               const gi = getGrade(pct);
                               return (
-                                <td key={sub.id || sub.name} className="px-3 py-2.5 text-center">
+                                <td key={sub.key || sub.id || sub.name} className="px-3 py-2.5 text-center">
                                   <div className="flex flex-col items-center gap-0.5">
                                     <span className="font-semibold text-slate-700 dark:text-slate-200">{g.score}/{g.maxScore}</span>
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${gradeColors[gi.grade] || 'bg-slate-100 text-slate-600'}`}>{gi.grade}</span>

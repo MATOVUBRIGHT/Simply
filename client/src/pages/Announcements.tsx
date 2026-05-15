@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Portal } from '../components/Portal';
 
-import { Plus, Megaphone, Clock, Trash2, AlertCircle, CheckCircle, Info, Bell, Pin, Edit2, X, Download, FileText, ChevronDown, Check, Trash, Search } from 'lucide-react';
+import { Plus, Megaphone, Clock, Trash2, AlertCircle, CheckCircle, Info, Bell, Pin, Edit2, X, Download, FileText, ChevronDown, Check, Trash, Search, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Announcement, Priority } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -11,6 +11,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
+import { PortalDropdown } from '../components/PortalDropdown';
 
 const priorityConfig: Record<string, { 
   bg: string; 
@@ -53,6 +54,42 @@ const priorityConfig: Record<string, {
     gradientText: 'from-red-600 to-rose-600',
   },
 };
+
+function AnnouncementActions({
+  announcement,
+  onEdit,
+  onDelete,
+}: {
+  announcement: Announcement;
+  onEdit: (announcement: Announcement) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={e => { e.stopPropagation(); setIsOpen(v => !v); }}
+        className={`p-1.5 rounded-lg transition-all ${
+          isOpen
+            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20'
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+        title="Actions"
+      >
+        <Settings size={15} className={isOpen ? 'animate-spin-slow' : ''} />
+      </button>
+
+      <PortalDropdown triggerRef={btnRef} isOpen={isOpen} onClose={() => setIsOpen(false)}>
+        <PortalDropdown.Item icon={<Edit2 size={13} />} label="Edit" onClick={() => { onEdit(announcement); setIsOpen(false); }} />
+        <PortalDropdown.Divider />
+        <PortalDropdown.Item icon={<Trash2 size={13} />} label="Delete" danger onClick={() => { onDelete(announcement.id); setIsOpen(false); }} />
+      </PortalDropdown>
+    </>
+  );
+}
 
 export default function Announcements() {
   const { user, schoolId } = useAuth();
@@ -487,21 +524,8 @@ export default function Announcements() {
                         <p className="text-slate-600 dark:text-slate-300 leading-relaxed">{a.content}</p>
                       </div>
                       {!selectMode && (
-                        <div className="flex items-center gap-1">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleEdit(a); }} 
-                            className="p-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 text-indigo-600 rounded-lg transition-colors"
-                            title="Edit"
-                          >
-                            <Edit2 size={18} />
-                          </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleDelete(a.id); }} 
-                            className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded-lg transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 size={18} />
-                          </button>
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <AnnouncementActions announcement={a} onEdit={handleEdit} onDelete={handleDelete} />
                         </div>
                       )}
                     </div>

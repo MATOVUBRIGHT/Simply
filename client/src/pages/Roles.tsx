@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Users, Plus, Eye, EyeOff, Trash2, Edit2, Shield, History, CheckCircle, XCircle, Copy, RefreshCw, Key, Lock, Mail, Phone, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { Users, Plus, Eye, EyeOff, Trash2, Edit2, Shield, History, CheckCircle, XCircle, Copy, RefreshCw, Key, Lock, ChevronDown, ChevronUp, AlertTriangle, UserCheck, UserX, Gauge } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { hashPassword } from '../lib/security';
-import { useStaffAuth, logStaffActivity, buildGeneratedEmail } from '../contexts/StaffAuthContext';
+import { useStaffAuth, logStaffActivity } from '../contexts/StaffAuthContext';
 
 const ALL_PAGES = [
   { path: '/', label: 'Dashboard' },
@@ -40,7 +40,7 @@ const ROLE_COLORS: Record<string, string> = {
 
 interface StaffUser {
   id: string; staffId: string; firstName: string; lastName: string;
-  role: string; email: string; generatedEmail: string; phone: string;
+  role: string; email: string; phone: string;
   allowedPages: string[]; isActive: boolean; isReadOnly: boolean;
   lastLoginAt: string | null; createdAt: string;
 }
@@ -76,7 +76,7 @@ export default function Roles() {
   const [credError, setCredError] = useState('');
 
   const [form, setForm] = useState({
-    firstName: '', lastName: '', role: 'teacher', email: '', phone: '',
+    staffId: '', firstName: '', lastName: '', role: 'teacher',
     password: '', allowedPages: ROLE_PRESETS.teacher, isReadOnly: false,
   });
 
@@ -93,7 +93,6 @@ export default function Roles() {
       setStaffList((staffRes.data || []).map((s: any) => ({
         id: s.id, staffId: s.staff_id, firstName: s.first_name, lastName: s.last_name,
         role: s.role, email: s.email || '',
-        generatedEmail: s.generated_email || buildGeneratedEmail(s.first_name, s.last_name, s.staff_id),
         phone: s.phone || '',
         allowedPages: Array.isArray(s.allowed_pages) ? s.allowed_pages : [],
         isActive: s.is_active, isReadOnly: s.is_read_only || false,
@@ -112,11 +111,19 @@ export default function Roles() {
   }
 
   function openAdd() {
-    setForm({ firstName: '', lastName: '', role: 'teacher', email: '', phone: '', password: '', allowedPages: ROLE_PRESETS.teacher, isReadOnly: false });
+    setForm({
+      staffId: generateStaffId('teacher', staffList.filter(s => s.role === 'teacher').length),
+      firstName: '',
+      lastName: '',
+      role: 'teacher',
+      password: '',
+      allowedPages: ROLE_PRESETS.teacher,
+      isReadOnly: false,
+    });
     setEditingStaff(null); setShowAddModal(true); setError(''); setSuccess('');
   }
   function openEdit(s: StaffUser) {
-    setForm({ firstName: s.firstName, lastName: s.lastName, role: s.role, email: s.email, phone: s.phone, password: '', allowedPages: s.allowedPages, isReadOnly: s.isReadOnly });
+    setForm({ staffId: s.staffId, firstName: s.firstName, lastName: s.lastName, role: s.role, password: '', allowedPages: s.allowedPages, isReadOnly: s.isReadOnly });
     setEditingStaff(s); setShowAddModal(true); setError('');
   }
   function openCredModal(s: StaffUser) {
@@ -125,6 +132,10 @@ export default function Roles() {
 
   async function saveStaff() {
     if (!form.firstName.trim() || !form.lastName.trim()) { setError('First and last name required'); return; }
+    const cleanStaffId = form.staffId.trim().toUpperCase();
+    if (!cleanStaffId) { setError('Staff ID required'); return; }
+    const duplicate = staffList.find(s => s.staffId.toUpperCase() === cleanStaffId && s.id !== editingStaff?.id);
+    if (duplicate) { setError('That Staff ID is already in use'); return; }
     if (!editingStaff && form.password.length < 6) { setError('Password must be at least 6 characters'); return; }
     if (!supabase) return;
     setSaving(true); setError('');
@@ -132,30 +143,31 @@ export default function Roles() {
       const now = new Date().toISOString();
       if (editingStaff) {
         const update: any = {
-          first_name: form.firstName.trim(), last_name: form.lastName.trim(),
-          role: form.role, email: form.email.trim(), phone: form.phone.trim(),
+          staff_id: cleanStaffId,
+          first_name: form.firstName.trim(),
+          last_name: form.lastName.trim(),
+          role: form.role,
+          email: null,
+          phone: null,
           allowed_pages: form.allowedPages, is_read_only: form.isReadOnly,
-          generated_email: buildGeneratedEmail(form.firstName.trim(), form.lastName.trim(), editingStaff.staffId),
+          generated_email: null,
           updated_at: now,
         };
         if (form.password.length >= 6) update.password_hash = await hashPassword(form.password);
         await supabase.from('school_staff_users').update(update).eq('id', editingStaff.id);
-        await logStaffActivity(tenantId, user?.id || '', 'admin', 'edit_staff', 'Edited: ' + editingStaff.staffId);
+        await logStaffActivity(tenantId, user?.id || '', 'admin', 'edit_staff', 'Edited: ' + cleanStaffId);
         setSuccess('Staff updated successfully');
       } else {
-        const roleCount = staffList.filter(s => s.role === form.role).length;
-        const staffId = generateStaffId(form.role, roleCount);
-        const genEmail = buildGeneratedEmail(form.firstName.trim(), form.lastName.trim(), staffId);
         await supabase.from('school_staff_users').insert({
-          id: crypto.randomUUID(), school_id: tenantId, staff_id: staffId,
+          id: crypto.randomUUID(), school_id: tenantId, staff_id: cleanStaffId,
           first_name: form.firstName.trim(), last_name: form.lastName.trim(),
-          role: form.role, email: form.email.trim(), phone: form.phone.trim(),
+          role: form.role, email: null, phone: null,
           password_hash: await hashPassword(form.password), allowed_pages: form.allowedPages,
-          is_read_only: form.isReadOnly, generated_email: genEmail,
+          is_read_only: form.isReadOnly, generated_email: null,
           is_active: true, created_at: now, updated_at: now,
         });
-        await logStaffActivity(tenantId, user?.id || '', 'admin', 'create_staff', 'Created: ' + staffId);
-        setSuccess('Account created. ID: ' + staffId + ' | Email: ' + genEmail);
+        await logStaffActivity(tenantId, user?.id || '', 'admin', 'create_staff', 'Created: ' + cleanStaffId);
+        setSuccess('Account created. Staff ID: ' + cleanStaffId);
       }
       setShowAddModal(false); await loadData();
     } catch (e: any) { setError(e.message || 'Failed to save'); }
@@ -172,8 +184,7 @@ export default function Roles() {
       const now = new Date().toISOString();
       const update: any = { staff_id: cleanId, updated_at: now };
       if (newPassword.length >= 6) update.password_hash = await hashPassword(newPassword);
-      // Regenerate email with new staff ID
-      update.generated_email = buildGeneratedEmail(credTarget.firstName, credTarget.lastName, cleanId);
+      update.generated_email = null;
       await supabase.from('school_staff_users').update(update).eq('id', credTarget.id);
       await logStaffActivity(tenantId, user?.id || '', 'admin', 'change_credentials', 'Changed credentials for: ' + credTarget.staffId + (cleanId !== credTarget.staffId ? ' -> ' + cleanId : ''));
       setSuccess('Credentials updated for ' + credTarget.firstName + ' ' + credTarget.lastName);
@@ -212,6 +223,13 @@ export default function Roles() {
     return new Date(iso).toLocaleDateString();
   }
 
+  const activeStaffCount = staffList.filter(s => s.isActive).length;
+  const inactiveStaffCount = staffList.length - activeStaffCount;
+  const readOnlyStaffCount = staffList.filter(s => s.isReadOnly).length;
+  const recentLoginCount = staffList.filter(s =>
+    s.lastLoginAt && Date.now() - new Date(s.lastLoginAt).getTime() < 24 * 60 * 60 * 1000
+  ).length;
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -229,6 +247,45 @@ export default function Roles() {
 
       {error && <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl p-3 text-sm">{error}</div>}
       {success && <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 rounded-xl p-3 text-sm flex items-center gap-2"><CheckCircle size={16} />{success}</div>}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="card p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-300">
+            <Gauge size={20} />
+          </div>
+          <div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Total Staff</p>
+            <p className="text-xl font-bold text-slate-900 dark:text-white">{staffList.length}</p>
+          </div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-300">
+            <UserCheck size={20} />
+          </div>
+          <div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Active</p>
+            <p className="text-xl font-bold text-slate-900 dark:text-white">{activeStaffCount}</p>
+          </div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 dark:text-red-300">
+            <UserX size={20} />
+          </div>
+          <div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Inactive</p>
+            <p className="text-xl font-bold text-slate-900 dark:text-white">{inactiveStaffCount}</p>
+          </div>
+        </div>
+        <div className="card p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-300">
+            <Eye size={20} />
+          </div>
+          <div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Read Only / Today</p>
+            <p className="text-xl font-bold text-slate-900 dark:text-white">{readOnlyStaffCount} / {recentLoginCount}</p>
+          </div>
+        </div>
+      </div>
 
       {/* Tabs */}
       {!isStaffMode && (
@@ -263,7 +320,7 @@ export default function Roles() {
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Staff</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">ID / Login Email</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Staff ID</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide hidden md:table-cell">Role</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide hidden lg:table-cell">Last Login</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide hidden lg:table-cell">Pages</th>
@@ -273,7 +330,7 @@ export default function Roles() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {staffList.map(s => (
-                    <>
+                    <Fragment key={s.id}>
                       <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                         {/* Name + avatar */}
                         <td className="px-4 py-3">
@@ -287,16 +344,13 @@ export default function Roles() {
                             </div>
                           </div>
                         </td>
-                        {/* ID + email */}
+                        {/* Staff ID */}
                         <td className="px-4 py-3">
                           <button onClick={() => copyText(s.staffId)} className="flex items-center gap-1 text-xs font-mono font-semibold text-slate-700 dark:text-slate-200 hover:text-primary-600 dark:hover:text-primary-400 mb-0.5">
                             <Shield size={11} />{s.staffId}
                             {copiedId === s.staffId ? <CheckCircle size={10} className="text-green-500" /> : <Copy size={10} className="opacity-50" />}
                           </button>
-                          <button onClick={() => copyText(s.generatedEmail)} className="flex items-center gap-1 text-[11px] font-mono text-indigo-500 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">
-                            <Mail size={10} />{s.generatedEmail}
-                            {copiedId === s.generatedEmail ? <CheckCircle size={10} className="text-green-500" /> : <Copy size={10} className="opacity-50" />}
-                          </button>
+                          <p className="text-[11px] text-slate-400">Use this ID with the staff password</p>
                         </td>
                         {/* Role */}
                         <td className="px-4 py-3 hidden md:table-cell">
@@ -361,7 +415,7 @@ export default function Roles() {
                       </tr>
                       {/* Expanded row — page access */}
                       {expandedRow === s.id && (
-                        <tr key={s.id + '-expanded'} className="bg-slate-50 dark:bg-slate-800/30">
+                        <tr className="bg-slate-50 dark:bg-slate-800/30">
                           <td colSpan={!isStaffMode ? 7 : 6} className="px-4 py-3">
                             <div className="flex flex-wrap gap-1.5">
                               <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">Allowed pages:</span>
@@ -375,7 +429,7 @@ export default function Roles() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -438,23 +492,33 @@ export default function Roles() {
             </div>
             <div className="p-5 space-y-4">
               {error && <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl p-3 text-sm">{error}</div>}
+              <div>
+                <label className="form-label">Staff ID *</label>
+                <input
+                  className="form-input font-mono uppercase"
+                  value={form.staffId}
+                  onChange={e => setForm(f => ({ ...f, staffId: e.target.value.toUpperCase() }))}
+                  placeholder="e.g. TCH-001"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="form-label">First Name *</label><input className="form-input" value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} placeholder="John" /></div>
                 <div><label className="form-label">Last Name *</label><input className="form-input" value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Doe" /></div>
               </div>
               <div>
                 <label className="form-label">Role</label>
-                <select className="form-input" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value, allowedPages: ROLE_PRESETS[e.target.value] || [] }))}>
+                <select className="form-input" value={form.role} onChange={e => setForm(f => ({
+                  ...f,
+                  role: e.target.value,
+                  staffId: editingStaff ? f.staffId : generateStaffId(e.target.value, staffList.filter(s => s.role === e.target.value).length),
+                  allowedPages: ROLE_PRESETS[e.target.value] || []
+                }))}>
                   <option value="teacher">Teacher</option>
                   <option value="accountant">Accountant</option>
                   <option value="librarian">Librarian</option>
                   <option value="receptionist">Receptionist</option>
                   <option value="custom">Custom</option>
                 </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="form-label">Email</label><input className="form-input" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="staff@school.com" /></div>
-                <div><label className="form-label">Phone</label><input className="form-input" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="07XXXXXXXX" /></div>
               </div>
               <div>
                 <label className="form-label">{editingStaff ? 'New Password (blank = keep)' : 'Password *'}</label>
@@ -521,8 +585,8 @@ export default function Roles() {
                 </div>
               </div>
               <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl p-3 text-xs text-indigo-700 dark:text-indigo-300">
-                <p className="font-semibold mb-1">New login email will be:</p>
-                <p className="font-mono break-all">{buildGeneratedEmail(credTarget.firstName, credTarget.lastName, newStaffId || credTarget.staffId)}</p>
+                <p className="font-semibold mb-1">Staff login will use:</p>
+                <p className="font-mono break-all">{newStaffId || credTarget.staffId}</p>
               </div>
               <div className="flex gap-3 pt-1">
                 <button onClick={() => setShowCredModal(false)} className="flex-1 btn btn-secondary">Cancel</button>

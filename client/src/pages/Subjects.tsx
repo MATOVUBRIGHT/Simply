@@ -6,13 +6,14 @@ import { useToast } from '../contexts/ToastContext';
 import { Class, Subject } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
-import { getClassDisplayName, sortClassesBySectionThenLevel } from '../utils/classroom';
+import { getClassDisplayName, getClassSection, sortClassesBySectionThenLevel } from '../utils/classroom';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { PortalDropdown } from '../components/PortalDropdown';
 
 const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
   'nursery': [
@@ -102,36 +103,12 @@ const SubjectActions = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node;
-      if (btnRef.current && !btnRef.current.contains(target)) {
-        // Check if click is inside the portal panel
-        const panel = document.getElementById(`subject-actions-${sub.id}`);
-        if (!panel || !panel.contains(target)) setIsOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen, sub.id]);
-
-  function openMenu() {
-    if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      // Position panel to the left of the button so it doesn't go off-screen
-      setPos({ top: rect.bottom + 6, left: rect.right });
-    }
-    setIsOpen(v => !v);
-  }
 
   return (
     <>
       <button
         ref={btnRef}
-        onClick={e => { e.stopPropagation(); openMenu(); }}
+        onClick={e => { e.stopPropagation(); setIsOpen(v => !v); }}
         className={`p-1.5 rounded-lg transition-all ${
           isOpen
             ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20'
@@ -142,35 +119,15 @@ const SubjectActions = ({
         <Settings size={14} className={isOpen ? 'animate-spin-slow' : ''} />
       </button>
 
-      {isOpen && createPortal(
-        <div
-          id={`subject-actions-${sub.id}`}
-          className="fixed z-[99999] flex items-center gap-1 p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 animate-dropdown-in"
-          style={{ top: pos.top, right: `calc(100vw - ${pos.left}px)` }}
-          onClick={e => e.stopPropagation()}
-        >
-          {group && (
-            <button
-              onClick={() => { onEdit(group); setIsOpen(false); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors whitespace-nowrap"
-              title="Edit Subject"
-            >
-              <Pencil size={13} />
-              Edit
-            </button>
-          )}
-          <div className="w-px h-5 bg-slate-200 dark:bg-slate-600" />
-          <button
-            onClick={() => { onDelete({ name: sub.name, ids: [sub.id] }); setIsOpen(false); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors whitespace-nowrap"
-            title="Remove Subject"
-          >
-            <Trash2 size={13} />
-            Remove
-          </button>
-        </div>,
-        document.body
-      )}
+      <PortalDropdown triggerRef={btnRef} isOpen={isOpen} onClose={() => setIsOpen(false)} id={`subject-actions-${sub.id}`}>
+        {group && (
+          <>
+            <PortalDropdown.Item icon={<Pencil size={13} />} label="Edit" onClick={() => { onEdit(group); setIsOpen(false); }} />
+            <PortalDropdown.Divider />
+          </>
+        )}
+        <PortalDropdown.Item icon={<Trash2 size={13} />} label="Remove" danger onClick={() => { onDelete({ name: sub.name, ids: [sub.id] }); setIsOpen(false); }} />
+      </PortalDropdown>
     </>
   );
 };
@@ -255,7 +212,7 @@ export default function Subjects() {
     ) as Subject[], [subjectsData]);
 
   const classes = useMemo(() =>
-    [...classesData].sort((a: any, b: any) => a.name.localeCompare(b.name)) as Class[], [classesData]);
+    sortClassesBySectionThenLevel([...classesData]) as Class[], [classesData]);
 
   const schoolType = useMemo(() => {
     const s = settingsData.find((s: any) => s.key === 'schoolType');
@@ -304,33 +261,17 @@ export default function Subjects() {
     const cls = classes.find(c => c.id === classId) as any;
     if (!cls) return '';
     const name = cls.name?.toLowerCase() || '';
-    // Nursery classes by name
-    if (['baby', 'nursery', 'middle', 'top'].includes(name)) return 'nursery';
-    const level = cls.level || 0;
-    // Map by level ranges based on school type
-    if (schoolType === 'nursery_primary' || schoolType === 'all') {
-      if (level >= 1 && level <= 4) return 'nursery';
-      if (level >= 5 && level <= 11) return 'primary';
-      if (level >= 12 && level <= 17) return 'jss';
+    const section = getClassSection(cls);
+    if (section === 0) return 'nursery';
+    if (section === 1) return 'primary';
+    if (section === 2) {
+      const level = cls.level || 0;
       if (level >= 18) return 'ss';
+      if (/^s[.\s-]*[56]\b/.test(name) || /^ss[.\s-]*[12]\b/.test(name)) return 'ss';
+      return 'jss';
     }
-    if (schoolType === 'nursery') {
-      if (level >= 1 && level <= 4) return 'nursery';
-    }
-    if (schoolType === 'primary') {
-      if (level >= 1 && level <= 7) return 'primary';
-    }
-    if (schoolType === 'secondary') {
-      if (level >= 1 && level <= 6) return level <= 4 ? 'jss' : 'ss';
-    }
-    if (schoolType === 'primary_secondary') {
-      if (level >= 1 && level <= 7) return 'primary';
-      if (level >= 8 && level <= 11) return 'jss';
-      if (level >= 12) return 'ss';
-    }
-    // Fallback: guess from class name
     if (name.startsWith('p.') || name.startsWith('p ')) return 'primary';
-    if (name.startsWith('s.') || name.startsWith('s ')) return level <= 4 ? 'jss' : 'ss';
+    if (name.startsWith('s.') || name.startsWith('s ')) return /^s[.\s-]*[56]\b/.test(name) ? 'ss' : 'jss';
     return 'primary';
   }
 

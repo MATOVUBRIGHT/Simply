@@ -52,6 +52,12 @@ function friendlyMessage(raw: string): string {
 let _addToast: AddToast | null = null;
 let _installed = false;
 
+function queueToast(message: string, type: 'success' | 'error' | 'info' | 'warning') {
+  window.setTimeout(() => {
+    _addToast?.(message, type);
+  }, 0);
+}
+
 export function initErrorInterceptor(addToast: AddToast) {
   _addToast = addToast;
   if (_installed) return;
@@ -63,9 +69,7 @@ export function initErrorInterceptor(addToast: AddToast) {
     const level = classify(msg);
     if (level === 'suppress') { event.preventDefault(); return; }
     event.preventDefault(); // prevent console error
-    if (_addToast) {
-      _addToast(friendlyMessage(msg), level === 'warning' ? 'warning' : 'error');
-    }
+    queueToast(friendlyMessage(msg), level === 'warning' ? 'warning' : 'error');
   });
 
   // Uncaught synchronous errors (rare in React apps but possible)
@@ -76,9 +80,7 @@ export function initErrorInterceptor(addToast: AddToast) {
     // Don't intercept script load errors (they have no message)
     if (!msg || msg === 'Script error.') return;
     event.preventDefault();
-    if (_addToast) {
-      _addToast(friendlyMessage(msg), level === 'warning' ? 'warning' : 'error');
-    }
+    queueToast(friendlyMessage(msg), level === 'warning' ? 'warning' : 'error');
   });
 
   // Patch console.error to suppress noisy Supabase / React internals in production

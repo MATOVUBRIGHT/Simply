@@ -54,6 +54,11 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Allow horizontal scrolling for the entire app when content overflows */
+html, body, #root {
+  overflow-x: auto;
+}
+
 /* Custom Selection */
 ::selection {
   background: rgba(59, 130, 246, 0.2);

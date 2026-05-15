@@ -2,11 +2,13 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
+import { useStaffAuth } from '../contexts/StaffAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSync } from '../contexts/SyncContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { useConfirm } from '../components/ConfirmModal';
 
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -29,6 +31,9 @@ export default function Settings() {
   const { setCurrency } = useCurrency();
   const { isOnline, isSyncing, pendingChanges, lastSyncTime, exportBackup, importBackup, isSyncEnabled, enableSync, disableSync, isSupabaseConfigured } = useSync();
   const { user, schoolId } = useAuth();
+  const { staffImpersonate } = useStaffAuth();
+  const confirm = useConfirm();
+  const [impersonateId, setImpersonateId] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
@@ -164,13 +169,15 @@ export default function Settings() {
       localStorage.setItem('schofy_currency', settings.currency || 'USD');
       window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
 
+      const classesOk = await autoCreateClasses(sid, settings.schoolType, { confirmStudentClear: true, forceReplace: true });
+      if (!classesOk) return;
+
       const result = await dataService.saveSettings(sid, settings);
       if (!result.success) {
         addToast(result.error || 'Failed to save settings', 'error');
         return;
       }
 
-      await autoCreateClasses(sid);
       window.dispatchEvent(new CustomEvent('classesUpdated'));
       window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
       addToast('Settings saved', 'success');
@@ -182,9 +189,15 @@ export default function Settings() {
     }
   }
 
-  async function autoCreateClasses(sid: string) {
-    const schoolType = settings.schoolType || 'nursery_primary';
+  async function autoCreateClasses(
+    sid: string,
+    schoolTypeOverride?: string,
+    options: { confirmStudentClear?: boolean; forceReplace?: boolean } = {},
+  ): Promise<boolean> {
+    const schoolType = schoolTypeOverride || settings.schoolType || 'nursery_primary';
 
+    // Globally unique levels matching getClassSection() ranges:
+    // Nursery: 1-4, Primary: 5-11, Secondary JSS: 12-15, SS: 18-19
     const CLASS_MAP: Record<string, { name: string; level: number }[]> = {
       nursery: [
         { name: 'Baby', level: 1 },
@@ -193,58 +206,144 @@ export default function Settings() {
         { name: 'Top', level: 4 },
       ],
       primary: [
-        { name: 'P.1', level: 1 }, { name: 'P.2', level: 2 }, { name: 'P.3', level: 3 },
-        { name: 'P.4', level: 4 }, { name: 'P.5', level: 5 }, { name: 'P.6', level: 6 },
-        { name: 'P.7', level: 7 },
+        { name: 'P.1', level: 5 }, { name: 'P.2', level: 6 }, { name: 'P.3', level: 7 },
+        { name: 'P.4', level: 8 }, { name: 'P.5', level: 9 }, { name: 'P.6', level: 10 },
+        { name: 'P.7', level: 11 },
       ],
       secondary: [
-        { name: 'S.1', level: 1 }, { name: 'S.2', level: 2 }, { name: 'S.3', level: 3 },
-        { name: 'S.4', level: 4 }, { name: 'S.5', level: 5 }, { name: 'S.6', level: 6 },
+        { name: 'S.1', level: 12 }, { name: 'S.2', level: 13 }, { name: 'S.3', level: 14 },
+        { name: 'S.4', level: 15 }, { name: 'S.5', level: 18 }, { name: 'S.6', level: 19 },
       ],
     };
 
     let classesToCreate: { name: string; level: number }[] = [];
+    let allowedSections: number[] = [];
 
     if (schoolType === 'nursery') {
       classesToCreate = CLASS_MAP.nursery;
+      allowedSections = [0];
     } else if (schoolType === 'nursery_primary') {
-      classesToCreate = [
-        ...CLASS_MAP.nursery,
-        ...CLASS_MAP.primary.map(c => ({ ...c, level: c.level + 4 })),
-      ];
+      classesToCreate = [...CLASS_MAP.nursery, ...CLASS_MAP.primary];
+      allowedSections = [0, 1];
     } else if (schoolType === 'primary') {
       classesToCreate = CLASS_MAP.primary;
+      allowedSections = [1];
     } else if (schoolType === 'secondary') {
       classesToCreate = CLASS_MAP.secondary;
+      allowedSections = [2];
     } else if (schoolType === 'primary_secondary') {
-      classesToCreate = [
-        ...CLASS_MAP.primary,
-        ...CLASS_MAP.secondary.map(c => ({ ...c, level: c.level + 7 })),
-      ];
+      classesToCreate = [...CLASS_MAP.primary, ...CLASS_MAP.secondary];
+      allowedSections = [1, 2];
     } else if (schoolType === 'all') {
-      classesToCreate = [
-        ...CLASS_MAP.nursery,
-        ...CLASS_MAP.primary.map(c => ({ ...c, level: c.level + 4 })),
-        ...CLASS_MAP.secondary.map(c => ({ ...c, level: c.level + 11 })),
-      ];
+      classesToCreate = [...CLASS_MAP.nursery, ...CLASS_MAP.primary, ...CLASS_MAP.secondary];
+      allowedSections = [0, 1, 2];
     }
 
     const existingClasses = await dataService.getAll(sid, 'classes');
-    const existingNames = new Set(existingClasses.map((c: any) => c.name));
+    const existingStudents = await dataService.getAll(sid, 'students');
+    const { getClassSection } = await import('../utils/classroom');
+    const allowedSet = new Set(allowedSections);
 
+    // Delete classes that don't belong to this school type
+    // Normalize names and dedupe existing classes first (keep first, delete duplicates)
+    const byName = new Map<string, any[]>();
+    for (const c of existingClasses) {
+      const n = (c.name || '').toLowerCase().trim();
+      if (!byName.has(n)) byName.set(n, []);
+      byName.get(n)!.push(c);
+    }
+    const duplicatesToDelete: any[] = [];
+    for (const [_, group] of byName.entries()) {
+      if (group.length > 1) {
+        // keep the first, delete the rest
+        duplicatesToDelete.push(...group.slice(1));
+      }
+    }
+
+    // Classes that don't belong to this school type (by section)
+    const toDelete = existingClasses.filter((c: any) => {
+      const section = getClassSection({ name: c.name, level: c.level });
+      return !allowedSet.has(section);
+    });
+    const toDeleteIds = new Set(toDelete.map((c: any) => c.id));
+    const affectedStudents = existingStudents.filter((student: any) => student.classId && toDeleteIds.has(student.classId));
+
+    // If forceReplace is set, clear student class assignments and delete without prompting.
+    const now = new Date().toISOString();
+    if (affectedStudents.length > 0) {
+      if (options.forceReplace) {
+        for (const student of affectedStudents) {
+          await dataService.update(sid, 'students', student.id, { classId: null, updatedAt: now } as any);
+        }
+      } else {
+        if (!options.confirmStudentClear) {
+          addToast(`${affectedStudents.length} student class assignment${affectedStudents.length !== 1 ? 's' : ''} must be cleared before changing school type`, 'warning');
+          return false;
+        }
+
+        const ok = await confirm({
+          title: 'Clear Student Classes?',
+          description: `Changing to ${schoolType.replace(/_/g, ' ')} will remove ${toDelete.length} class${toDelete.length !== 1 ? 'es' : ''}. ${affectedStudents.length} student${affectedStudents.length !== 1 ? 's' : ''} assigned to those classes will be set to "Not assigned". Continue?`,
+          confirmLabel: 'Clear and Continue',
+          variant: 'warning',
+        });
+        if (!ok) return false;
+
+        for (const student of affectedStudents) {
+          await dataService.update(sid, 'students', student.id, { classId: null, updatedAt: now } as any);
+        }
+      }
+    }
+
+    // Delete duplicates first, then classes not in allowed sections
+    for (const cls of duplicatesToDelete) {
+      await dataService.delete(sid, 'classes', (cls as any).id);
+    }
+    for (const cls of toDelete) {
+      await dataService.delete(sid, 'classes', (cls as any).id);
+    }
+    if (toDelete.length > 0) {
+      addToast(`${toDelete.length} class${toDelete.length > 1 ? 'es' : ''} removed (not in ${schoolType} type)`, 'info');
+    }
+
+    // Re-fetch existing classes after deletions to avoid race conditions
+    const postExisting = await dataService.getAll(sid, 'classes');
+    const existingNames = new Set(postExisting.map((c: any) => c.name.toLowerCase().trim()));
     let createdCount = 0;
     for (const cls of classesToCreate) {
-      if (!existingNames.has(cls.name)) {
+      if (!existingNames.has(cls.name.toLowerCase().trim())) {
         await dataService.create(sid, 'classes', { name: cls.name, level: cls.level, capacity: 40 } as any);
         createdCount++;
       }
     }
 
     if (createdCount > 0) addToast(`${createdCount} classes auto-created`, 'info');
+    else if (toDelete.length === 0 && schoolTypeOverride) addToast('All classes for this school type already exist', 'info');
+    if (affectedStudents.length > 0) window.dispatchEvent(new CustomEvent('studentsUpdated'));
+    return true;
+  }
+
+  async function handleSchoolTypeChange(value: string) {
+    const sid = schoolId || user?.id;
+    const newSettings = { ...settings, schoolType: value };
+    if (sid) {
+      const ok = await autoCreateClasses(sid, value, { confirmStudentClear: true, forceReplace: true });
+      if (!ok) return;
+    }
+    setSettings(newSettings);
+    window.dispatchEvent(new CustomEvent('classesUpdated'));
+    window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => void autoSave(newSettings), 1000);
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) {
     const { name, value } = e.target;
+    if (name === 'schoolType') {
+      void handleSchoolTypeChange(value);
+      return;
+    }
+
     const newSettings = { ...settings, [name]: value };
     setSettings(newSettings);
 
@@ -322,6 +421,10 @@ export default function Settings() {
     }
   }
 
+  // --- Admin utilities: sign out all users, impersonate staff ---
+  const showAdminUtilities = !!user?.id;
+
+
   async function handleDeleteAllData() {
     const id = schoolId || user?.id;
     if (!id) return;
@@ -380,6 +483,22 @@ export default function Settings() {
       addToast('Failed to delete data', 'error');
       setIsDeleting(false);
     }
+  }
+
+  async function handleSignOutAll() {
+    try {
+      window.dispatchEvent(new CustomEvent('forceSignOutAllUsers'));
+      addToast('All users signed out', 'info');
+    } catch {}
+  }
+
+  async function handleImpersonate() {
+    if (!impersonateId || impersonateId.trim() === '') { addToast('Enter a Staff ID', 'error'); return; }
+    const sid = schoolId || user?.id || undefined;
+    const adminId = user?.id;
+    const res = await staffImpersonate(impersonateId.trim().toUpperCase(), sid, adminId);
+    if (!res.success) addToast(res.error || 'Impersonation failed', 'error');
+    else addToast('Signed in as staff', 'success');
   }
 
   async function cleanAllDuplicates() {
@@ -885,6 +1004,30 @@ export default function Settings() {
             )}
           </div>
         </div>
+
+        {showAdminUtilities && (
+          <div className="card border-slate-200 dark:border-slate-700">
+            <div className="card-header flex items-center gap-2">
+              <Users size={20} />
+              <h2 className="font-semibold">Admin Utilities</h2>
+            </div>
+            <div className="card-body space-y-4">
+              <p className="text-sm text-slate-600 dark:text-slate-400">Administrative tools: sign out all users or sign in as a staff member by Staff ID.</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div className="md:col-span-2">
+                  <label className="form-label">Impersonate Staff (Staff ID)</label>
+                  <input className="form-input font-mono" value={impersonateId} onChange={e => setImpersonateId(e.target.value)} placeholder="e.g. TCH-001" />
+                </div>
+                <div>
+                  <button onClick={handleImpersonate} className="btn btn-primary w-full">Impersonate</button>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button onClick={handleSignOutAll} className="btn btn-secondary">Sign out all users</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="card border-red-200 dark:border-red-800">
           <div className="card-header flex items-center gap-2 text-red-600 dark:text-red-400">

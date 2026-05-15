@@ -30,7 +30,7 @@ function Item({ icon, label, onClick, danger, disabled }: DropdownItemProps) {
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
+      className={`flex shrink-0 items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed ${
         danger
           ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
           : 'text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400'
@@ -43,7 +43,7 @@ function Item({ icon, label, onClick, danger, disabled }: DropdownItemProps) {
 }
 
 function Divider() {
-  return <div className="w-px h-5 bg-slate-200 dark:bg-slate-600 mx-0.5" />;
+  return <div className="shrink-0 w-px h-5 bg-slate-200 dark:bg-slate-600 mx-0.5" />;
 }
 
 interface PortalDropdownProps {
@@ -99,8 +99,13 @@ export function PortalDropdown({ triggerRef, isOpen, onClose, children, id }: Po
     <div
       ref={panelRef}
       id={id}
-      className="fixed z-[99999] flex items-center gap-1 p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 animate-dropdown-in"
-      style={{ top: pos.top, right: pos.right }}
+      className="fixed z-[99999] inline-flex flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 animate-dropdown-in whitespace-nowrap"
+      style={{
+        top: pos.top,
+        right: pos.right,
+        width: 'max-content',
+        maxWidth: 'calc(100vw - 16px)',
+      }}
       onClick={e => e.stopPropagation()}
     >
       {children}

@@ -1,6 +1,6 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+﻿﻿import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle } from 'lucide-react';
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, Settings, Edit } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import type { Class, Student } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
@@ -9,12 +9,14 @@ import ImageModal from '../components/ImageModal';
 import { useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
-import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments } from '../utils/classroom';
+import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments, sortClassesBySectionThenLevel } from '../utils/classroom';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
 import { useConfirm } from '../components/ConfirmModal';
+import { PortalDropdown } from '../components/PortalDropdown';
+import { BulkEditClassModal } from '../components/BulkEditClassModal';
 
 const avatarColors = [
   'bg-rose-500',
@@ -50,6 +52,66 @@ function generateStudentId(firstName: string, lastName: string): string {
   return `${fn}${ln}${digits}`;
 }
 
+function StudentActions({
+  student,
+  onMarkCompleted,
+  onEdit,
+  onToggleStatus,
+  onSendEmail,
+  onDelete,
+}: {
+  student: Student;
+  onMarkCompleted: (id: string) => void;
+  onEdit: (id: string) => void;
+  onToggleStatus: (student: Student) => void;
+  onSendEmail: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          setIsOpen((open) => !open);
+        }}
+        className={`p-1.5 rounded-lg transition-all ${
+          isOpen
+            ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/20'
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+        title="Student actions"
+      >
+        <Settings size={15} className={isOpen ? 'animate-spin-slow' : ''} />
+      </button>
+
+      <PortalDropdown triggerRef={btnRef} isOpen={isOpen} onClose={() => setIsOpen(false)}>
+        <PortalDropdown.Item icon={<Edit size={13} />} label="Edit" onClick={() => { onEdit(student.id); setIsOpen(false); }} />
+        {student.status === 'active' && (
+          <>
+            <PortalDropdown.Divider />
+            <PortalDropdown.Item icon={<GraduationCap size={13} />} label="Complete" onClick={() => { onMarkCompleted(student.id); setIsOpen(false); }} />
+          </>
+        )}
+        <PortalDropdown.Divider />
+        <PortalDropdown.Item
+          icon={student.status === 'active' ? <UserMinus size={13} /> : <UserCheck size={13} />}
+          label={student.status === 'active' ? 'Deactivate' : 'Activate'}
+          onClick={() => { onToggleStatus(student); setIsOpen(false); }}
+        />
+        <PortalDropdown.Divider />
+        <PortalDropdown.Item icon={<Mail size={13} />} label="Email" onClick={() => { onSendEmail(student.id); setIsOpen(false); }} />
+        <PortalDropdown.Divider />
+        <PortalDropdown.Item icon={<Trash2 size={13} />} label="Delete" danger onClick={() => { onDelete(student.id); setIsOpen(false); }} />
+      </PortalDropdown>
+    </>
+  );
+}
+
 export default function Students() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
@@ -83,8 +145,9 @@ export default function Students() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [showAll, setShowAll] = useState(false);
   const [selectedClass, setSelectedClass] = useState('');
-  const itemsPerPage = 10;
+  const itemsPerPage = showAll ? 99999 : 10;
   const { addToast } = useToast();
   // ... rest of state stays same
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -104,6 +167,7 @@ export default function Students() {
   const [viewFilter, setViewFilter] = useState<'all' | 'active' | 'deactivated' | 'completed'>('active');
   const [showStatusFilter, setShowStatusFilter] = useState(false);
   const [showClassFilter, setShowClassFilter] = useState(false);
+  const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [completedYearFilter, setCompletedYearFilter] = useState<string>('');
   const [planLimitMessage, setPlanLimitMessage] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -127,7 +191,7 @@ export default function Students() {
     if (!id) return;
     try {
       const classesData = await dataService.getAll(id, 'classes');
-      setClasses(classesData);
+      setClasses(sortClassesBySectionThenLevel(classesData));
     } catch (error) {
       console.error('Failed to load classes:', error);
     }
@@ -172,10 +236,22 @@ export default function Students() {
     loadData();
   }, [loadData]);
 
-  const availableClassIds = Array.from(new Set([
-    ...classes.map((classItem) => classItem.id),
-    ...students.map((student) => student.classId).filter(Boolean),
-  ]));
+  const availableClassIds = sortClassesBySectionThenLevel(classes)
+    .map((classItem) => classItem.id)
+    .filter((id) => classes.some((c) => c.id === id) || students.some((s) => s.classId === id));
+
+  // Keep paginated `students` in sync with the global `allStudents` store
+  // so changes from other pages or realtime sync reflect immediately.
+  useEffect(() => {
+    if (debouncedSearch) return; // when searching we use search results instead
+    const filtered = (allStudents || []).filter((student: Student) => {
+      const matchesClass = !selectedClass || student.classId === selectedClass;
+      const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
+      return matchesClass && matchesView;
+    });
+    setStudents(filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
+    setTotalCount(filtered.length);
+  }, [allStudents, debouncedSearch, selectedClass, viewFilter, currentPage, itemsPerPage]);
 
   const getCompletedStudents = () => {
     return students.filter(s => s.status === 'completed').sort((a, b) => {
@@ -236,7 +312,7 @@ export default function Students() {
     
     const handleClassesUpdated = () => {
       if (isReloadingRef.current) return;
-      console.log('🔄 Classes updated, reloading...');
+      console.log('🔁 Classes updated, reloading...');
       isReloadingRef.current = true;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
@@ -247,7 +323,7 @@ export default function Students() {
     };
     const handleClassesDataChanged = () => {
       if (isReloadingRef.current) return;
-      console.log('🔄 Classes data changed, reloading students...');
+      console.log('🔁 Classes data changed, reloading students...');
       isReloadingRef.current = true;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
@@ -258,7 +334,7 @@ export default function Students() {
     };
     const handleDataRefresh = () => {
       if (isReloadingRef.current) return;
-      console.log('🔄 General data refresh, reloading classes...');
+      console.log('🔁 General data refresh, reloading classes...');
       isReloadingRef.current = true;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
@@ -290,7 +366,7 @@ export default function Students() {
       addToast('Cleaning up...', 'info');
       const allStudentsRaw = await dataService.getAll(id, 'students');
 
-      // ── 1. Remove duplicate students (same firstName+lastName, keep oldest) ──
+      // --- 1. Remove duplicate students (same firstName+lastName, keep oldest) ---
       const seen = new Map<string, any>();
       const duplicateIds: string[] = [];
       // Sort oldest first so we keep the first-created record
@@ -309,7 +385,7 @@ export default function Students() {
         await dataService.batchDelete(id, 'students', duplicateIds);
       }
 
-      // ── 2. Remove orphaned related records ────────────────────────────────
+      // --- 2. Remove orphaned related records ---
       const validIds = new Set(allStudentsRaw.map((s: any) => s.id).filter((i: string) => !duplicateIds.includes(i)));
       let cleanedCount = 0;
 
@@ -622,6 +698,26 @@ export default function Students() {
   }
 
   const handleBulkActivate = handleBulkMarkActive;
+
+  async function handleBulkEditClass(classId: string) {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    if (selectedStudents.size === 0) return;
+    
+    try {
+      const now = new Date().toISOString();
+      
+      for (const studentId of selectedStudents) {
+        await dataService.update(id, 'students', studentId, { classId, updatedAt: now } as any);
+      }
+      
+      setSelectedStudents(new Set());
+      setSelectMode(false);
+      addToast(`${selectedStudents.size} students moved to ${getClassDisplayName(classId, classes)}`, 'success');
+    } catch (error) {
+      addToast('Failed to update classes', 'error');
+    }
+  }
 
   function handleBulkSendEmail() {
     const selectedList = students.filter(s => selectedStudents.has(s.id) && s.guardianEmail);
@@ -1346,13 +1442,22 @@ export default function Students() {
                   {selectedStudents.size === paginatedStudents.length ? 'Deselect All' : 'Select All'}
                 </button>
                 {viewFilter !== 'deactivated' && (
-                  <button
-                    onClick={handleBulkMarkCompleted}
-                    className="px-3 py-1.5 text-xs bg-violet-500 hover:bg-violet-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
-                  >
+                  <>
+                    <button
+                      onClick={() => setShowBulkEditModal(true)}
+                      className="px-3 py-1.5 text-xs bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
+                    >
+                      <Users size={12} />
+                      Edit Class
+                    </button>
+                    <button
+                      onClick={handleBulkMarkCompleted}
+                      className="px-3 py-1.5 text-xs bg-violet-500 hover:bg-violet-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
+                    >
                     <Award size={12} />
                     Mark Completed
-                  </button>
+                    </button>
+                  </>
                 )}
                 {viewFilter === 'deactivated' ? (
                   <button
@@ -1613,6 +1718,7 @@ export default function Students() {
                         <StudentActions
                           student={student}
                           onMarkCompleted={handleMarkCompleted}
+                          onEdit={(studentId) => navigate(`/students/${studentId}/edit`)}
                           onToggleStatus={handleToggleStatus}
                           onSendEmail={handleSendEmail}
                           onDelete={handleDelete}
@@ -1726,10 +1832,27 @@ export default function Students() {
           )}
         </div>
 
-        {totalPages > 1 && viewFilter !== 'completed' && (
+        {viewFilter !== 'completed' && (
+          <div className="px-4 py-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+            <p className="text-sm text-slate-500">
+              {showAll ? (
+                <><span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students (all)</>
+              ) : (
+                <><span className="font-medium text-slate-700 dark:text-slate-300">{Math.min((currentPage - 1) * itemsPerPage + 1, totalCount)}</span>{' - '}<span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span>{' of '}<span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span></>
+              )}
+            </p>
+            <button
+              onClick={() => { setShowAll(v => !v); setCurrentPage(1); }}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            >
+              {showAll ? 'Show Pages' : 'Show All'}
+            </button>
+          </div>
+        )}
+        {viewFilter !== 'completed' && showAll === false && totalPages > 1 && (
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>–
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>â€“
               <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span> of{' '}
               <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students
             </p>
@@ -2011,7 +2134,28 @@ export default function Students() {
           </div>
         </div>
       )}
+      {(
+        <BulkEditClassModal
+          isOpen={showBulkEditModal}
+          onClose={() => setShowBulkEditModal(false)}
+          onSave={async (classId: string) => {
+            await handleBulkEditClass(classId);
+          }}
+          studentCount={selectedStudents.size}
+          classes={classes}
+          currentClassId={selectedStudents.size === 1 ? students.find(s => selectedStudents.has(s.id))?.classId : undefined}
+        />
+      )}
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
 

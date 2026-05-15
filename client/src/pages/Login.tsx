@@ -107,9 +107,10 @@ export default function Login() {
           return;
         }
 
-        // Detect staff email login (firstname.lastname.staffid@staff.schofy.app)
-        if (isStaffEmail(email.toLowerCase().trim())) {
-          const result = await staffLoginByEmail(email.toLowerCase().trim(), password);
+        const loginId = email.trim();
+        const isStaffLogin = isStaffEmail(loginId.toLowerCase()) || !loginId.includes('@');
+        if (isStaffLogin) {
+          const result = await staffLoginByEmail(loginId, password);
           if (!result.success) {
             setError(result.error || 'Staff login failed');
             setLoading(false);
@@ -309,19 +310,19 @@ export default function Login() {
             )}
 
             <div>
-              <label className="form-label">Email Address</label>
+              <label className="form-label">{isRegister ? 'Email Address' : 'Email or Staff ID'}</label>
               <input
-                type="email"
+                type={isRegister ? 'email' : 'text'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="form-input"
-                placeholder="you@example.com or staff email"
+                placeholder={isRegister ? 'you@example.com' : 'you@example.com or TCH-001'}
                 required
-                autoComplete="email"
+                autoComplete={isRegister ? 'email' : 'username'}
               />
-              {isStaffEmail(email.toLowerCase().trim()) && (
+              {!isRegister && (isStaffEmail(email.toLowerCase().trim()) || (!!email.trim() && !email.includes('@'))) && (
                 <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1 flex items-center gap-1">
-                  <Shield size={11}/> Staff account detected — enter your staff password
+                  <Shield size={11}/> Staff account detected - enter your staff password
                 </p>
               )}
             </div>
@@ -418,3 +419,4 @@ export default function Login() {
     </div>
   );
 }
+

@@ -24,15 +24,17 @@ export function getClassSection(cls: { name?: string; level?: number }): number 
   // Explicit nursery names always go first
   if (NURSERY_NAMES.has(name)) return 0;
 
+  // Explicit class names should win over legacy level values. Some older
+  // schools stored P.1-P.7 or S.1-S.6 as levels 1-7 / 1-6.
+  if (name.startsWith('p.') || name.startsWith('p ') || name.startsWith('primary')) return 1;
+  if (name.startsWith('jss')) return 2;
+  if (name.startsWith('ss')) return 2;
+  if (name.startsWith('s.') || name.startsWith('s ')) return 2;
+
   // Level-based section mapping (matches Settings.tsx CLASS_MAP offsets)
   if (level >= 1  && level <= 4)  return 0; // Nursery
   if (level >= 5  && level <= 11) return 1; // Primary
-  if (level >= 12 && level <= 17) return 2; // JSS / Lower Secondary
-  if (level >= 18)                return 3; // SS / Upper Secondary
-
-  // Name-based fallback
-  if (name.startsWith('p.') || name.startsWith('p ') || name.startsWith('primary')) return 1;
-  if (name.startsWith('s.') || name.startsWith('s ') || name.startsWith('jss') || name.startsWith('ss')) return 2;
+  if (level >= 12)                return 2; // Secondary
 
   return 1; // default to primary
 }
@@ -40,12 +42,11 @@ export function getClassSection(cls: { name?: string; level?: number }): number 
 export const SECTION_LABELS: Record<number, string> = {
   0: 'Nursery',
   1: 'Primary',
-  2: 'Secondary (JSS)',
-  3: 'Secondary (SS)',
+  2: 'Secondary',
 };
 
 /**
- * Sort classes: Nursery first, then Primary, then Secondary (JSS), then SS.
+ * Sort classes: Nursery first, then Primary, then Secondary.
  * Within each section, sort by level ascending.
  * Use this everywhere instead of raw `.sort((a,b) => a.level - b.level)`.
  */
