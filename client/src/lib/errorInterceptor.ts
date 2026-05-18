@@ -25,6 +25,9 @@ const SUPPRESS_PATTERNS = [
   /not found/i,
   /404/,
   /PGRST116/i, // Supabase "no rows" error code
+  /402/,       // Supabase egress quota exceeded — handled gracefully
+  /Payment Required/i,
+  /exceed_egress_quota/i,
 ];
 
 // Messages that should show as a warning (not error)

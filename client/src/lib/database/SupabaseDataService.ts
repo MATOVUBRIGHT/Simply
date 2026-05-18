@@ -611,7 +611,13 @@ class SupabaseDataService {
         let q = this.db.from(rt).select('*');
         q = applyScope(q, rt, sid);
         const { data, error } = await q;
-        if (error) { console.error(`[getAll] ${rt}:`, error.message); return []; }
+        if (error) {
+          // Silently ignore 402 (egress quota) — return empty, app uses cache
+          if (!error.message?.includes('402') && !error.message?.includes('exceed_egress_quota')) {
+            console.error(`[getAll] ${rt}:`, error.message);
+          }
+          return [];
+        }
         const result = (data || []).map(mapToLocal);
         cacheSet(sid, tableName, result);
         return result;

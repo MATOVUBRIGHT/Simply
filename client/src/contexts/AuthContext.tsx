@@ -196,7 +196,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await usersApi.getByEmail(email);
 
+      // If Supabase returns 402 (egress quota exceeded), fall back to cached session
+      // so the user can still access the app and navigate to Plans to resolve billing
       if (error) {
+        const is402 = error.message?.includes('402') ||
+          error.message?.includes('Payment Required') ||
+          error.message?.includes('exceed_egress_quota');
+        if (is402) {
+          const savedUser = getSession();
+          if (savedUser && savedUser.email.toLowerCase() === email.toLowerCase()) {
+            setUser(savedUser);
+            setSchoolId(savedUser.schoolId);
+            void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+            return { success: true };
+          }
+          // No cached session — still let them in with a minimal user object
+          // They'll see the subscription gate and can go to Plans
+          return { success: false, error: 'Service temporarily unavailable. Please try again shortly.' };
+        }
         return { success: false, error: error.message };
       }
 
