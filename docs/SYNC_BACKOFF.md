@@ -11,7 +11,7 @@ What changed:
 - Backoff resets on a successful sync.
 
 Why:
-- Reduce Supabase/Appwrite request usage and avoid hitting free-tier limits.
+- Reduce Supabase request usage and avoid hitting free-tier limits.
 
 Notes & next steps:
 - Consider tuning `SYNC_INTERVAL_MS` and `MAX_BACKOFF_MS` based on observed behavior.

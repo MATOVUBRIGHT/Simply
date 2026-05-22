@@ -246,6 +246,7 @@ function isUUID(v: any): boolean {
 }
 
 // UUID columns that must be valid UUIDs or null — never plain strings
+// NOTE: student_id in 'students' table is VARCHAR, but in others it's a UUID foreign key.
 const UUID_COLUMNS = new Set([
   'id','school_id','class_id','student_id','staff_id','subject_id','exam_id',
   'fee_id','route_id','teacher_id','user_id','published_by','recorded_by',
@@ -258,11 +259,19 @@ function toRemote(data: any, remoteTable: string): any {
     if (v === undefined) continue;
     const col = k === 'schoolId' ? 'school_id' : camelToSnake(k);
     if (allowed && !allowed.has(col)) continue;
-    // Coerce non-UUID values in UUID columns to null
-    if (UUID_COLUMNS.has(col) && v !== null && !isUUID(v)) {
-      out[col] = null;
-      continue;
+
+    // UUID Validation with table-specific overrides
+    if (UUID_COLUMNS.has(col) && v !== null) {
+      // Exceptions: student_id in 'students' table is VARCHAR, not UUID
+      const isActuallyVarchar = (col === 'student_id' && remoteTable === 'students');
+      
+      if (!isActuallyVarchar && !isUUID(v)) {
+        console.warn(`[toRemote] Nullifying non-UUID value for ${remoteTable}.${col}:`, v);
+        out[col] = null;
+        continue;
+      }
     }
+    
     out[col] = v;
   }
   delete out.sync_status;
@@ -814,58 +823,82 @@ class SupabaseDataService {
 
   // ── reads ─────────────────────────────────────────────────────────────────
 
-  async getAll(userId: string, tableName: string): Promise<any[]> {
+  async getAll(userId: string, tableName: string, forceRefresh = false): Promise<any[]> {
     const sid = this.sid(userId);
 
-    // Always return cached data immediately — instant UI, works offline
+    // 1. Instant Return from Cache (Offline-Ready)
     const cached = cacheGet(sid, tableName);
-    if (cached && cached.length > 0) {
-      // Only trigger background merge if cache is older than 6 hours
-      // We rely on Realtime sync for instant updates, background merge is just a safety catch
-      if (isOnline() && this.ok) {
-        const entry = memCache.get(cacheKey(sid, tableName));
-        if (entry && Date.now() - entry.ts > 6 * 60 * 60_000) {
-          void this._backgroundMerge(sid, tableName);
+    
+    // 2. Cloud-First: If online and (forceRefresh OR no cache OR cache stale), fetch from Supabase
+    if (isOnline() && this.ok) {
+      const entry = memCache.get(cacheKey(sid, tableName));
+      const isStale = !entry || (Date.now() - entry.ts > 5 * 60 * 1000); // 5 minutes staleness for cloud-first
+
+      if (forceRefresh || !cached || cached.length === 0 || isStale) {
+        // Trigger background merge immediately
+        // For cloud-first, if we have NO cache, we must wait for the fetch
+        if (!cached || cached.length === 0 || forceRefresh) {
+          return await this._fetchAndMerge(sid, tableName);
+        } else {
+          // If we have cache, return it but kick off a background refresh
+          void this._fetchAndMerge(sid, tableName);
         }
       }
-      return cached;
     }
 
-    // No cache at all — if offline return empty array
-    if (!isOnline() || !this.ok) return [];
+    return cached || [];
+  }
 
-    // No cache and online — fetch from Supabase
+  /** Internal helper for cloud-first fetching */
+  private async _fetchAndMerge(sid: string, tableName: string): Promise<any[]> {
     const key = cacheKey(sid, tableName);
-    const existing = inflight.get(key);
-    if (existing) return existing;
+    const existingInflight = inflight.get(key);
+    if (existingInflight) return existingInflight;
 
     const rt = getSupabaseTable(tableName);
     const cols = (TABLE_COLUMNS as any)[tableName] || ['*'];
-    
+
     const req = (async () => {
       try {
         let q = this.db.from(rt).select(cols.join(','));
-        // Only apply school filter if it's not a special table
         if (!NO_SCHOOL_FILTER.has(rt) && rt !== 'schools') {
           q = applyScope(q, rt, sid);
         } else if (rt === 'schools') {
           q = q.eq('id', sid);
         }
-        
+
         const { data, error } = await q;
-        if (error) {
-          // Silently ignore 402 (egress quota) — return empty, app uses cache
-          if (!error.message?.includes('402') && !error.message?.includes('exceed_egress_quota')) {
-            console.error(`[getAll] ${rt}:`, error.message);
-          }
-          return [];
-        }
+        if (error) throw error;
+
         const result = (data || []).map(mapToLocal);
-        cacheSet(sid, tableName, result);
-        return result;
+        const filtered = filterDeleted(sid, tableName, result);
+        
+        // Merge with local pending changes to ensure we don't overwrite user edits
+        const pendingIds = new Set(
+          loadQueueSync()
+            .filter(q => q.tableName === tableName)
+            .map(q => q.recordId || q.data?.id)
+            .filter(Boolean)
+        );
+
+        if (pendingIds.size === 0) {
+          cacheSet(sid, tableName, filtered);
+        } else {
+          const local = cacheGet(sid, tableName) || [];
+          const localMap = new Map(local.map(r => [r.id, r]));
+          
+          for (const remote of filtered) {
+            if (pendingIds.has(remote.id)) continue;
+            localMap.set(remote.id, remote);
+          }
+          cacheSet(sid, tableName, Array.from(localMap.values()));
+        }
+
+        notifyUI(tableName);
+        return cacheGet(sid, tableName) || filtered;
       } catch (e: any) {
-        console.error(`[getAll] ${rt}:`, e.message);
-        return [];
+        console.warn(`[cloud-fetch] ${rt}:`, e.message);
+        return cacheGet(sid, tableName) || [];
       } finally {
         inflight.delete(key);
       }
@@ -1296,12 +1329,88 @@ class SupabaseDataService {
     }
   }
 
-  // ── stubs ─────────────────────────────────────────────────────────────────
-  async syncNow(_: string) { return { success: true, pushed: 0, pulled: 0, failed: 0 }; }
-  async forcePush(_: string) { return { success: true, pushed: 0, failed: 0 }; }
-  async forcePull(_: string) { return { success: true, pulled: 0, failed: 0 }; }
+  // ── Sync Control ──────────────────────────────────────────────────────────
+  
+  /**
+   * Performs a full sync cycle:
+   * 1. Flush offline queue (push local changes)
+   * 2. Pull all tables from Supabase (pull remote changes)
+   */
+  async syncNow(schoolId: string): Promise<{ success: boolean; pushed: number; pulled: number; failed: number; error?: string }> {
+    if (!isOnline() || !this.ok) {
+      return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Offline or Supabase not configured' };
+    }
+
+    try {
+      const sid = schoolId;
+      console.log(`[Sync] Starting full sync for ${sid}...`);
+
+      // 1. Flush Queue
+      const initialQueue = await loadQueue();
+      await this.flushOfflineQueue();
+      const finalQueue = await loadQueue();
+      const pushed = initialQueue.length - finalQueue.length;
+      const failed = finalQueue.length;
+
+      // 2. Pull all critical tables
+      const tables = [
+        'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
+        'announcements', 'attendance', 'feeStructures', 'exams', 'examResults',
+        'transportRoutes', 'transportAssignments', 'invoices', 'settings', 'schools'
+      ];
+
+      let pulled = 0;
+      await Promise.allSettled(tables.map(async (t) => {
+        await this._fetchAndMerge(sid, t);
+        pulled++;
+      }));
+
+      console.log(`[Sync] Finished: pushed ${pushed}, pulled ${pulled}, failed ${failed}`);
+      return { success: true, pushed, pulled, failed };
+    } catch (e: any) {
+      console.error('[Sync] Full sync failed:', e.message);
+      return { success: false, pushed: 0, pulled: 0, failed: 0, error: e.message };
+    }
+  }
+
+  async forcePush(schoolId: string): Promise<{ success: boolean; pushed: number; failed: number; error?: string }> {
+    const initialQueue = await loadQueue();
+    await this.flushOfflineQueue();
+    const finalQueue = await loadQueue();
+    return { 
+      success: true, 
+      pushed: initialQueue.length - finalQueue.length, 
+      failed: finalQueue.length 
+    };
+  }
+
+  async forcePull(schoolId: string): Promise<{ success: boolean; pulled: number; failed: number; error?: string }> {
+    if (!isOnline() || !this.ok) return { success: false, pulled: 0, failed: 0, error: 'Offline' };
+    
+    const tables = Object.keys(TABLE_COLUMNS);
+    let pulled = 0;
+    
+    await Promise.allSettled(tables.map(async (t) => {
+      await this._fetchAndMerge(schoolId, t);
+      pulled++;
+    }));
+
+    return { success: true, pulled, failed: 0 };
+  }
+
   async getSyncStatus(schoolId: string): Promise<SyncHealthStatus> {
-    return { schoolId, pendingSyncItems: 0, lastSyncAt: null, lastError: null, online: navigator.onLine, configured: this.ok, missingTables: [] };
+    const queue = await loadQueue();
+    const entry = memCache.get(cacheKey(schoolId, 'students')); // Use students as a proxy for last sync
+    
+    return {
+      schoolId,
+      pendingSyncItems: queue.length,
+      lastSyncAt: entry ? new Date(entry.ts).toISOString() : null,
+      lastError: null,
+      online: isOnline(),
+      configured: this.ok,
+      missingTables: []
+    };
   }
   async cleanupDuplicates(_: string) { return {}; }
   async clear(_u: string, _t: string) {}

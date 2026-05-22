@@ -3,10 +3,10 @@ import { dataService } from '../lib/database/SupabaseDataService';
 
 class SyncService {
   private syncInterval: ReturnType<typeof setTimeout> | null = null;
-  /** Background pull + push base interval (automatic; no manual sync required). */
-  private readonly SYNC_INTERVAL_MS = 120000; // 2 minutes default
+  /** Background pull + push base interval (Cloud-First: more aggressive). */
+  private readonly SYNC_INTERVAL_MS = 30000; // 30 seconds (was 2 minutes)
   /** Maximum backoff interval when repeated failures occur. */
-  private readonly MAX_BACKOFF_MS = 30 * 60 * 1000; // 30 minutes
+  private readonly MAX_BACKOFF_MS = 10 * 60 * 1000; // 10 minutes (was 30)
   private backoffMs: number | null = null;
   private currentUserId: string | null = null;
   private currentSchoolId: string | null = null;
