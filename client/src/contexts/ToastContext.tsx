@@ -24,7 +24,7 @@ const TOAST_SOUND_PATHS: Partial<Record<ToastType, string>> = {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const timeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const timeoutRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const soundRefs = useRef<Partial<Record<ToastType, HTMLAudioElement>>>({});
   const lastSoundTimeRef = useRef(0);
 
