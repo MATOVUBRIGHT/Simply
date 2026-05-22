@@ -31,8 +31,8 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [revoking, setRevoking] = useState(false);
-  const [revokeSuccess, setRevokeSuccess] = useState('');
   const [showRevokeModal, setShowRevokeModal] = useState(false);
+  const [revokeSuccess, setRevokeSuccess] = useState('');
 
   useEffect(() => { loadStats(); }, []);
 
@@ -56,7 +56,7 @@ export default function AdminDashboard() {
       settings.forEach((s: any) => { if (s.school_id && s.value) schoolNames[s.school_id] = String(s.value); });
 
       const now = Date.now();
-      const uniqueSchools = [...new Set(users.map((u: any) => u.school_id).filter(Boolean))];
+      const uniqueSchools = Array.from(new Set(users.map((u: any) => String(u.school_id || '')).filter(Boolean))) as string[];
 
       const schoolSubMap: Record<string, any> = {};
       subs.forEach((sub: any) => {
@@ -66,7 +66,7 @@ export default function AdminDashboard() {
       });
 
       let activeSchools = 0, expiredSchools = 0, pendingSchools = 0;
-      uniqueSchools.forEach(sid => {
+      uniqueSchools.forEach((sid: string) => {
         const sub = schoolSubMap[sid];
         if (!sub) { pendingSchools++; return; }
         const ends = sub.ends_at ? new Date(sub.ends_at).getTime() : 0;
@@ -76,8 +76,8 @@ export default function AdminDashboard() {
 
       const recentSubscriptions: RecentSub[] = subs.slice(0, 10).map((sub: any) => ({
         id: sub.id,
-        schoolId: sub.school_id,
-        schoolName: schoolNames[sub.school_id] || sub.school_id?.slice(0, 8) + '...',
+        schoolId: String(sub.school_id || ''),
+        schoolName: schoolNames[sub.school_id] || String(sub.school_id || '').slice(0, 8) + '...',
         plan: sub.plan || 'unknown',
         status: sub.ends_at && new Date(sub.ends_at).getTime() > now ? 'active' : 'expired',
         endsAt: sub.ends_at,

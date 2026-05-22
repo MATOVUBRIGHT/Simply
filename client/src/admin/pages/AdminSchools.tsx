@@ -70,10 +70,10 @@ export default function AdminSchools() {
         if (!schoolSubMap[sid] || new Date(sub.updated_at) > new Date(schoolSubMap[sid].updated_at)) schoolSubMap[sid] = sub;
       });
 
-      const uniqueSchools = [...new Set(users.map((u: any) => u.school_id || u.id).filter(Boolean))];
+      const uniqueSchools = Array.from(new Set(users.map((u: any) => String(u.school_id || u.id)).filter(Boolean))) as string[];
       const now = Date.now();
 
-      const rows: SchoolRow[] = uniqueSchools.map(sid => {
+      const rows: SchoolRow[] = uniqueSchools.map((sid: string) => {
         const sub = schoolSubMap[sid];
         let status: SchoolRow['status'] = 'no_plan';
         let endsAt: string | null = null;
@@ -82,7 +82,17 @@ export default function AdminSchools() {
           plan = sub.plan; endsAt = sub.ends_at;
           status = endsAt && new Date(endsAt).getTime() > now ? 'active' : 'expired';
         }
-        return { schoolId: sid, schoolName: schoolNames[sid] || 'Unnamed School', email: schoolEmails[sid] || '—', plan, status, endsAt, studentCount: schoolStudentCount[sid] || 0, userCount: schoolUserCount[sid] || 0, createdAt: schoolCreated[sid] || '' };
+        return { 
+          schoolId: String(sid), 
+          schoolName: schoolNames[sid] || 'Unnamed School', 
+          email: schoolEmails[sid] || '—', 
+          plan, 
+          status, 
+          endsAt, 
+          studentCount: schoolStudentCount[sid] || 0, 
+          userCount: schoolUserCount[sid] || 0, 
+          createdAt: schoolCreated[sid] || '' 
+        };
       });
 
       rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

@@ -1,7 +1,7 @@
 // client/src/lib/database/OptimizedDataService.ts
 // Pagination-aware data service
 
-import { userDBManager } from './UserDatabaseManager';
+import { dataService } from './DataService';
 import { performanceMonitor } from '../../services/performanceMonitor';
 import { queryCache } from '../cache/QueryCache';
 
@@ -38,30 +38,26 @@ class OptimizedDataService {
         const cached = queryCache.get<PaginatedResult<T>>(cacheKey);
         if (cached) return cached;
 
-        // Get total count
-        const allItems = await userDBManager.getAll(userId, table) as T[];
-        const total = allItems.length;
+        // Use the unified data service
+        const { items, total } = await dataService.getPage(
+          userId,
+          table,
+          options.page,
+          options.pageSize
+        );
+
         const totalPages = Math.ceil(total / options.pageSize);
-
-        // Apply pagination
-        const startIndex = (options.page - 1) * options.pageSize;
-        const endIndex = startIndex + options.pageSize;
-        const items = allItems.slice(startIndex, endIndex);
-
         const result = {
-          items,
+          items: items as T[],
           total,
           page: options.page,
           pageSize: options.pageSize,
-          totalPages,
+          totalPages
         };
 
-        // Cache for 5 minutes
-        queryCache.set(cacheKey, result, 5 * 60 * 1000);
-
+        queryCache.set(cacheKey, result);
         return result;
-      },
-      'data'
+      }
     );
   }
 
@@ -78,12 +74,12 @@ class OptimizedDataService {
     return performanceMonitor.measure(
       `search-paginated-${table}`,
       async () => {
-        const allItems = await userDBManager.getAll(userId, table) as any[];
+        const allItems = await dataService.getAll(userId, table) as any[];
         
         // Filter by search query
         const filtered = allItems.filter(item =>
           searchFields.some(field =>
-            String(item[field]).toLowerCase().includes(query.toLowerCase())
+            String(item[field] || '').toLowerCase().includes(query.toLowerCase())
           )
         );
 
@@ -100,8 +96,7 @@ class OptimizedDataService {
           pageSize: options.pageSize,
           totalPages,
         };
-      },
-      'data'
+      }
     );
   }
 
@@ -117,7 +112,7 @@ class OptimizedDataService {
     return performanceMonitor.measure(
       `filter-paginated-${table}`,
       async () => {
-        let allItems = await userDBManager.getAll(userId, table) as any[];
+        let allItems = await dataService.getAll(userId, table) as any[];
 
         // Apply filters
         for (const [key, value] of Object.entries(filters)) {
@@ -139,8 +134,7 @@ class OptimizedDataService {
           pageSize: options.pageSize,
           totalPages,
         };
-      },
-      'data'
+      }
     );
   }
 
@@ -156,7 +150,7 @@ class OptimizedDataService {
     return performanceMonitor.measure(
       `projection-query-${table}`,
       async () => {
-        let allItems = await userDBManager.getAll(userId, table) as T[];
+        let allItems = await dataService.getAll(userId, table) as T[];
 
         // Project only needed fields
         const projected = allItems.map(item =>
@@ -173,8 +167,7 @@ class OptimizedDataService {
         }
 
         return projected;
-      },
-      'data'
+      }
     );
   }
 
@@ -185,10 +178,9 @@ class OptimizedDataService {
     return performanceMonitor.measure(
       `count-${table}`,
       async () => {
-        const items = await userDBManager.getAll(userId, table);
+        const items = await dataService.getAll(userId, table);
         return items.length;
-      },
-      'data'
+      }
     );
   }
 
@@ -203,7 +195,7 @@ class OptimizedDataService {
     return performanceMonitor.measure(
       `stats-${table}`,
       async () => {
-        const items = await userDBManager.getAll(userId, table) as any[];
+        const items = await dataService.getAll(userId, table) as any[];
         const stats: any = {};
 
         for (const field of numericFields) {
@@ -222,8 +214,7 @@ class OptimizedDataService {
         }
 
         return stats;
-      },
-      'data'
+      }
     );
   }
 
@@ -232,6 +223,27 @@ class OptimizedDataService {
    */
   clearCache(table: string) {
     queryCache.invalidatePattern(`${table}:*`);
+  }
+
+  async getAll<T>(userId: string, table: string): Promise<T[]> {
+    return dataService.getAll(userId, table);
+  }
+
+  async get<T>(userId: string, table: string, id: string): Promise<T | null> {
+    return dataService.get(userId, table, id);
+  }
+
+  async create<T>(userId: string, table: string, data: any): Promise<any> {
+    return dataService.create(userId, table, data);
+  }
+
+  async update<T>(userId: string, table: string, id: string, data: any): Promise<any> {
+    return dataService.update(userId, table, id, data);
+  }
+
+  async delete(userId: string, table: string, id: string): Promise<boolean> {
+    const res = await dataService.delete(userId, table, id);
+    return res.success;
   }
 }
 

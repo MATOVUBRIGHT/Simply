@@ -252,9 +252,11 @@ const UUID_COLUMNS = new Set([
   'fee_id','route_id','teacher_id','user_id','published_by','recorded_by',
 ]);
 
-function toRemote(data: any, remoteTable: string): any {
+function toRemote(data: any, remoteTable: string, contextSchoolId?: string): any {
   const allowed = COLUMN_SETS[remoteTable];
   const out: any = {};
+  
+  // 1. Map existing fields
   for (const [k, v] of Object.entries(data)) {
     if (v === undefined) continue;
     const col = k === 'schoolId' ? 'school_id' : camelToSnake(k);
@@ -262,18 +264,36 @@ function toRemote(data: any, remoteTable: string): any {
 
     // UUID Validation with table-specific overrides
     if (UUID_COLUMNS.has(col) && v !== null) {
-      // Exceptions: student_id in 'students' table is VARCHAR, not UUID
       const isActuallyVarchar = (col === 'student_id' && remoteTable === 'students');
-      
       if (!isActuallyVarchar && !isUUID(v)) {
-        console.warn(`[toRemote] Nullifying non-UUID value for ${remoteTable}.${col}:`, v);
-        out[col] = null;
+        // If it's school_id and it's invalid, we'll try to fix it later from contextSchoolId
+        if (col === 'school_id') {
+          out[col] = null;
+        } else {
+          // For other UUID columns, null is the safest fallback to avoid DB errors
+          out[col] = null;
+        }
         continue;
       }
     }
     
     out[col] = v;
   }
+
+  // 2. Ensure school_id is present and valid for non-school/non-special tables
+  const needsSchoolId = !NO_SCHOOL_FILTER.has(remoteTable) && remoteTable !== 'schools';
+  if (needsSchoolId && allowed && allowed.has('school_id')) {
+    // If missing or not a valid UUID, use the contextSchoolId
+    if (!out.school_id || !isUUID(out.school_id)) {
+      if (contextSchoolId && isUUID(contextSchoolId)) {
+        out.school_id = contextSchoolId;
+      } else {
+        // Last resort: default school ID from migrations
+        out.school_id = '00000000-0000-0000-0000-000000000001';
+      }
+    }
+  }
+
   delete out.sync_status;
   delete out.device_id;
   return out;
@@ -362,18 +382,11 @@ function filterDeleted(sid: string, tableName: string, records: any[]): any[] {
 
 // ── Persistent cache — IndexedDB primary, localStorage fallback ──────────────
 const PERSIST_KEY = 'schofy_data_cache';
-const IDB_DB_NAME = 'schofy_cache';
-const IDB_STORE = 'data';
-const IDB_VERSION = 2; // v2 — queue and deleted_ids stores added in StorageManager
 
 interface CacheEntry { data: any[]; ts: number; }
 const memCache = new Map<string, CacheEntry>();
 
 // ── IndexedDB cache database ──────────────────────────────────────────────────
-// Use the shared StorageManager DB (schofy_cache v2) — same connection, same upgrade path
-let _cacheDB: IDBDatabase | null = null;
-let _cacheDBReady: Promise<IDBDatabase> | null = null;
-
 function getCacheDB(): Promise<IDBDatabase> {
   // Delegate to StorageManager which owns the DB lifecycle
   return getStorageDB();
@@ -386,8 +399,8 @@ export const cacheReady = new Promise<void>(r => { resolveCacheReady = r; });
 async function loadPersistedCache() {
   try {
     const db = await getCacheDB();
-    const tx = db.transaction(IDB_STORE, 'readonly');
-    const req = tx.objectStore(IDB_STORE).get(PERSIST_KEY);
+    const tx = db.transaction('data', 'readonly');
+    const req = tx.objectStore('data').get(PERSIST_KEY);
     req.onsuccess = () => {
       let parsed = req.result;
       if (!parsed) {
@@ -459,8 +472,8 @@ function _flushCache() {
     try { localStorage.setItem(PERSIST_KEY, JSON.stringify(obj)); } catch {}
 
     getCacheDB().then(db => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).put(obj, PERSIST_KEY);
+      const tx = db.transaction('data', 'readwrite');
+      tx.objectStore('data').put(obj, PERSIST_KEY);
       // Also write Electron native backup (no-op in browser)
       void writeElectronBackup('schofy_data_cache', obj);
     }).catch(() => {
@@ -580,6 +593,16 @@ function notifyUI(table: string) {
 
 // ── service ───────────────────────────────────────────────────────────────────
 
+const ALL_SYNC_TABLES = [
+  'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
+  'announcements', 'attendance', 'feeStructures',
+  'exams', 'examResults', 'transportRoutes', 'transportAssignments', 'salaryPayments',
+  'pointTransactions', 'bursaries', 'discounts', 'notifications', 'invoices', 'settings', 'timetable',
+  'inventory', 'expenses', 'auditLogs', 'libraryBooks', 'libraryIssues', 'homework', 'behaviorLogs', 'parentMessages', 'studentAttendance',
+  'staffAttendance', 'examTimetable', 'lessonPlans', 'studentResources', 'hostelRooms', 'hostelAssignments', 'events', 'visitorLogs', 'certificates',
+  'schools', 'subscriptions', 'users', 'plans'
+];
+
 class SupabaseDataService {
   private _realtimeChannel: any = null;
 
@@ -599,20 +622,13 @@ class SupabaseDataService {
     const sid = schoolId || userId;
     localStorage.setItem('schofy_current_school_id', sid);
 
-    const ALL_TABLES = [
-      'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
-      'announcements', 'attendance', 'feeStructures',
-      'exams', 'examResults', 'transportRoutes', 'transportAssignments', 'salaryPayments',
-      'pointTransactions', 'bursaries', 'discounts', 'notifications', 'invoices', 'settings', 'timetable',
-      'inventory', 'expenses', 'auditLogs', 'libraryBooks', 'libraryIssues', 'homework', 'behaviorLogs', 'parentMessages', 'studentAttendance',
-      'staffAttendance', 'examTimetable', 'lessonPlans', 'studentResources', 'hostelRooms', 'hostelAssignments', 'events', 'visitorLogs', 'certificates',
-      'schools', 'subscriptions', 'users', 'plans'
-    ];
+    // Step 0: One-time migration from legacy databases if they exist
+    await this._migrateLegacyData(userId, sid);
 
     // Step 1: Synchronously push ALL cached data into the store — instant, zero network
     const storeRef = (globalThis as any).__schofyStore;
     if (storeRef) {
-      for (const table of ALL_TABLES) {
+      for (const table of ALL_SYNC_TABLES) {
         const entry = memCache.get(cacheKey(sid, table));
         if (entry && entry.data.length > 0) {
           // Use the actual cache timestamp so staleness is correctly tracked
@@ -636,7 +652,7 @@ class SupabaseDataService {
     // Step 3: Fetch ALL tables from Supabase in parallel
     // We only fetch if the cache is stale (older than 24 hours) or missing
     // This dramatically reduces API requests on every refresh
-    const syncPromises = ALL_TABLES.map(t => {
+    const syncPromises = ALL_SYNC_TABLES.map(t => {
       const entry = memCache.get(cacheKey(sid, t));
       const isStale = !entry || (Date.now() - entry.ts > 24 * 60 * 60_000);
       if (isStale) {
@@ -657,6 +673,61 @@ class SupabaseDataService {
     this.startRealtimeSync(sid);
   }
 
+  /** One-time migration from schofy_user_db_* databases to the new sync cache */
+  private async _migrateLegacyData(userId: string, schoolId: string): Promise<void> {
+    const migrationFlag = `schofy_migrated_${userId}`;
+    if (localStorage.getItem(migrationFlag)) return;
+
+    try {
+      const dbName = `schofy_user_db_${userId}`;
+      console.log(`[Migration] Checking for legacy data in ${dbName}...`);
+      
+      const db = await new Promise<IDBDatabase | null>((resolve) => {
+        const req = indexedDB.open(dbName);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      });
+
+      if (!db) return;
+
+      let migratedCount = 0;
+      const stores = Array.from(db.objectStoreNames);
+      
+      for (const storeName of stores) {
+        if (storeName === 'syncQueue' || storeName === 'syncMeta') continue;
+        
+        const data = await new Promise<any[]>((resolve) => {
+          const tx = db.transaction(storeName, 'readonly');
+          const req = tx.objectStore(storeName).getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => resolve([]);
+        });
+
+        if (data.length > 0) {
+          const tableName = storeName; // assuming names match
+          const existing = cacheGet(schoolId, tableName) || [];
+          const merged = [...existing];
+          
+          for (const item of data) {
+            if (!merged.find(r => r.id === item.id)) {
+              merged.push(item);
+              migratedCount++;
+            }
+          }
+          cacheSet(schoolId, tableName, merged);
+        }
+      }
+
+      db.close();
+      if (migratedCount > 0) {
+        console.log(`[Migration] Successfully migrated ${migratedCount} records from legacy database`);
+      }
+      localStorage.setItem(migrationFlag, 'true');
+    } catch (e) {
+      console.warn('[Migration] Legacy migration failed:', e);
+    }
+  }
+
   /**
    * Fetch a table from Supabase and merge into local cache.
    * Used on bootstrap — seeds data for first-time use, doesn't override pending local changes.
@@ -664,7 +735,7 @@ class SupabaseDataService {
   private async _seedFromSupabase(sid: string, tableName: string): Promise<void> {
     if (!isOnline() || !this.ok) return;
     const rt = getSupabaseTable(tableName);
-    const cols = (TABLE_COLUMNS as any)[tableName] || ['*'];
+    const cols = (TABLE_COLUMNS as any)[rt] || ['*'];
 
     try {
       const controller = new AbortController();
@@ -705,13 +776,13 @@ class SupabaseDataService {
 
       for (const remote of remoteRecords) {
         if (pendingIds.has(remote.id)) continue;
-        const localRecord = localMap.get(remote.id);
-        if (!localRecord) {
+        const localRec = localMap.get(remote.id);
+        if (!localRec) {
           localMap.set(remote.id, remote);
           changed = true;
         } else {
           const remoteTs = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
-          const localTs = new Date(localRecord.updatedAt || localRecord.createdAt || 0).getTime();
+          const localTs = new Date(localRec.updatedAt || localRec.createdAt || 0).getTime();
           if (remoteTs > localTs) {
             localMap.set(remote.id, remote);
             changed = true;
@@ -835,7 +906,7 @@ class SupabaseDataService {
       const isStale = !entry || (Date.now() - entry.ts > 5 * 60 * 1000); // 5 minutes staleness for cloud-first
 
       if (forceRefresh || !cached || cached.length === 0 || isStale) {
-        // Trigger background merge immediately
+        // Trigger background fetch immediately
         // For cloud-first, if we have NO cache, we must wait for the fetch
         if (!cached || cached.length === 0 || forceRefresh) {
           return await this._fetchAndMerge(sid, tableName);
@@ -856,7 +927,7 @@ class SupabaseDataService {
     if (existingInflight) return existingInflight;
 
     const rt = getSupabaseTable(tableName);
-    const cols = (TABLE_COLUMNS as any)[tableName] || ['*'];
+    const cols = (TABLE_COLUMNS as any)[rt] || ['*'];
 
     const req = (async () => {
       try {
@@ -906,118 +977,6 @@ class SupabaseDataService {
 
     inflight.set(key, req);
     return req;
-  }
-
-  /**
-   * Fetch from Supabase and merge into local cache without overriding pending local changes.
-   * Remote record wins only if:
-   *   - remote updatedAt > local updatedAt  (remote is newer)
-   *   - AND the record has no pending queue entry (not modified locally while offline)
-   */
-  private _mergeTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  private _backgroundMerge(sid: string, tableName: string): void {
-    // Settings have their own dedicated save path — skip background merge
-    if (tableName === 'settings') return;
-
-    const key = cacheKey(sid, tableName);
-
-    // Already scheduled or running — skip
-    if (this._mergeTimers.has(key)) return;
-
-    // DELTA SYNC OPTIMIZATION: 
-    // Only merge if cache is older than 6 hours.
-    // Instead of fetching everything, we will soon transition this to fetch only changes.
-    const entry = memCache.get(key);
-    if (entry && Date.now() - entry.ts < 6 * 60 * 60_000) return;
-
-    this._mergeTimers.set(key, setTimeout(async () => {
-      this._mergeTimers.delete(key);
-      if (!isOnline() || !this.ok) return;
-      const rt = getSupabaseTable(tableName);
-      const cols = (TABLE_COLUMNS as any)[tableName] || ['*'];
-      
-      try {
-        let q = this.db.from(rt).select(cols.join(','));
-        
-        // If we have a local cache, only fetch records modified after our last sync
-        // This is a "Delta Sync" that saves massive egress on large tables
-        if (entry && entry.data.length > 0) {
-          const lastUpdate = entry.data.reduce((max: number, r: any) => {
-            const ts = new Date(r.updatedAt || r.createdAt || 0).getTime();
-            return ts > max ? ts : max;
-          }, 0);
-          
-          if (lastUpdate > 0) {
-            // Fetch records updated since our latest local record + 1 second buffer
-            const since = new Date(lastUpdate + 1000).toISOString();
-            q = q.gt('updated_at', since);
-          }
-        }
-
-        // Only apply school filter if it's not a special table
-        if (!NO_SCHOOL_FILTER.has(rt) && rt !== 'schools') {
-          q = applyScope(q, rt, sid);
-        } else if (rt === 'schools') {
-          q = q.eq('id', sid);
-        }
-        
-        const { data, error } = await q;
-        if (error || !data) return;
-
-        const remoteRecords = filterDeleted(sid, tableName, data.map(mapToLocal));
-        const local = cacheGet(sid, tableName) || [];
-
-        // If it was a delta sync, we merge into existing local data
-        // Otherwise (if no gt filter), it's a full sync
-        const isDelta = entry && entry.data.length > 0;
-        
-        // Build set of IDs with pending local queue entries — don't overwrite these
-        const pendingIds = new Set(
-          loadQueueSync()
-            .filter(q => q.tableName === tableName && q.userId === sid)
-            .map(q => q.recordId || q.data?.id)
-            .filter(Boolean)
-        );
-
-        const localMap = new Map(local.map(r => [r.id, r]));
-        let changed = false;
-
-        for (const remote of remoteRecords) {
-          if (pendingIds.has(remote.id)) continue;
-          const localRecord = localMap.get(remote.id);
-          if (!localRecord) {
-            localMap.set(remote.id, remote);
-            changed = true;
-          } else {
-            const remoteTs = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
-            const localTs = new Date(localRecord.updatedAt || localRecord.createdAt || 0).getTime();
-            if (remoteTs > localTs) {
-              localMap.set(remote.id, remote);
-              changed = true;
-            }
-          }
-        }
-
-        // Only handle garbage collection (deleting items not in remote) if it was NOT a delta sync
-        if (!isDelta) {
-          const remoteIds = new Set(remoteRecords.map(r => r.id));
-          for (const [id, localRecord] of localMap) {
-            if (!remoteIds.has(id) && !pendingIds.has(id)) {
-              localMap.delete(id);
-              changed = true;
-            }
-          }
-        }
-
-        if (changed) {
-          cacheSet(sid, tableName, Array.from(localMap.values()));
-          notifyUI(tableName);
-        }
-      } catch (e: any) {
-        console.warn(`[merge] ${rt}:`, e.message);
-      }
-    }, 100));
   }
 
   async get(userId: string, tableName: string, id: string): Promise<any | null> {
@@ -1092,7 +1051,7 @@ class SupabaseDataService {
 
   // ── writes ────────────────────────────────────────────────────────────────
 
-  async create<T extends { id?: string }>(userId: string, tableName: string, data: any): Promise<SyncResult> {
+  async create(userId: string, tableName: string, data: any): Promise<SyncResult> {
     const sid = this.sid(userId);
     const now = new Date().toISOString();
     const id = isUUID(data.id) ? data.id : generateUUID();
@@ -1124,7 +1083,7 @@ class SupabaseDataService {
     }
 
     const rt = getSupabaseTable(tableName);
-    const payload = toRemote(record, rt);
+    const payload = toRemote(record, rt, sid);
     try {
       // 1. Attempt upsert
       const { error: upsertError } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
@@ -1136,7 +1095,7 @@ class SupabaseDataService {
       }
 
       // 2. Attempt select to get the final server state (with triggers/defaults)
-      const { data: remoteData, error: selectError } = await this.db.from(rt).select('*').eq('id', id).maybeSingle();
+      const { data: remoteData } = await this.db.from(rt).select('*').eq('id', id).maybeSingle();
       
       const finalRecord = remoteData ? mapToLocal(remoteData) : record;
       
@@ -1151,7 +1110,7 @@ class SupabaseDataService {
     }
   }
 
-  async update<T>(userId: string, tableName: string, id: string, data: Partial<T>): Promise<SyncResult> {
+  async update(userId: string, tableName: string, id: string, data: Partial<any>): Promise<SyncResult> {
     const sid = this.sid(userId);
     const record = { ...data, updatedAt: new Date().toISOString() };
 
@@ -1165,7 +1124,7 @@ class SupabaseDataService {
     }
 
     const rt = getSupabaseTable(tableName);
-    const payload = toRemote(record, rt);
+    const payload = toRemote(record, rt, sid);
     delete payload.id;
     delete payload.created_at;
     try {
@@ -1353,14 +1312,8 @@ class SupabaseDataService {
       const failed = finalQueue.length;
 
       // 2. Pull all critical tables
-      const tables = [
-        'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
-        'announcements', 'attendance', 'feeStructures', 'exams', 'examResults',
-        'transportRoutes', 'transportAssignments', 'invoices', 'settings', 'schools'
-      ];
-
       let pulled = 0;
-      await Promise.allSettled(tables.map(async (t) => {
+      await Promise.allSettled(ALL_SYNC_TABLES.map(async (t) => {
         await this._fetchAndMerge(sid, t);
         pulled++;
       }));
@@ -1374,23 +1327,71 @@ class SupabaseDataService {
   }
 
   async forcePush(schoolId: string): Promise<{ success: boolean; pushed: number; failed: number; error?: string }> {
-    const initialQueue = await loadQueue();
-    await this.flushOfflineQueue();
-    const finalQueue = await loadQueue();
-    return { 
-      success: true, 
-      pushed: initialQueue.length - finalQueue.length, 
-      failed: finalQueue.length 
-    };
+    if (!isOnline() || !this.ok) return { success: false, pushed: 0, failed: 0, error: 'Offline' };
+    
+    try {
+      console.log(`[Sync] Starting deep force push for ${schoolId}...`);
+      await cacheReady; // Ensure local data is loaded from IndexedDB first
+      
+      // 1. Ensure school exists and flush existing queue first
+      await this.ensureSchoolExists(schoolId);
+      await this.flushOfflineQueue();
+
+      // 2. Scan ALL entries in memCache (even those from other/old school IDs)
+      // and push them to the CURRENT schoolId in Supabase.
+      let pushedCount = 0;
+      let failedCount = 0;
+
+      for (const tableName of ALL_SYNC_TABLES) {
+        // Find ALL records for this table across ANY school ID in cache
+        const allLocalRecords: any[] = [];
+        for (const [key, entry] of memCache.entries()) {
+          const [_, table] = key.split(':');
+          if (table === tableName && entry.data && entry.data.length > 0) {
+            allLocalRecords.push(...entry.data);
+          }
+        }
+
+        // Deduplicate by ID
+        const uniqueRecords = Array.from(new Map(allLocalRecords.map(r => [r.id, r])).values());
+
+        if (uniqueRecords.length === 0) {
+          continue;
+        }
+
+        const rt = getSupabaseTable(tableName);
+        console.log(`[Sync] Pushing ${uniqueRecords.length} unique records for ${rt}...`);
+        
+        // Chunk records to avoid large payloads
+        const chunkSize = 50;
+        for (let i = 0; i < uniqueRecords.length; i += chunkSize) {
+          const chunk = uniqueRecords.slice(i, i + chunkSize);
+          const payloads = chunk.map(r => toRemote(r, rt, schoolId));
+
+          const { error } = await this.db.from(rt).upsert(payloads, { onConflict: 'id' });
+          if (error) {
+            console.error(`[forcePush] Failed to push ${rt} chunk:`, error.message, error.details);
+            failedCount += chunk.length;
+          } else {
+            pushedCount += chunk.length;
+          }
+        }
+      }
+
+      console.log(`[Sync] Deep force push finished: pushed ${pushedCount}, failed ${failedCount}`);
+      return { success: true, pushed: pushedCount, failed: failedCount };
+    } catch (e: any) {
+      console.error('[Sync] Deep force push failed:', e.message);
+      return { success: false, pushed: 0, failed: 0, error: e.message };
+    }
   }
 
   async forcePull(schoolId: string): Promise<{ success: boolean; pulled: number; failed: number; error?: string }> {
     if (!isOnline() || !this.ok) return { success: false, pulled: 0, failed: 0, error: 'Offline' };
     
-    const tables = Object.keys(TABLE_COLUMNS);
     let pulled = 0;
     
-    await Promise.allSettled(tables.map(async (t) => {
+    await Promise.allSettled(ALL_SYNC_TABLES.map(async (t) => {
       await this._fetchAndMerge(schoolId, t);
       pulled++;
     }));
@@ -1415,12 +1416,39 @@ class SupabaseDataService {
   async cleanupDuplicates(_: string) { return {}; }
   async clear(_u: string, _t: string) {}
 
+  /** Ensures the school record exists in Supabase so foreign keys don't fail */
+  private async ensureSchoolExists(sid: string): Promise<void> {
+    if (!isOnline() || !this.ok) return;
+    try {
+      const { data } = await this.db.from('schools').select('id').eq('id', sid).single();
+      if (!data) {
+        console.log(`[Sync] Creating missing school record for ${sid}`);
+        await this.db.from('schools').upsert({
+          id: sid,
+          name: 'My School', // Placeholder name
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+      }
+    } catch (e) {
+      // If .single() fails it might just be missing
+      try {
+        await this.db.from('schools').upsert({
+          id: sid,
+          name: 'My School',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+      } catch { /* ignore */ }
+    }
+  }
+
   // ── Offline queue flush with exponential backoff ─────────────────────────
   async flushOfflineQueue(): Promise<void> {
     if (!isOnline() || !this.ok) return;
+
     // Load from IDB (primary) — falls back to localStorage automatically
     const queue = await loadQueue() as QueueItem[];
     if (queue.length === 0) return;
+
     console.log(`[offline] Flushing ${queue.length} queued operations`);
 
     const MAX_RETRIES = 3;
@@ -1443,9 +1471,10 @@ class SupabaseDataService {
           await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
         }
         try {
+          const sid = this.sid(item.userId);
           if (item.op === 'create' && item.data) {
             const rt = getSupabaseTable(item.tableName);
-            const payload = toRemote(item.data, rt);
+            const payload = toRemote(item.data, rt, sid);
             // 1. Upsert
             const { error: upsertError } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
             if (upsertError) throw upsertError;
@@ -1453,11 +1482,11 @@ class SupabaseDataService {
             const { data: remoteData } = await this.db.from(rt).select('*').eq('id', item.data.id).maybeSingle();
             if (remoteData) {
               const finalRecord = mapToLocal(remoteData);
-              cacheApplyCreate(this.sid(item.userId), item.tableName, finalRecord);
+              cacheApplyCreate(sid, item.tableName, finalRecord);
             }
           } else if (item.op === 'update' && item.recordId && item.data) {
             const rt = getSupabaseTable(item.tableName);
-            const payload = toRemote(item.data, rt);
+            const payload = toRemote(item.data, rt, sid);
             delete payload.id; delete payload.created_at;
             // 1. Update
             const { error: updateError } = await this.db.from(rt).update(payload).eq('id', item.recordId);
@@ -1466,7 +1495,7 @@ class SupabaseDataService {
             const { data: remoteData } = await this.db.from(rt).select('*').eq('id', item.recordId).maybeSingle();
             if (remoteData) {
               const finalRecord = mapToLocal(remoteData);
-              cacheApplyUpdate(this.sid(item.userId), item.tableName, item.recordId, finalRecord);
+              cacheApplyUpdate(sid, item.tableName, item.recordId, finalRecord);
             }
           } else if (item.op === 'delete' && item.recordId) {
             const rt = getSupabaseTable(item.tableName);

@@ -65,10 +65,10 @@ export default function AdminAnalytics() {
       });
 
       const now = Date.now();
-      const uniqueSchools = [...new Set(users.map((u: any) => u.school_id || u.id).filter(Boolean))];
+      const uniqueSchools = Array.from(new Set(users.map((u: any) => String(u.school_id || u.id)).filter(Boolean))) as string[];
 
-      const records: LoginRecord[] = uniqueSchools.map(sid => {
-        const user = users.find((u: any) => (u.school_id || u.id) === sid);
+      const records: LoginRecord[] = uniqueSchools.map((sid: string) => {
+        const user = users.find((u: any) => String(u.school_id || u.id) === sid);
         const sub = schoolSubMap[sid];
         let planStatus: LoginRecord['planStatus'] = 'no_plan';
         if (sub) {
@@ -78,7 +78,7 @@ export default function AdminAnalytics() {
         // Use updated_at as proxy for last login if no explicit lastLoginAt
         const lastLogin = lastLogins[sid] || user?.updated_at || null;
         return {
-          schoolId: sid,
+          schoolId: String(sid),
           schoolName: schoolNames[sid] || 'Unnamed School',
           email: user?.email || '—',
           lastLogin,

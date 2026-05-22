@@ -855,7 +855,6 @@ export default function Settings() {
                   if (!sid) { addToast('Not logged in', 'error'); return; }
                   addToast('Pulling all data from cloud...', 'info');
                   try {
-                    const { dataService } = await import('../lib/database/DataService');
                     const result = await dataService.forcePull(sid);
                     if (result.success) {
                       addToast(`Pulled ${result.pulled} records from cloud`, 'success');
@@ -879,7 +878,6 @@ export default function Settings() {
                   if (!sid) { addToast('Not logged in', 'error'); return; }
                   addToast('Pushing local data to cloud...', 'info');
                   try {
-                    const { dataService } = await import('../lib/database/DataService');
                     const result = await dataService.forcePush(sid);
                     if (result.success) {
                       addToast(`Pushed ${result.pushed} records to cloud`, 'success');

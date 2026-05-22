@@ -78,7 +78,7 @@ export default function AdminVerifications() {
 
         return {
           id: sub.id,
-          schoolId: sub.school_id,
+          schoolId: String(sub.school_id || ''),
           schoolName: schoolNames[sub.school_id] || 'Unnamed School',
           email: schoolEmails[sub.school_id] || '—',
           plan: sub.plan || receipt.planId || 'unknown',

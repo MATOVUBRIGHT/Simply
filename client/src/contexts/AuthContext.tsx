@@ -354,6 +354,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: error.message };
       }
 
+      // Also create the school record so foreign keys/tenant logic works in Supabase
+      await supabase.from('schools').upsert({
+        id: newId,
+        name: `${firstName}'s School`,
+        updated_at: now
+      }, { onConflict: 'id' });
+
       const userData: LocalUser = {
         id: data.id,
         schoolId: data.school_id || data.id,
