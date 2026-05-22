@@ -16,7 +16,14 @@ export function getSchofySupabaseClient(url: string, anonKey: string): SupabaseC
     auth: {
       autoRefreshToken: true,
       persistSession: true,
-      detectSessionInUrl: true,
+      detectSessionInUrl: false,
+      // CRITICAL FIX FOR ELECTRON:
+      // This stops Supabase from calling the broken navigator.locks API
+      lockType: 'custom',
+      getLock: async () => {
+        // Provide a dummy lock function that resolves immediately
+        return () => {};
+      }
     },
     realtime: {
       params: { eventsPerSecond: 20 },
