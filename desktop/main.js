@@ -31,18 +31,34 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-    icon: path.join(__dirname, '../public/favicon.svg'),
+    icon: path.join(__dirname, '../client/public/favicon.svg'),
     show: false,
   });
 
-  const isDev = process.env.NODE_ENV !== 'production';
+  const isDev = process.env.NODE_ENV === 'development';
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://localhost:4201').catch(err => {
+      console.error('Failed to load dev URL:', err);
+      mainWindow.show(); // Show anyway to reveal error/devTools
+    });
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../client/dist/index.html')).catch(err => {
+      console.error('Failed to load production file:', err);
+      mainWindow.show();
+    });
   }
+
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error(`Page failed to load: ${errorCode} - ${errorDescription}`);
+    if (isDev) {
+      mainWindow.webContents.executeJavaScript(`
+        document.body.innerHTML = '<div style="background:#1a1a1a;color:#fff;padding:20px;font-family:sans-serif;"><h1>Connection Failed</h1><p>Could not connect to the development server at <b>http://localhost:5173</b>.</p><p>Please ensure your web client is running: <code>npm run dev:client</code></p><button onclick="location.reload()" style="padding:10px 20px;cursor:pointer;">Retry</button></div>';
+      `);
+      mainWindow.show();
+    }
+  });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -105,7 +121,7 @@ function createMenu() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, '../public/favicon.svg');
+  const iconPath = path.join(__dirname, '../client/public/favicon.svg');
   const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
 
   tray = new Tray(icon);

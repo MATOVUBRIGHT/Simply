@@ -5,6 +5,7 @@ import { AlertTriangle, CreditCard, LogOut, RefreshCw, Clock, MessageCircle, Pho
 import { useAuth } from '../contexts/AuthContext';
 import { getSubscriptionAccessState, SubscriptionAccessState, PLAN_DEFINITIONS } from '../utils/plans';
 import { supabase } from '../lib/supabase';
+import { cacheReady } from '../lib/database/SupabaseDataService';
 
 // Routes always accessible regardless of subscription
 const ALLOWED_ROUTES = ['/plans', '/subscribe', '/login'];
@@ -66,6 +67,10 @@ export default function SubscriptionGate({ children }: Props) {
   const checkSubscription = useCallback(async () => {
     if (!user) { setChecking(false); return; }
     if (isAllowedRoute) { setBlocked(false); setChecking(false); return; }
+
+    // Ensure the data cache is loaded before checking subscription status
+    // This prevents "incomplete" status being returned just because IndexedDB hasn't opened yet
+    await cacheReady;
 
     const tenantId = schoolId || user.id;
 

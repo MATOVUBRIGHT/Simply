@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SupabaseDataService — offline-first with conflict-safe sync.
  * Cache helpers: cacheGet, cacheSet, cacheApplyCreate, cacheApplyUpdate, cacheApplyDelete
  *
@@ -59,6 +59,7 @@ function getSupabaseTable(t: string): string {
     feeStructures: 'fee_structures', examResults: 'exam_results',
     transportRoutes: 'transport_routes', transportAssignments: 'transport_assignments',
     salaryPayments: 'salary_payments', pointTransactions: 'point_transactions',
+    schools: 'schools', subscriptions: 'subscriptions', users: 'users', plans: 'plans'
   };
   return m[t] || (t.includes('_') ? t : camelToSnake(t));
 }
@@ -151,6 +152,87 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   timetable: [
     'id','school_id','class_id','subject_id','teacher_id','day_of_week',
     'start_time','end_time','created_at','updated_at',
+  ],
+  schools: [
+    'id','name','registration_number','address','phone','email','logo_url',
+    'settings','plan','max_students','max_staff','created_at','updated_at',
+  ],
+  subscriptions: [
+    'id','school_id','user_id','plan','status','starts_at','ends_at',
+    'metadata','created_at','updated_at',
+  ],
+  users: [
+    'id','school_id','email','first_name','last_name','phone','avatar_url',
+    'role','is_active','last_login_at','created_at','updated_at',
+  ],
+  plans: ['id','name','price','student_limit','features','created_at','updated_at'],
+  inventory: [
+    'id','school_id','name','category','quantity','unit','min_stock',
+    'price','supplier','created_at','updated_at',
+  ],
+  expenses: [
+    'id','school_id','title','category','amount','date','recorded_by',
+    'notes','created_at','updated_at',
+  ],
+  audit_logs: [
+    'id','school_id','user_id','action','resource','details','created_at',
+  ],
+  library_books: [
+    'id','school_id','title','author','isbn','category','total_copies',
+    'available_copies','created_at','updated_at',
+  ],
+  library_issues: [
+    'id','school_id','book_id','student_id','issue_date','due_date',
+    'return_date','status','created_at','updated_at',
+  ],
+  homework: [
+    'id','school_id','title','description','class_id','subject_id',
+    'due_date','created_at','updated_at',
+  ],
+  behavior_logs: [
+    'id','school_id','student_id','type','points','reason','date',
+    'recorded_by','created_at','updated_at',
+  ],
+  parent_messages: [
+    'id','school_id','parent_id','student_id','message','direction',
+    'created_at',
+  ],
+  student_attendance: [
+    'id','school_id','student_id','class_id','date','status','remarks',
+    'created_at','updated_at',
+  ],
+  staff_attendance: [
+    'id','school_id','staff_id','date','status','remarks','created_at','updated_at',
+  ],
+  exam_timetable: [
+    'id','school_id','exam_id','subject_id','date','start_time','end_time',
+    'room','created_at','updated_at',
+  ],
+  lesson_plans: [
+    'id','school_id','teacher_id','subject_id','class_id','title',
+    'content','date','created_at','updated_at',
+  ],
+  student_resources: [
+    'id','school_id','title','description','class_id','subject_id',
+    'file_url','created_at','updated_at',
+  ],
+  hostel_rooms: [
+    'id','school_id','name','block','capacity','created_at','updated_at',
+  ],
+  hostel_assignments: [
+    'id','school_id','student_id','room_id','start_date','end_date',
+    'created_at','updated_at',
+  ],
+  events: [
+    'id','school_id','title','description','date','location','created_at','updated_at',
+  ],
+  visitor_logs: [
+    'id','school_id','name','purpose','phone','entry_time','exit_time',
+    'created_at','updated_at',
+  ],
+  certificates: [
+    'id','school_id','student_id','type','issue_date','template_id',
+    'created_at','updated_at',
   ],
 };
 
@@ -300,11 +382,10 @@ async function loadPersistedCache() {
     req.onsuccess = () => {
       let parsed = req.result;
       if (!parsed) {
-        // Migrate from localStorage
+        // Fallback to legacy localStorage cache
         const saved = localStorage.getItem(PERSIST_KEY);
         if (saved) {
           try { parsed = JSON.parse(saved); } catch {}
-          localStorage.removeItem(PERSIST_KEY);
         }
       }
       if (parsed) {
@@ -312,31 +393,52 @@ async function loadPersistedCache() {
           memCache.set(k, v as CacheEntry);
         }
       }
+      
+      // Load critical fallbacks (ensures settings are always available)
+      _loadCriticalFallbacks();
       resolveCacheReady();
     };
-    req.onerror = () => { resolveCacheReady(); };
+    req.onerror = () => { 
+      _loadCriticalFallbacks();
+      resolveCacheReady(); 
+    };
   } catch {
-    // Fallback to localStorage
-    try {
-      const saved = localStorage.getItem(PERSIST_KEY);
-      if (saved) {
-        const parsed: Record<string, CacheEntry> = JSON.parse(saved);
-        for (const [k, v] of Object.entries(parsed)) memCache.set(k, v);
-      }
-    } catch {}
+    _loadCriticalFallbacks();
     resolveCacheReady();
   }
 }
+
+function _loadCriticalFallbacks() {
+  try {
+    const sid = localStorage.getItem('schofy_current_school_id');
+    if (!sid) return;
+    
+    ['settings', 'schools', 'users'].forEach(table => {
+      const key = `schofy_critical_${sid}_${table}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        try {
+          const data = JSON.parse(saved);
+          const k = cacheKey(sid, table);
+          // Only overwrite if not already in memCache or if memCache is older
+          if (!memCache.has(k)) {
+            memCache.set(k, { data, ts: Date.now() });
+          }
+        } catch {}
+      }
+    });
+  } catch {}
+}
 void loadPersistedCache();
 
-// Debounced persist — write to IndexedDB at most once per 2 seconds
+// Debounced persist — write to IndexedDB at most once per 1 second
 let _persistTimer: ReturnType<typeof setTimeout> | null = null;
 function persistCache() {
-  if (_persistTimer) return;
+  if (_persistTimer) clearTimeout(_persistTimer);
   _persistTimer = setTimeout(() => {
     _persistTimer = null;
     _flushCache();
-  }, 2000);
+  }, 1000);
 }
 
 function _flushCache() {
@@ -344,13 +446,16 @@ function _flushCache() {
     const obj: Record<string, CacheEntry> = {};
     for (const [k, v] of memCache) obj[k] = v;
     
+    // Save to localStorage synchronously as an emergency fallback for page unload
+    try { localStorage.setItem(PERSIST_KEY, JSON.stringify(obj)); } catch {}
+
     getCacheDB().then(db => {
       const tx = db.transaction(IDB_STORE, 'readwrite');
       tx.objectStore(IDB_STORE).put(obj, PERSIST_KEY);
       // Also write Electron native backup (no-op in browser)
       void writeElectronBackup('schofy_data_cache', obj);
     }).catch(() => {
-      try { localStorage.setItem(PERSIST_KEY, JSON.stringify(obj)); } catch {}
+      // already saved to localStorage above
     });
   } catch { /* error building obj */ }
 }
@@ -413,6 +518,16 @@ function cacheGetAny(sid: string, table: string): any[] | null {
 function cacheSet(sid: string, table: string, data: any[]) {
   memCache.set(cacheKey(sid, table), { data, ts: Date.now() });
   persistCache();
+  
+  // Critical tables: Save to localStorage immediately (no debounce, sync)
+  // This ensures that even if the page is refreshed or crashed, 
+  // subscription and identity data are never lost.
+  if (table === 'settings' || table === 'schools' || table === 'users') {
+    try {
+      const key = `schofy_critical_${sid}_${table}`;
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch {}
+  }
 }
 
 // In-flight deduplication for concurrent getAll calls
@@ -457,6 +572,8 @@ function notifyUI(table: string) {
 // ── service ───────────────────────────────────────────────────────────────────
 
 class SupabaseDataService {
+  private _realtimeChannel: any = null;
+
   private sid(userOrSchoolId: string | null | undefined): string {
     if (!userOrSchoolId) return localStorage.getItem('schofy_current_school_id') || '';
     const school = localStorage.getItem('schofy_current_school_id');
@@ -468,7 +585,7 @@ class SupabaseDataService {
   private get db() { return supabase!; }
   private get ok() { return isSupabaseConfigured && !!supabase; }
 
-  async bootstrapSession(userId: string, schoolId: string) {
+  async bootstrapSession(userId: string, schoolId: string, options: { wait?: boolean } = {}) {
     localStorage.setItem('schofy_current_user_id', userId);
     const sid = schoolId || userId;
     localStorage.setItem('schofy_current_school_id', sid);
@@ -476,8 +593,11 @@ class SupabaseDataService {
     const ALL_TABLES = [
       'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
       'announcements', 'attendance', 'feeStructures',
-      'exams', 'examResults', 'transportRoutes', 'salaryPayments',
-      'bursaries', 'discounts', 'notifications',
+      'exams', 'examResults', 'transportRoutes', 'transportAssignments', 'salaryPayments',
+      'pointTransactions', 'bursaries', 'discounts', 'notifications', 'invoices', 'settings', 'timetable',
+      'inventory', 'expenses', 'auditLogs', 'libraryBooks', 'libraryIssues', 'homework', 'behaviorLogs', 'parentMessages', 'studentAttendance',
+      'staffAttendance', 'examTimetable', 'lessonPlans', 'studentResources', 'hostelRooms', 'hostelAssignments', 'events', 'visitorLogs', 'certificates',
+      'schools', 'subscriptions', 'users', 'plans'
     ];
 
     // Step 1: Synchronously push ALL cached data into the store — instant, zero network
@@ -497,12 +617,35 @@ class SupabaseDataService {
       return;
     }
 
-    // Step 2: Flush offline queue (push local changes to Supabase)
-    void this.flushOfflineQueue();
+    // Ensure persistent storage is requested so data isn't evicted by browser
+    const { requestPersistentStorage } = await import('./StorageManager');
+    void requestPersistentStorage();
 
-    // Step 3: Fetch ALL tables from Supabase in parallel — no sequential awaiting
-    // Use Promise.allSettled so one failure doesn't block others
-    void Promise.allSettled(ALL_TABLES.map(t => this._seedFromSupabase(sid, t)));
+    // Step 2: Flush offline queue (push local changes to Supabase)
+    await this.flushOfflineQueue();
+
+    // Step 3: Fetch ALL tables from Supabase in parallel
+    // We only fetch if the cache is stale (older than 24 hours) or missing
+    // This dramatically reduces API requests on every refresh
+    const syncPromises = ALL_TABLES.map(t => {
+      const entry = memCache.get(cacheKey(sid, t));
+      const isStale = !entry || (Date.now() - entry.ts > 24 * 60 * 60_000);
+      if (isStale) {
+        return this._seedFromSupabase(sid, t);
+      }
+      return Promise.resolve();
+    });
+    
+    if (options.wait) {
+      await Promise.allSettled(syncPromises);
+      console.log('[bootstrap] Online sync complete (waiting enabled)');
+    } else {
+      void Promise.allSettled(syncPromises);
+      console.log('[bootstrap] Online sync started in background');
+    }
+
+    // Start Realtime sync (like Google Sheets) for all devices on this school ID
+    this.startRealtimeSync(sid);
   }
 
   /**
@@ -512,13 +655,21 @@ class SupabaseDataService {
   private async _seedFromSupabase(sid: string, tableName: string): Promise<void> {
     if (!isOnline() || !this.ok) return;
     const rt = getSupabaseTable(tableName);
+    const cols = (TABLE_COLUMNS as any)[tableName] || ['*'];
+
     try {
-      // Add a 10-second timeout so slow tables don't block the UI
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
 
-      let q = this.db.from(rt).select('*');
-      q = applyScope(q, rt, sid);
+      // DELTA SYNC: Only fetch what we need (specific columns + school filter)
+      let q = this.db.from(rt).select(cols.join(','));
+      
+      if (!NO_SCHOOL_FILTER.has(rt) && rt !== 'schools') {
+        q = applyScope(q, rt, sid);
+      } else if (rt === 'schools') {
+        q = q.eq('id', sid);
+      }
+      
       const { data, error } = await q;
       clearTimeout(timeout);
 
@@ -570,9 +721,91 @@ class SupabaseDataService {
     }
   }
 
-  startRealtimeSync(_: string) {}
-  restartRealtimeSync(_: string) {}
-  stopRealtimeSync() {}
+  startRealtimeSync(sid: string) {
+    if (!this.ok || !isOnline()) return;
+    if (this._realtimeChannel) this.stopRealtimeSync();
+
+    console.log(`[Realtime] Starting sync for school: ${sid}`);
+
+    // Create a single channel for all database changes
+    this._realtimeChannel = this.db.channel(`school-sync-${sid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+        },
+        (payload) => {
+          const { eventType, table, new: newRecord, old: oldRecord } = payload;
+          
+          // 1. Verify this change belongs to our school
+          const record = (newRecord && Object.keys(newRecord).length > 0) ? newRecord : oldRecord;
+          if (!record || Object.keys(record).length === 0) return;
+
+          // Special handling for tables without school_id or different mapping
+          const r = record as any;
+          const recordSid = r.school_id || (table === 'users' || table === 'schools' ? r.id : null);
+          
+          if (recordSid !== sid && !NO_SCHOOL_FILTER.has(table)) {
+            return;
+          }
+
+          // 2. Map snake_case to camelCase
+          const tableName = snakeToCamel(table);
+          const localRecord = mapToLocal(record);
+
+          // 3. Update local cache based on event type
+          if (eventType === 'INSERT' || eventType === 'UPDATE') {
+            // Check if we have a pending local change for this record
+            // If we do, we don't overwrite it to avoid "jumping" UI
+            const pendingIds = new Set(
+              loadQueueSync()
+                .filter(q => q.tableName === tableName)
+                .map(q => q.recordId || q.data?.id)
+                .filter(Boolean)
+            );
+
+            if (pendingIds.has(localRecord.id)) {
+              console.log(`[Realtime] Skipping ${table} update for ${localRecord.id} (pending local change)`);
+              return;
+            }
+
+            if (eventType === 'INSERT') {
+              cacheApplyCreate(sid, tableName, localRecord);
+            } else {
+              cacheApplyUpdate(sid, tableName, localRecord.id, localRecord);
+            }
+          } else if (eventType === 'DELETE') {
+            cacheApplyDelete(sid, tableName, localRecord.id);
+          }
+
+          // 4. Notify UI components to re-render
+          notifyUI(tableName);
+          console.log(`[Realtime] ${eventType} on ${table} processed`);
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] Connected to school sync channel');
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          console.warn(`[Realtime] Channel ${status}. Restarting in 5s...`);
+          setTimeout(() => this.restartRealtimeSync(sid), 5000);
+        }
+      });
+  }
+
+  restartRealtimeSync(sid: string) {
+    this.stopRealtimeSync();
+    this.startRealtimeSync(sid);
+  }
+
+  stopRealtimeSync() {
+    if (this._realtimeChannel) {
+      void this.db.removeChannel(this._realtimeChannel);
+      this._realtimeChannel = null;
+      console.log('[Realtime] Disconnected from school sync channel');
+    }
+  }
 
   /** Public: merge a single table from Supabase into local cache (conflict-safe) */
   async syncTable(sid: string, tableName: string): Promise<void> {
@@ -587,10 +820,11 @@ class SupabaseDataService {
     // Always return cached data immediately — instant UI, works offline
     const cached = cacheGet(sid, tableName);
     if (cached && cached.length > 0) {
-      // Only trigger background merge if cache is older than 10 minutes
+      // Only trigger background merge if cache is older than 6 hours
+      // We rely on Realtime sync for instant updates, background merge is just a safety catch
       if (isOnline() && this.ok) {
         const entry = memCache.get(cacheKey(sid, tableName));
-        if (entry && Date.now() - entry.ts > 10 * 60_000) {
+        if (entry && Date.now() - entry.ts > 6 * 60 * 60_000) {
           void this._backgroundMerge(sid, tableName);
         }
       }
@@ -606,10 +840,18 @@ class SupabaseDataService {
     if (existing) return existing;
 
     const rt = getSupabaseTable(tableName);
+    const cols = (TABLE_COLUMNS as any)[tableName] || ['*'];
+    
     const req = (async () => {
       try {
-        let q = this.db.from(rt).select('*');
-        q = applyScope(q, rt, sid);
+        let q = this.db.from(rt).select(cols.join(','));
+        // Only apply school filter if it's not a special table
+        if (!NO_SCHOOL_FILTER.has(rt) && rt !== 'schools') {
+          q = applyScope(q, rt, sid);
+        } else if (rt === 'schools') {
+          q = q.eq('id', sid);
+        }
+        
         const { data, error } = await q;
         if (error) {
           // Silently ignore 402 (egress quota) — return empty, app uses cache
@@ -650,23 +892,53 @@ class SupabaseDataService {
     // Already scheduled or running — skip
     if (this._mergeTimers.has(key)) return;
 
-    // Only merge if cache is older than 10 minutes
+    // DELTA SYNC OPTIMIZATION: 
+    // Only merge if cache is older than 6 hours.
+    // Instead of fetching everything, we will soon transition this to fetch only changes.
     const entry = memCache.get(key);
-    if (entry && Date.now() - entry.ts < 10 * 60_000) return;
+    if (entry && Date.now() - entry.ts < 6 * 60 * 60_000) return;
 
     this._mergeTimers.set(key, setTimeout(async () => {
       this._mergeTimers.delete(key);
       if (!isOnline() || !this.ok) return;
       const rt = getSupabaseTable(tableName);
+      const cols = (TABLE_COLUMNS as any)[tableName] || ['*'];
+      
       try {
-        let q = this.db.from(rt).select('*');
-        q = applyScope(q, rt, sid);
+        let q = this.db.from(rt).select(cols.join(','));
+        
+        // If we have a local cache, only fetch records modified after our last sync
+        // This is a "Delta Sync" that saves massive egress on large tables
+        if (entry && entry.data.length > 0) {
+          const lastUpdate = entry.data.reduce((max: number, r: any) => {
+            const ts = new Date(r.updatedAt || r.createdAt || 0).getTime();
+            return ts > max ? ts : max;
+          }, 0);
+          
+          if (lastUpdate > 0) {
+            // Fetch records updated since our latest local record + 1 second buffer
+            const since = new Date(lastUpdate + 1000).toISOString();
+            q = q.gt('updated_at', since);
+          }
+        }
+
+        // Only apply school filter if it's not a special table
+        if (!NO_SCHOOL_FILTER.has(rt) && rt !== 'schools') {
+          q = applyScope(q, rt, sid);
+        } else if (rt === 'schools') {
+          q = q.eq('id', sid);
+        }
+        
         const { data, error } = await q;
         if (error || !data) return;
 
         const remoteRecords = filterDeleted(sid, tableName, data.map(mapToLocal));
         const local = cacheGet(sid, tableName) || [];
 
+        // If it was a delta sync, we merge into existing local data
+        // Otherwise (if no gt filter), it's a full sync
+        const isDelta = entry && entry.data.length > 0;
+        
         // Build set of IDs with pending local queue entries — don't overwrite these
         const pendingIds = new Set(
           loadQueueSync()
@@ -675,19 +947,16 @@ class SupabaseDataService {
             .filter(Boolean)
         );
 
-        // Merge: for each remote record, update local only if remote is newer and not pending
         const localMap = new Map(local.map(r => [r.id, r]));
         let changed = false;
 
         for (const remote of remoteRecords) {
-          if (pendingIds.has(remote.id)) continue; // local has pending changes — skip
+          if (pendingIds.has(remote.id)) continue;
           const localRecord = localMap.get(remote.id);
           if (!localRecord) {
-            // New record from remote — add it
             localMap.set(remote.id, remote);
             changed = true;
           } else {
-            // Compare updatedAt — remote wins only if newer
             const remoteTs = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
             const localTs = new Date(localRecord.updatedAt || localRecord.createdAt || 0).getTime();
             if (remoteTs > localTs) {
@@ -697,19 +966,19 @@ class SupabaseDataService {
           }
         }
 
-        // Also remove local records that were deleted remotely (not in remote AND not pending)
-        const remoteIds = new Set(remoteRecords.map(r => r.id));
-        for (const [id, localRecord] of localMap) {
-          if (!remoteIds.has(id) && !pendingIds.has(id)) {
-            // Record deleted remotely — remove from local cache
-            localMap.delete(id);
-            changed = true;
+        // Only handle garbage collection (deleting items not in remote) if it was NOT a delta sync
+        if (!isDelta) {
+          const remoteIds = new Set(remoteRecords.map(r => r.id));
+          for (const [id, localRecord] of localMap) {
+            if (!remoteIds.has(id) && !pendingIds.has(id)) {
+              localMap.delete(id);
+              changed = true;
+            }
           }
         }
 
         if (changed) {
-          const merged = Array.from(localMap.values());
-          cacheSet(sid, tableName, merged);
+          cacheSet(sid, tableName, Array.from(localMap.values()));
           notifyUI(tableName);
         }
       } catch (e: any) {
@@ -730,7 +999,13 @@ class SupabaseDataService {
     const rt = getSupabaseTable(tableName);
     try {
       let q = this.db.from(rt).select('*').eq('id', id);
-      q = applyScope(q, rt, sid);
+      // Only apply school filter if it's not a special table
+      if (!NO_SCHOOL_FILTER.has(rt) && rt !== 'schools') {
+        q = applyScope(q, rt, sid);
+      } else if (rt === 'schools') {
+        q = q.eq('id', sid);
+      }
+      
       const { data, error } = await (q as any).maybeSingle();
       if (error || !data) return null;
       return mapToLocal(data);
@@ -762,7 +1037,13 @@ class SupabaseDataService {
     const col = fieldName === 'schoolId' ? 'school_id' : camelToSnake(fieldName);
     try {
       let q = this.db.from(rt).select('*').eq(col, value);
-      q = applyScope(q, rt, sid);
+      // Only apply school filter if it's not a special table
+      if (!NO_SCHOOL_FILTER.has(rt) && rt !== 'schools') {
+        q = applyScope(q, rt, sid);
+      } else if (rt === 'schools') {
+        q = q.eq('id', sid);
+      }
+      
       const { data, error } = await q;
       if (error) {
         // Fall back to cache on error
@@ -812,15 +1093,25 @@ class SupabaseDataService {
     const rt = getSupabaseTable(tableName);
     const payload = toRemote(record, rt);
     try {
-      const { error } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
-      if (error) {
-        console.error(`[create] ${rt}:`, error.code, error.message, error.details, error.hint);
-        // Queue for retry even on error
+      // 1. Attempt upsert
+      const { error: upsertError } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
+      
+      if (upsertError) {
+        console.error(`[create] ${rt} upsert failed:`, upsertError.code, upsertError.message);
         enqueue({ op: 'create', userId, tableName, data: record });
         return { success: true, syncedRemotely: false, savedLocally: true, record };
       }
-      // Don't bust cache — optimistic data is already correct, background merge will reconcile
-      return { success: true, syncedRemotely: true, savedLocally: true, record };
+
+      // 2. Attempt select to get the final server state (with triggers/defaults)
+      const { data: remoteData, error: selectError } = await this.db.from(rt).select('*').eq('id', id).maybeSingle();
+      
+      const finalRecord = remoteData ? mapToLocal(remoteData) : record;
+      
+      // Update cache with the best available record
+      cacheApplyCreate(sid, tableName, finalRecord);
+      notifyUI(tableName);
+      
+      return { success: true, syncedRemotely: true, savedLocally: true, record: finalRecord };
     } catch (e: any) {
       enqueue({ op: 'create', userId, tableName, data: record });
       return { success: true, syncedRemotely: false, savedLocally: true, record };
@@ -845,13 +1136,24 @@ class SupabaseDataService {
     delete payload.id;
     delete payload.created_at;
     try {
-      const { error } = await this.db.from(rt).update(payload).eq('id', id);
-      if (error) {
-        console.error(`[update] ${rt}:`, error.code, error.message, error.details, error.hint);
+      // 1. Attempt update
+      const { error: updateError } = await this.db.from(rt).update(payload).eq('id', id);
+      
+      if (updateError) {
+        console.error(`[update] ${rt} failed:`, updateError.code, updateError.message);
         enqueue({ op: 'update', userId, tableName, recordId: id, data: record });
         return { success: true, syncedRemotely: false, savedLocally: true, record };
       }
-      return { success: true, syncedRemotely: true, savedLocally: true, record };
+
+      // 2. Attempt select
+      const { data: remoteData } = await this.db.from(rt).select('*').eq('id', id).maybeSingle();
+      const finalRecord = remoteData ? mapToLocal(remoteData) : { ...record, id };
+
+      // Update cache
+      cacheApplyUpdate(sid, tableName, id, finalRecord);
+      notifyUI(tableName);
+
+      return { success: true, syncedRemotely: true, savedLocally: true, record: finalRecord };
     } catch (e: any) {
       enqueue({ op: 'update', userId, tableName, recordId: id, data: record });
       return { success: true, syncedRemotely: false, savedLocally: true, record };
@@ -952,10 +1254,39 @@ class SupabaseDataService {
     }
 
     try {
-      for (const [key, value] of Object.entries(settings)) {
-        await this.db.from('settings').upsert(
-          { school_id: sid, key, value, updated_at: now, created_at: now },
-          { onConflict: 'school_id,key' }
+      // BATCH UPSERT: Send all settings in a single API call to save limits
+      const payloads = Object.entries(settings).map(([key, value]) => ({
+        school_id: sid,
+        key,
+        value,
+        updated_at: now,
+        created_at: now
+      }));
+
+      const { data, error } = await this.db.from('settings').upsert(
+        payloads,
+        { onConflict: 'school_id,key' }
+      ).select();
+
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        const results = data.map(mapToLocal);
+        const current = cacheGet(sid, 'settings') || [];
+        const merged = [...current];
+        for (const res of results) {
+          const idx = merged.findIndex(s => s.key === res.key);
+          if (idx >= 0) merged[idx] = res;
+          else merged.push(res);
+        }
+        cacheSet(sid, 'settings', merged);
+        notifyUI('settings');
+      }
+
+      if (settings.schoolName) {
+        await this.db.from('schools').upsert(
+          { id: sid, name: settings.schoolName, updated_at: now },
+          { onConflict: 'id' }
         );
       }
       return { success: true, syncedRemotely: true, savedLocally: true };
@@ -1006,14 +1337,28 @@ class SupabaseDataService {
           if (item.op === 'create' && item.data) {
             const rt = getSupabaseTable(item.tableName);
             const payload = toRemote(item.data, rt);
-            const { error } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
-            if (error) throw error;
+            // 1. Upsert
+            const { error: upsertError } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
+            if (upsertError) throw upsertError;
+            // 2. Select
+            const { data: remoteData } = await this.db.from(rt).select('*').eq('id', item.data.id).maybeSingle();
+            if (remoteData) {
+              const finalRecord = mapToLocal(remoteData);
+              cacheApplyCreate(this.sid(item.userId), item.tableName, finalRecord);
+            }
           } else if (item.op === 'update' && item.recordId && item.data) {
             const rt = getSupabaseTable(item.tableName);
             const payload = toRemote(item.data, rt);
             delete payload.id; delete payload.created_at;
-            const { error } = await this.db.from(rt).update(payload).eq('id', item.recordId);
-            if (error) throw error;
+            // 1. Update
+            const { error: updateError } = await this.db.from(rt).update(payload).eq('id', item.recordId);
+            if (updateError) throw updateError;
+            // 2. Select
+            const { data: remoteData } = await this.db.from(rt).select('*').eq('id', item.recordId).maybeSingle();
+            if (remoteData) {
+              const finalRecord = mapToLocal(remoteData);
+              cacheApplyUpdate(this.sid(item.userId), item.tableName, item.recordId, finalRecord);
+            }
           } else if (item.op === 'delete' && item.recordId) {
             const rt = getSupabaseTable(item.tableName);
             const { error } = await this.db.from(rt).delete().eq('id', item.recordId);
@@ -1027,6 +1372,13 @@ class SupabaseDataService {
                 { onConflict: 'school_id,key' }
               );
               if (error) throw error;
+            }
+            // Also sync schoolName to schools table during offline flush
+            if (item.settings.schoolName) {
+              await this.db.from('schools').upsert(
+                { id: sid, name: item.settings.schoolName, updated_at: now },
+                { onConflict: 'id' }
+              );
             }
           }
           succeeded = true;

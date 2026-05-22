@@ -5,18 +5,21 @@
   "workspaces": [
     "client",
     "server",
-    "shared"
+    "shared",
+    "desktop"
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:mobile": "node start-dev-server.js",
     "dev:client": "npm run dev --workspace=client",
     "dev:server": "npm run dev --workspace=server",
+    "dev:desktop": "npm run dev --workspace=desktop",
     "build": "npm run build --workspace=client && npm run build --workspace=server",
-    "electron": "npm run electron --workspace=client",
+    "electron": "npm run start --workspace=desktop",
     "test:smoke": "node scripts/smoke-test.mjs"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0"
   }
 }

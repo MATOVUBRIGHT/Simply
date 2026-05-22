@@ -2,9 +2,12 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { dataService } from '../lib/database/SupabaseDataService';
 
 class SyncService {
-  private syncInterval: ReturnType<typeof setInterval> | null = null;
-  /** Background pull + push interval (automatic; no manual sync required). */
-  private readonly SYNC_INTERVAL_MS = 30000;
+  private syncInterval: ReturnType<typeof setTimeout> | null = null;
+  /** Background pull + push base interval (automatic; no manual sync required). */
+  private readonly SYNC_INTERVAL_MS = 120000; // 2 minutes default
+  /** Maximum backoff interval when repeated failures occur. */
+  private readonly MAX_BACKOFF_MS = 30 * 60 * 1000; // 30 minutes
+  private backoffMs: number | null = null;
   private currentUserId: string | null = null;
   private currentSchoolId: string | null = null;
   private intervalSchoolId: string | null = null;
@@ -76,7 +79,7 @@ class SyncService {
     }
 
     if (this.syncInterval) {
-      clearInterval(this.syncInterval);
+      clearTimeout(this.syncInterval);
       this.syncInterval = null;
     }
     this.intervalSchoolId = schoolId;
@@ -84,15 +87,35 @@ class SyncService {
     dataService.startRealtimeSync(schoolId);
     void this.runFullSyncCycle();
 
-    this.syncInterval = setInterval(() => {
-      if (!this.syncEnabled || !navigator.onLine) return;
-      void this.runFullSyncCycle();
-    }, this.SYNC_INTERVAL_MS);
+    // Adaptive scheduler: use setTimeout so we can apply exponential backoff on failures.
+    this.backoffMs = null; // reset any previous backoff
+    const scheduleNext = (delayMs: number) => {
+      if (this.syncInterval) clearTimeout(this.syncInterval);
+      this.syncInterval = setTimeout(async () => {
+        if (!this.syncEnabled || !navigator.onLine) return;
+        const result = await this.runFullSyncCycle();
+        // On success reset backoff; on failure increase it exponentially with jitter
+        if (result && result.success) {
+          this.backoffMs = null;
+          scheduleNext(this.SYNC_INTERVAL_MS);
+        } else {
+          const prev = this.backoffMs ?? this.SYNC_INTERVAL_MS;
+          let next = Math.min(prev * 2, this.MAX_BACKOFF_MS);
+          // Add jitter +/- 25%
+          const jitter = 1 + (Math.random() * 0.5 - 0.25);
+          next = Math.max(1000, Math.round(next * jitter));
+          this.backoffMs = next;
+          scheduleNext(next);
+        }
+      }, delayMs);
+    };
+
+    scheduleNext(this.SYNC_INTERVAL_MS);
   }
 
   stopBackgroundSync() {
     if (this.syncInterval) {
-      clearInterval(this.syncInterval);
+      clearTimeout(this.syncInterval);
       this.syncInterval = null;
     }
     this.intervalSchoolId = null;

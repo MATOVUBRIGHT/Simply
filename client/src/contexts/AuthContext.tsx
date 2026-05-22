@@ -6,6 +6,7 @@ import { usersApi } from '../services/apiService';
 import { syncService } from '../services/sync';
 import { generateUUID } from '../utils/uuid';
 import { prefetchCriticalTables } from '../lib/store';
+import { getSubscriptionAccessState } from '../utils/plans';
 
 export interface LocalUser {
   id: string;
@@ -91,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  function initializeSyncForUser(userData: LocalUser): void {
+  function initializeSyncForUser(userData: LocalUser, options: { wait?: boolean } = {}): void {
     // Everything is fire-and-forget — never block the UI
     try {
       syncService.configure({ supabaseClient: supabase! });
@@ -101,10 +102,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (navigator.onLine) syncService.enableSync();
     } catch { /* ignore */ }
 
-    // Bootstrap runs in background — store already seeded from main.tsx
-    cacheReady.then(() => {
-      void dataService.bootstrapSession(userData.id, userData.schoolId).catch(() => {});
+    // Bootstrap runs — store already seeded from main.tsx
+    // If wait is true, bootstrapSession will block until sync completes
+    const bootstrap = cacheReady.then(() => {
+      return dataService.bootstrapSession(userData.id, userData.schoolId, options);
     });
+
+    if (options.wait) {
+      // Return the promise so it can be awaited
+      (userData as any)._bootstrapPromise = bootstrap;
+    }
+
     prefetchCriticalTables(userData.schoolId || userData.id);
 
     // Pre-hydrate recycle bin from IndexedDB so first read is instant
@@ -143,14 +151,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (savedUser) {
-      // Set user state immediately — no waiting
+      // Background initialization
+      void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+      
+      // Ensure the cache is ready before we stop loading
+      // This ensures SubscriptionGate sees the correct data on first render
+      try {
+        await Promise.race([
+          cacheReady,
+          new Promise(resolve => setTimeout(resolve, 2000))
+        ]);
+      } catch { /* proceed anyway after 2s */ }
+
       if (!stale()) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
-        setLoading(false); // Done — user is restored
+        setLoading(false); 
       }
-      // Everything else is background
-      void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+      
       initializeSyncForUser(savedUser);
 
       // Verify session with server in background (non-blocking)
@@ -203,6 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           error.message?.includes('Payment Required') ||
           error.message?.includes('exceed_egress_quota');
         if (is402) {
+          // Try cached session first
           const savedUser = getSession();
           if (savedUser && savedUser.email.toLowerCase() === email.toLowerCase()) {
             setUser(savedUser);
@@ -210,9 +229,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
             return { success: true };
           }
-          // No cached session — still let them in with a minimal user object
-          // They'll see the subscription gate and can go to Plans
-          return { success: false, error: 'Service temporarily unavailable. Please try again shortly.' };
+          // No cached session — create a minimal offline session so user can access the app
+          // They'll see the subscription gate and can navigate to Plans
+          const offlineId = generateUUID();
+          const offlineUser: LocalUser = {
+            id: offlineId,
+            schoolId: offlineId,
+            email: email.toLowerCase(),
+            firstName: email.split('@')[0],
+            lastName: '',
+            isActive: true,
+            createdAt: new Date().toISOString(),
+          };
+          setUser(offlineUser);
+          setSchoolId(offlineUser.schoolId);
+          saveSession(offlineUser);
+          void userDBManager.openDatabase(offlineUser.schoolId).catch(() => {});
+          return { success: true };
         }
         return { success: false, error: error.message };
       }
@@ -240,7 +273,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       saveSession(userData);
 
       void userDBManager.openDatabase(userData.schoolId).catch(() => {});
-      initializeSyncForUser(userData);
+      
+      // If online, perform a full blocking sync before letting the user in
+      // This ensures "unlimited offline access" is ready immediately
+      if (isOnline) {
+        initializeSyncForUser(userData, { wait: true });
+        if ((userData as any)._bootstrapPromise) {
+          await (userData as any)._bootstrapPromise;
+        }
+      } else {
+        initializeSyncForUser(userData);
+      }
 
       // Record last login time for admin analytics (fire and forget)
       if (supabase) {
@@ -326,7 +369,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       saveSession(userData);
 
       void userDBManager.openDatabase(userData.schoolId).catch(() => {});
-      initializeSyncForUser(userData);
+      
+      // Full sync for first-time setup
+      if (isOnline) {
+        initializeSyncForUser(userData, { wait: true });
+        if ((userData as any)._bootstrapPromise) {
+          await (userData as any)._bootstrapPromise;
+        }
+      } else {
+        initializeSyncForUser(userData);
+      }
 
       return { success: true };
     } catch (error: any) {
@@ -339,6 +391,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
     setUser(null);
     setSchoolId(null);
+    try {
+      if (supabase) await supabase.auth.signOut();
+      dataService.stopRealtimeSync();
+    } catch { /* ignore */ }
   }
 
   return (
