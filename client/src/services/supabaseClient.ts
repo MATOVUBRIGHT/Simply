@@ -19,12 +19,14 @@ export function getSchofySupabaseClient(url: string, anonKey: string): SupabaseC
       detectSessionInUrl: false,
       // CRITICAL FIX FOR ELECTRON:
       // This stops Supabase from calling the broken navigator.locks API
+      // We use 'as any' because these properties were added in recent versions
+      // and might not be reflected in the current @types/supabase-js
       lockType: 'custom',
       getLock: async () => {
         // Provide a dummy lock function that resolves immediately
         return () => {};
       }
-    },
+    } as any,
     realtime: {
       params: { eventsPerSecond: 20 },
     },
