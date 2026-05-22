@@ -15,7 +15,7 @@
 // ── IndexedDB setup ───────────────────────────────────────────────────────────
 
 const IDB_DB_NAME = 'schofy_cache';
-const IDB_VERSION = 2; // bumped from 1 to add queue + deleted_ids stores
+const IDB_VERSION = 3; // bumped to 3 to ensure all stores are created
 const CACHE_STORE = 'data';
 const QUEUE_STORE = 'offline_queue';
 const DELETED_STORE = 'deleted_ids';
@@ -33,24 +33,22 @@ export function getStorageDB(): Promise<IDBDatabase> {
 
       req.onupgradeneeded = (event) => {
         const db = req.result;
-        const oldVersion = event.oldVersion;
 
-        // v1 store (cache data) — keep as-is
+        // v1 store (cache data)
         if (!db.objectStoreNames.contains(CACHE_STORE)) {
           db.createObjectStore(CACHE_STORE);
         }
 
         // v2 stores — offline queue and deleted IDs
-        if (oldVersion < 2) {
-          if (!db.objectStoreNames.contains(QUEUE_STORE)) {
-            const qs = db.createObjectStore(QUEUE_STORE, { keyPath: 'id' });
-            qs.createIndex('by_table', 'tableName', { unique: false });
-            qs.createIndex('by_ts', 'ts', { unique: false });
-          }
-          if (!db.objectStoreNames.contains(DELETED_STORE)) {
-            // key = "${sid}:${tableName}", value = string[] of deleted IDs
-            db.createObjectStore(DELETED_STORE);
-          }
+        if (!db.objectStoreNames.contains(QUEUE_STORE)) {
+          const qs = db.createObjectStore(QUEUE_STORE, { keyPath: 'id' });
+          qs.createIndex('by_table', 'tableName', { unique: false });
+          qs.createIndex('by_ts', 'ts', { unique: false });
+        }
+        
+        if (!db.objectStoreNames.contains(DELETED_STORE)) {
+          // key = "${sid}:${tableName}", value = string[] of deleted IDs
+          db.createObjectStore(DELETED_STORE);
         }
       };
 

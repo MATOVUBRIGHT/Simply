@@ -38,7 +38,7 @@ function createWindow() {
   const isDev = process.env.NODE_ENV === 'development';
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:4202').catch(err => {
+    mainWindow.loadURL('http://localhost:4201').catch(err => {
       console.error('Failed to load dev URL:', err);
       mainWindow.show(); // Show anyway to reveal error/devTools
     });
@@ -54,7 +54,7 @@ function createWindow() {
     console.error(`Page failed to load: ${errorCode} - ${errorDescription}`);
     if (isDev) {
       mainWindow.webContents.executeJavaScript(`
-        document.body.innerHTML = '<div style="background:#1a1a1a;color:#fff;padding:20px;font-family:sans-serif;"><h1>Connection Failed</h1><p>Could not connect to the development server at <b>http://localhost:4202</b>.</p><p>Please ensure your web client is running: <code>npm run dev:client</code></p><button onclick="location.reload()" style="padding:10px 20px;cursor:pointer;">Retry</button></div>';
+        document.body.innerHTML = '<div style="background:#1a1a1a;color:#fff;padding:20px;font-family:sans-serif;"><h1>Connection Failed</h1><p>Could not connect to the development server at <b>http://localhost:4201</b>.</p><p>Please ensure your web client is running: <code>npm run dev:client</code></p><button onclick="location.reload()" style="padding:10px 20px;cursor:pointer;">Retry</button></div>';
       `);
       mainWindow.show();
     }

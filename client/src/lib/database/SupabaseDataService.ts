@@ -617,6 +617,37 @@ class SupabaseDataService {
   private get db() { return supabase!; }
   private get ok() { return isSupabaseConfigured && !!supabase; }
 
+  /**
+   * Waits for the Supabase session to be fully restored/available.
+   * Prevents 401 Unauthorized errors by ensuring the Bearer token is present.
+   */
+  private async waitForSession(timeoutMs = 5000): Promise<boolean> {
+    if (!this.ok) return false;
+    
+    // Check if we already have a session
+    const { data: { session } } = await this.db.auth.getSession();
+    if (session) return true;
+
+    // Wait for session to be restored (via onAuthStateChange or just polling)
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const check = async () => {
+        const { data: { session } } = await this.db.auth.getSession();
+        if (session) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start > timeoutMs) {
+          console.warn('[SupabaseDataService] Timeout waiting for session');
+          resolve(false);
+          return;
+        }
+        setTimeout(check, 100);
+      };
+      check();
+    });
+  }
+
   async bootstrapSession(userId: string, schoolId: string, options: { wait?: boolean } = {}) {
     localStorage.setItem('schofy_current_user_id', userId);
     const sid = schoolId || userId;
@@ -734,6 +765,11 @@ class SupabaseDataService {
    */
   private async _seedFromSupabase(sid: string, tableName: string): Promise<void> {
     if (!isOnline() || !this.ok) return;
+
+    // Ensure session is available for online fetch
+    const hasSession = await this.waitForSession();
+    if (!hasSession) return;
+
     const rt = getSupabaseTable(tableName);
     const cols = (TABLE_COLUMNS as any)[rt] || ['*'];
 
@@ -925,6 +961,10 @@ class SupabaseDataService {
     const key = cacheKey(sid, tableName);
     const existingInflight = inflight.get(key);
     if (existingInflight) return existingInflight;
+
+    // Ensure session is available for online fetch
+    const hasSession = await this.waitForSession();
+    if (!hasSession) return cacheGet(sid, tableName) || [];
 
     const rt = getSupabaseTable(tableName);
     const cols = (TABLE_COLUMNS as any)[rt] || ['*'];
@@ -1444,6 +1484,13 @@ class SupabaseDataService {
   // ── Offline queue flush with exponential backoff ─────────────────────────
   async flushOfflineQueue(): Promise<void> {
     if (!isOnline() || !this.ok) return;
+
+    // Ensure session is available before attempting to push
+    const hasSession = await this.waitForSession();
+    if (!hasSession) {
+      console.warn('[offline] Skipping flush: No authenticated session');
+      return;
+    }
 
     // Load from IDB (primary) — falls back to localStorage automatically
     const queue = await loadQueue() as QueueItem[];
