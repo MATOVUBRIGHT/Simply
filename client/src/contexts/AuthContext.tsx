@@ -25,6 +25,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (email: string, password: string, firstName: string, lastName: string, phone?: string) => Promise<{ success: boolean; user?: { id: string }; error?: string; needsVerification?: boolean }>;
+  sendPasswordReset: (email: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   isOnline: boolean;
   schoolId: string | null;
@@ -123,25 +124,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     void restoreSessionWithGuard(stale);
 
-    const { data: { subscription } } = supabase!.auth.onAuthStateChange((event, session) => {
-      console.log('Auth state changed:', event);
+    const { data: { subscription } } = supabase!.auth.onAuthStateChange((event) => {
       if (active) {
         if (event === 'INITIAL_SESSION') {
           setLoading(false);
         }
-        
-        if (session?.user) {
-          const userData: LocalUser = {
-            id: session.user.id,
-            schoolId: session.user.id,
-            email: session.user.email || '',
-            firstName: '', lastName: '', isActive: true, createdAt: new Date().toISOString()
-          };
-          setUser(userData);
-          setSchoolId(userData.schoolId);
-          // Centralized initialization - ServiceManager handles staged startup
-          initializeSyncForUser(userData);
-        } else if (event === 'SIGNED_OUT') {
+
+        if (event === 'SIGNED_OUT') {
           setUser(null);
           setSchoolId(null);
           clearSession();
@@ -271,7 +260,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       });
       if (authError || !authData.user) {
-        return { success: false, error: 'Invalid email or password' };
+        const message = authError?.message || '';
+        if (/confirm|verified/i.test(message)) {
+          return { success: false, error: 'Please verify your email before signing in. Check your inbox for the verification link.' };
+        }
+        return { success: false, error: 'Invalid email or password. Use Forgot password if this account was created before secure email login was enabled.' };
       }
       if (!authData.user.email_confirmed_at) {
         await supabase.auth.signOut();
@@ -504,6 +497,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function sendPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Supabase not configured. Cannot send reset email.' };
+    }
+
+    if (!isOnline) {
+      return { success: false, error: 'Please connect to the internet to reset your password.' };
+    }
+
+    const redirectTo = `${window.location.origin}/login`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), { redirectTo });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  }
+
   async function logout() {
     clearSession();
     setUser(null);
@@ -528,7 +536,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, isOnline, schoolId, isSupabaseAvailable: isSupabaseConfigured && !!supabase }}>
+    <AuthContext.Provider value={{ user, loading, login, register, sendPasswordReset, logout, isOnline, schoolId, isSupabaseAvailable: isSupabaseConfigured && !!supabase }}>
       {children}
     </AuthContext.Provider>
   );

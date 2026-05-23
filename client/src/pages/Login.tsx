@@ -9,6 +9,7 @@ import {
   FileText,
   Loader2,
   LockKeyhole,
+  Mail,
   Shield,
   UserPlus,
   Wifi,
@@ -17,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { SuccessPopup } from '../components/SuccessPopup';
 
 type PolicyModal = 'terms' | 'privacy' | null;
@@ -112,21 +113,29 @@ export default function Login() {
   const [showSplash, setShowSplash] = useState(true);
   const [securingAccount, setSecuringAccount] = useState(false);
   const [verificationSent, setVerificationSent] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [syncStatus, setSyncStatus] = useState<{
     step: 'creating' | 'syncing' | 'complete' | 'error' | 'offline';
     message: string;
     progress: number;
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
 
-  const { login, register, user, isOnline } = useAuth();
+  const { login, register, sendPasswordReset, user, isOnline } = useAuth();
   const { primaryColor } = useTheme();
   const navigate = useNavigate();
 
   useEffect(() => {
-    const remembered = localStorage.getItem('remembered_email');
-    if (remembered) {
-      setEmail(remembered);
-      setRememberMe(localStorage.getItem('remember_me') === 'true');
+    localStorage.removeItem('remembered_email');
+    localStorage.removeItem('remember_me');
+    const recoveryUrl = window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
+    if (recoveryUrl) {
+      setResetMode(true);
+      setIsRegister(false);
+      setShowSplash(false);
     }
   }, []);
 
@@ -227,20 +236,83 @@ export default function Login() {
         setSecuringAccount(false);
       }
 
-      if (rememberMe) {
-        localStorage.setItem('remembered_email', email.trim());
-        localStorage.setItem('remember_me', 'true');
-      } else {
-        localStorage.removeItem('remembered_email');
-        localStorage.removeItem('remember_me');
-      }
+      localStorage.removeItem('remembered_email');
+      localStorage.removeItem('remember_me');
 
       setShowSuccess(true);
       await new Promise((resolve) => setTimeout(resolve, isRegister ? 700 : 1200));
+      if (rememberMe) {
+        setEmail('');
+        setPassword('');
+        setConfirmPassword('');
+      }
       navigate(isRegister ? '/plans' : '/');
     } catch (err: any) {
       setError(err.message || (isRegister ? 'Registration failed' : 'Login failed'));
       setSecuringAccount(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setError('');
+    setResetSent(false);
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError('Enter your email address first, then request a reset link.');
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const result = await sendPasswordReset(cleanEmail);
+      if (!result.success) {
+        setError(result.error || 'Could not send reset email');
+        return;
+      }
+      setResetSent(true);
+      setPassword('');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (!supabase) {
+      setError('Cloud authentication is not available. Please check your configuration.');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateError) {
+        setError(updateError.message);
+        return;
+      }
+
+      setResetMode(false);
+      setResetSent(false);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPassword('');
+      window.history.replaceState({}, document.title, '/login');
+      setShowSuccess(true);
+      await supabase.auth.signOut();
     } finally {
       setLoading(false);
     }
@@ -255,6 +327,7 @@ export default function Login() {
           </div>
           <h1 className="mt-5 text-2xl font-bold text-slate-950">Welcome to Schofy</h1>
           <p className="mt-2 text-sm text-slate-500">Preparing your school workspace...</p>
+          <Loader2 className="mx-auto mt-5 animate-spin text-blue-600" size={24} />
         </div>
       </div>
     );
@@ -338,14 +411,14 @@ export default function Login() {
             <div className="mb-6 grid grid-cols-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
               <button
                 type="button"
-                onClick={() => { setIsRegister(false); setError(''); }}
+                onClick={() => { setIsRegister(false); setResetMode(false); setError(''); }}
                 className={`rounded-md px-3 py-2 text-sm font-semibold transition ${!isRegister ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
               >
                 Sign in
               </button>
               <button
                 type="button"
-                onClick={() => { setIsRegister(true); setError(''); }}
+                onClick={() => { setIsRegister(true); setResetMode(false); setError(''); }}
                 className={`inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition ${isRegister ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
               >
                 <UserPlus size={15} />
@@ -353,6 +426,51 @@ export default function Login() {
               </button>
             </div>
 
+            {resetMode ? (
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                {error && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                    {error}
+                  </div>
+                )}
+
+                <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+                  Enter a new password for your Schofy account.
+                </div>
+
+                <div>
+                  <label className="form-label">New password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="form-input"
+                    placeholder="New password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label">Confirm new password</label>
+                  <input
+                    type="password"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    className="form-input"
+                    placeholder="Confirm new password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                <button type="submit" disabled={loading} className="btn btn-primary w-full justify-center py-3 disabled:opacity-50">
+                  {loading ? <><Loader2 size={18} className="animate-spin" /> Updating password...</> : <><LockKeyhole size={18} /> Update password</>}
+                </button>
+              </form>
+            ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
@@ -363,6 +481,12 @@ export default function Login() {
               {verificationSent && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
                   Verification email sent. Please verify your email, then sign in with your password.
+                </div>
+              )}
+
+              {resetSent && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+                  Password reset email sent. Open your inbox and follow the secure reset link.
                 </div>
               )}
 
@@ -465,15 +589,26 @@ export default function Login() {
               )}
 
               {!isRegister && (
-                <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  Remember me
-                </label>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    Clear fields after sign in
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={resetLoading}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    {resetLoading ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
+                    Forgot password?
+                  </button>
+                </div>
               )}
 
               <button type="submit" disabled={loading || !isSupabaseConfigured} className="btn btn-primary w-full justify-center py-3 disabled:opacity-50">
@@ -490,6 +625,7 @@ export default function Login() {
                 )}
               </button>
             </form>
+            )}
 
             <div className="mt-6 flex items-center justify-center gap-2 border-t border-slate-200 pt-5 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <Cloud size={16} className={isOnline ? 'text-emerald-500' : 'text-amber-500'} />
@@ -504,7 +640,7 @@ export default function Login() {
       {showSuccess && (
         <SuccessPopup
           message={isRegister ? 'Account created' : 'Welcome back'}
-          subMessage="Taking you to your dashboard..."
+          subMessage={resetMode ? 'Password updated. Sign in again with your new password.' : 'Taking you to your dashboard...'}
         />
       )}
     </div>
