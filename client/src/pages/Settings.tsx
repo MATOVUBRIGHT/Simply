@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
@@ -39,6 +40,8 @@ export default function Settings() {
   const [promoteNewTerm, setPromoteNewTerm] = useState('1');
   const [promoteNewYear, setPromoteNewYear] = useState(new Date().getFullYear().toString());
   const [isPromoting, setIsPromoting] = useState(false);
+  const [promoteProgress, setPromoteProgress] = useState(0);
+  const [promoteStatus, setPromoteStatus] = useState('');
   const [settings, setSettings] = useState({
     schoolName: 'My School',
     schoolAddress: '',
@@ -348,7 +351,10 @@ export default function Settings() {
   async function handlePromoteStudents() {
     const id = schoolId || user?.id;
     if (!id) return;
+    if (isPromoting) return;
     setIsPromoting(true);
+    setPromoteProgress(0);
+    setPromoteStatus('Preparing students...');
     try {
       // Load all classes sorted by level
       const allClasses = await dataService.getAll(id, 'classes');
@@ -370,43 +376,66 @@ export default function Settings() {
       let graduated = 0;
       const now = new Date().toISOString();
 
-      for (const student of active) {
-        const currentClassId = (student as any).classId;
-        if (currentClassId === lastClassId) {
-          // Graduate — mark completed
-          await dataService.update(id, 'students', (student as any).id, {
-            status: 'completed',
-            completedYear: parseInt(promoteNewYear),
-            completedTerm: settings.currentTerm,
-            updatedAt: now,
-          } as any);
-          graduated++;
-        } else if (nextClassMap[currentClassId]) {
-          // Promote to next class
-          await dataService.update(id, 'students', (student as any).id, {
-            classId: nextClassMap[currentClassId],
-            updatedAt: now,
-          } as any);
-          promoted++;
-        }
+      const updates = active
+        .map((student: any) => {
+          const currentClassId = student.classId;
+          if (currentClassId === lastClassId) {
+            graduated++;
+            return {
+              id: student.id,
+              updates: {
+                status: 'completed',
+                completedYear: parseInt(promoteNewYear),
+                completedTerm: settings.currentTerm,
+                updatedAt: now,
+              },
+            };
+          }
+          if (nextClassMap[currentClassId]) {
+            promoted++;
+            return {
+              id: student.id,
+              updates: {
+                classId: nextClassMap[currentClassId],
+                updatedAt: now,
+              },
+            };
+          }
+          return null;
+        })
+        .filter(Boolean) as Array<{ id: string; updates: Record<string, any> }>;
+
+      for (let i = 0; i < updates.length; i += 25) {
+        const batch = updates.slice(i, i + 25);
+        const done = Math.min(i + batch.length, updates.length);
+        setPromoteStatus(`Updating ${done} of ${updates.length} students...`);
+        const results = await Promise.allSettled(
+          batch.map(item => dataService.update(id, 'students', item.id, item.updates as any))
+        );
+        const failed = results.filter(result => result.status === 'rejected');
+        if (failed.length > 0) throw new Error(`${failed.length} student updates failed`);
+        setPromoteProgress(updates.length ? Math.round((done / updates.length) * 90) : 90);
       }
 
-      // Update current term in settings
+      setPromoteStatus('Saving term settings...');
       await dataService.saveSettings(id, {
         ...settings,
         currentTerm: promoteNewTerm,
         academicYear: promoteNewYear,
       });
+      setPromoteProgress(100);
       setSettings(prev => ({ ...prev, currentTerm: promoteNewTerm, academicYear: promoteNewYear }));
 
       window.dispatchEvent(new CustomEvent('studentsUpdated'));
       window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'students' } }));
       setShowPromoteModal(false);
       addToast(`Term started: ${promoted} students promoted, ${graduated} graduated`, 'success');
     } catch (err: any) {
       addToast(err?.message || 'Promotion failed', 'error');
     } finally {
       setIsPromoting(false);
+      setPromoteStatus('');
     }
   }
 
@@ -1018,8 +1047,13 @@ export default function Settings() {
       </form>
 
       {/* Promote Students Modal */}
-      {showPromoteModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      {showPromoteModal && createPortal((
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !isPromoting) setShowPromoteModal(false);
+          }}
+        >
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center gap-3 p-5 border-b border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/20">
               <GraduationCap size={22} className="text-amber-600" />
@@ -1050,6 +1084,14 @@ export default function Settings() {
                 <p>• Current term is updated to Term {promoteNewTerm} / {promoteNewYear}</p>
               </div>
             </div>
+            {isPromoting && (
+              <div className="px-5 pb-4 space-y-2">
+                <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                  <div className="h-full bg-amber-500 transition-all" style={{ width: `${promoteProgress}%` }} />
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{promoteStatus || 'Working...'} {promoteProgress}%</p>
+              </div>
+            )}
             <div className="flex justify-end gap-3 px-5 pb-5">
               <button type="button" onClick={() => setShowPromoteModal(false)} className="btn btn-secondary" disabled={isPromoting}>Cancel</button>
               <button type="button" onClick={handlePromoteStudents} className="btn btn-primary bg-amber-500 hover:bg-amber-600 border-amber-500 flex items-center gap-2" disabled={isPromoting}>
@@ -1059,7 +1101,7 @@ export default function Settings() {
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }

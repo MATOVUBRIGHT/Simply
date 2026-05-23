@@ -71,6 +71,8 @@ export default function Invoices() {
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const [viewMode, setViewMode] = useState<'invoices' | 'students'>('invoices');
   const [selectedStudentForView, setSelectedStudentForView] = useState<any | null>(null);
   
@@ -94,6 +96,7 @@ export default function Invoices() {
   const [termSettings, setTermSettings] = useState<Record<string, string>>({});
   const [showPromotionBanner, setShowPromotionBanner] = useState(false);
   const [expiredTerm, setExpiredTerm] = useState('');
+  const [recordingPaymentId, setRecordingPaymentId] = useState<string | null>(null);
 
   const students = useActiveStudents();
   const { students: allStudents } = useStudents();
@@ -404,17 +407,19 @@ export default function Invoices() {
           continue;
         }
 
-        let invoiceAmount = baseTotal;
-        let description = structuresToApply.map(s => s.name || s.description || 'Fee').join(', ') || 'School Fees';
-        if (discount) {
-          if (discount.type === 'percentage') {
-            invoiceAmount = Math.max(0, invoiceAmount - (invoiceAmount * discount.amount) / 100);
-            description += ` (${discount.amount}% off)`;
-          } else {
-            invoiceAmount = Math.max(0, invoiceAmount - discount.amount);
+        for (const structure of structuresToApply) {
+          let invoiceAmount = structure.amount;
+          let description = structure.name || structure.description || 'Fee';
+          if (discount) {
+            if (discount.type === 'percentage') {
+              invoiceAmount = Math.max(0, invoiceAmount - (invoiceAmount * discount.amount) / 100);
+              description += ` (${discount.amount}% off)`;
+            } else {
+              const share = baseTotal > 0 ? structure.amount / baseTotal : 0;
+              invoiceAmount = Math.max(0, invoiceAmount - discount.amount * share);
+            }
           }
-        }
-        if (invoiceAmount > 0) {
+          if (invoiceAmount <= 0) continue;
           await dataService.create(id, 'fees', {
             id: uuidv4(), studentId: student.id, classId: classIdVal,
             description, amount: invoiceAmount, paidAmount: 0,
@@ -430,6 +435,8 @@ export default function Invoices() {
       setShowStructureModal(false);
       loadBursariesAndDiscounts();
       refreshInvoices();
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'fees' } }));
     } catch (error) {
       console.error('Failed to generate invoices:', error);
       addToast('Failed to generate invoices', 'error');
@@ -490,6 +497,8 @@ export default function Invoices() {
       }
       addToast('Student invoiced successfully', 'success');
       refreshInvoices();
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'fees' } }));
     } catch { addToast('Failed to invoice student', 'error'); }
   }
 
@@ -521,6 +530,7 @@ export default function Invoices() {
   async function markAsPaid(invoiceId: string) {
     const id = schoolId || user?.id;
     if (!id) return;
+    if (recordingPaymentId) return;
     const invoice = invoices.find(i => i.id === invoiceId);
     if (!invoice) return;
 
@@ -528,6 +538,7 @@ export default function Invoices() {
     const paymentAmount = prompt(`Enter payment amount (remaining: ${formatMoney(remainingAmount)}):`, remainingAmount.toString());
     if (!paymentAmount || isNaN(parseFloat(paymentAmount))) return;
 
+    setRecordingPaymentId(invoiceId);
     try {
       await dataService.create(id, 'payments', {
         id: uuidv4(),
@@ -540,8 +551,12 @@ export default function Invoices() {
       } as any);
       addToast('Payment recorded', 'success');
       refreshInvoices();
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'payments' } }));
     } catch (error) {
       addToast('Failed to record payment', 'error');
+    } finally {
+      setRecordingPaymentId(null);
     }
   }
 
@@ -586,14 +601,14 @@ export default function Invoices() {
   function downloadTemplate() {
     const headers = invoiceExpectedFields.map(f => f.label);
     const sampleRows = [['John Doe', 'Term 1 Tuition', '50000', '1']];
-    const csv = [headers.join(','), ...sampleRows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'invoices-import-template.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
-    addToast('Template downloaded', 'success');
+    import('xlsx').then(({ utils, writeFile }) => {
+      const ws = utils.aoa_to_sheet([headers, ...sampleRows]);
+      ws['!cols'] = headers.map(() => ({ wch: 22 }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Invoices');
+      writeFile(wb, 'invoices-import-template.xlsx');
+      addToast('Excel template downloaded', 'success');
+    });
   }
 
   function closeImportModal() {
@@ -603,6 +618,8 @@ export default function Invoices() {
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
+    setIsImporting(false);
+    setImportProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -624,11 +641,24 @@ export default function Invoices() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
-      const headers = parseCSVLine(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
+      let headers: string[] = [];
+      let data: string[][] = [];
+      if (/\.(xlsx|xls)$/i.test(file.name)) {
+        const { read, utils } = await import('xlsx');
+        const workbook = read(await file.arrayBuffer(), { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' })
+          .filter(row => row.some(cell => String(cell ?? '').trim()));
+        if (rows.length < 2) { addToast('Excel file must have headers and at least one data row', 'error'); return; }
+        headers = rows[0].map(cell => String(cell ?? '').trim());
+        data = rows.slice(1).map(row => headers.map((_, index) => String(row[index] ?? '').trim()));
+      } else {
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+        if (lines.length < 2) { addToast('CSV must have headers and at least one data row', 'error'); return; }
+        headers = parseCSVLine(lines[0]);
+        data = lines.slice(1).map(line => parseCSVLine(line));
+      }
       setCsvHeaders(headers);
       setCsvData(data);
       const autoMapping: Record<string, string> = {};
@@ -639,7 +669,7 @@ export default function Invoices() {
       setFieldMapping(autoMapping);
       setImportStep('map');
       setShowImportModal(true);
-    } catch (error) { addToast('Failed to read CSV file', 'error'); }
+    } catch (error) { addToast('Failed to read import file', 'error'); }
     event.target.value = '';
   }
 
@@ -664,16 +694,26 @@ export default function Invoices() {
 
   async function executeImport() {
     if (importPreview.length === 0 || !user?.id) { addToast('No valid invoices to import', 'error'); return; }
+    if (isImporting) return;
+    setIsImporting(true);
+    setImportProgress(0);
     try {
       const now = new Date().toISOString();
       const year = new Date().getFullYear().toString();
       let successCount = 0;
 
-      for (const data of importPreview) {
+      for (let i = 0; i < importPreview.length; i++) {
+        const data = importPreview[i];
         const student = students.find(s => `${s.firstName} ${s.lastName}` === data.studentName);
-        if (!student) continue;
+        if (!student) {
+          setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
+          continue;
+        }
         const id = schoolId || user?.id;
-        if (!id) continue;
+        if (!id) {
+          setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
+          continue;
+        }
         const fee: Fee = {
           id: uuidv4(),
           studentId: student.id,
@@ -685,11 +725,15 @@ export default function Invoices() {
         };
         await dataService.create(id, 'fees', fee as any);
         successCount++;
+        setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
       }
       addToast(`Successfully imported ${successCount} invoices`, 'success');
       closeImportModal();
       refreshInvoices();
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'fees' } }));
     } catch (error) { addToast('Failed to import invoices', 'error'); }
+    finally { setIsImporting(false); }
   }
 
   const filteredInvoices = invoices.filter(inv => {
@@ -790,7 +834,7 @@ export default function Invoices() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".csv"
+            accept=".csv,.xlsx,.xls"
             className="hidden"
           />
           <button onClick={() => setShowStructureModal(true)} className="btn btn-secondary">
@@ -1244,9 +1288,13 @@ export default function Invoices() {
                         {invoice.status !== 'paid' && (
                           <button
                             onClick={() => markAsPaid(invoice.id)}
-                            className="btn btn-secondary text-sm py-1.5"
+                            disabled={!!recordingPaymentId}
+                            className="btn btn-secondary text-sm py-1.5 disabled:opacity-70"
                           >
-                            <DollarSign size={14} /> Record
+                            {recordingPaymentId === invoice.id
+                              ? <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                              : <DollarSign size={14} />}
+                            {recordingPaymentId === invoice.id ? 'Saving...' : 'Record'}
                           </button>
                         )}
                       </td>
@@ -1369,15 +1417,18 @@ export default function Invoices() {
         </div>
       )}
 
-      {showImportModal && (
-        <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
+      {showImportModal && createPortal((
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto"
+          onClick={(e) => { if (e.target === e.currentTarget && !isImporting) closeImportModal(); }}
+        >
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
                 <h2 className="font-bold text-white">Import Invoices</h2>
               </div>
-              <button onClick={closeImportModal} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+              <button onClick={closeImportModal} disabled={isImporting} className="p-1 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-50">
                 <X size={18} className="text-white" />
               </button>
             </div>
@@ -1396,7 +1447,7 @@ export default function Invoices() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel or CSV file</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
 
@@ -1451,7 +1502,7 @@ export default function Invoices() {
                   </div>
 
                   <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={closeImportModal} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
+                    <button onClick={closeImportModal} disabled={isImporting} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
                     <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
                       Preview <ArrowRight size={14} />
                     </button>
@@ -1502,9 +1553,20 @@ export default function Invoices() {
                   </div>
 
                   <div className="flex justify-between pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
-                      <CheckIcon size={14} /> Import {importPreview.length}
+                    <div className="flex-1 max-w-40">
+                      {isImporting && (
+                        <>
+                          <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${importProgress}%` }} />
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-500">{importProgress}% imported</p>
+                        </>
+                      )}
+                    </div>
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
+                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                      {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <CheckIcon size={14} />}
+                      {isImporting ? 'Importing...' : `Import ${importPreview.length}`}
                     </button>
                   </div>
                 </div>
@@ -1512,7 +1574,7 @@ export default function Invoices() {
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {showStructureModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }} onClick={e => { if (e.target === e.currentTarget) setShowStructureModal(false); }}>

@@ -86,6 +86,7 @@ export default function Finance() {
   async function handleRecordPayment(feeId: string, studentId: string, _amount: number) {
     const id = schoolId || user?.id;
     if (!id || !payModal) return;
+    if (isRecordingPayment) return;
     const parsed = parseFloat(payAmount);
     if (isNaN(parsed) || parsed <= 0) { addToast('Enter a valid amount', 'error'); return; }
     setIsRecordingPayment(true);
@@ -98,6 +99,8 @@ export default function Finance() {
         createdAt: new Date().toISOString(),
       } as any);
       addToast('Payment recorded', 'success');
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'payments' } }));
       setPayModal(null);
     } catch { addToast('Failed to record payment', 'error'); }
     finally { setIsRecordingPayment(false); }

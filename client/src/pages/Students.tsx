@@ -1,4 +1,5 @@
 ﻿﻿import { useEffect, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, Settings, Edit } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -161,6 +162,8 @@ export default function Students() {
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<Partial<Student>[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const [flaggedItems, setFlaggedItems] = useState<Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }>>({});
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
@@ -831,14 +834,14 @@ export default function Students() {
       }
     });
     
-    const csv = [headers.join(','), sampleRow.join(',')].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'student-import-template.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
-    addToast('Template downloaded', 'success');
+    import('xlsx').then(({ utils, writeFile }) => {
+      const ws = utils.aoa_to_sheet([headers, sampleRow]);
+      ws['!cols'] = headers.map(() => ({ wch: 22 }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Students');
+      writeFile(wb, 'student-import-template.xlsx');
+      addToast('Excel template downloaded', 'success');
+    });
   }
 
   function closeImportModal() {
@@ -849,6 +852,8 @@ export default function Students() {
     setFieldMapping({});
     setImportPreview([]);
     setPlanLimitMessage(null);
+    setIsImporting(false);
+    setImportProgress(0);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -859,16 +864,31 @@ export default function Students() {
     if (!file) return;
 
     try {
-      const text = await file.text();
-      const lines = text.split('\n').filter(line => line.trim());
-      
-      if (lines.length < 2) {
-        addToast('CSV file must have headers and at least one data row', 'error');
-        return;
-      }
+      let headers: string[] = [];
+      let data: string[][] = [];
 
-      const headers = parseCSVHeaders(lines[0]);
-      const data = lines.slice(1).map(line => parseCSVLine(line));
+      if (/\.(xlsx|xls)$/i.test(file.name)) {
+        const { read, utils } = await import('xlsx');
+        const workbook = read(await file.arrayBuffer(), { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' })
+          .filter(row => row.some(cell => String(cell ?? '').trim()));
+        if (rows.length < 2) {
+          addToast('Excel file must have headers and at least one data row', 'error');
+          return;
+        }
+        headers = rows[0].map(cell => String(cell ?? '').trim());
+        data = rows.slice(1).map(row => headers.map((_, index) => String(row[index] ?? '').trim()));
+      } else {
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+        if (lines.length < 2) {
+          addToast('CSV file must have headers and at least one data row', 'error');
+          return;
+        }
+        headers = parseCSVHeaders(lines[0]);
+        data = lines.slice(1).map(line => parseCSVLine(line));
+      }
       
       setCsvHeaders(headers);
       setCsvData(data);
@@ -890,7 +910,7 @@ export default function Students() {
       setShowImportModal(true);
     } catch (error) {
       console.error('File read error:', error);
-      addToast('Failed to read CSV file', 'error');
+      addToast('Failed to read import file', 'error');
     }
 
     event.target.value = '';
@@ -991,6 +1011,10 @@ export default function Students() {
       return;
     }
 
+    if (isImporting) return;
+    setIsImporting(true);
+    setImportProgress(0);
+
     try {
       const now = new Date().toISOString();
       let successCount = 0;
@@ -1018,12 +1042,14 @@ export default function Students() {
         addToast('Choose an active plan before importing students.', 'error');
         setPlanLimitMessage('Choose an active plan before importing students.');
         navigate('/plans');
+        setIsImporting(false);
         return;
       }
       if (newEnrolledCount > access.remaining) {
         const message = `Plan limit reached. You can add ${access.remaining} more enrolled student${access.remaining === 1 ? '' : 's'} on ${access.plan.name}, but this import adds ${newEnrolledCount}.`;
         setPlanLimitMessage(message);
         addToast(message, 'error');
+        setIsImporting(false);
         return;
       }
 
@@ -1035,6 +1061,7 @@ export default function Students() {
         if (flagged) {
           if (flagged.action === 'skip') {
             skippedCount++;
+            setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
             continue;
           } else if (flagged.action === 'duplicate') {
             let newId = studentId;
@@ -1124,6 +1151,7 @@ export default function Students() {
           await dataService.create(id, 'students', student as any);
           successCount++;
         }
+        setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
       }
 
       const parts: string[] = [];
@@ -1133,9 +1161,15 @@ export default function Students() {
       
       addToast(parts.join(', ') || 'Import complete', 'success');
       closeImportModal();
+      window.dispatchEvent(new CustomEvent('studentsUpdated'));
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'students' } }));
+      void loadData();
     } catch (error) {
       console.error('Import error:', error);
       addToast('Failed to import students', 'error');
+    } finally {
+      setIsImporting(false);
     }
   }
 
@@ -1231,7 +1265,7 @@ export default function Students() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".csv"
+            accept=".csv,.xlsx,.xls"
             className="hidden"
           />
           <Link to="/admission" className="btn btn-primary">
@@ -1948,8 +1982,13 @@ export default function Students() {
         />
       )}
 
-      {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
+      {showImportModal && createPortal((
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !isImporting) closeImportModal();
+          }}
+        >
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
@@ -1958,7 +1997,7 @@ export default function Students() {
                   Import {viewFilter === 'completed' ? 'School Records' : viewFilter === 'all' ? 'Students' : viewFilter === 'active' ? 'Active Students' : 'Deactivated Students'}
                 </h2>
               </div>
-              <button onClick={closeImportModal} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+              <button onClick={closeImportModal} disabled={isImporting} className="p-1 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-50">
                 <X size={18} className="text-white" />
               </button>
             </div>
@@ -1977,7 +2016,7 @@ export default function Students() {
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload CSV file</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel or CSV file</p>
                     <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
                   </div>
 
@@ -2032,7 +2071,7 @@ export default function Students() {
                   </div>
 
                   <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={closeImportModal} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
+                    <button onClick={closeImportModal} disabled={isImporting} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
                     <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
                       Preview <ArrowRight size={14} />
                     </button>
@@ -2143,9 +2182,20 @@ export default function Students() {
                   </div>
 
                   <div className="flex justify-between px-5 py-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-2 px-4">Back to Mapping</button>
-                    <button onClick={executeImport} className="btn btn-primary py-2 px-4 flex items-center gap-2">
-                      <Check size={16} /> Import Selected
+                    <div className="flex-1 max-w-xs">
+                      {isImporting && (
+                        <>
+                          <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${importProgress}%` }} />
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500">{importProgress}% imported</p>
+                        </>
+                      )}
+                    </div>
+                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-2 px-4" disabled={isImporting}>Back to Mapping</button>
+                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-2 px-4 flex items-center gap-2 disabled:opacity-70">
+                      {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check size={16} />}
+                      {isImporting ? 'Importing...' : 'Import Selected'}
                     </button>
                   </div>
                 </div>
@@ -2153,7 +2203,7 @@ export default function Students() {
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
       {(
         <BulkEditClassModal
           isOpen={showBulkEditModal}

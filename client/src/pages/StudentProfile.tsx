@@ -149,6 +149,7 @@ export default function StudentProfile() {
 
   async function handleRecordPayment() {
     if (!showPayModal || !id) return;
+    if (paying) return;
     const amount = parseFloat(payAmount);
     if (!amount || amount <= 0 || amount > showPayModal.remaining) {
       addToast(`Enter a valid amount (max ${formatMoney(showPayModal.remaining)})`, 'error');
@@ -167,6 +168,8 @@ export default function StudentProfile() {
         createdAt: new Date().toISOString(),
       } as any);
       addToast('Payment recorded', 'success');
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'payments' } }));
       setShowPayModal(null);
     } catch { addToast('Failed to record payment', 'error'); }
     finally { setPaying(false); }
