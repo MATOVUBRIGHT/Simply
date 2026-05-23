@@ -19,6 +19,8 @@ type UpdateState = {
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CACHE_KEY = 'schofy_desktop_update_check';
 const DISMISS_PREFIX = 'schofy_desktop_update_dismissed_';
+const DEFAULT_MANIFEST_URL =
+  'https://raw.githubusercontent.com/MATOVUBRIGHT/Simply/main/desktop/update-manifest.json';
 
 function normalizeVersion(version: string): number[] {
   return version
@@ -43,7 +45,8 @@ function isNewerVersion(latest: string, current: string): boolean {
 }
 
 async function loadManifest(): Promise<UpdateManifest | null> {
-  const manifestUrl = import.meta.env.VITE_DESKTOP_UPDATE_MANIFEST_URL as string | undefined;
+  const manifestUrl =
+    (import.meta.env.VITE_DESKTOP_UPDATE_MANIFEST_URL as string | undefined) || DEFAULT_MANIFEST_URL;
   const fallbackVersion = import.meta.env.VITE_DESKTOP_LATEST_VERSION as string | undefined;
   const fallbackDownloadUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_URL as string | undefined;
 
