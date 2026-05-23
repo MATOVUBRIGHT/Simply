@@ -79,7 +79,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   students: [
     'id','school_id','student_id','first_name','last_name','gender','dob','class_id',
     'stream','address','guardian_name','guardian_phone','guardian_email','medical_info',
-    'photo_url','status','admission_no','tuition_fee','boarding_fee',
+    'photo_url','status','admission_no','boarding_status','tuition_fee','boarding_fee',
     'requirements','custom_fields','attachments','completed_term','completed_year',
     'created_at','updated_at',
   ],
@@ -138,11 +138,11 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     'created_at','updated_at',
   ],
   bursaries: [
-    'id','school_id','student_id','student_name','amount','term','year','reason',
+    'id','school_id','student_id','student_name','amount','is_full','term','year','reason',
     'created_at','updated_at',
   ],
   discounts: [
-    'id','school_id','class_id','class_name','type','amount','term','year',
+    'id','school_id','class_id','class_name','student_id','student_name','type','amount','term','year',
     'created_at','updated_at',
   ],
   invoices: [

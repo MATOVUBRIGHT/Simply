@@ -280,6 +280,7 @@ class UserDatabaseManager {
           { name: 'discounts', indexes: [
             { name: 'schoolId', keyPath: 'schoolId' },
             { name: 'classId', keyPath: 'classId' },
+            { name: 'studentId', keyPath: 'studentId' },
             { name: 'updatedAt', keyPath: 'updatedAt' }
           ]},
           { name: 'payments', indexes: [

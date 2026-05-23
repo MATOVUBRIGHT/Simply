@@ -13,6 +13,7 @@ import { useTableData } from '../lib/store';
 import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor, generateInvoicesFromStructure } from '../utils/feeStructures';
 import { ClassOption } from '../utils/classroom';
 import DropdownModal from '../components/DropdownModal';
+import { matchesStudentSearch } from '../utils/studentSearch';
 
 interface Invoice {
   id: string;
@@ -33,6 +34,7 @@ interface Bursary {
   studentId: string;
   studentName: string;
   amount: number;
+  isFull?: boolean;
   term: string;
   year: string;
   createdAt: string;
@@ -40,8 +42,10 @@ interface Bursary {
 
 interface Discount {
   id: string;
-  classId: string;
-  className: string;
+  studentId?: string;
+  studentName?: string;
+  classId?: string;
+  className?: string;
   amount: number;
   type: 'fixed' | 'percentage';
   term: string;
@@ -89,10 +93,15 @@ export default function Invoices() {
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [bursaries, setBursaries] = useState<Bursary[]>([]);
   const [discounts, setDiscounts] = useState<Discount[]>([]);
-  const [newBursary, setNewBursary] = useState({ studentId: '', amount: 0 });
-  const [newDiscount, setNewDiscount] = useState({ classId: '', amount: 0, type: 'fixed' as 'fixed' | 'percentage' });
+  const [newBursary, setNewBursary] = useState({ amount: 0, isFull: false });
+  const [selectedBursaryStudentIds, setSelectedBursaryStudentIds] = useState<string[]>([]);
+  const [newDiscount, setNewDiscount] = useState({ amount: 0, type: 'fixed' as 'fixed' | 'percentage' });
+  const [selectedDiscountStudentIds, setSelectedDiscountStudentIds] = useState<string[]>([]);
   const [searchStudent, setSearchStudent] = useState('');
   const [filterBursaryClass, setFilterBursaryClass] = useState<string>('all');
+  const [searchDiscountStudent, setSearchDiscountStudent] = useState('');
+  const [filterDiscountClass, setFilterDiscountClass] = useState<string>('all');
+  const [applyClassIds, setApplyClassIds] = useState<string[]>([]);
   const [termSettings, setTermSettings] = useState<Record<string, string>>({});
   const [showPromotionBanner, setShowPromotionBanner] = useState(false);
   const [expiredTerm, setExpiredTerm] = useState('');
@@ -106,6 +115,39 @@ export default function Invoices() {
   const { data: settingsData } = useTableData(sid, 'settings');
   const fees = feesData as any[];
   const payments = paymentsData as any[];
+  const filteredBursaryStudents = useMemo(() => {
+    return students.filter((student: any) => {
+      if (filterBursaryClass !== 'all' && student.classId !== filterBursaryClass) return false;
+      return matchesStudentSearch(student, searchStudent, [classes.find(c => c.id === student.classId)?.name || '']);
+    });
+  }, [students, filterBursaryClass, searchStudent, classes]);
+  const filteredDiscountStudents = useMemo(() => {
+    return students.filter((student: any) => {
+      if (filterDiscountClass !== 'all' && student.classId !== filterDiscountClass) return false;
+      return matchesStudentSearch(student, searchDiscountStudent, [classes.find(c => c.id === student.classId)?.name || '']);
+    });
+  }, [students, filterDiscountClass, searchDiscountStudent, classes]);
+  const feeStructureGroups = useMemo(() => {
+    const order = [
+      FeeCategory.TUITION,
+      FeeCategory.BOARDING,
+      FeeCategory.EXAM,
+      FeeCategory.REGISTRATION,
+      FeeCategory.UNIFORM,
+      FeeCategory.BOOKS,
+      FeeCategory.TRANSPORT,
+      FeeCategory.ACTIVITY,
+      FeeCategory.OTHER,
+    ];
+    return order
+      .map(category => ({
+        category,
+        items: feeStructures
+          .filter(structure => structure.category === category)
+          .sort((a, b) => Number(b.isRequired) - Number(a.isRequired) || a.name.localeCompare(b.name)),
+      }))
+      .filter(group => group.items.length > 0);
+  }, [feeStructures]);
 
   // Derive bank accounts from settings for invoice display
   const bankAccounts = useMemo(() => {
@@ -364,6 +406,59 @@ export default function Invoices() {
     }
   }
 
+  async function handleApplyStructuresToClasses() {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    if (selectedStructureIds.length === 0) {
+      addToast('Select fees or requirements to apply', 'error');
+      return;
+    }
+    if (applyClassIds.length === 0) {
+      addToast('Select at least one class', 'error');
+      return;
+    }
+
+    try {
+      const existing = await dataService.getAll(id, 'feeStructures');
+      const selected = feeStructures.filter(structure => selectedStructureIds.includes(structure.id));
+      let createdCount = 0;
+
+      for (const targetClassId of applyClassIds) {
+        for (const structure of selected) {
+          const duplicate = existing.find((item: any) =>
+            item.classId === targetClassId &&
+            item.name?.toLowerCase() === structure.name?.toLowerCase() &&
+            item.category === structure.category &&
+            item.term === selectedTerm &&
+            String(item.year) === String(selectedYear)
+          );
+          if (duplicate) continue;
+
+          const copy: FeeStructure = {
+            ...structure,
+            id: uuidv4(),
+            classId: targetClassId,
+            term: selectedTerm,
+            year: parseInt(selectedYear) as any,
+            createdAt: new Date().toISOString(),
+            updatedAt: undefined,
+          };
+          await dataService.create(id, 'feeStructures', copy as any);
+          existing.push(copy as any);
+          createdCount++;
+        }
+      }
+
+      setApplyClassIds([]);
+      addToast(createdCount > 0 ? `Applied ${createdCount} fees/requirements to selected classes` : 'Selected classes already have these fees/requirements', createdCount > 0 ? 'success' : 'info');
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'feeStructures' } }));
+    } catch (error) {
+      console.error('Failed to apply fee structures:', error);
+      addToast('Failed to apply fees/requirements', 'error');
+    }
+  }
+
   async function handleGenerateInvoices() {
     if (selectedStructureIds.length === 0) {
       addToast('Please select at least one fee structure', 'error');
@@ -375,10 +470,9 @@ export default function Invoices() {
       const isUUID = (v: any) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
       const studentsInClass = students.filter(s => s.classId === selectedClassId && isUUID(s.id));
       const classBursaries = bursaries.filter(b => b.term === selectedTerm && String(b.year) === String(selectedYear));
-      const classDiscounts = discounts.filter(d => d.classId === selectedClassId && d.term === selectedTerm && String(d.year) === String(selectedYear));
+      const termDiscounts = discounts.filter(d => d.term === selectedTerm && String(d.year) === String(selectedYear));
       const structuresToApply = feeStructures.filter(s => selectedStructureIds.includes(s.id));
       const baseTotal = structuresToApply.reduce((sum, s) => sum + s.amount, 0);
-      const discount = classDiscounts[0];
       const dueDate = new Date(); dueDate.setMonth(dueDate.getMonth() + 3);
       const dueDateStr = dueDate.toISOString().split('T')[0];
       const yearInt = parseInt(selectedYear);
@@ -399,7 +493,8 @@ export default function Invoices() {
         if (studentBursary) {
           await dataService.create(id, 'fees', {
             id: uuidv4(), studentId: student.id, classId: classIdVal,
-            description: 'Bursary Invoice', amount: studentBursary.amount,
+            description: studentBursary.isFull ? 'Full Bursary' : 'Bursary Invoice',
+            amount: studentBursary.isFull ? 0 : studentBursary.amount,
             paidAmount: 0, dueDate: dueDateStr, term: selectedTerm,
             year: yearInt, status: 'pending', createdAt: now,
           } as any);
@@ -408,6 +503,7 @@ export default function Invoices() {
         }
 
         for (const structure of structuresToApply) {
+          const discount = termDiscounts.find(d => d.studentId === student.id) || termDiscounts.find(d => !d.studentId && d.classId === selectedClassId);
           let invoiceAmount = structure.amount;
           let description = structure.name || structure.description || 'Fee';
           if (discount) {
@@ -478,12 +574,13 @@ export default function Invoices() {
         dataService.getAll(id, 'discounts'),
       ]);
       const bursary = allBursaries.find((b: any) => b.studentId === studentId && b.term === selectedTerm && b.year === selectedYear);
-      const discount = allDiscounts.find((d: any) => d.classId === classId && d.term === selectedTerm && d.year === selectedYear);
+      const discount = allDiscounts.find((d: any) => d.studentId === studentId && d.term === selectedTerm && String(d.year) === String(selectedYear)) ||
+        allDiscounts.find((d: any) => !d.studentId && d.classId === classId && d.term === selectedTerm && String(d.year) === String(selectedYear));
       const applicable = structures.filter(s => s.isRequired || s.category === 'tuition' || s.category === 'boarding');
       const baseTotal = applicable.reduce((sum, s) => sum + s.amount, 0);
       const now = new Date().toISOString();
       if (bursary) {
-        await dataService.create(id, 'fees', { id: uuidv4(), studentId, classId, description: `Bursary Invoice`, amount: bursary.amount, term: selectedTerm, year: selectedYear, createdAt: now } as any);
+        await dataService.create(id, 'fees', { id: uuidv4(), studentId, classId, description: bursary.isFull ? 'Full Bursary' : 'Bursary Invoice', amount: bursary.isFull ? 0 : bursary.amount, term: selectedTerm, year: selectedYear, createdAt: now } as any);
       } else {
         for (const structure of applicable) {
           let amount = structure.amount;
@@ -1719,61 +1816,108 @@ export default function Invoices() {
                       Total per student: <span className="font-bold text-primary-600">{formatMoney(feeStructures.reduce((sum, s) => sum + s.amount, 0))}</span>
                     </p>
                   </div>
-                  {feeStructures.map(structure => (
-                    <div 
-                      key={structure.id}
-                      className={`flex items-center justify-between p-3 rounded-xl border-2 transition-all ${
-                        selectedStructureIds.includes(structure.id)
-                          ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={selectedStructureIds.includes(structure.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedStructureIds([...selectedStructureIds, structure.id]);
-                            } else {
-                              setSelectedStructureIds(selectedStructureIds.filter(id => id !== structure.id));
-                            }
-                          }}
-                          className="w-5 h-5 rounded border-slate-300"
-                        />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium text-slate-800 dark:text-white">{structure.name}</p>
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getCategoryColor(structure.category)}`}>
-                              {getCategoryLabel(structure.category)}
-                            </span>
-                            {structure.isRequired && (
-                              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
-                                Required
-                              </span>
-                            )}
-                          </div>
-                          {structure.description && (
-                            <p className="text-xs text-slate-500 mt-0.5">{structure.description}</p>
-                          )}
+                  {feeStructureGroups.map(group => (
+                    <div key={group.category} className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                      <div className="px-4 py-2 bg-slate-100 dark:bg-slate-700/60 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getCategoryColor(group.category)}`}>
+                            {getCategoryLabel(group.category)}
+                          </span>
+                          <span className="text-xs text-slate-500">{group.items.length} item{group.items.length !== 1 ? 's' : ''}</span>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="font-bold text-lg text-slate-800 dark:text-white">
-                          {formatMoney(structure.amount)}
+                        <span className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                          {formatMoney(group.items.reduce((sum, structure) => sum + structure.amount, 0))}
                         </span>
-                        <button
-                          onClick={() => handleDeleteStructure(structure.id)}
-                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                      </div>
+                      <div className="divide-y divide-slate-200 dark:divide-slate-700">
+                        {group.items.map(structure => (
+                          <div 
+                            key={structure.id}
+                            className={`flex items-center justify-between p-3 transition-all ${
+                              selectedStructureIds.includes(structure.id)
+                                ? 'bg-primary-50 dark:bg-primary-900/20'
+                                : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={selectedStructureIds.includes(structure.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedStructureIds([...selectedStructureIds, structure.id]);
+                                  } else {
+                                    setSelectedStructureIds(selectedStructureIds.filter(id => id !== structure.id));
+                                  }
+                                }}
+                                className="w-5 h-5 rounded border-slate-300"
+                              />
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-medium text-slate-800 dark:text-white">{structure.name}</p>
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${structure.isRequired ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
+                                    {structure.isRequired ? 'Requirement' : 'Optional fee'}
+                                  </span>
+                                </div>
+                                {structure.description && (
+                                  <p className="text-xs text-slate-500 mt-0.5 truncate">{structure.description}</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4 shrink-0">
+                              <span className="font-bold text-lg text-slate-800 dark:text-white">
+                                {formatMoney(structure.amount)}
+                              </span>
+                              <button
+                                onClick={() => handleDeleteStructure(structure.id)}
+                                className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
+
+            {feeStructures.length > 0 && (
+              <div className="px-5 pb-5">
+                <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-600 p-4 bg-white dark:bg-slate-800">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div>
+                      <p className="font-semibold text-slate-800 dark:text-white">Apply selected fees or requirements</p>
+                      <p className="text-xs text-slate-500">Copy the selected items to other classes for this term and year.</p>
+                    </div>
+                    <button
+                      onClick={handleApplyStructuresToClasses}
+                      disabled={selectedStructureIds.length === 0 || applyClassIds.length === 0}
+                      className="btn btn-secondary disabled:opacity-50"
+                    >
+                      <ArrowRight size={16} /> Apply to Classes
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {classes.filter(c => c.id !== selectedClassId).map(c => (
+                      <label key={c.id} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${applyClassIds.includes(c.id) ? 'border-primary-400 bg-primary-50 dark:bg-primary-900/20' : 'border-slate-200 dark:border-slate-700'}`}>
+                        <input
+                          type="checkbox"
+                          checked={applyClassIds.includes(c.id)}
+                          onChange={(e) => {
+                            setApplyClassIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id));
+                          }}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        <span className="text-slate-700 dark:text-slate-200">{c.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="p-5 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
               <div>
@@ -1795,7 +1939,7 @@ export default function Invoices() {
                   disabled={selectedStructureIds.length === 0}
                   className="btn btn-primary disabled:opacity-50"
                 >
-                  <FileText size={16} /> Generate Invoices for Class
+                  <FileText size={16} /> Apply Fees / Requirements
                 </button>
               </div>
             </div>
@@ -1805,14 +1949,14 @@ export default function Invoices() {
 
       {showBursaryModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }} onClick={e => { if (e.target === e.currentTarget) setShowBursaryModal(false); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700 my-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700 my-4" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
                   <Award size={24} className="text-amber-500" />
                   Bursary Management
                 </h2>
-                <p className="text-sm text-slate-500 mt-1">Manage student bursaries/scholarships</p>
+                <p className="text-sm text-slate-500 mt-1">Select one or more students. Bursary invoices override class fee structures.</p>
               </div>
               <button onClick={() => setShowBursaryModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
                 <X size={20} />
@@ -1824,13 +1968,13 @@ export default function Invoices() {
                 <div className="flex-1">
                   <label className="form-label">Search Student</label>
                   <div className="relative">
-                    <SearchIcon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <SearchIcon size={18} className="search-input-icon" />
                     <input
                       type="text"
                       value={searchStudent}
                       onChange={(e) => setSearchStudent(e.target.value)}
-                      className="form-input pl-10"
-                      placeholder="Search by name or ID..."
+                      className="search-input"
+                      placeholder="Search full name or ID..."
                     />
                   </div>
                 </div>
@@ -1849,68 +1993,95 @@ export default function Invoices() {
                 </div>
               </div>
               
-              <div className="mt-4 flex gap-4 items-end">
-                <div className="flex-1">
-                  <label className="form-label">Select Student</label>
-                  <select 
-                    value={newBursary.studentId} 
-                    onChange={(e) => setNewBursary({...newBursary, studentId: e.target.value})}
-                    className="form-input"
+              <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-4">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 max-h-56 overflow-y-auto">
+                  <div className="sticky top-0 z-10 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{selectedBursaryStudentIds.length} selected</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const visibleIds = filteredBursaryStudents.map(s => s.id);
+                        const allVisibleSelected = visibleIds.every(id => selectedBursaryStudentIds.includes(id));
+                        setSelectedBursaryStudentIds(allVisibleSelected ? selectedBursaryStudentIds.filter(id => !visibleIds.includes(id)) : Array.from(new Set([...selectedBursaryStudentIds, ...visibleIds])));
+                      }}
+                      className="text-xs font-semibold text-primary-600 hover:underline"
+                    >
+                      {filteredBursaryStudents.every(s => selectedBursaryStudentIds.includes(s.id)) ? 'Clear visible' : 'Select visible'}
+                    </button>
+                  </div>
+                  {filteredBursaryStudents.length === 0 ? (
+                    <p className="p-4 text-sm text-slate-500">No students match the filter.</p>
+                  ) : filteredBursaryStudents.map(s => (
+                    <label key={s.id} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-100 dark:border-slate-700 last:border-b-0 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                      <span className="flex items-center gap-3 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedBursaryStudentIds.includes(s.id)}
+                          onChange={(e) => setSelectedBursaryStudentIds(prev => e.target.checked ? [...prev, s.id] : prev.filter(id => id !== s.id))}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-slate-800 dark:text-white truncate">{s.firstName} {s.lastName}</span>
+                          <span className="block text-xs text-slate-500 truncate">{s.studentId || s.admissionNo || 'No ID'} · {classes.find(c => c.id === s.classId)?.name || 'No class'}</span>
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  <label className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 p-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newBursary.isFull}
+                      onChange={(e) => setNewBursary({...newBursary, isFull: e.target.checked, amount: e.target.checked ? 0 : newBursary.amount})}
+                      className="w-4 h-4 rounded border-slate-300"
+                    />
+                    <span className="text-sm font-medium text-amber-800 dark:text-amber-200">Full bursary</span>
+                  </label>
+                  <div>
+                    <label className="form-label">Invoice amount ({currency.symbol})</label>
+                    <input
+                      type="number"
+                      value={newBursary.amount || ''}
+                      onChange={(e) => setNewBursary({...newBursary, amount: parseFloat(e.target.value) || 0})}
+                      className="form-input"
+                      placeholder="0.00"
+                      disabled={newBursary.isFull}
+                    />
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      if (selectedBursaryStudentIds.length === 0 || (!newBursary.isFull && newBursary.amount <= 0)) {
+                        addToast('Select students and enter a bursary amount', 'error');
+                        return;
+                      }
+                      const created: Bursary[] = [];
+                      for (const studentId of selectedBursaryStudentIds) {
+                        const student = students.find(s => s.id === studentId);
+                        if (!student) continue;
+                        const bursary: Bursary = {
+                          id: uuidv4(),
+                          studentId,
+                          studentName: `${student.firstName} ${student.lastName}`,
+                          amount: newBursary.isFull ? 0 : newBursary.amount,
+                          isFull: newBursary.isFull,
+                          term: selectedTerm,
+                          year: selectedYear,
+                          createdAt: new Date().toISOString(),
+                        };
+                        await dataService.create(sid, 'bursaries', bursary as any);
+                        created.push(bursary);
+                      }
+                      setBursaries([...bursaries, ...created]);
+                      setSelectedBursaryStudentIds([]);
+                      setNewBursary({ amount: 0, isFull: false });
+                      addToast(`Bursary added for ${created.length} student${created.length !== 1 ? 's' : ''}`, 'success');
+                    }}
+                    className="btn btn-primary w-full justify-center"
                   >
-                    <option value="">Select a student...</option>
-                    {students
-                      .filter(s => {
-                        if (filterBursaryClass !== 'all' && s.classId !== filterBursaryClass) return false;
-                        if (searchStudent) {
-                          const search = searchStudent.toLowerCase();
-                          return s.firstName.toLowerCase().includes(search) || 
-                                 s.lastName.toLowerCase().includes(search) ||
-                                 (s.studentId || s.admissionNo || '').toLowerCase().includes(search);
-                        }
-                        return true;
-                      })
-                      .slice(0, 20)
-                      .map(s => (
-                        <option key={s.id} value={s.id}>{s.firstName} {s.lastName} - {s.studentId || s.admissionNo}</option>
-                      ))
-                    }
-                  </select>
+                    <UserPlus size={16} /> Add Bursary
+                  </button>
                 </div>
-                <div className="w-40">
-                  <label className="form-label">Amount ({currency.symbol})</label>
-                  <input
-                    type="number"
-                    value={newBursary.amount || ''}
-                    onChange={(e) => setNewBursary({...newBursary, amount: parseFloat(e.target.value) || 0})}
-                    className="form-input"
-                    placeholder="0.00"
-                  />
-                </div>
-                <button 
-                  onClick={async () => {
-                    if (!newBursary.studentId || newBursary.amount <= 0) {
-                      addToast('Please select a student and enter amount', 'error');
-                      return;
-                    }
-                    const student = students.find(s => s.id === newBursary.studentId);
-                    const bursary: Bursary = {
-                      id: uuidv4(),
-                      studentId: newBursary.studentId,
-                      studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
-                      amount: newBursary.amount,
-                      term: selectedTerm,
-                      year: selectedYear,
-                      createdAt: new Date().toISOString(),
-                    };
-                    await dataService.create(user!.id, 'bursaries', bursary as any);
-                    setBursaries([...bursaries, bursary]);
-                    setNewBursary({ studentId: '', amount: 0 });
-                    addToast('Bursary added successfully', 'success');
-                  }}
-                  className="btn btn-primary"
-                >
-                  <UserPlus size={16} /> Add
-                </button>
               </div>
             </div>
 
@@ -1930,10 +2101,10 @@ export default function Invoices() {
                         <p className="text-xs text-slate-500">Term {b.term}, {b.year}</p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="font-bold text-amber-600">{formatMoney(b.amount)}</span>
+                        <span className="font-bold text-amber-600">{b.isFull ? 'Full bursary' : formatMoney(b.amount)}</span>
                         <button
                           onClick={async () => {
-                            await dataService.delete(user!.id, 'bursaries', b.id);
+                            await dataService.delete(sid, 'bursaries', b.id);
                             setBursaries(bursaries.filter(br => br.id !== b.id));
                             addToast('Bursary removed', 'success');
                           }}
@@ -1962,14 +2133,14 @@ export default function Invoices() {
 
       {showDiscountModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }} onClick={e => { if (e.target === e.currentTarget) setShowDiscountModal(false); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700 my-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700 my-4" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
                   <Percent size={24} className="text-cyan-500" />
-                  Class Discount Management
+                  Student Discount Management
                 </h2>
-                <p className="text-sm text-slate-500 mt-1">Set percentage or fixed amount discounts per class</p>
+                <p className="text-sm text-slate-500 mt-1">Select one or more students and reduce their generated invoices.</p>
               </div>
               <button onClick={() => setShowDiscountModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
                 <X size={20} />
@@ -1979,66 +2150,130 @@ export default function Invoices() {
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
               <div className="flex gap-4 items-end">
                 <div className="flex-1">
-                  <label className="form-label">Class</label>
+                  <label className="form-label">Search Student</label>
+                  <div className="relative">
+                    <SearchIcon size={18} className="search-input-icon" />
+                    <input
+                      type="text"
+                      value={searchDiscountStudent}
+                      onChange={(e) => setSearchDiscountStudent(e.target.value)}
+                      className="search-input"
+                      placeholder="Search full name or ID..."
+                    />
+                  </div>
+                </div>
+                <div className="w-40">
+                  <label className="form-label">Class Filter</label>
                   <select 
-                    value={newDiscount.classId} 
-                    onChange={(e) => setNewDiscount({...newDiscount, classId: e.target.value})}
+                    value={filterDiscountClass} 
+                    onChange={(e) => setFilterDiscountClass(e.target.value)}
                     className="form-input"
                   >
-                    <option value="">Select a class...</option>
+                    <option value="all">All Classes</option>
                     {classes.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
                 </div>
-                <div className="w-32">
-                  <label className="form-label">Type</label>
-                  <select 
-                    value={newDiscount.type} 
-                    onChange={(e) => setNewDiscount({...newDiscount, type: e.target.value as 'fixed' | 'percentage'})}
-                    className="form-input"
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-4">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 max-h-56 overflow-y-auto">
+                  <div className="sticky top-0 z-10 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{selectedDiscountStudentIds.length} selected</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const visibleIds = filteredDiscountStudents.map(s => s.id);
+                        const allVisibleSelected = visibleIds.every(id => selectedDiscountStudentIds.includes(id));
+                        setSelectedDiscountStudentIds(allVisibleSelected ? selectedDiscountStudentIds.filter(id => !visibleIds.includes(id)) : Array.from(new Set([...selectedDiscountStudentIds, ...visibleIds])));
+                      }}
+                      className="text-xs font-semibold text-primary-600 hover:underline"
+                    >
+                      {filteredDiscountStudents.every(s => selectedDiscountStudentIds.includes(s.id)) ? 'Clear visible' : 'Select visible'}
+                    </button>
+                  </div>
+                  {filteredDiscountStudents.length === 0 ? (
+                    <p className="p-4 text-sm text-slate-500">No students match the filter.</p>
+                  ) : filteredDiscountStudents.map(s => (
+                    <label key={s.id} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-100 dark:border-slate-700 last:border-b-0 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                      <span className="flex items-center gap-3 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedDiscountStudentIds.includes(s.id)}
+                          onChange={(e) => setSelectedDiscountStudentIds(prev => e.target.checked ? [...prev, s.id] : prev.filter(id => id !== s.id))}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-slate-800 dark:text-white truncate">{s.firstName} {s.lastName}</span>
+                          <span className="block text-xs text-slate-500 truncate">{s.studentId || s.admissionNo || 'No ID'} · {classes.find(c => c.id === s.classId)?.name || 'No class'}</span>
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="form-label">Type</label>
+                    <select 
+                      value={newDiscount.type} 
+                      onChange={(e) => setNewDiscount({...newDiscount, type: e.target.value as 'fixed' | 'percentage'})}
+                      className="form-input"
+                    >
+                      <option value="fixed">Fixed Amount</option>
+                      <option value="percentage">Percentage (%)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">{newDiscount.type === 'percentage' ? 'Percent' : 'Amount'} ({newDiscount.type === 'percentage' ? '%' : currency.symbol})</label>
+                    <input
+                      type="number"
+                      value={newDiscount.amount || ''}
+                      onChange={(e) => setNewDiscount({...newDiscount, amount: parseFloat(e.target.value) || 0})}
+                      className="form-input"
+                      placeholder={newDiscount.type === 'percentage' ? '10' : '0.00'}
+                      max={newDiscount.type === 'percentage' ? 100 : undefined}
+                    />
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      if (selectedDiscountStudentIds.length === 0 || newDiscount.amount <= 0) {
+                        addToast('Select students and enter a discount value', 'error');
+                        return;
+                      }
+                      if (newDiscount.type === 'percentage' && newDiscount.amount > 100) {
+                        addToast('Percentage discount cannot exceed 100%', 'error');
+                        return;
+                      }
+                      const created: Discount[] = [];
+                      for (const studentId of selectedDiscountStudentIds) {
+                        const student = students.find(s => s.id === studentId);
+                        if (!student) continue;
+                        const discount: Discount = {
+                          id: uuidv4(),
+                          studentId,
+                          studentName: `${student.firstName} ${student.lastName}`,
+                          classId: student.classId,
+                          className: classes.find(c => c.id === student.classId)?.name || 'No class',
+                          amount: newDiscount.amount,
+                          type: newDiscount.type,
+                          term: selectedTerm,
+                          year: selectedYear,
+                          createdAt: new Date().toISOString(),
+                        };
+                        await dataService.create(sid, 'discounts', discount as any);
+                        created.push(discount);
+                      }
+                      setDiscounts([...discounts, ...created]);
+                      setSelectedDiscountStudentIds([]);
+                      setNewDiscount({ amount: 0, type: 'fixed' });
+                      addToast(`Discount added for ${created.length} student${created.length !== 1 ? 's' : ''}`, 'success');
+                    }}
+                    className="btn btn-primary w-full justify-center"
                   >
-                    <option value="fixed">Fixed Amount</option>
-                    <option value="percentage">Percentage (%)</option>
-                  </select>
+                    <Plus size={16} /> Add Discount
+                  </button>
                 </div>
-                <div className="w-32">
-                  <label className="form-label">{newDiscount.type === 'percentage' ? 'Percent' : 'Amount'} ({newDiscount.type === 'percentage' ? '%' : currency.symbol})</label>
-                  <input
-                    type="number"
-                    value={newDiscount.amount || ''}
-                    onChange={(e) => setNewDiscount({...newDiscount, amount: parseFloat(e.target.value) || 0})}
-                    className="form-input"
-                    placeholder={newDiscount.type === 'percentage' ? '10' : '0.00'}
-                    max={newDiscount.type === 'percentage' ? 100 : undefined}
-                  />
-                </div>
-                <button 
-                  onClick={async () => {
-                    if (!newDiscount.classId || newDiscount.amount <= 0) {
-                      addToast('Please select a class and enter amount', 'error');
-                      return;
-                    }
-                    const cls = classes.find(c => c.id === newDiscount.classId);
-                    const discount: Discount = {
-                      id: uuidv4(),
-                      classId: newDiscount.classId,
-                      className: cls ? cls.name : 'Unknown',
-                      amount: newDiscount.amount,
-                      type: newDiscount.type,
-                      term: selectedTerm,
-                      year: selectedYear,
-                      createdAt: new Date().toISOString(),
-                    };
-                    await dataService.create(user!.id, 'discounts', discount as any);
-                    setDiscounts([...discounts, discount]);
-                    setNewDiscount({ classId: '', amount: 0, type: 'fixed' });
-                    addToast('Discount added successfully', 'success');
-                  }}
-                  className="btn btn-primary"
-                >
-                  <Plus size={16} /> Add
-                </button>
               </div>
             </div>
 
@@ -2047,15 +2282,15 @@ export default function Invoices() {
                 <div className="text-center py-8">
                   <Percent size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
                   <p className="text-slate-500 font-medium">No discounts added</p>
-                  <p className="text-sm text-slate-400 mt-1">Add discounts to reduce class invoiced amounts</p>
+                  <p className="text-sm text-slate-400 mt-1">Add student discounts to reduce invoiced amounts</p>
                 </div>
               ) : (
                 <div className="space-y-2">
                   {discounts.map(d => (
                     <div key={d.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                       <div>
-                        <p className="font-medium text-slate-800 dark:text-white">{d.className}</p>
-                        <p className="text-xs text-slate-500">Term {d.term}, {d.year}</p>
+                        <p className="font-medium text-slate-800 dark:text-white">{d.studentName || d.className || 'Discount'}</p>
+                        <p className="text-xs text-slate-500">Term {d.term}, {d.year}{d.studentName && d.className ? ` · ${d.className}` : ''}</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-cyan-600">
@@ -2063,7 +2298,7 @@ export default function Invoices() {
                         </span>
                         <button
                           onClick={async () => {
-                            await dataService.delete(user!.id, 'discounts', d.id);
+                            await dataService.delete(sid, 'discounts', d.id);
                             setDiscounts(discounts.filter(disc => disc.id !== d.id));
                             addToast('Discount removed', 'success');
                           }}

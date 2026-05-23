@@ -48,6 +48,8 @@ export default function StudentProfile() {
   const { data: classesData } = useTableData(sid, 'classes');
   const { data: feesData } = useTableData(sid, 'fees');
   const { data: paymentsData } = useTableData(sid, 'payments');
+  const { data: bursariesData } = useTableData(sid, 'bursaries');
+  const { data: discountsData } = useTableData(sid, 'discounts');
   const { data: examResultsData } = useTableData(sid, 'examResults');
   const { data: examsData } = useTableData(sid, 'exams');
   const { data: attendanceData } = useTableData(sid, 'attendance');
@@ -76,6 +78,12 @@ export default function StudentProfile() {
   const totalInvoiced = feeRows.reduce((s: number, f: any) => s + (f.amount || 0), 0);
   const totalPaid = feeRows.reduce((s: number, f: any) => s + f.paid, 0);
   const totalBalance = Math.max(0, totalInvoiced - totalPaid);
+  const studentBursaries = useMemo(() => (bursariesData as any[]).filter((b: any) => b.studentId === id), [bursariesData, id]);
+  const studentDiscounts = useMemo(() => (discountsData as any[]).filter((d: any) => d.studentId === id), [discountsData, id]);
+  const hasFullBursary = studentBursaries.some((b: any) => b.isFull);
+  const bursaryAmount = studentBursaries.reduce((sum: number, b: any) => sum + Number(b.amount || 0), 0);
+  const discountAmount = studentDiscounts.filter((d: any) => d.type !== 'percentage').reduce((sum: number, d: any) => sum + Number(d.amount || 0), 0);
+  const discountPercent = studentDiscounts.filter((d: any) => d.type === 'percentage').reduce((sum: number, d: any) => sum + Number(d.amount || 0), 0);
   const overallStatus: 'paid' | 'partial' | 'pending' | 'none' =
     feeRows.length === 0 ? 'none' : totalBalance <= 0 ? 'paid' : totalPaid > 0 ? 'partial' : 'pending';
 
@@ -214,7 +222,12 @@ export default function StudentProfile() {
         <Link to="/students" className="btn btn-ghost p-2"><ArrowLeft size={20} /></Link>
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">{student.firstName} {student.lastName}</h1>
-          <p className="text-sm text-slate-500 mt-1">ID: {student.studentId || student.admissionNo} · {getClassName(student.classId)}</p>
+          <div className="flex flex-wrap items-center gap-2 mt-1">
+            <p className="text-sm text-slate-500">ID: {student.studentId || student.admissionNo} · {getClassName(student.classId)}</p>
+            {hasFullBursary && <span className="badge badge-success">Full bursary</span>}
+            {!hasFullBursary && bursaryAmount > 0 && <span className="badge badge-warning">On bursary: {formatMoney(bursaryAmount)}</span>}
+            {studentDiscounts.length > 0 && <span className="badge badge-info">Discount: {discountPercent > 0 ? `${discountPercent}%` : formatMoney(discountAmount)}</span>}
+          </div>
         </div>
         <Link to={`/students/${student.id}/edit`} className="btn btn-primary"><Edit size={18} />Edit</Link>
       </div>
@@ -272,6 +285,14 @@ export default function StudentProfile() {
                 <div><p className="text-xs text-slate-500 mb-1">ID Number</p><p className="text-sm font-medium font-mono">{student.studentId || student.admissionNo || 'N/A'}</p></div>
                 <div><p className="text-xs text-slate-500 mb-1">Fee Status</p>
                   <span className={`badge ${statusBadge[overallStatus]}`}>{statusLabel[overallStatus]}</span>
+                </div>
+                <div><p className="text-xs text-slate-500 mb-1">Finance Tags</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {hasFullBursary && <span className="badge badge-success">Full bursary</span>}
+                    {!hasFullBursary && bursaryAmount > 0 && <span className="badge badge-warning">Bursary {formatMoney(bursaryAmount)}</span>}
+                    {studentDiscounts.length > 0 && <span className="badge badge-info">Discount {discountPercent > 0 ? `${discountPercent}%` : formatMoney(discountAmount)}</span>}
+                    {!studentBursaries.length && !studentDiscounts.length && <span className="text-sm text-slate-400">None</span>}
+                  </div>
                 </div>
                 <div><p className="text-xs text-slate-500 mb-1">Status</p><span className={`badge ${student.status === 'active' ? 'badge-success' : 'badge-gray'}`}>{student.status}</span></div>
               </div>

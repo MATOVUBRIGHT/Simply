@@ -29,7 +29,9 @@ export default function Plans() {
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
   const [isSubmitting, setIsRefreshing] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(false);
+  const [accessProgress, setAccessProgress] = useState(0);
   const [accessNotice, setAccessNotice] = useState<{ type: 'success' | 'pending' | 'paused' | 'error'; message: string } | null>(null);
+  const [accessPopup, setAccessPopup] = useState<{ title: string; message: string; days: number | null; canProceed: boolean } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [transactionId, setTransactionId] = useState('');
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
@@ -49,9 +51,12 @@ export default function Plans() {
     if (!authId) return;
     if (showLoader) {
       setCheckingAccess(true);
+      setAccessProgress(20);
       setAccessNotice(null);
+      setAccessPopup(null);
     }
     try {
+      if (showLoader) setAccessProgress(55);
       const [savedBillingCycle, usage, receipt] = await Promise.all([
         getCurrentBillingCycle(authId),
         getSubscriptionAccessState(authId, undefined, { authUserId: user?.id }),
@@ -71,7 +76,8 @@ export default function Plans() {
         const meta = sub?.metadata || {};
         const pending = sub?.status === 'pending' || (meta.source === 'client' && !meta.approvedByAdmin && !meta.grantedByAdmin && !meta.extendedByAdmin && sub?.status !== 'active');
         const paused = sub?.status === 'paused' || meta.pausedByAdmin;
-        const plan = PLAN_DEFINITIONS.find(p => p.id === sub?.plan) || null;
+        const isFreeTier = meta.accessType === 'free_trial' || meta.requestType === 'trial' || sub?.plan === 'trial';
+        const plan = PLAN_DEFINITIONS.find(p => p.id === sub?.plan) || (isFreeTier || meta.grantedByAdmin || meta.approvedByAdmin ? PLAN_DEFINITIONS[0] : null);
         if (sub && pending) {
           localStorage.setItem('schofy_sub_pending', '1');
           setAccessNotice({
@@ -100,6 +106,7 @@ export default function Plans() {
           };
         } else if (sub && plan && sub.status === 'active') {
           localStorage.setItem('schofy_sub_pending', '0');
+          if (showLoader) setAccessProgress(82);
           const expiry = sub.ends_at ? new Date(sub.ends_at) : null;
           const ms = expiry && !Number.isNaN(expiry.getTime()) ? expiry.getTime() - Date.now() : 0;
           const days = ms > 0 ? Math.ceil(ms / (24 * 60 * 60 * 1000)) : 0;
@@ -116,8 +123,16 @@ export default function Plans() {
           };
           setAccessNotice({
             type: ms <= 0 ? 'error' : 'success',
-            message: ms <= 0 ? 'This subscription is expired. Renew a plan to continue.' : 'Access verified. Your current plan is active.',
+            message: ms <= 0 ? 'This subscription is expired. Renew a plan to continue.' : `${isFreeTier ? 'Free tier' : 'Access'} verified. ${ms > 0 ? `${days} day${days === 1 ? '' : 's'} remaining.` : ''}`,
           });
+          if (showLoader) {
+            setAccessPopup({
+              title: isFreeTier ? 'Free tier active' : 'Access approved',
+              message: `${plan.name} access is active. You can proceed to the app.`,
+              days: ms <= 0 ? 0 : days,
+              canProceed: ms > 0,
+            });
+          }
         } else if (showLoader) {
           setAccessNotice({
             type: 'error',
@@ -131,6 +146,10 @@ export default function Plans() {
       setStudentCount(effectiveUsage.used);
       setAccessState(effectiveUsage);
       setLatestReceipt(receipt);
+      if (showLoader) {
+        setAccessProgress(100);
+        await new Promise((resolve) => setTimeout(resolve, 180));
+      }
     } catch (error) {
       console.error('Failed to load plan state:', error);
       if (showLoader) {
@@ -140,7 +159,10 @@ export default function Plans() {
         });
       }
     } finally {
-      if (showLoader) setCheckingAccess(false);
+      if (showLoader) {
+        setAccessProgress(100);
+        setCheckingAccess(false);
+      }
     }
   }
 
@@ -253,6 +275,14 @@ Powered by Schofy`;
             {checkingAccess && <Loader2 size={13} className="animate-spin" />}
             {checkingAccess ? 'Checking...' : 'Check access'}
           </button>
+          {checkingAccess && (
+            <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-all duration-150"
+                style={{ width: `${accessProgress}%` }}
+              />
+            </div>
+          )}
           {canProceedToApp && (
             <button
               type="button"
@@ -864,6 +894,41 @@ Powered by Schofy`;
                 </a>
                 <button onClick={() => setShowRenewModal(false)} className="w-full py-2 text-slate-400 text-sm">Cancel</button>
               </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {accessPopup && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl border border-emerald-200 bg-white p-5 text-center shadow-2xl dark:border-emerald-800 dark:bg-slate-900">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+              <Check size={22} />
+            </div>
+            <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">{accessPopup.title}</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{accessPopup.message}</p>
+            {accessPopup.days !== null && (
+              <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+                {accessPopup.days} day{accessPopup.days === 1 ? '' : 's'} remaining
+              </p>
+            )}
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setAccessPopup(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                disabled={!accessPopup.canProceed}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+              >
+                Proceed
+              </button>
             </div>
           </div>
         </div>,

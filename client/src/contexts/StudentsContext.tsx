@@ -3,6 +3,7 @@ import { Student } from '@schofy/shared';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useAuth } from './AuthContext';
 import { useTableData } from '../lib/store';
+import { matchesStudentSearch } from '../utils/studentSearch';
 
 interface StudentsContextType {
   students: Student[];
@@ -38,9 +39,11 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
     async (query: string) => {
       const id = schoolId || user?.id;
       if (!id) return [];
+      const localMatches = students.filter(student => matchesStudentSearch(student, query));
+      if (localMatches.length > 0) return localMatches;
       return await dataService.search(id, 'students', query, ['firstName', 'lastName', 'admissionNo', 'studentId']);
     },
-    [user, schoolId]
+    [user, schoolId, students]
   );
 
   return (

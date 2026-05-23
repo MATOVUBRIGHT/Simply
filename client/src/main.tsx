@@ -33,7 +33,7 @@ if (!isFileProtocol && !isAdminPath && 'serviceWorker' in navigator) {
         navigator.serviceWorker.ready.then(sw => {
           const appRoutes = [
             '/', '/students', '/admission', '/staff', '/classes',
-            '/subjects', '/attendance', '/finance', '/invoices',
+            '/subjects', '/attendance', '/day-boarding', '/finance', '/invoices',
             '/grades', '/exam-marks', '/transport', '/announcements',
             '/notifications', '/settings', '/reports', '/plans',
             '/recycle-bin', '/about',

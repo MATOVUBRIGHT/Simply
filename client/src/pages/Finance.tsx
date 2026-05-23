@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight, Building2, Plus, Trash2, Edit, Save } from 'lucide-react';
+import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight, Building2, Plus, Trash2, Edit, Save, Award, Percent } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { matchesStudentSearch } from '../utils/studentSearch';
 
 export default function Finance() {
   const { user, schoolId } = useAuth();
@@ -46,6 +47,8 @@ export default function Finance() {
   const { data: fees } = useTableData(sid, 'fees');
   const { data: payments } = useTableData(sid, 'payments');
   const { data: settingsData } = useTableData(sid, 'settings');
+  const { data: bursariesData } = useTableData(sid, 'bursaries');
+  const { data: discountsData } = useTableData(sid, 'discounts');
 
   // Derive payment accounts from settings
   const bankAccounts = useMemo(() => {
@@ -203,7 +206,7 @@ export default function Finance() {
       let count = 0;
       const now = new Date().toISOString();
       for (const d of importPreview) {
-        const s = students.find(x => `${x.firstName} ${x.lastName}` === d.studentName);
+        const s = students.find(x => matchesStudentSearch(x, d.studentName));
         if (!s) continue;
         await dataService.create(id, 'payments', { id: uuidv4(), feeId: '', studentId: s.id, amount: parseFloat(d.amount), method: (d.method as PaymentMethod) || PaymentMethod.CASH, date: d.date || now, createdAt: now } as any);
         count++;
@@ -230,21 +233,49 @@ export default function Finance() {
   const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
   const totalInvoiced = fees.reduce((s, f) => s + f.amount, 0);
   const totalPending = totalInvoiced - totalCollected;
+  const bursaryByStudent = useMemo(() => {
+    const map = new Map<string, { amount: number; isFull: boolean; count: number }>();
+    (bursariesData as any[]).forEach((b: any) => {
+      const current = map.get(b.studentId) || { amount: 0, isFull: false, count: 0 };
+      map.set(b.studentId, { amount: current.amount + Number(b.amount || 0), isFull: current.isFull || Boolean(b.isFull), count: current.count + 1 });
+    });
+    return map;
+  }, [bursariesData]);
+  const discountByStudent = useMemo(() => {
+    const map = new Map<string, { amount: number; percentage: number; count: number }>();
+    (discountsData as any[]).forEach((d: any) => {
+      if (!d.studentId) return;
+      const current = map.get(d.studentId) || { amount: 0, percentage: 0, count: 0 };
+      map.set(d.studentId, {
+        amount: current.amount + (d.type === 'percentage' ? 0 : Number(d.amount || 0)),
+        percentage: current.percentage + (d.type === 'percentage' ? Number(d.amount || 0) : 0),
+        count: current.count + 1,
+      });
+    });
+    return map;
+  }, [discountsData]);
+  const studentsOnBursary = students.filter(s => bursaryByStudent.has(s.id)).length;
+  const studentsWithDiscount = students.filter(s => discountByStudent.has(s.id)).length;
 
   const studentFinanceSummary = students.map(student => {
     const sf = fees.filter(f => f.studentId === student.id);
     const inv = sf.reduce((a, f) => a + f.amount, 0);
     const paid = payments.filter(p => p.feeId ? sf.some(f => f.id === p.feeId) : p.studentId === student.id).reduce((a, p) => a + p.amount, 0);
-    return { id: student.id, studentName: `${student.firstName} ${student.lastName}`, studentId: student.studentId, totalInvoiced: inv, totalPaid: paid, balance: inv - paid, invoiceCount: sf.length, isCleared: sf.length > 0 && inv - paid <= 0 };
+    const bursary = bursaryByStudent.get(student.id);
+    const discount = discountByStudent.get(student.id);
+    return { id: student.id, studentName: `${student.firstName} ${student.lastName}`, studentId: student.studentId, totalInvoiced: inv, totalPaid: paid, balance: inv - paid, invoiceCount: sf.length, isCleared: sf.length > 0 && inv - paid <= 0, bursary, discount };
   }).filter(s => filterTerm === 'all' ? s.invoiceCount > 0 : s.invoiceCount > 0);
 
-  const filteredStudentFinance = studentFinanceSummary.filter(s => !searchTerm || s.studentName.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredStudentFinance = studentFinanceSummary.filter(s => {
+    const student = students.find(x => x.id === s.id);
+    return !student || matchesStudentSearch(student, searchTerm);
+  });
 
   // Group fees by student for Invoices tab
   const invoicesByStudent = students.map(student => {
     const sf = fees.filter(f => {
       const q = searchTerm.toLowerCase();
-      const matchSearch = !q || `${student.firstName} ${student.lastName}`.toLowerCase().includes(q) || f.description.toLowerCase().includes(q);
+      const matchSearch = !q || matchesStudentSearch(student, q) || f.description.toLowerCase().includes(q);
       const matchTerm = filterTerm === 'all' || f.term === filterTerm;
       return f.studentId === student.id && matchSearch && matchTerm;
     });
@@ -258,7 +289,7 @@ export default function Finance() {
   const paymentsByStudent = students.map(student => {
     const sp = payments.filter(p => {
       const q = searchTerm.toLowerCase();
-      const matchSearch = !q || `${student.firstName} ${student.lastName}`.toLowerCase().includes(q) || p.method.toLowerCase().includes(q);
+      const matchSearch = !q || matchesStudentSearch(student, q) || p.method.toLowerCase().includes(q);
       return p.studentId === student.id && matchSearch;
     });
     if (sp.length === 0) return null;
@@ -313,7 +344,7 @@ export default function Finance() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
         <div className="card-solid-emerald p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Receipt size={24} className="text-white" /></div>
@@ -336,6 +367,18 @@ export default function Finance() {
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Receipt size={24} className="text-white" /></div>
             <div><p className="text-sm font-medium text-white/80">Transactions</p><p className="text-2xl font-bold text-white">{payments.length}</p></div>
+          </div>
+        </div>
+        <div className="card-solid-amber p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Award size={24} className="text-white" /></div>
+            <div><p className="text-sm font-medium text-white/80">On Bursary</p><p className="text-2xl font-bold text-white">{studentsOnBursary}</p></div>
+          </div>
+        </div>
+        <div className="card-solid-cyan p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Percent size={24} className="text-white" /></div>
+            <div><p className="text-sm font-medium text-white/80">With Discount</p><p className="text-2xl font-bold text-white">{studentsWithDiscount}</p></div>
           </div>
         </div>
       </div>
@@ -386,10 +429,10 @@ export default function Finance() {
         {activeTab === 'students' && (
           <div className="table-container">
             <table>
-              <thead><tr><th>Student</th><th>ID Number</th><th>Invoices</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></tr></thead>
+              <thead><tr><th>Student</th><th>ID Number</th><th>Invoices</th><th>Bursary</th><th>Discount</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></tr></thead>
               <tbody>
                 {filteredStudentFinance.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-12">
+                  <tr><td colSpan={9} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><Users size={24} className="text-violet-400" /></div>
                       <p className="text-slate-500 font-medium">No invoiced students</p>
@@ -400,6 +443,8 @@ export default function Finance() {
                     <td className="font-medium">{s.studentName}</td>
                     <td className="text-slate-500">{s.studentId}</td>
                     <td><span className="badge badge-info">{s.invoiceCount}</span></td>
+                    <td>{s.bursary ? <span className="badge badge-warning">{s.bursary.isFull ? 'Full bursary' : formatMoney(s.bursary.amount)}</span> : <span className="text-slate-400 text-sm">-</span>}</td>
+                    <td>{s.discount ? <span className="badge badge-info">{s.discount.percentage > 0 ? `${s.discount.percentage}%` : formatMoney(s.discount.amount)}</span> : <span className="text-slate-400 text-sm">-</span>}</td>
                     <td className="font-semibold">{formatMoney(s.totalInvoiced)}</td>
                     <td className="text-emerald-600 font-semibold">{formatMoney(s.totalPaid)}</td>
                     <td className={s.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>{formatMoney(s.balance)}</td>

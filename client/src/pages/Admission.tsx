@@ -12,6 +12,7 @@ import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../u
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, IdFormat } from '../utils/idFormat';
 import { getSubscriptionAccessState } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { BoardingStatus, withBoardingStatus } from '../utils/studentBoarding';
 
 const steps = [
   { id: 1, label: 'Student Info', icon: User },
@@ -45,6 +46,7 @@ export default function Admission() {
     guardianName: '', guardianPhone: '', guardianEmail: '',
     guardianRelation: 'Parent', guardianOccupation: '',
     medicalInfo: '', photoUrl: '',
+    boardingStatus: 'day' as BoardingStatus,
     tuitionFee: '', boardingFee: '',
     requirements: [] as string[],
     previousSchool: '', previousClass: '',
@@ -146,7 +148,7 @@ export default function Admission() {
       const students = await dataService.getAll(id, 'students');
       const existing = students.flatMap((s: any) => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
       const admissionNo = form.admissionNo.trim() || generateStudentId(form.firstName, form.lastName, existing);
-      const newStudent: Student = {
+      const newStudent: Student = withBoardingStatus({
         id: uuidv4(), userId: user!.id, schoolId: id,
         admissionNo, studentId: admissionNo,
         firstName: form.firstName, lastName: form.lastName,
@@ -161,7 +163,7 @@ export default function Admission() {
         boardingFee: form.boardingFee ? parseFloat(form.boardingFee) : undefined,
         requirements: form.requirements,
         createdAt: now, updatedAt: now,
-      };
+      } as Student, form.boardingStatus);
       await dataService.create(id, 'students', newStudent as any);
       window.dispatchEvent(new Event('studentsUpdated'));
       
@@ -284,6 +286,13 @@ export default function Admission() {
                 <label className="form-label">Address</label>
                 <input type="text" name="address" value={form.address} onChange={handleChange} className="form-input" placeholder="Home address" />
               </div>
+              <div>
+                <label className="form-label">Day or Boarding *</label>
+                <select name="boardingStatus" value={form.boardingStatus} onChange={handleChange} className="form-input" required>
+                  <option value="day">Day</option>
+                  <option value="boarding">Boarding</option>
+                </select>
+              </div>
             </div>
           </div>
         )}
@@ -403,6 +412,7 @@ export default function Admission() {
                   { label: 'Gender', value: form.gender },
                   { label: 'DOB', value: form.dob || '-' },
                   { label: 'Class', value: selectedClass?.name || '-' },
+                  { label: 'Type', value: form.boardingStatus === 'boarding' ? 'Boarding' : 'Day' },
                   { label: 'Address', value: form.address || '-' },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex gap-2 text-sm">

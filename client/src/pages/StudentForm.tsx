@@ -14,6 +14,7 @@ import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../u
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, extractFormatFromId, IdFormat } from '../utils/idFormat';
 import { getSubscriptionAccessState } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { BoardingStatus, getBoardingStatus, withBoardingStatus } from '../utils/studentBoarding';
 
 interface CustomField { id: string; label: string; value: string; }
 interface Attachment { id: string; name: string; file: string; type: string; }
@@ -22,6 +23,7 @@ const initialFormData: Partial<Student> & { customFields?: CustomField[]; attach
   firstName: '', lastName: '', dob: '', gender: Gender.MALE,
   classId: '', address: '', guardianName: '', guardianPhone: '',
   guardianEmail: '', medicalInfo: '', status: 'active',
+  boardingStatus: 'day',
   photoUrl: undefined, tuitionFee: undefined, boardingFee: undefined,
   requirements: [], customFields: [], attachments: [],
 };
@@ -73,7 +75,7 @@ export default function StudentForm() {
     try {
       const student = await dataService.get(idAuth, 'students', id!);
       if (student) {
-        setFormData({ ...student, customFields: student.customFields || [], attachments: student.attachments || [] } as any);
+        setFormData({ ...student, boardingStatus: getBoardingStatus(student), customFields: student.customFields || [], attachments: student.attachments || [] } as any);
         setStudentId(student.studentId || student.admissionNo || '');
       }
     } catch { addToast('Failed to load student data', 'error'); }
@@ -177,11 +179,11 @@ export default function StudentForm() {
       if (isEditing) {
         const cap = formData.classId ? await getClassCapacityState(idAuth, formData.classId, id) : null;
         if (cap?.isFull) { addToast(`${cap.name} is full. Choose another class.`, 'error'); setLoading(false); return; }
-        await dataService.update(idAuth, 'students', id!, { ...formData, admissionNo: finalId, studentId: finalId, updatedAt: now } as any);
+        await dataService.update(idAuth, 'students', id!, withBoardingStatus({ ...formData, admissionNo: finalId, studentId: finalId, updatedAt: now } as any, (formData as any).boardingStatus || 'day'));
       } else {
         const cap = formData.classId ? await getClassCapacityState(idAuth, formData.classId) : null;
         if (cap?.isFull) { addToast(`${cap.name} is full. Choose another class.`, 'error'); setLoading(false); return; }
-        const newStudent: Student = {
+        const newStudent: Student = withBoardingStatus({
           id: tempId, userId: user!.id, schoolId: idAuth,
           admissionNo: finalId, studentId: finalId,
           firstName: formData.firstName || '', lastName: formData.lastName || '',
@@ -193,7 +195,7 @@ export default function StudentForm() {
           tuitionFee: formData.tuitionFee, boardingFee: formData.boardingFee,
           requirements: formData.requirements || [], customFields: formData.customFields || [],
           attachments: formData.attachments || [], createdAt: now, updatedAt: now,
-        };
+        } as Student, ((formData as any).boardingStatus || 'day') as BoardingStatus);
         await dataService.create(idAuth, 'students', newStudent as any);
       }
       window.dispatchEvent(new Event('studentsUpdated'));
@@ -308,6 +310,13 @@ export default function StudentForm() {
                       {c.name} ({c.enrolled}/{c.capacity}){c.isFull && c.id !== formData.classId ? ' — Full' : ''}
                     </option>
                   ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Day or Boarding *</label>
+                <select name="boardingStatus" value={(formData as any).boardingStatus || 'day'} onChange={handleChange} className="form-input" required>
+                  <option value="day">Day</option>
+                  <option value="boarding">Boarding</option>
                 </select>
               </div>
             </div>

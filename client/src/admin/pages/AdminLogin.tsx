@@ -11,10 +11,16 @@ export default function AdminLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [securityCheckPassed, setSecurityCheckPassed] = useState(false);
+  const [accessDeniedPopup, setAccessDeniedPopup] = useState(false);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    if (!securityCheckPassed) {
+      setAccessDeniedPopup(true);
+      return;
+    }
     setLoading(true);
 
     setTimeout(() => {
@@ -55,7 +61,7 @@ export default function AdminLogin() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5">
                 Admin Email
@@ -65,7 +71,8 @@ export default function AdminLogin() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
-                autoComplete="email"
+                autoComplete="off"
+                name="schofy_admin_email"
                 className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               />
             </div>
@@ -80,7 +87,8 @@ export default function AdminLogin() {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   required
-                  autoComplete="current-password"
+                  autoComplete="new-password"
+                  name="schofy_admin_password"
                   placeholder="••••••••"
                   className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent pr-11"
                 />
@@ -93,6 +101,20 @@ export default function AdminLogin() {
                 </button>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setError('');
+                setSecurityCheckPassed(true);
+              }}
+              className={`inline-flex items-center gap-1.5 text-sm font-semibold ${
+                securityCheckPassed ? 'text-emerald-400' : 'text-indigo-300 hover:text-indigo-200'
+              }`}
+            >
+              <Shield size={15} />
+              Security check
+            </button>
 
             <button
               type="submit"
@@ -115,6 +137,28 @@ export default function AdminLogin() {
           Schofy Super Admin Portal — Restricted Access
         </p>
       </div>
+
+      {accessDeniedPopup && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-red-800 bg-slate-900 p-5 text-center shadow-2xl">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-900/30 text-red-300">
+              <AlertCircle size={22} />
+            </div>
+            <h2 className="mt-4 text-lg font-bold text-white">Access denied</h2>
+            <p className="mt-2 text-sm text-slate-400">Try again.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setAccessDeniedPopup(false);
+                setSecurityCheckPassed(false);
+              }}
+              className="mt-5 w-full rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

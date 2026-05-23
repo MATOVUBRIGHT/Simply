@@ -11,6 +11,7 @@ const ALL_PAGES = [
   { path: '/students', label: 'Students' },
   { path: '/admission', label: 'Admission' },
   { path: '/attendance', label: 'Attendance' },
+  { path: '/day-boarding', label: 'Day & Boarding' },
   { path: '/classes', label: 'Classes' },
   { path: '/subjects', label: 'Subjects' },
   { path: '/grades', label: 'Exams & Grades' },
@@ -23,7 +24,7 @@ const ALL_PAGES = [
 ];
 
 const ROLE_PRESETS: Record<string, string[]> = {
-  teacher: ['/', '/students', '/attendance', '/classes', '/subjects', '/grades', '/announcements'],
+  teacher: ['/', '/students', '/attendance', '/day-boarding', '/classes', '/subjects', '/grades', '/announcements'],
   accountant: ['/', '/finance', '/invoices', '/reports'],
   librarian: ['/', '/students', '/announcements'],
   receptionist: ['/', '/students', '/admission', '/announcements'],

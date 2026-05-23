@@ -711,6 +711,7 @@ textarea.form-input {
 /* Card Styles - Clean & Solid */
 .card {
   @apply rounded-xl border;
+  position: relative;
   overflow: visible;
   background-color: var(--bg-secondary);
   border-color: var(--neutral-border);
@@ -726,6 +727,19 @@ textarea.form-input {
 .card-body {
   @apply p-5;
   overflow: visible;
+}
+
+/* Keep filters/dropdowns above nearby cards and tables. */
+.card:focus-within,
+.card:has(.absolute),
+.card-header:has(.absolute),
+.relative:has(> .absolute) {
+  z-index: 80;
+}
+
+.card-header .absolute,
+.relative > .absolute {
+  z-index: 9999;
 }
 
 /* Text overflow prevention in cards */

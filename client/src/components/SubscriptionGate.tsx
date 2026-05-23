@@ -71,16 +71,19 @@ export default function SubscriptionGate({ children }: Props) {
   const [expiryDate,  setExpiryDate]  = useState<string | null>(null);
   const [pendingTid,  setPendingTid]  = useState<string | null>(null);
   const [checking,    setChecking]    = useState(true);
+  const [checkProgress, setCheckProgress] = useState(0);
 
   const isAllowedRoute = ALLOWED_ROUTES.some(r => location.pathname.startsWith(r));
 
   const checkSubscription = useCallback(async () => {
+    setCheckProgress(18);
     if (!user) { setChecking(false); return; }
     if (isAllowedRoute) { setBlocked(false); setChecking(false); return; }
 
     // Ensure the data cache is loaded before checking subscription status
     // This prevents "incomplete" status being returned just because IndexedDB hasn't opened yet
     await cacheReady;
+    setCheckProgress(55);
 
     const tenantId = schoolId || user.id;
 
@@ -94,6 +97,7 @@ export default function SubscriptionGate({ children }: Props) {
       let tid: string | null = null;
 
       if (supabase) {
+        setCheckProgress(72);
         const { data: subRows } = await supabase
           .from('subscriptions')
           .select('status, ends_at, metadata, plan')
@@ -110,7 +114,8 @@ export default function SubscriptionGate({ children }: Props) {
           if (!isPaused && meta.pausedByAdmin) isPaused = true;
 
           if (!isPaused && !isPending && sub.status === 'active') {
-            const remotePlan = PLAN_DEFINITIONS.find(p => p.id === sub.plan) || null;
+            const isFreeTier = meta.accessType === 'free_trial' || meta.requestType === 'trial' || sub.plan === 'trial';
+            const remotePlan = PLAN_DEFINITIONS.find(p => p.id === sub.plan) || (isFreeTier || meta.grantedByAdmin || meta.approvedByAdmin ? PLAN_DEFINITIONS[0] : null);
             const remoteExpiry = classifyRemoteExpiry(sub.ends_at || null);
             if (remotePlan) {
               state = {
@@ -130,6 +135,7 @@ export default function SubscriptionGate({ children }: Props) {
       }
 
       // Cache for offline
+      setCheckProgress(90);
       cacheSubscriptionLocally(state, isPending);
       if (tid) localStorage.setItem('schofy_sub_tid', tid);
 
@@ -187,7 +193,8 @@ export default function SubscriptionGate({ children }: Props) {
         }
       }
     } finally {
-      setChecking(false);
+      setCheckProgress(100);
+      setTimeout(() => setChecking(false), 120);
     }
   }, [user, schoolId, isAllowedRoute]);
 
@@ -218,6 +225,9 @@ export default function SubscriptionGate({ children }: Props) {
           <RefreshCw size={30} className="mx-auto mb-3 animate-spin text-emerald-600" />
           <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Checking secure access...</p>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Verifying your plan, account status, and device sync.</p>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+            <div className="h-full rounded-full bg-emerald-500 transition-all duration-150" style={{ width: `${checkProgress}%` }} />
+          </div>
         </div>
       </div>
     );

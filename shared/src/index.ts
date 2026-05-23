@@ -135,6 +135,7 @@ export interface Student {
   medicalInfo?: string;
   photoUrl?: string;
   status: 'active' | 'inactive' | 'graduated' | 'transferred' | 'completed';
+  boardingStatus?: 'day' | 'boarding';
   tuitionFee?: number;
   boardingFee?: number;
   requirements?: string[];

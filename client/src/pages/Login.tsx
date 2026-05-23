@@ -109,13 +109,14 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [savedEmailNotice, setSavedEmailNotice] = useState(false);
+  const [accessDeniedPopup, setAccessDeniedPopup] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [securingAccount, setSecuringAccount] = useState(false);
   const [verificationSent, setVerificationSent] = useState(false);
   const [resetSent, setResetSent] = useState(false);
-  const [activationSent, setActivationSent] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
-  const [activationLoading, setActivationLoading] = useState(false);
+  const [securityCheckPassed, setSecurityCheckPassed] = useState(false);
   const [resetMode, setResetMode] = useState(false);
   const [resetFromLink, setResetFromLink] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -129,16 +130,22 @@ export default function Login() {
     progress: number;
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
 
-  const { login, register, sendPasswordReset, activateSecureLogin, user, isOnline } = useAuth();
+  const { login, register, sendPasswordReset, user, isOnline } = useAuth();
   const { primaryColor } = useTheme();
   const navigate = useNavigate();
 
   useEffect(() => {
-    localStorage.removeItem('remembered_email');
-    localStorage.removeItem('remember_me');
-    setEmail('');
-    setPassword('');
+    const explicitlySavedEmail = localStorage.getItem('schofy_saved_login_email') || '';
+    const explicitlySavedPassword = localStorage.getItem('schofy_saved_login_password') || '';
+    setEmail(explicitlySavedEmail);
+    setPassword(explicitlySavedPassword);
     setConfirmPassword('');
+    setSecurityCheckPassed(false);
+    const clearTimer = window.setTimeout(() => {
+      setEmail(localStorage.getItem('schofy_saved_login_email') || '');
+      setPassword(localStorage.getItem('schofy_saved_login_password') || '');
+      setConfirmPassword('');
+    }, 250);
     const recoveryUrl = window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
     if (recoveryUrl) {
       setResetMode(true);
@@ -146,6 +153,7 @@ export default function Login() {
       setIsRegister(false);
       setShowSplash(false);
     }
+    return () => window.clearTimeout(clearTimer);
   }, []);
 
   useEffect(() => {
@@ -161,7 +169,6 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setResetSent(false);
-    setActivationSent(false);
     setLoading(true);
 
     try {
@@ -233,6 +240,11 @@ export default function Login() {
         await new Promise((resolve) => setTimeout(resolve, 900));
         setSecuringAccount(false);
       } else {
+        if (!securityCheckPassed) {
+          setAccessDeniedPopup(true);
+          setLoading(false);
+          return;
+        }
         setSecuringAccount(true);
         setSyncStatus({ step: 'syncing', message: 'Checking your secure access...', progress: 45 });
         const result = await login(email.trim(), password);
@@ -247,9 +259,6 @@ export default function Login() {
         setSecuringAccount(false);
       }
 
-      localStorage.removeItem('remembered_email');
-      localStorage.removeItem('remember_me');
-
       setShowSuccess(true);
       await new Promise((resolve) => setTimeout(resolve, isRegister ? 700 : 1200));
       setPassword('');
@@ -263,10 +272,39 @@ export default function Login() {
     }
   };
 
+  const handleSaveEmail = () => {
+    const cleanEmail = email.trim().toLowerCase();
+    setError('');
+    setSavedEmailNotice(false);
+    if (!cleanEmail) {
+      localStorage.removeItem('schofy_saved_login_email');
+      localStorage.removeItem('schofy_saved_login_password');
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+      setError('Email cleared. Enter an email before saving it.');
+      return;
+    }
+    localStorage.setItem('schofy_saved_login_email', cleanEmail);
+    localStorage.setItem('schofy_saved_login_password', password);
+    setEmail(cleanEmail);
+    setConfirmPassword('');
+    setSavedEmailNotice(true);
+  };
+
+  const handleClearLoginFields = () => {
+    localStorage.removeItem('schofy_saved_login_email');
+    localStorage.removeItem('schofy_saved_login_password');
+    setEmail('');
+    setPassword('');
+    setConfirmPassword('');
+    setSavedEmailNotice(false);
+    setError('');
+  };
+
   const handleForgotPassword = async () => {
     setError('');
     setResetSent(false);
-    setActivationSent(false);
     const cleanEmail = email.trim();
     if (!cleanEmail) {
       setError('Enter your email address first, then request a reset link.');
@@ -293,32 +331,10 @@ export default function Login() {
     }
   };
 
-  const handleActivateSecureLogin = async () => {
+  const handleSecurityCheck = () => {
     setError('');
     setResetSent(false);
-    setActivationSent(false);
-    const cleanEmail = email.trim();
-    if (!cleanEmail) {
-      setError('Enter your email address first, then activate secure login.');
-      return;
-    }
-    if (password.length < 6) {
-      setError('Enter the password you want to use. It must be at least 6 characters.');
-      return;
-    }
-
-    setActivationLoading(true);
-    try {
-      const result = await activateSecureLogin(cleanEmail, password);
-      if (!result.success) {
-        setError(result.error || 'Could not activate secure login');
-        return;
-      }
-      setActivationSent(true);
-      setPassword('');
-    } finally {
-      setActivationLoading(false);
-    }
+    setSecurityCheckPassed(true);
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -569,7 +585,7 @@ export default function Login() {
                 </button>
               </form>
             ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
               {error && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
                   {error}
@@ -588,9 +604,9 @@ export default function Login() {
                 </div>
               )}
 
-              {activationSent && (
+              {savedEmailNotice && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-                  Security check email sent. Open your inbox, verify it, then sign in with this password.
+                  Login details saved for this device.
                 </div>
               )}
 
@@ -622,11 +638,12 @@ export default function Login() {
                 <input
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => { setEmail(e.target.value); setSavedEmailNotice(false); }}
                   className="form-input"
                   placeholder="you@school.com"
                   required
-                  autoComplete="email"
+                  autoComplete="off"
+                  name="schofy_login_email"
                 />
               </div>
 
@@ -641,7 +658,8 @@ export default function Login() {
                     placeholder="Enter your password"
                     required
                     minLength={6}
-                    autoComplete={isRegister ? 'new-password' : 'current-password'}
+                    autoComplete="new-password"
+                    name="schofy_login_password"
                   />
                   <button
                     type="button"
@@ -693,7 +711,23 @@ export default function Login() {
               )}
 
               {!isRegister && (
-                <div className="flex flex-wrap items-center justify-end gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveEmail}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearLoginFields}
+                      className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300"
+                    >
+                      Clear
+                    </button>
+                  </div>
                   <button
                     type="button"
                     onClick={handleForgotPassword}
@@ -705,11 +739,14 @@ export default function Login() {
                   </button>
                   <button
                     type="button"
-                    onClick={handleActivateSecureLogin}
-                    disabled={activationLoading}
-                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
+                    onClick={handleSecurityCheck}
+                    className={`inline-flex items-center gap-1.5 text-sm font-semibold ${
+                      securityCheckPassed
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300'
+                    }`}
                   >
-                    {activationLoading ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
+                    <LockKeyhole size={15} />
                     Security check
                   </button>
                 </div>
@@ -740,6 +777,28 @@ export default function Login() {
       </div>
 
       {policyModal && <PolicyDialog type={policyModal} onClose={() => setPolicyModal(null)} />}
+
+      {accessDeniedPopup && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-lg border border-red-200 bg-white p-5 text-center shadow-2xl dark:border-red-800 dark:bg-slate-900">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300">
+              <LockKeyhole size={22} />
+            </div>
+            <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">Access denied</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Try again.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setAccessDeniedPopup(false);
+                setSecurityCheckPassed(false);
+              }}
+              className="mt-5 w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      )}
 
       {showSuccess && (
         <SuccessPopup

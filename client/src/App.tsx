@@ -28,6 +28,7 @@ const Classes = lazy(() => import('./pages/Classes'));
 const ClassDetail = lazy(() => import('./pages/ClassDetail'));
 const Subjects = lazy(() => import('./pages/Subjects'));
 const Attendance = lazy(() => import('./pages/Attendance'));
+const DayBoarding = lazy(() => import('./pages/DayBoarding'));
 const Finance = lazy(() => import('./pages/Finance'));
 const Transport = lazy(() => import('./pages/Transport'));
 const Announcements = lazy(() => import('./pages/Announcements'));
@@ -118,6 +119,7 @@ function MainApp() {
                     <Route path="/classes/:id" element={<ErrorBoundary inline><ClassDetail /></ErrorBoundary>} />
                     <Route path="/subjects" element={<ErrorBoundary inline><Subjects /></ErrorBoundary>} />
                     <Route path="/attendance" element={<ErrorBoundary inline><Attendance /></ErrorBoundary>} />
+                    <Route path="/day-boarding" element={<ErrorBoundary inline><DayBoarding /></ErrorBoundary>} />
                     <Route path="/finance" element={<ErrorBoundary inline><Finance /></ErrorBoundary>} />
                     <Route path="/invoices" element={<ErrorBoundary inline><Invoices /></ErrorBoundary>} />
                     <Route path="/grades" element={<ErrorBoundary inline><Grades /></ErrorBoundary>} />

@@ -168,8 +168,8 @@ export async function generateInvoicesFromStructure(
   const termBursaries = allBursaries.filter(
     (b: any) => b.term === term && String(b.year) === String(year)
   );
-  const classDiscount = allDiscounts.find(
-    (d: any) => d.classId === classId && d.term === term && String(d.year) === String(year)
+  const termDiscounts = allDiscounts.filter(
+    (d: any) => d.term === term && String(d.year) === String(year)
   );
   const applicable = structures.filter(
     s => s.isRequired || s.category === FeeCategory.TUITION || s.category === FeeCategory.BOARDING
@@ -194,8 +194,8 @@ export async function generateInvoicesFromStructure(
         id: uuidv4(),
         studentId: student.id,
         classId: isUUID(classId) ? classId : undefined as any,
-        description: `Bursary Invoice`,
-        amount: bursary.amount,
+        description: bursary.isFull ? 'Full Bursary' : 'Bursary Invoice',
+        amount: bursary.isFull ? 0 : bursary.amount,
         paidAmount: 0,
         dueDate: dueDateStr,
         term,
@@ -207,15 +207,17 @@ export async function generateInvoicesFromStructure(
     }
 
     for (const structure of applicable) {
+      const discount = termDiscounts.find((d: any) => d.studentId === student.id) ||
+        termDiscounts.find((d: any) => !d.studentId && d.classId === classId);
       let amount = structure.amount;
       let description = structure.name || structure.description || 'Fee';
-      if (classDiscount) {
-        if (classDiscount.type === 'percentage') {
-          amount = Math.max(0, amount - (amount * classDiscount.amount) / 100);
-          description += ` (${classDiscount.amount}% off)`;
+      if (discount) {
+        if (discount.type === 'percentage') {
+          amount = Math.max(0, amount - (amount * discount.amount) / 100);
+          description += ` (${discount.amount}% off)`;
         } else {
           const share = baseTotal > 0 ? structure.amount / baseTotal : 0;
-          amount = Math.max(0, amount - classDiscount.amount * share);
+          amount = Math.max(0, amount - discount.amount * share);
         }
       }
       if (amount <= 0) continue;

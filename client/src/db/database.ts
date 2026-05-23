@@ -25,6 +25,7 @@ interface Bursary {
   studentId: string;
   studentName: string;
   amount: number;
+  isFull?: boolean;
   term: string;
   year: string;
   createdAt: string;
@@ -32,8 +33,10 @@ interface Bursary {
 
 interface Discount {
   id: string;
-  classId: string;
-  className: string;
+  studentId?: string;
+  studentName?: string;
+  classId?: string;
+  className?: string;
   amount: number;
   type: 'fixed' | 'percentage';
   term: string;
@@ -243,6 +246,34 @@ export class SchofyDB extends Dexie {
       feeStructures: 'id, classId, category, term, year, schoolId',
       bursaries: 'id, studentId, term, year, schoolId',
       discounts: 'id, classId, term, year, schoolId',
+      payments: 'id, feeId, studentId, date, schoolId',
+      invoices: 'id, studentId, status, term, year, schoolId',
+      announcements: 'id, priority, createdAt, schoolId',
+      syncQueue: 'id, table, synced, timestamp',
+      syncLogs: 'id, table, status, createdAt',
+      syncMeta: 'id, tableName',
+      exams: 'id, classId, term, year, schoolId',
+      examResults: 'id, examId, studentId, subjectId, schoolId',
+      timetable: 'id, classId, dayOfWeek, period, schoolId',
+      transportRoutes: 'id, name, schoolId',
+      transportAssignments: 'id, studentId, routeId, schoolId',
+      settings: 'id, key',
+      notifications: 'id, read, createdAt, type, schoolId',
+      salaryPayments: 'id, staffId, month, year, status, schoolId'
+    });
+
+    this.version(8).stores({
+      schools: 'id, name',
+      users: 'id, email, role, schoolId',
+      students: 'id, admissionNo, classId, firstName, lastName, status, boardingStatus, schoolId',
+      staff: 'id, employeeId, role, firstName, lastName, status, schoolId',
+      classes: 'id, name, level, schoolId',
+      subjects: 'id, classId, name, schoolId',
+      attendance: 'id, entityType, entityId, date, schoolId',
+      fees: 'id, studentId, classId, term, year, schoolId',
+      feeStructures: 'id, classId, category, term, year, schoolId',
+      bursaries: 'id, studentId, term, year, schoolId',
+      discounts: 'id, classId, studentId, term, year, schoolId',
       payments: 'id, feeId, studentId, date, schoolId',
       invoices: 'id, studentId, status, term, year, schoolId',
       announcements: 'id, priority, createdAt, schoolId',

@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { getClassDisplayName } from '../utils/classroom';
 import { store } from '../lib/store';
+import { matchesStudentSearch } from '../utils/studentSearch';
 
 interface SearchResult {
   id: string;
@@ -25,6 +26,7 @@ const pages = [
   { path: '/subjects', title: 'Subjects', subtitle: 'Manage subjects', icon: BookOpen, keywords: ['subjects', 'subject', 'subjects', 'courses'] },
   { path: '/grades', title: 'Exams & Grades', subtitle: 'Manage exams and grades', icon: Award, keywords: ['exams', 'grades', 'results', 'marks', 'scores'] },
   { path: '/finance', title: 'Fees & Finance', subtitle: 'Financial management', icon: Receipt, keywords: ['finance', 'fees', 'payments', 'money'] },
+  { path: '/day-boarding', title: 'Day & Boarding', subtitle: 'Day and boarding students', icon: Users, keywords: ['day', 'boarding', 'boys', 'girls', 'students'] },
   { path: '/invoices', title: 'Invoices', subtitle: 'View invoices', icon: FileBarChart, keywords: ['invoices', 'billing', 'receipts'] },
   { path: '/transport', title: 'Transport', subtitle: 'Transport management', icon: Bus, keywords: ['transport', 'bus', 'transportation', 'routes'] },
   { path: '/announcements', title: 'Announcements', subtitle: 'School announcements', icon: MessageSquare, keywords: ['announcements', 'news', 'notices', 'events'] },
@@ -118,11 +120,7 @@ export default function GlobalSearch() {
       ]);
 
       students
-        .filter(s => 
-          (s.firstName || '').toLowerCase().includes(searchTerm) ||
-          (s.lastName || '').toLowerCase().includes(searchTerm) ||
-          (s.admissionNo || '').toLowerCase().includes(searchTerm)
-        )
+        .filter(s => matchesStudentSearch(s, searchTerm, [getClassDisplayName(s.classId, classes)]))
         .slice(0, 3)
         .forEach(s => {
           found.push({
