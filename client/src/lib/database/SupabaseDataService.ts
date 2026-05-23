@@ -543,6 +543,34 @@ function dequeue(id: string) {
 }
 
 function isOnline() { return navigator.onLine; }
+
+function isRecoverableCloudProblem(error: any): boolean {
+  const message = String(error?.message || error?.details || error || '').toLowerCase();
+  const status = Number(error?.status || error?.code || 0);
+  return (
+    status === 402 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    message.includes('failed to fetch') ||
+    message.includes('quota') ||
+    message.includes('too many requests') ||
+    message.includes('resource exhausted') ||
+    message.includes('service unavailable') ||
+    message.includes('exceed_egress_quota')
+  );
+}
+
+function notifyCloudProblem(error: any) {
+  if (!isRecoverableCloudProblem(error)) return;
+  window.dispatchEvent(new CustomEvent('schofyCloudProblem', {
+    detail: {
+      message: 'Supabase is unavailable or your free-tier limit may be reached. You can keep working locally on this desktop.',
+    },
+  }));
+}
 // ── Cache helpers ─────────────────────────────────────────────────────────────
 function cacheKey(sid: string, table: string) { return `${sid}:${table}`; }
 
@@ -869,6 +897,7 @@ class SupabaseDataService {
         notifyUI(tableName);
       }
     } catch (e: any) {
+      notifyCloudProblem(e);
       if (e.name !== 'AbortError') {
         console.warn(`[seed] ${rt}:`, e.message);
       }
@@ -1095,6 +1124,7 @@ class SupabaseDataService {
 
         return local;
       } catch (e: any) {
+        notifyCloudProblem(e);
         console.warn(`[cloud-fetch] ${rt}:`, e.message);
         return cacheGet(sid, tableName) || [];
       } finally {
@@ -1244,6 +1274,7 @@ class SupabaseDataService {
       
       return { success: true, syncedRemotely: true, savedLocally: true, record: finalRecord };
     } catch (e: any) {
+      notifyCloudProblem(e);
       enqueue({ op: 'create', userId, tableName, data: record });
       return { success: true, syncedRemotely: false, savedLocally: true, record };
     }
@@ -1298,6 +1329,7 @@ class SupabaseDataService {
 
       return { success: true, syncedRemotely: true, savedLocally: true, record: finalRecord };
     } catch (e: any) {
+      notifyCloudProblem(e);
       enqueue({ op: 'update', userId, tableName, recordId: id, data: record });
       return { success: true, syncedRemotely: false, savedLocally: true, record };
     }
@@ -1349,6 +1381,7 @@ class SupabaseDataService {
       }
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
+      notifyCloudProblem(e);
       enqueue({ op: 'delete', userId, tableName, recordId: id });
       return { success: true, syncedRemotely: false, savedLocally: true };
     }
@@ -1395,6 +1428,7 @@ class SupabaseDataService {
       }
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
+      notifyCloudProblem(e);
       for (const id of ids) enqueue({ op: 'delete', userId, tableName, recordId: id });
       return { success: false, syncedRemotely: false, savedLocally: true, error: e.message };
     }
@@ -1470,6 +1504,7 @@ class SupabaseDataService {
       }
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
+      notifyCloudProblem(e);
       enqueue({ op: 'saveSettings', userId, tableName: 'settings', settings });
       return { success: true, syncedRemotely: false, savedLocally: true };
     }

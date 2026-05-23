@@ -65,7 +65,9 @@ if (!isAdminPath) {
     if (session) {
       try {
         const user = JSON.parse(session);
-        serviceManager.initialize(user.id, user.schoolId || user.id);
+        if (isCloudSyncEnabled() && !user.localOnly) {
+          serviceManager.initialize(user.id, user.schoolId || user.id);
+        }
       } catch { /* ignore */ }
     }
   });

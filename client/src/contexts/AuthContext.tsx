@@ -9,6 +9,7 @@ import { generateUUID } from '../utils/uuid';
 import { prefetchCriticalTables } from '../lib/store';
 import { store } from '../lib/store';
 import { getSubscriptionAccessState } from '../utils/plans';
+import { isDesktopApp, setCloudSyncEnabled } from '../utils/desktopSyncPreference';
 
 export interface LocalUser {
   id: string;
@@ -18,13 +19,17 @@ export interface LocalUser {
   lastName: string;
   isActive: boolean;
   createdAt: string;
+  localOnly?: boolean;
 }
+
+type AuthResult = { success: boolean; error?: string; localFallback?: boolean; fallbackMode?: 'login' | 'register' };
 
 interface AuthContextType {
   user: LocalUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (email: string, password: string, firstName: string, lastName: string, phone?: string) => Promise<{ success: boolean; user?: { id: string }; error?: string; needsVerification?: boolean }>;
+  login: (email: string, password: string) => Promise<AuthResult>;
+  register: (email: string, password: string, firstName: string, lastName: string, phone?: string) => Promise<AuthResult & { user?: { id: string }; needsVerification?: boolean }>;
+  continueLocally: (profile: { email: string; firstName?: string; lastName?: string }) => Promise<AuthResult>;
   sendPasswordReset: (email: string) => Promise<{ success: boolean; error?: string }>;
   resendVerification: (email: string) => Promise<{ success: boolean; error?: string }>;
   activateSecureLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
@@ -37,6 +42,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const SESSION_KEY = 'schofy_session';
+const LOCAL_ONLY_SESSION_KEY = 'schofy_local_only_session';
+const LOCAL_FALLBACK_REASON_KEY = 'schofy_local_fallback_reason';
 
 function saveSession(user: LocalUser) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(user));
@@ -66,9 +73,40 @@ function clearSession() {
   localStorage.removeItem('schofy_sub_plan');
   localStorage.removeItem('schofy_sub_pending');
   localStorage.removeItem('schofy_sub_tid');
+  localStorage.removeItem(LOCAL_ONLY_SESSION_KEY);
+  localStorage.removeItem(LOCAL_FALLBACK_REASON_KEY);
   sessionStorage.removeItem('lastRoute');
   store.clearAll();
   void writeElectronBackup(SESSION_KEY, null);
+}
+
+function isRecoverableCloudProblem(error: any): boolean {
+  const message = String(error?.message || error?.error_description || error || '').toLowerCase();
+  const status = Number(error?.status || error?.code || 0);
+  return (
+    status === 402 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    message.includes('failed to fetch') ||
+    message.includes('network') ||
+    message.includes('quota') ||
+    message.includes('resource exhausted') ||
+    message.includes('too many requests') ||
+    message.includes('service unavailable') ||
+    message.includes('exceed_egress_quota')
+  );
+}
+
+function markLocalUnlimitedAccess(user: LocalUser) {
+  localStorage.setItem(LOCAL_ONLY_SESSION_KEY, 'true');
+  localStorage.setItem('schofy_sub_status', 'active');
+  localStorage.setItem('schofy_sub_plan', 'local_unlimited');
+  localStorage.setItem('schofy_sub_expiry', new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 20).toISOString());
+  localStorage.setItem('schofy_sub_pending', '0');
+  localStorage.setItem(`schofy_local_backup_email_${user.schoolId}`, user.email.toLowerCase());
 }
 
 async function getBackedUpSession(): Promise<LocalUser | null> {
@@ -126,7 +164,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     void restoreSessionWithGuard(stale);
 
-    const { data: { subscription } } = supabase!.auth.onAuthStateChange((event) => {
+    const { data: { subscription } } = supabase
+      ? supabase.auth.onAuthStateChange((event) => {
       if (active) {
         if (event === 'INITIAL_SESSION') {
           setLoading(false);
@@ -138,7 +177,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           clearSession();
         }
       }
-    });
+    })
+      : { data: { subscription: { unsubscribe: () => {} } } };
 
     return () => {
       active = false;
@@ -150,6 +190,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   function initializeSyncForUser(userData: LocalUser, options: { wait?: boolean } = {}): void {
+    const localOnly = userData.localOnly || localStorage.getItem(LOCAL_ONLY_SESSION_KEY) === 'true';
+    if (localOnly) {
+      const bootstrap = dataService.bootstrapSession(userData.id, userData.schoolId || userData.id);
+      if (options.wait) {
+        (userData as any)._bootstrapPromise = bootstrap;
+      }
+      prefetchCriticalTables(userData.schoolId || userData.id);
+      import('../utils/recycleBin').then(({ hydrateRecycleBin }) => {
+        void hydrateRecycleBin(userData.schoolId || userData.id);
+      });
+      try {
+        const raw = localStorage.getItem(`schofy_settings_${userData.schoolId}`);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          if (obj.currency) {
+            localStorage.setItem('schofy_currency', obj.currency);
+            window.dispatchEvent(new Event('currencyChanged'));
+          }
+          if (obj.schoolName) {
+            window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: obj }));
+          }
+        }
+      } catch { /* ignore */ }
+      return;
+    }
+
     // Trigger staged initialization via ServiceManager
     const bootstrap = serviceManager.initialize(userData.id, userData.schoolId || userData.id);
 
@@ -240,9 +306,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!stale()) setLoading(false);
   }
 
-  async function login(email: string, password: string): Promise<{ success: boolean; error?: string }> {
+  async function login(email: string, password: string): Promise<AuthResult> {
     if (!isSupabaseConfigured || !supabase) {
-      return { success: false, error: 'Supabase not configured. Cannot login.' };
+      return {
+        success: false,
+        error: isDesktopApp() ? 'Cloud authentication is unavailable. You can continue locally on this desktop.' : 'Supabase not configured. Cannot login.',
+        localFallback: isDesktopApp(),
+        fallbackMode: 'login',
+      };
     }
 
     if (!isOnline) {
@@ -253,7 +324,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
         return { success: true };
       }
-      return { success: false, error: 'You are offline. Please connect to login for the first time.' };
+      return {
+        success: false,
+        error: isDesktopApp() ? 'You are offline. Continue locally on this desktop.' : 'You are offline. Please connect to login for the first time.',
+        localFallback: isDesktopApp(),
+        fallbackMode: 'login',
+      };
     }
 
     try {
@@ -262,6 +338,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       });
       if (authError || !authData.user) {
+        if (isDesktopApp() && isRecoverableCloudProblem(authError)) {
+          return {
+            success: false,
+            error: 'Supabase could not be reached. You can keep working locally on this desktop.',
+            localFallback: true,
+            fallbackMode: 'login',
+          };
+        }
         const message = authError?.message || '';
         if (/confirm|verified/i.test(message)) {
           return { success: false, error: 'Please verify your email before signing in. Check your inbox for the verification link.' };
@@ -292,7 +376,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           // No cached session — create a minimal offline session so user can access the app
           // They'll see the subscription gate and can navigate to Plans
-          return { success: false, error: 'Could not verify your account because Supabase quota is currently blocked. Please retry after the project is restored.' };
+          return {
+            success: false,
+            error: 'Supabase quota is currently blocked. You can continue locally on this desktop.',
+            localFallback: isDesktopApp(),
+            fallbackMode: 'login',
+          };
         }
         return { success: false, error: error.message };
       }
@@ -400,6 +489,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true };
     } catch (error: any) {
       console.error('Login error:', error);
+      if (isDesktopApp() && isRecoverableCloudProblem(error)) {
+        return {
+          success: false,
+          error: 'Supabase could not be reached. You can continue locally on this desktop.',
+          localFallback: true,
+          fallbackMode: 'login',
+        };
+      }
       return { success: false, error: error.message || 'Login failed' };
     }
   }
@@ -410,13 +507,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     firstName: string,
     lastName: string,
     phone = ''
-  ): Promise<{ success: boolean; user?: { id: string }; error?: string; needsVerification?: boolean }> {
+  ): Promise<AuthResult & { user?: { id: string }; needsVerification?: boolean }> {
     if (!isSupabaseConfigured || !supabase) {
-      return { success: false, error: 'Supabase not configured. Cannot register.' };
+      return {
+        success: false,
+        error: isDesktopApp() ? 'Cloud registration is unavailable. You can create a local desktop account.' : 'Supabase not configured. Cannot register.',
+        localFallback: isDesktopApp(),
+        fallbackMode: 'register',
+      };
     }
 
     if (!isOnline) {
-      return { success: false, error: 'You are offline. Please connect to the internet to create an account.' };
+      return {
+        success: false,
+        error: isDesktopApp() ? 'You are offline. Create a local desktop account instead.' : 'You are offline. Please connect to the internet to create an account.',
+        localFallback: isDesktopApp(),
+        fallbackMode: 'register',
+      };
     }
 
     try {
@@ -431,7 +538,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           },
         },
       });
-      if (authError) return { success: false, error: authError.message };
+      if (authError) {
+        if (isDesktopApp() && isRecoverableCloudProblem(authError)) {
+          return {
+            success: false,
+            error: 'Supabase could not create the account right now. You can create it locally on this desktop.',
+            localFallback: true,
+            fallbackMode: 'register',
+          };
+        }
+        return { success: false, error: authError.message };
+      }
 
       const newId = authData.user?.id || generateUUID();
       const now = new Date().toISOString();
@@ -461,6 +578,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.error('Registration error:', error);
+        if (isDesktopApp() && isRecoverableCloudProblem(error)) {
+          return {
+            success: false,
+            error: 'Supabase could not save the account profile right now. You can create it locally on this desktop.',
+            localFallback: true,
+            fallbackMode: 'register',
+          };
+        }
         return { success: false, error: error.message };
       }
 
@@ -502,8 +627,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true };
     } catch (error: any) {
       console.error('Registration error:', error);
+      if (isDesktopApp() && isRecoverableCloudProblem(error)) {
+        return {
+          success: false,
+          error: 'Supabase could not be reached. You can create a local desktop account.',
+          localFallback: true,
+          fallbackMode: 'register',
+        };
+      }
       return { success: false, error: error.message || 'Registration failed' };
     }
+  }
+
+  async function continueLocally(profile: { email: string; firstName?: string; lastName?: string }): Promise<AuthResult> {
+    if (!isDesktopApp()) {
+      return { success: false, error: 'Local unlimited sessions are available only in the desktop app.' };
+    }
+
+    const cleanEmail = profile.email.trim().toLowerCase();
+    if (!cleanEmail) return { success: false, error: 'Enter an email first.' };
+
+    const cached = await getBackedUpSession();
+    const useCached = cached?.email?.toLowerCase() === cleanEmail;
+    const now = new Date().toISOString();
+    const userData: LocalUser = useCached
+      ? { ...cached, localOnly: true }
+      : {
+          id: generateUUID(),
+          schoolId: generateUUID(),
+          email: cleanEmail,
+          firstName: profile.firstName?.trim() || cleanEmail.split('@')[0] || 'Local',
+          lastName: profile.lastName?.trim() || 'School',
+          isActive: true,
+          createdAt: now,
+          localOnly: true,
+        };
+
+    setCloudSyncEnabled(false);
+    markLocalUnlimitedAccess(userData);
+    localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'cloud_unavailable');
+    localStorage.removeItem('schofy_local_merge_prompt_dismissed');
+    localStorage.removeItem('schofy_cloud_recovered');
+    localStorage.setItem('schofy_next_cloud_health_check_at', String(Date.now() + 30 * 60 * 1000));
+    saveSession(userData);
+    setUser(userData);
+    setSchoolId(userData.schoolId);
+    void userDBManager.openDatabase(userData.schoolId).catch(() => {});
+    initializeSyncForUser(userData);
+    return { success: true };
   }
 
   async function sendPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
@@ -585,7 +756,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, sendPasswordReset, resendVerification, activateSecureLogin, logout, isOnline, schoolId, isSupabaseAvailable: isSupabaseConfigured && !!supabase }}>
+    <AuthContext.Provider value={{ user, loading, login, register, continueLocally, sendPasswordReset, resendVerification, activateSecureLogin, logout, isOnline, schoolId, isSupabaseAvailable: isSupabaseConfigured && !!supabase }}>
       {children}
     </AuthContext.Provider>
   );

@@ -21,7 +21,7 @@ export function getSchofySupabaseClient(url: string, anonKey: string): SupabaseC
       lockType: 'null',
     } as any,
     realtime: {
-      params: { eventsPerSecond: 20 },
+      params: { eventsPerSecond: 5 },
     },
   });
   g[GLOBAL_KEY] = client;

@@ -5,7 +5,7 @@ import { isCloudSyncEnabled } from '../utils/desktopSyncPreference';
 class SyncService {
   private syncInterval: ReturnType<typeof setTimeout> | null = null;
   /** Background queue-flush interval. Reads are on-demand to protect Supabase limits. */
-  private readonly SYNC_INTERVAL_MS = 5 * 60 * 1000;
+  private readonly SYNC_INTERVAL_MS = 15 * 60 * 1000;
   /** Maximum backoff interval when repeated failures occur. */
   private readonly MAX_BACKOFF_MS = 10 * 60 * 1000; // 10 minutes (was 30)
   private backoffMs: number | null = null;

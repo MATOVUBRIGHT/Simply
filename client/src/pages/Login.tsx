@@ -123,6 +123,7 @@ export default function Login() {
   const [resetEmail, setResetEmail] = useState('');
   const [resetOtp, setResetOtp] = useState('');
   const [passwordResetComplete, setPasswordResetComplete] = useState(false);
+  const [localFallback, setLocalFallback] = useState<{ mode: 'login' | 'register'; message: string } | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [syncStatus, setSyncStatus] = useState<{
@@ -131,7 +132,7 @@ export default function Login() {
     progress: number;
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
 
-  const { login, register, sendPasswordReset, user, isOnline } = useAuth();
+  const { login, register, continueLocally, sendPasswordReset, user, isOnline } = useAuth();
   const { primaryColor } = useTheme();
   const navigate = useNavigate();
 
@@ -173,19 +174,7 @@ export default function Login() {
     setLoading(true);
 
     try {
-      if (!isSupabaseConfigured) {
-        setError('Cloud authentication is not available. Please check your configuration.');
-        setLoading(false);
-        return;
-      }
-
       if (isRegister) {
-        if (!isOnline) {
-          setError('You must be online to create an account. Please connect to the internet.');
-          setLoading(false);
-          return;
-        }
-
         if (!acceptedPolicies) {
           setError('Please accept the Terms of Use and Privacy Policy to create an account.');
           setLoading(false);
@@ -217,6 +206,9 @@ export default function Login() {
         const result = await register(email.trim(), password, firstName.trim(), lastName.trim(), phone.trim());
 
         if (!result.success) {
+          if (result.localFallback) {
+            setLocalFallback({ mode: result.fallbackMode || 'register', message: result.error || 'Cloud is unavailable. You can continue locally.' });
+          }
           setError(result.error || 'Registration failed');
           setSecuringAccount(false);
           setLoading(false);
@@ -250,6 +242,9 @@ export default function Login() {
         setSyncStatus({ step: 'syncing', message: 'Checking your secure access...', progress: 45 });
         const result = await login(email.trim(), password);
         if (!result.success) {
+          if (result.localFallback) {
+            setLocalFallback({ mode: result.fallbackMode || 'login', message: result.error || 'Cloud is unavailable. You can continue locally.' });
+          }
           setError(result.error || 'Login failed');
           setSecuringAccount(false);
           setLoading(false);
@@ -329,6 +324,28 @@ export default function Login() {
       setPassword('');
     } finally {
       setResetLoading(false);
+    }
+  };
+
+  const handleContinueLocally = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const result = await continueLocally({
+        email,
+        firstName,
+        lastName,
+      });
+      if (!result.success) {
+        setError(result.error || 'Could not start local session');
+        return;
+      }
+      setLocalFallback(null);
+      setShowSuccess(true);
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      navigate('/');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -753,7 +770,7 @@ export default function Login() {
                 </div>
               )}
 
-              <button type="submit" disabled={loading || !isSupabaseConfigured} className="btn btn-primary w-full justify-center py-3 disabled:opacity-50">
+              <button type="submit" disabled={loading} className="btn btn-primary w-full justify-center py-3 disabled:opacity-50">
                 {loading ? (
                   <>
                     <Loader2 size={18} className="animate-spin" />
@@ -797,6 +814,38 @@ export default function Login() {
             >
               Try again
             </button>
+          </div>
+        </div>
+      )}
+
+      {localFallback && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-blue-200 bg-white p-5 shadow-2xl dark:border-blue-800 dark:bg-slate-900">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
+              <CloudOff size={22} />
+            </div>
+            <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">Use Schofy locally</h2>
+            <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">{localFallback.message}</p>
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              Your data will be stored on this desktop with Supabase sync paused. When Supabase is available again, you can turn sync back on in Settings and push your local data.
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setLocalFallback(null)}
+                className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleContinueLocally}
+                disabled={loading}
+                className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {loading ? 'Starting...' : 'Use locally'}
+              </button>
+            </div>
           </div>
         </div>
       )}

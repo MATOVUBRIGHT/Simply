@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { store } from '../lib/store';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { isCloudSyncEnabled } from '../utils/desktopSyncPreference';
 
 import { useAuth } from '../contexts/AuthContext';
 
@@ -56,31 +57,56 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
 
   // ── Delegation to dataService for all realtime logic ────────────────────────
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !sid || !user) return;
+    if (!isSupabaseConfigured || !supabase || !sid || !user || !isCloudSyncEnabled()) {
+      setIsConnected(false);
+      return;
+    }
 
     // We don't call it here directly if serviceManager is handling it.
     // But for safety and consistency with current architecture:
     dataService.startRealtimeSync(sid);
-    setIsConnected(true);
+    setIsConnected(isCloudSyncEnabled());
 
     const handleOnline = () => {
+      if (!isCloudSyncEnabled()) {
+        setIsConnected(false);
+        return;
+      }
       dataService.startRealtimeSync(sid);
       refreshActive(sid);
+      setIsConnected(true);
     };
 
     const handleVisible = () => {
       if (document.visibilityState !== 'visible') return;
+      if (!isCloudSyncEnabled()) {
+        setIsConnected(false);
+        return;
+      }
       dataService.startRealtimeSync(sid);
       refreshActive(sid);
+      setIsConnected(true);
+    };
+
+    const handleSyncPreference = () => {
+      if (!isCloudSyncEnabled()) {
+        dataService.stopRealtimeSync();
+        setIsConnected(false);
+      } else {
+        dataService.startRealtimeSync(sid);
+        setIsConnected(true);
+      }
     };
 
     const interval = window.setInterval(() => refreshStale(sid), POLL_INTERVAL);
     window.addEventListener('online', handleOnline);
+    window.addEventListener('schofyCloudSyncPreferenceChanged', handleSyncPreference);
     document.addEventListener('visibilitychange', handleVisible);
 
     return () => {
       window.clearInterval(interval);
       window.removeEventListener('online', handleOnline);
+      window.removeEventListener('schofyCloudSyncPreferenceChanged', handleSyncPreference);
       document.removeEventListener('visibilitychange', handleVisible);
       setIsConnected(false);
       dataService.stopRealtimeSync();

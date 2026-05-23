@@ -12,7 +12,9 @@ import SubscriptionGate from './components/SubscriptionGate';
 import StaffSessionBanner from './components/StaffSessionBanner';
 import { useStaffAuth } from './contexts/StaffAuthContext';
 import { useToast } from './contexts/ToastContext';
+import { useSync } from './contexts/SyncContext';
 import { initErrorInterceptor } from './lib/errorInterceptor';
+import { supabaseAnonKey, supabaseUrl } from './lib/supabase';
 
 // Lazy load pages for performance
 const Login = lazy(() => import('./pages/Login'));
@@ -142,6 +144,8 @@ function MainApp() {
           <UpdateBanner />
           <StorageWarning />
           <StaffSessionBanner />
+          <LocalMergePrompt />
+          <CloudProblemPrompt />
         </RealtimeSyncProvider>
       </StudentsProvider>
     </ErrorBoundary>
@@ -181,6 +185,178 @@ function App() {
       </Suspense>
       <DesktopUpdatePrompt />
     </>
+  );
+}
+
+function LocalMergePrompt() {
+  const { user, isOnline } = useAuth();
+  const { enableSync, isSyncEnabled, isSupabaseConfigured } = useSync();
+  const [dismissed, setDismissed] = useState(localStorage.getItem('schofy_local_merge_prompt_dismissed') === '1');
+  const [merging, setMerging] = useState(false);
+  const [cloudRecovered, setCloudRecovered] = useState(localStorage.getItem('schofy_cloud_recovered') === '1');
+
+  const localOnlySession = user?.localOnly || localStorage.getItem('schofy_local_only_session') === 'true';
+  const canCheckCloud = !!localOnlySession && isOnline && isSupabaseConfigured && !isSyncEnabled && !dismissed;
+  const shouldShow = canCheckCloud && cloudRecovered;
+
+  useEffect(() => {
+    if (!canCheckCloud || cloudRecovered) return;
+
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const checkCloud = async () => {
+      const nextCheckAt = Number(localStorage.getItem('schofy_next_cloud_health_check_at') || '0');
+      const now = Date.now();
+      if (nextCheckAt > now) {
+        retryTimer = setTimeout(checkCloud, Math.min(nextCheckAt - now, 30 * 60 * 1000));
+        return;
+      }
+
+      try {
+        const controller = new AbortController();
+        const abortTimer = setTimeout(() => controller.abort(), 5000);
+        const response = await fetch(`${supabaseUrl}/auth/v1/settings`, {
+          headers: { apikey: supabaseAnonKey },
+          signal: controller.signal,
+        });
+        clearTimeout(abortTimer);
+
+        if (response.ok) {
+          localStorage.setItem('schofy_cloud_recovered', '1');
+          setCloudRecovered(true);
+          return;
+        }
+      } catch { /* cloud still unavailable */ }
+
+      localStorage.setItem('schofy_next_cloud_health_check_at', String(Date.now() + 30 * 60 * 1000));
+      retryTimer = setTimeout(checkCloud, 30 * 60 * 1000);
+    };
+
+    void checkCloud();
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [canCheckCloud, cloudRecovered]);
+
+  if (!shouldShow) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-lg border border-emerald-200 bg-white p-5 shadow-2xl dark:border-emerald-800 dark:bg-slate-900">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
+          <span className="text-sm font-bold">OK</span>
+        </div>
+        <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">Supabase is reachable again</h2>
+        <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">
+          This desktop is using a local-only backup. If this is the same school account, merge by enabling Supabase sync and uploading your local data.
+        </p>
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.setItem('schofy_local_merge_prompt_dismissed', '1');
+              setDismissed(true);
+            }}
+            className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            Later
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              setMerging(true);
+              try {
+                await enableSync();
+                localStorage.removeItem('schofy_local_only_session');
+                localStorage.removeItem('schofy_local_fallback_reason');
+                localStorage.removeItem('schofy_cloud_recovered');
+                localStorage.removeItem('schofy_next_cloud_health_check_at');
+                localStorage.setItem('schofy_sub_plan', '');
+                const saved = localStorage.getItem('schofy_session');
+                if (saved) {
+                  try {
+                    const parsed = JSON.parse(saved);
+                    delete parsed.localOnly;
+                    localStorage.setItem('schofy_session', JSON.stringify(parsed));
+                  } catch { /* ignore */ }
+                }
+                localStorage.setItem('schofy_local_merge_prompt_dismissed', '1');
+                setDismissed(true);
+              } finally {
+                setMerging(false);
+              }
+            }}
+            disabled={merging}
+            className="flex-1 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {merging ? 'Merging...' : 'Merge account'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CloudProblemPrompt() {
+  const { user, schoolId } = useAuth();
+  const { disableSync } = useSync();
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    const onCloudProblem = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      setMessage(detail?.message || 'Supabase is unavailable. You can keep working locally on this desktop.');
+    };
+    window.addEventListener('schofyCloudProblem', onCloudProblem as EventListener);
+    return () => window.removeEventListener('schofyCloudProblem', onCloudProblem as EventListener);
+  }, []);
+
+  if (!message) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-lg border border-amber-200 bg-white p-5 shadow-2xl dark:border-amber-800 dark:bg-slate-900">
+        <h2 className="text-center text-lg font-bold text-slate-900 dark:text-white">Cloud sync problem</h2>
+        <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">{message}</p>
+        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          Local mode stops Supabase calls and keeps storing changes on this device. You can re-enable Supabase sync in Settings later.
+        </div>
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={() => setMessage('')}
+            className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            Keep trying
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              disableSync();
+              const expiry = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 20).toISOString();
+              localStorage.setItem('schofy_local_only_session', 'true');
+              localStorage.setItem('schofy_next_cloud_health_check_at', String(Date.now() + 30 * 60 * 1000));
+              localStorage.removeItem('schofy_cloud_recovered');
+              localStorage.setItem('schofy_sub_status', 'active');
+              localStorage.setItem('schofy_sub_plan', 'local_unlimited');
+              localStorage.setItem('schofy_sub_expiry', expiry);
+              localStorage.setItem('schofy_sub_pending', '0');
+              localStorage.removeItem('schofy_local_merge_prompt_dismissed');
+              if (user) {
+                const updatedUser = { ...user, localOnly: true };
+                localStorage.setItem('schofy_session', JSON.stringify(updatedUser));
+                if (schoolId || user.schoolId) {
+                  localStorage.setItem(`schofy_local_backup_email_${schoolId || user.schoolId}`, user.email.toLowerCase());
+                }
+              }
+              setMessage('');
+            }}
+            className="flex-1 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+          >
+            Use locally
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
