@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, shell } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -182,6 +182,21 @@ app.on('before-quit', () => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+ipcMain.handle('open-external', async (_event, url) => {
+  try {
+    const parsed = new URL(url);
+    if (!['https:', 'http:'].includes(parsed.protocol)) {
+      throw new Error('Only http and https links can be opened');
+    }
+
+    await shell.openExternal(parsed.toString());
+    return { success: true };
+  } catch (error) {
+    console.error('[external] Failed to open link:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('check-online', async () => {

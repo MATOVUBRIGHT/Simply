@@ -6,6 +6,7 @@ import { RealtimeSyncProvider } from './realtime/RealtimeSync';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import UpdateBanner from './components/UpdateBanner';
+import DesktopUpdatePrompt from './components/DesktopUpdatePrompt';
 import StorageWarning from './components/StorageWarning';
 import SubscriptionGate from './components/SubscriptionGate';
 import StaffSessionBanner from './components/StaffSessionBanner';
@@ -152,24 +153,30 @@ function App() {
   if (!hasSession && !user) {
     if (loading) return <FullScreenLoader label="Loading Schofy..." />;
     return (
-      <Suspense fallback={<FullScreenLoader />}>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </Suspense>
+      <>
+        <Suspense fallback={<FullScreenLoader />}>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </Suspense>
+        <DesktopUpdatePrompt />
+      </>
     );
   }
 
   // Has session or user — render app
   return (
-    <Suspense fallback={<FullScreenLoader />}>
-      <Routes>
-        <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-        <Route path="/subscribe" element={<Subscription />} />
-        <Route path="/*" element={<MainApp />} />
-      </Routes>
-    </Suspense>
+    <>
+      <Suspense fallback={<FullScreenLoader />}>
+        <Routes>
+          <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+          <Route path="/subscribe" element={<Subscription />} />
+          <Route path="/*" element={<MainApp />} />
+        </Routes>
+      </Suspense>
+      <DesktopUpdatePrompt />
+    </>
   );
 }
 

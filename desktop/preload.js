@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Get the app version */
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
 
+  /** Open a trusted update/download link in the user's default browser */
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
   /** Check if the backend is reachable */
   checkOnline: () => ipcRenderer.invoke('check-online'),
 });
