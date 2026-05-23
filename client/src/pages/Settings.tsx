@@ -107,23 +107,15 @@ export default function Settings() {
         const remoteObj: Record<string, any> = {};
         stored.forEach((s: any) => { remoteObj[s.key] = s.value; });
 
-        // Only apply remote keys that don't exist locally yet
-        const missing: Record<string, any> = {};
-        for (const [k, v] of Object.entries(remoteObj)) {
-          if (!(k in localObj)) missing[k] = v;
-        }
-
-        if (Object.keys(missing).length > 0) {
-          const merged = { ...localObj, ...missing };
-          setSettings(prev => ({ ...prev, ...missing }));
-          localStorage.setItem(localKey, JSON.stringify(merged));
-          if (missing.currency) {
-            localStorage.setItem('schofy_currency', missing.currency);
-            window.dispatchEvent(new Event('currencyChanged'));
-          }
+        const merged = { ...localObj, ...remoteObj };
+        setSettings(prev => ({ ...prev, ...remoteObj }));
+        localStorage.setItem(localKey, JSON.stringify(merged));
+        if (remoteObj.currency) {
+          localStorage.setItem('schofy_currency', remoteObj.currency);
+          window.dispatchEvent(new Event('currencyChanged'));
         }
       }
-    } catch (error) {
+  } catch (error) {
       console.error(error);
     }
   }

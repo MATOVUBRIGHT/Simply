@@ -127,8 +127,15 @@ export default function Admission() {
     try {
       // Check plan limit before admitting
       const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
-      if (access.plan && access.plan.studentLimit > 0 && access.remaining <= 0) {
+      if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
+        addToast('Choose an active plan before admitting students.', 'error');
+        navigate('/plans');
+        setLoading(false);
+        return;
+      }
+      if (access.plan.studentLimit > 0 && access.remaining <= 0) {
         addToast(`Plan limit reached (${access.used}/${access.plan.studentLimit} students). Upgrade your plan to admit more.`, 'error');
+        navigate('/plans');
         setLoading(false);
         return;
       }

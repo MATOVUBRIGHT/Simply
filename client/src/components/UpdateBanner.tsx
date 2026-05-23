@@ -23,7 +23,10 @@ export default function UpdateBanner() {
   useEffect(() => {
     // Small delay so it doesn't flash on first paint
     const t = setTimeout(() => {
-      if (!localStorage.getItem(STORAGE_KEY)) setVisible(true);
+      if (!localStorage.getItem(STORAGE_KEY)) {
+        localStorage.setItem(STORAGE_KEY, '1');
+        setVisible(true);
+      }
     }, 1200);
     return () => clearTimeout(t);
   }, []);

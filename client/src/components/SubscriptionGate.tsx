@@ -46,9 +46,19 @@ function getOfflineStatus(): { blocked: boolean; reason: BlockReason; planId: st
   };
 }
 
-type BlockReason = 'expired' | 'incomplete' | 'pending' | 'paused';
+type BlockReason = 'expired' | 'incomplete' | 'pending' | 'paused' | 'limit';
 
 interface Props { children: React.ReactNode; }
+
+function classifyRemoteExpiry(expiryIso: string | null): Pick<SubscriptionAccessState, 'status' | 'daysRemaining' | 'expiryDate'> {
+  if (!expiryIso) return { status: 'incomplete', daysRemaining: null, expiryDate: null };
+  const expiry = new Date(expiryIso);
+  if (Number.isNaN(expiry.getTime())) return { status: 'incomplete', daysRemaining: null, expiryDate: null };
+  const ms = expiry.getTime() - Date.now();
+  if (ms <= 0) return { status: 'expired', daysRemaining: 0, expiryDate: expiry.toISOString() };
+  const days = Math.ceil(ms / (24 * 60 * 60 * 1000));
+  return { status: days <= 14 ? 'expiring' : 'active', daysRemaining: days, expiryDate: expiry.toISOString() };
+}
 
 export default function SubscriptionGate({ children }: Props) {
   const { user, schoolId, logout } = useAuth();
@@ -75,7 +85,7 @@ export default function SubscriptionGate({ children }: Props) {
     const tenantId = schoolId || user.id;
 
     // Always read local cache first — works 100% offline
-    const state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
+    let state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
 
     try {
       // Check Supabase for latest subscription row (online only)
@@ -98,6 +108,24 @@ export default function SubscriptionGate({ children }: Props) {
           isPending = sub.status === 'pending' || (meta.source === 'client' && !meta.approvedByAdmin && !meta.grantedByAdmin && !meta.extendedByAdmin && sub.status !== 'active');
           tid = meta.transactionId || null;
           if (!isPaused && meta.pausedByAdmin) isPaused = true;
+
+          if (!isPaused && !isPending && sub.status === 'active') {
+            const remotePlan = PLAN_DEFINITIONS.find(p => p.id === sub.plan) || null;
+            const remoteExpiry = classifyRemoteExpiry(sub.ends_at || null);
+            if (remotePlan) {
+              state = {
+                ...state,
+                plan: remotePlan,
+                selectedPlanId: remotePlan.id,
+                expiryDate: remoteExpiry.expiryDate,
+                status: remoteExpiry.status,
+                daysRemaining: remoteExpiry.daysRemaining,
+                remaining: Math.max(0, remotePlan.studentLimit - state.used),
+                eligible: state.used < remotePlan.studentLimit && (remoteExpiry.status === 'active' || remoteExpiry.status === 'expiring'),
+                requiresPlanAction: remoteExpiry.status === 'expired' || remoteExpiry.status === 'incomplete',
+              };
+            }
+          }
         }
       }
 
@@ -121,6 +149,12 @@ export default function SubscriptionGate({ children }: Props) {
         setPlanName(state.plan?.name || null);
         setExpiryDate(state.expiryDate);
         setPendingTid(null);
+      } else if (state.plan && state.used > state.plan.studentLimit) {
+        setBlocked(true);
+        setBlockReason('limit');
+        setPlanName(state.plan.name);
+        setExpiryDate(state.expiryDate);
+        setPendingTid(null);
       } else {
         setBlocked(false);
         setPendingTid(null);
@@ -132,6 +166,12 @@ export default function SubscriptionGate({ children }: Props) {
         setBlocked(true);
         setBlockReason(state.status as BlockReason);
         setPlanName(state.plan?.name || null);
+        setExpiryDate(state.expiryDate);
+        setPendingTid(null);
+      } else if (state.plan && state.used > state.plan.studentLimit) {
+        setBlocked(true);
+        setBlockReason('limit');
+        setPlanName(state.plan.name);
         setExpiryDate(state.expiryDate);
         setPendingTid(null);
       } else {
@@ -171,7 +211,16 @@ export default function SubscriptionGate({ children }: Props) {
     return `https://wa.me/256750034304?text=${encodeURIComponent(msg)}`;
   };
 
-  if (checking) return <>{children}</>;
+  if (checking && !isAllowedRoute) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
+        <div className="text-center">
+          <RefreshCw size={28} className="mx-auto mb-3 animate-spin text-indigo-600" />
+          <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Checking access...</p>
+        </div>
+      </div>
+    );
+  }
 
   const headerConfig: Record<BlockReason, { gradient: string; icon: React.ReactNode; title: string; subtitle: string }> = {
     expired: {
@@ -197,6 +246,12 @@ export default function SubscriptionGate({ children }: Props) {
       icon: <AlertTriangle size={32} className="text-white" />,
       title: 'Access Paused',
       subtitle: 'Your access has been paused by the admin. Contact support to resolve.',
+    },
+    limit: {
+      gradient: 'from-purple-600 to-indigo-700',
+      icon: <AlertTriangle size={32} className="text-white" />,
+      title: 'Plan Limit Exceeded',
+      subtitle: 'Your school has more students than the current plan allows. Upgrade before continuing.',
     },
   };
 
@@ -258,9 +313,9 @@ export default function SubscriptionGate({ children }: Props) {
               )}
 
               {/* Payment instructions for expired/incomplete */}
-              {(blockReason === 'expired' || blockReason === 'incomplete') && (
+              {(blockReason === 'expired' || blockReason === 'incomplete' || blockReason === 'limit') && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-xs text-indigo-700 space-y-1">
-                  <p className="font-semibold">How to renew:</p>
+                  <p className="font-semibold">{blockReason === 'limit' ? 'How to restore access:' : 'How to renew:'}</p>
                   <p>1. Send payment via <strong>Airtel Money: 0750034304</strong> or <strong>MTN MoMo: 0775011029</strong></p>
                   <p>2. Go to Plans page and enter your Transaction ID</p>
                   <p>3. Admin will verify and activate within 24 hours</p>
@@ -270,13 +325,13 @@ export default function SubscriptionGate({ children }: Props) {
               {/* Action buttons */}
               <div className="space-y-2 pt-1">
                 {/* Plans page — only for expired/incomplete */}
-                {(blockReason === 'expired' || blockReason === 'incomplete') && (
+                {(blockReason === 'expired' || blockReason === 'incomplete' || blockReason === 'limit') && (
                   <button
                     onClick={() => navigate('/plans')}
                     className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-all"
                   >
                     <CreditCard size={18} />
-                    {blockReason === 'expired' ? 'Renew Subscription' : 'Choose a Plan'}
+                    {blockReason === 'limit' ? 'Upgrade Plan' : blockReason === 'expired' ? 'Renew Subscription' : 'Choose a Plan'}
                   </button>
                 )}
 

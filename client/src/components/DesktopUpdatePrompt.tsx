@@ -19,6 +19,7 @@ type UpdateState = {
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CACHE_KEY = 'schofy_desktop_update_check';
 const DISMISS_PREFIX = 'schofy_desktop_update_dismissed_';
+const SHOWN_PREFIX = 'schofy_desktop_update_shown_';
 const DEFAULT_MANIFEST_URL =
   'https://raw.githubusercontent.com/MATOVUBRIGHT/Simply/main/desktop/update-manifest.json';
 
@@ -103,11 +104,13 @@ export default function DesktopUpdatePrompt() {
         if (!currentVersion || !manifest?.version || !manifest.downloadUrl) return;
 
         const dismissedKey = `${DISMISS_PREFIX}${manifest.version}`;
-        if (!manifest.required && localStorage.getItem(dismissedKey) === '1') return;
+        const shownKey = `${SHOWN_PREFIX}${manifest.version}`;
+        if (!manifest.required && (localStorage.getItem(dismissedKey) === '1' || localStorage.getItem(shownKey) === '1')) return;
 
         if (!isNewerVersion(manifest.version, currentVersion)) return;
 
         if (!cancelled) {
+          if (!manifest.required) localStorage.setItem(shownKey, '1');
           setUpdate({
             currentVersion,
             latestVersion: manifest.version,
@@ -143,6 +146,8 @@ export default function DesktopUpdatePrompt() {
   };
 
   const installUpdate = async () => {
+    localStorage.setItem(`${DISMISS_PREFIX}${update.latestVersion}`, '1');
+    setDismissed(true);
     const result = await window.electronAPI?.openExternal?.(update.downloadUrl);
     if (!result?.success) {
       window.open(update.downloadUrl, '_blank', 'noopener,noreferrer');

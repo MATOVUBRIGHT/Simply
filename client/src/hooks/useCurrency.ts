@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 export const currencies: Record<string, { symbol: string; code: string; name: string }> = {
   USD: { symbol: '$',   code: 'USD', name: 'US Dollar' },
@@ -45,10 +46,22 @@ export function useCurrency() {
     window.addEventListener('settingsUpdated', onSettings);
 
     // Listen for realtime settings changes from other devices
-    function onDataRefresh(e: Event) {
+    async function onDataRefresh(e: Event) {
       const detail = (e as CustomEvent).detail;
       if (detail?.table === 'settings') {
-        // Re-read from localStorage (Settings page updates it on save)
+        const sid = localStorage.getItem('schofy_current_school_id');
+        if (sid) {
+          try {
+            const rows = await dataService.getAll(sid, 'settings');
+            const currencyRow = rows.find((row: any) => row.key === 'currency');
+            const code = currencyRow?.value;
+            if (code && currencies[code]) {
+              localStorage.setItem(CURRENCY_KEY, code);
+              setCurrencyState(currencies[code]);
+              return;
+            }
+          } catch { /* fall back to local cache */ }
+        }
         sync();
       }
     }

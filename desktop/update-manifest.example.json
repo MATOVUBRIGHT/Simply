@@ -1,10 +1,10 @@
 {
-  "version": "1.0.3",
-  "downloadUrl": "https://github.com/YOUR_ORG/YOUR_REPO/releases/download/v1.0.3/Schofy%20Setup%201.0.3.exe",
+  "version": "1.0.4",
+  "downloadUrl": "https://github.com/YOUR_ORG/YOUR_REPO/releases/download/v1.0.4/Schofy%20Setup%201.0.4.exe",
   "notes": [
-    "Fixed reinstall over a running desktop app",
-    "Updated Schofy app logo",
-    "Improved auth screen branding"
+    "New accounts start on Plans",
+    "Stronger subscription enforcement",
+    "Currency sync across devices"
   ],
   "required": false
 }

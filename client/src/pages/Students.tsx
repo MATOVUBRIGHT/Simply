@@ -17,6 +17,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { BulkEditClassModal } from '../components/BulkEditClassModal';
+import { getSubscriptionAccessState } from '../utils/plans';
 
 const avatarColors = [
   'bg-rose-500',
@@ -1006,6 +1007,25 @@ export default function Students() {
       };
 
       const importStatus = getImportStatus();
+      const newEnrolledCount = importPreview.filter((_data, index) => {
+        const flagged = flaggedItems[index];
+        if (flagged?.action === 'skip' || flagged?.action === 'replace') return false;
+        return importStatus !== 'completed';
+      }).length;
+
+      const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
+      if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
+        addToast('Choose an active plan before importing students.', 'error');
+        setPlanLimitMessage('Choose an active plan before importing students.');
+        navigate('/plans');
+        return;
+      }
+      if (newEnrolledCount > access.remaining) {
+        const message = `Plan limit reached. You can add ${access.remaining} more enrolled student${access.remaining === 1 ? '' : 's'} on ${access.plan.name}, but this import adds ${newEnrolledCount}.`;
+        setPlanLimitMessage(message);
+        addToast(message, 'error');
+        return;
+      }
 
       for (let i = 0; i < importPreview.length; i++) {
         const data = importPreview[i];

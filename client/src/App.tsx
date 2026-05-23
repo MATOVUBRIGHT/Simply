@@ -41,7 +41,6 @@ const Grades = lazy(() => import('./pages/Grades'));
 const ExamMarks = lazy(() => import('./pages/ExamMarks'));
 const ReportCard = lazy(() => import('./pages/ReportCard'));
 const Plans = lazy(() => import('./pages/Plans'));
-const Subscription = lazy(() => import('./pages/Subscription'));
 const RecycleBin = lazy(() => import('./pages/RecycleBin'));
 const Roles = lazy(() => import('./pages/Roles'));
 
@@ -125,7 +124,6 @@ function MainApp() {
                     <Route path="/announcements" element={<ErrorBoundary inline><Announcements /></ErrorBoundary>} />
                     <Route path="/notifications" element={<ErrorBoundary inline><Notifications /></ErrorBoundary>} />
                     <Route path="/settings" element={<ErrorBoundary inline><Settings /></ErrorBoundary>} />
-                    <Route path="/plans" element={<ErrorBoundary inline><Plans /></ErrorBoundary>} />
                     <Route path="/recycle-bin" element={<ErrorBoundary inline><RecycleBin /></ErrorBoundary>} />
                     <Route path="/reports" element={<ErrorBoundary inline><Reports /></ErrorBoundary>} />
                     <Route path="/about" element={<ErrorBoundary inline><About /></ErrorBoundary>} />
@@ -171,7 +169,8 @@ function App() {
       <Suspense fallback={<FullScreenLoader />}>
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-          <Route path="/subscribe" element={<Subscription />} />
+          <Route path="/plans" element={<Plans />} />
+          <Route path="/subscribe" element={<Navigate to="/plans" replace />} />
           <Route path="/*" element={<MainApp />} />
         </Routes>
       </Suspense>

@@ -210,7 +210,7 @@ export default function Login() {
 
       setShowSuccess(true);
       await new Promise((resolve) => setTimeout(resolve, isRegister ? 700 : 1200));
-      navigate('/');
+      navigate(isRegister ? '/plans' : '/');
     } catch (err: any) {
       setError(err.message || (isRegister ? 'Registration failed' : 'Login failed'));
       setSecuringAccount(false);

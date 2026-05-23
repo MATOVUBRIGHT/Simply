@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 
 import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2, Clock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen, saveCurrentPlan } from '../utils/plans';
+import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { supabase } from '../lib/supabase';
 
@@ -16,6 +17,7 @@ const faqs = [
 
 export default function Plans() {
   const { user, schoolId } = useAuth();
+  const navigate = useNavigate();
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'term' | 'yearly'>('term');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanDefinition | null>(null);
@@ -51,10 +53,41 @@ export default function Plans() {
         hasSeenPlanIntro(authId),
       ]);
 
+      let effectiveUsage = usage;
+      if (supabase) {
+        const { data: rows } = await supabase
+          .from('subscriptions')
+          .select('status, ends_at, metadata, plan')
+          .eq('school_id', authId)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        const sub = rows?.[0];
+        const meta = sub?.metadata || {};
+        const pending = sub?.status === 'pending' || (meta.source === 'client' && !meta.approvedByAdmin && !meta.grantedByAdmin && !meta.extendedByAdmin && sub?.status !== 'active');
+        const paused = sub?.status === 'paused' || meta.pausedByAdmin;
+        const plan = PLAN_DEFINITIONS.find(p => p.id === sub?.plan) || null;
+        if (sub && plan && sub.status === 'active' && !pending && !paused) {
+          const expiry = sub.ends_at ? new Date(sub.ends_at) : null;
+          const ms = expiry && !Number.isNaN(expiry.getTime()) ? expiry.getTime() - Date.now() : 0;
+          const days = ms > 0 ? Math.ceil(ms / (24 * 60 * 60 * 1000)) : 0;
+          effectiveUsage = {
+            ...usage,
+            plan,
+            selectedPlanId: plan.id,
+            remaining: Math.max(0, plan.studentLimit - usage.used),
+            eligible: usage.used < plan.studentLimit && ms > 0,
+            expiryDate: expiry && ms > 0 ? expiry.toISOString() : sub.ends_at || null,
+            status: ms <= 0 ? 'expired' : days <= 14 ? 'expiring' : 'active',
+            daysRemaining: ms <= 0 ? 0 : days,
+            requiresPlanAction: ms <= 0,
+          };
+        }
+      }
+
       setBillingCycle(savedBillingCycle);
-      setCurrentPlanId(usage.selectedPlanId);
-      setStudentCount(usage.used);
-      setAccessState(usage);
+      setCurrentPlanId(effectiveUsage.selectedPlanId);
+      setStudentCount(effectiveUsage.used);
+      setAccessState(effectiveUsage);
       setLatestReceipt(receipt);
     } catch (error) {
       console.error('Failed to load plan state:', error);
@@ -106,6 +139,7 @@ Powered by Schofy`;
   const checkPlanLimit = (planId: string) => studentCount <= (PLAN_DEFINITIONS.find(p => p.id === planId)?.studentLimit || 0);
   const currentCycle = latestReceipt?.billingCycle || null;
   const currentCycleLabel = currentCycle === 'monthly' ? 'Current Monthly' : currentCycle === 'yearly' ? 'Current Yearly' : currentCycle === 'term' ? 'Current Term' : 'Current';
+  const canProceedToApp = accessState?.status === 'active' || accessState?.status === 'expiring';
 
   return (
     <div className="relative space-y-4 text-slate-900 dark:text-white">
@@ -135,20 +169,38 @@ Powered by Schofy`;
             }
           </p>
         </div>
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-700 dark:bg-slate-800/90">
-          {(['monthly', 'term', 'yearly'] as const).map((cycle) => (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void loadPlanState()}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            Check access
+          </button>
+          {canProceedToApp && (
             <button
-              key={cycle}
-              onClick={() => setBillingCycle(cycle)}
-              className={`px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
-                billingCycle === cycle
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
+              type="button"
+              onClick={() => navigate('/')}
+              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
             >
-              {cycle === 'yearly' ? 'Yearly' : cycle === 'term' ? 'Per Term' : 'Monthly'}
+              Proceed to app
             </button>
-          ))}
+          )}
+          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-700 dark:bg-slate-800/90">
+            {(['monthly', 'term', 'yearly'] as const).map((cycle) => (
+              <button
+                key={cycle}
+                onClick={() => setBillingCycle(cycle)}
+                className={`px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  billingCycle === cycle
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                {cycle === 'yearly' ? 'Yearly' : cycle === 'term' ? 'Per Term' : 'Monthly'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -443,11 +495,6 @@ Powered by Schofy`;
 
                       setIsRefreshing(true);
                       try {
-                        // Save plan locally
-                        const usage = await saveCurrentPlan(authId, selectedPlan.id, billingCycle, {
-                          authUserId: user?.id,
-                        });
-
                         // Mark subscription as pending in Supabase so admin can verify
                         if (supabase) {
                           const now = new Date().toISOString();
@@ -497,9 +544,8 @@ Powered by Schofy`;
                         localStorage.setItem('schofy_sub_tid', transactionId.trim());
                         localStorage.setItem('schofy_sub_plan', selectedPlan.id);
 
-                        setCurrentPlanId(usage.selectedPlanId);
-                        setStudentCount(usage.used);
-                        setAccessState(usage);
+                        setCurrentPlanId(selectedPlan.id);
+                        setAccessState(prev => prev ? { ...prev, selectedPlanId: selectedPlan.id, plan: selectedPlan, status: 'incomplete', requiresPlanAction: true } : prev);
                         setLatestReceipt(await getLatestReceipt(authId));
                         setPaymentSubmitted(true);
                       } catch (error) {
