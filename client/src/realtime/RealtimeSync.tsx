@@ -38,14 +38,14 @@ function localName(t: string) { return TABLE_NAME_MAP[t] || t; }
 // Only refresh tables with active subscribers and stale data
 function refreshStale(sid: string) {
   if (!sid) return;
-  store.refreshStale(sid, REALTIME_TABLES.map(localName));
+  store.refreshStale(sid, store.getActiveTables(sid, REALTIME_TABLES.map(localName)));
 }
 
 const POLL_INTERVAL = 10 * 60_000; // Safety net only; realtime handles normal updates
 
 function refreshActive(sid: string) {
   if (!sid) return;
-  store.refreshActive(sid, REALTIME_TABLES.map(localName));
+  store.refreshCurrentPage(sid);
 }
 
 export function RealtimeSyncProvider({ children }: { children: React.ReactNode }) {

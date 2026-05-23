@@ -18,7 +18,7 @@ interface ToastContextType {
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 const TOAST_SOUND_PATHS: Partial<Record<ToastType, string>> = {
-  success: '/sound/success.wav',
+  success: '/sound/success.mp3',
   error: '/sound/error.wav',
 };
 

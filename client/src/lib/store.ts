@@ -130,11 +130,9 @@ class DataStore {
 
   refreshStale(sid: string, tables: string[]) {
     if (!sid) return;
-    for (const table of tables) {
+    for (const table of this.getActiveTables(sid, tables)) {
       const s = this.get(sid, table);
-      const k = this.key(sid, table);
-      const hasSubscribers = (this.listeners.get(k)?.size ?? 0) > 0;
-      if (hasSubscribers && Date.now() - s.lastFetch > FALLBACK_REFRESH_MS) {
+      if (Date.now() - s.lastFetch > FALLBACK_REFRESH_MS) {
         void this.fetch(sid, table, true);
       }
     }
@@ -142,15 +140,30 @@ class DataStore {
 
   refreshActive(sid: string, tables: string[]) {
     if (!sid) return;
-    for (const table of tables) {
+    for (const table of this.getActiveTables(sid, tables)) {
       const s = this.get(sid, table);
-      const k = this.key(sid, table);
-      const hasSubscribers = (this.listeners.get(k)?.size ?? 0) > 0;
-      if (hasSubscribers && Date.now() - s.lastFetch > ACTIVE_CATCHUP_MS) {
+      if (Date.now() - s.lastFetch > ACTIVE_CATCHUP_MS) {
         this.set(sid, table, { lastFetch: 0 });
         void this.fetch(sid, table, true);
       }
     }
+  }
+
+  refreshCurrentPage(sid: string) {
+    if (!sid) return;
+    this.refreshActive(sid, this.getActiveTables(sid));
+  }
+
+  getActiveTables(sid: string, tables?: string[]): string[] {
+    if (!sid) return [];
+    const scopedTables = tables ?? Array.from(this.listeners.keys())
+      .filter(k => k.startsWith(`${sid}:`))
+      .map(k => k.slice(sid.length + 1));
+
+    return Array.from(new Set(scopedTables)).filter(table => {
+      const k = this.key(sid, table);
+      return (this.listeners.get(k)?.size ?? 0) > 0;
+    });
   }
 }
 
