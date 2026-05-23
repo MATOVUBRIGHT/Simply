@@ -114,7 +114,11 @@ export default function Login() {
   const [securingAccount, setSecuringAccount] = useState(false);
   const [verificationSent, setVerificationSent] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [verificationResent, setVerificationResent] = useState(false);
+  const [activationSent, setActivationSent] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [activationLoading, setActivationLoading] = useState(false);
   const [resetMode, setResetMode] = useState(false);
   const [passwordResetComplete, setPasswordResetComplete] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -125,7 +129,7 @@ export default function Login() {
     progress: number;
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
 
-  const { login, register, sendPasswordReset, user, isOnline } = useAuth();
+  const { login, register, sendPasswordReset, resendVerification, activateSecureLogin, user, isOnline } = useAuth();
   const { primaryColor } = useTheme();
   const navigate = useNavigate();
 
@@ -152,6 +156,9 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setResetSent(false);
+    setVerificationResent(false);
+    setActivationSent(false);
     setLoading(true);
 
     try {
@@ -259,6 +266,8 @@ export default function Login() {
   const handleForgotPassword = async () => {
     setError('');
     setResetSent(false);
+    setVerificationResent(false);
+    setActivationSent(false);
     const cleanEmail = email.trim();
     if (!cleanEmail) {
       setError('Enter your email address first, then request a reset link.');
@@ -276,6 +285,59 @@ export default function Login() {
       setPassword('');
     } finally {
       setResetLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setError('');
+    setResetSent(false);
+    setVerificationResent(false);
+    setActivationSent(false);
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError('Enter your email address first, then resend verification.');
+      return;
+    }
+
+    setVerificationLoading(true);
+    try {
+      const result = await resendVerification(cleanEmail);
+      if (!result.success) {
+        setError(result.error || 'Could not resend verification email');
+        return;
+      }
+      setVerificationResent(true);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const handleActivateSecureLogin = async () => {
+    setError('');
+    setResetSent(false);
+    setVerificationResent(false);
+    setActivationSent(false);
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError('Enter your email address first, then activate secure login.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Enter the password you want to use. It must be at least 6 characters.');
+      return;
+    }
+
+    setActivationLoading(true);
+    try {
+      const result = await activateSecureLogin(cleanEmail, password);
+      if (!result.success) {
+        setError(result.error || 'Could not activate secure login');
+        return;
+      }
+      setActivationSent(true);
+      setPassword('');
+    } finally {
+      setActivationLoading(false);
     }
   };
 
@@ -493,6 +555,18 @@ export default function Login() {
                 </div>
               )}
 
+              {verificationResent && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+                  Verification email sent again. Verify your email, then sign in.
+                </div>
+              )}
+
+              {activationSent && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+                  Secure login activation email sent. Open your inbox, verify it, then sign in with this password.
+                </div>
+              )}
+
               {!isSupabaseConfigured && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
                   Cloud authentication is not configured yet.
@@ -610,6 +684,24 @@ export default function Login() {
                   >
                     {resetLoading ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
                     Forgot password?
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={verificationLoading}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    {verificationLoading ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
+                    Resend verification
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleActivateSecureLogin}
+                    disabled={activationLoading}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    {activationLoading ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
+                    Activate secure login
                   </button>
                 </div>
               )}

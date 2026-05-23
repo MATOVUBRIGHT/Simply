@@ -26,6 +26,8 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (email: string, password: string, firstName: string, lastName: string, phone?: string) => Promise<{ success: boolean; user?: { id: string }; error?: string; needsVerification?: boolean }>;
   sendPasswordReset: (email: string) => Promise<{ success: boolean; error?: string }>;
+  resendVerification: (email: string) => Promise<{ success: boolean; error?: string }>;
+  activateSecureLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   isOnline: boolean;
   schoolId: string | null;
@@ -298,6 +300,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let account = data;
 
       if (!account) {
+        const { data: legacyAccount } = await usersApi.getByEmail(email);
+        if (legacyAccount?.email?.toLowerCase() === authData.user.email?.toLowerCase()) {
+          account = legacyAccount;
+        }
+      }
+
+      if (!account) {
         const now = new Date().toISOString();
         const meta = authData.user.user_metadata || {};
         const firstName = String(meta.first_name || authData.user.email?.split('@')[0] || 'School');
@@ -512,6 +521,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   }
 
+  async function resendVerification(email: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Supabase not configured. Cannot resend verification.' };
+    }
+
+    if (!isOnline) {
+      return { success: false, error: 'Please connect to the internet to resend verification.' };
+    }
+
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.toLowerCase().trim(),
+      options: { emailRedirectTo: `${window.location.origin}/login` },
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  }
+
+  async function activateSecureLogin(email: string, password: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Supabase not configured. Cannot activate secure login.' };
+    }
+
+    if (!isOnline) {
+      return { success: false, error: 'Please connect to the internet to activate secure login.' };
+    }
+
+    if (password.length < 6) {
+      return { success: false, error: 'Enter a password with at least 6 characters.' };
+    }
+
+    const { error } = await supabase.auth.signUp({
+      email: email.toLowerCase().trim(),
+      password,
+      options: { emailRedirectTo: `${window.location.origin}/login` },
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  }
+
   async function logout() {
     clearSession();
     setUser(null);
@@ -536,7 +585,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, sendPasswordReset, logout, isOnline, schoolId, isSupabaseAvailable: isSupabaseConfigured && !!supabase }}>
+    <AuthContext.Provider value={{ user, loading, login, register, sendPasswordReset, resendVerification, activateSecureLogin, logout, isOnline, schoolId, isSupabaseAvailable: isSupabaseConfigured && !!supabase }}>
       {children}
     </AuthContext.Provider>
   );
