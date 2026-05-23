@@ -89,10 +89,7 @@ function createWindow() {
   });
 
   mainWindow.on('close', (event) => {
-    if (!app.isQuitting) {
-      event.preventDefault();
-      mainWindow.hide();
-    }
+    app.isQuitting = true;
   });
 
   createMenu();
