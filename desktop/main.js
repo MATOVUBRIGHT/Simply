@@ -33,6 +33,12 @@ function sanitizeKey(key) {
   return key.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 100);
 }
 
+function getClientAssetPath(fileName) {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'client-dist', fileName)
+    : path.join(__dirname, '../client/public', fileName);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -45,7 +51,7 @@ function createWindow() {
       backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js'),
     },
-    icon: path.join(__dirname, '../client/public/favicon.svg'),
+    icon: getClientAssetPath('icon-512.png'),
     show: false,
   });
 
@@ -139,7 +145,7 @@ function createMenu() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, '../client/public/favicon.svg');
+  const iconPath = getClientAssetPath('icon-512.png');
   const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
 
   tray = new Tray(icon);
