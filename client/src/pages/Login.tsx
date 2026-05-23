@@ -114,12 +114,13 @@ export default function Login() {
   const [securingAccount, setSecuringAccount] = useState(false);
   const [verificationSent, setVerificationSent] = useState(false);
   const [resetSent, setResetSent] = useState(false);
-  const [verificationResent, setVerificationResent] = useState(false);
   const [activationSent, setActivationSent] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
-  const [verificationLoading, setVerificationLoading] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
   const [resetMode, setResetMode] = useState(false);
+  const [resetFromLink, setResetFromLink] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetOtp, setResetOtp] = useState('');
   const [passwordResetComplete, setPasswordResetComplete] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
@@ -129,16 +130,21 @@ export default function Login() {
     progress: number;
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
 
-  const { login, register, sendPasswordReset, resendVerification, activateSecureLogin, user, isOnline } = useAuth();
+  const { login, register, sendPasswordReset, activateSecureLogin, user, isOnline } = useAuth();
   const { primaryColor } = useTheme();
   const navigate = useNavigate();
 
   useEffect(() => {
-    localStorage.removeItem('remembered_email');
-    localStorage.removeItem('remember_me');
+    const remembersEmail = localStorage.getItem('remember_me') === 'true';
+    const rememberedEmail = localStorage.getItem('remembered_email') || '';
+    setEmail(remembersEmail ? rememberedEmail : '');
+    setRememberMe(remembersEmail);
+    setPassword('');
+    setConfirmPassword('');
     const recoveryUrl = window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
     if (recoveryUrl) {
       setResetMode(true);
+      setResetFromLink(true);
       setIsRegister(false);
       setShowSplash(false);
     }
@@ -157,7 +163,6 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setResetSent(false);
-    setVerificationResent(false);
     setActivationSent(false);
     setLoading(true);
 
@@ -244,16 +249,18 @@ export default function Login() {
         setSecuringAccount(false);
       }
 
-      localStorage.removeItem('remembered_email');
-      localStorage.removeItem('remember_me');
+      if (rememberMe) {
+        localStorage.setItem('remembered_email', email.trim());
+        localStorage.setItem('remember_me', 'true');
+      } else {
+        localStorage.removeItem('remembered_email');
+        localStorage.removeItem('remember_me');
+      }
 
       setShowSuccess(true);
       await new Promise((resolve) => setTimeout(resolve, isRegister ? 700 : 1200));
-      if (rememberMe) {
-        setEmail('');
-        setPassword('');
-        setConfirmPassword('');
-      }
+      setPassword('');
+      setConfirmPassword('');
       navigate(isRegister ? '/plans' : '/');
     } catch (err: any) {
       setError(err.message || (isRegister ? 'Registration failed' : 'Login failed'));
@@ -266,7 +273,6 @@ export default function Login() {
   const handleForgotPassword = async () => {
     setError('');
     setResetSent(false);
-    setVerificationResent(false);
     setActivationSent(false);
     const cleanEmail = email.trim();
     if (!cleanEmail) {
@@ -282,40 +288,21 @@ export default function Login() {
         return;
       }
       setResetSent(true);
+      setResetMode(true);
+      setResetFromLink(false);
+      setResetEmail(cleanEmail);
+      setResetOtp('');
+      setNewPassword('');
+      setConfirmNewPassword('');
       setPassword('');
     } finally {
       setResetLoading(false);
     }
   };
 
-  const handleResendVerification = async () => {
-    setError('');
-    setResetSent(false);
-    setVerificationResent(false);
-    setActivationSent(false);
-    const cleanEmail = email.trim();
-    if (!cleanEmail) {
-      setError('Enter your email address first, then resend verification.');
-      return;
-    }
-
-    setVerificationLoading(true);
-    try {
-      const result = await resendVerification(cleanEmail);
-      if (!result.success) {
-        setError(result.error || 'Could not resend verification email');
-        return;
-      }
-      setVerificationResent(true);
-    } finally {
-      setVerificationLoading(false);
-    }
-  };
-
   const handleActivateSecureLogin = async () => {
     setError('');
     setResetSent(false);
-    setVerificationResent(false);
     setActivationSent(false);
     const cleanEmail = email.trim();
     if (!cleanEmail) {
@@ -363,6 +350,26 @@ export default function Login() {
 
     setLoading(true);
     try {
+      if (!resetFromLink) {
+        if (!resetEmail.trim()) {
+          setError('Enter the email address that received the OTP.');
+          return;
+        }
+        if (!resetOtp.trim()) {
+          setError('Enter the OTP from your email.');
+          return;
+        }
+        const { error: otpError } = await supabase.auth.verifyOtp({
+          email: resetEmail.trim().toLowerCase(),
+          token: resetOtp.trim(),
+          type: 'recovery',
+        });
+        if (otpError) {
+          setError(otpError.message);
+          return;
+        }
+      }
+
       const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
       if (updateError) {
         setError(updateError.message);
@@ -372,6 +379,8 @@ export default function Login() {
       setResetMode(false);
       setResetSent(false);
       setPasswordResetComplete(true);
+      setResetEmail('');
+      setResetOtp('');
       setNewPassword('');
       setConfirmNewPassword('');
       setPassword('');
@@ -476,14 +485,14 @@ export default function Login() {
             <div className="mb-6 grid grid-cols-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
               <button
                 type="button"
-                onClick={() => { setIsRegister(false); setResetMode(false); setError(''); }}
+                onClick={() => { setIsRegister(false); setResetMode(false); setResetFromLink(false); setError(''); }}
                 className={`rounded-md px-3 py-2 text-sm font-semibold transition ${!isRegister ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
               >
                 Sign in
               </button>
               <button
                 type="button"
-                onClick={() => { setIsRegister(true); setResetMode(false); setError(''); }}
+                onClick={() => { setIsRegister(true); setResetMode(false); setResetFromLink(false); setError(''); }}
                 className={`inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition ${isRegister ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
               >
                 <UserPlus size={15} />
@@ -500,8 +509,39 @@ export default function Login() {
                 )}
 
                 <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
-                  Enter a new password for your Schofy account.
+                  {resetFromLink ? 'Enter a new password for your Schofy account.' : 'Enter the OTP sent to your email, then choose a new password.'}
                 </div>
+
+                {!resetFromLink && (
+                  <>
+                    <div>
+                      <label className="form-label">Email address</label>
+                      <input
+                        type="email"
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        className="form-input"
+                        placeholder="you@school.com"
+                        required
+                        autoComplete="email"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="form-label">OTP</label>
+                      <input
+                        type="text"
+                        value={resetOtp}
+                        onChange={(e) => setResetOtp(e.target.value)}
+                        className="form-input"
+                        placeholder="Enter OTP"
+                        required
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                      />
+                    </div>
+                  </>
+                )}
 
                 <div>
                   <label className="form-label">New password</label>
@@ -551,19 +591,13 @@ export default function Login() {
 
               {resetSent && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-                  Password reset email sent. Open your inbox and follow the secure reset link.
-                </div>
-              )}
-
-              {verificationResent && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-                  Verification email sent again. Verify your email, then sign in.
+                  Password reset email sent. Enter the OTP from your email and set a new password.
                 </div>
               )}
 
               {activationSent && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-                  Secure login activation email sent. Open your inbox, verify it, then sign in with this password.
+                  Security check email sent. Open your inbox, verify it, then sign in with this password.
                 </div>
               )}
 
@@ -674,7 +708,7 @@ export default function Login() {
                       onChange={(e) => setRememberMe(e.target.checked)}
                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
-                    Clear fields after sign in
+                    Remember me
                   </label>
                   <button
                     type="button"
@@ -687,21 +721,12 @@ export default function Login() {
                   </button>
                   <button
                     type="button"
-                    onClick={handleResendVerification}
-                    disabled={verificationLoading}
-                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
-                  >
-                    {verificationLoading ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
-                    Resend verification
-                  </button>
-                  <button
-                    type="button"
                     onClick={handleActivateSecureLogin}
                     disabled={activationLoading}
                     className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60 dark:text-blue-400 dark:hover:text-blue-300"
                   >
                     {activationLoading ? <Loader2 size={15} className="animate-spin" /> : <LockKeyhole size={15} />}
-                    Activate secure login
+                    Security check
                   </button>
                 </div>
               )}
