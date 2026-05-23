@@ -18,6 +18,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "installer.nsh",
       "package.json"
     ],
     "extraResources": [
@@ -46,7 +47,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Schofy"
+      "shortcutName": "Schofy",
+      "include": "installer.nsh"
     }
   },
   "devDependencies": {

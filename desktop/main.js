@@ -6,6 +6,19 @@ const fs = require('fs');
 let mainWindow;
 let tray;
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
 // ── Native backup directory ───────────────────────────────────────────────────
 // Stores JSON backups in the app's userData directory — persists across updates,
 // survives browser cache clears, and occupies real disk space like a desktop app.
@@ -146,6 +159,7 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  app.setAppUserModelId('com.schofy.desktop');
   createWindow();
   createTray();
 });
