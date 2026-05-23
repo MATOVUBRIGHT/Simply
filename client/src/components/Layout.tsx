@@ -35,7 +35,6 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import GlobalSearch from './GlobalSearch';
 import InstallPWA from './InstallPWA';
 import { useStaffAuth } from '../contexts/StaffAuthContext';
-import StaffLoginModal from './StaffLoginModal';
 import { getSubscriptionAccessState, SubscriptionAccessState } from '../utils/plans';
 import { getRecycleBin } from '../utils/recycleBin';
 import RealtimeStatus from './RealtimeStatus';
@@ -80,7 +79,6 @@ function Layout({ children }: LayoutProps) {
   const navigate = useNavigate();
   const { user, schoolId, logout, isOnline } = useAuth();
   const { isStaffMode, staffSession, staffLogout } = useStaffAuth();
-  const [showStaffLogin, setShowStaffLogin] = useState(false);
   const tenantId = schoolId || user?.id;
   const { isSyncing } = useSync();
   const headerRef = useRef<HTMLDivElement>(null);
@@ -592,13 +590,7 @@ function Layout({ children }: LayoutProps) {
                     </button>
                   ))}
                   <div className="border-t border-slate-100 dark:border-slate-700 my-1 mx-3" />
-                  {!isStaffMode ? (
-                    <button onClick={() => { setProfileOpen(false); setShowStaffLogin(true); }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors">
-                      <Shield size={16} className="shrink-0" />
-                      <span className="font-medium text-sm">Staff Login</span>
-                    </button>
-                  ) : (
+                  {isStaffMode && (
                     <button onClick={() => { setProfileOpen(false); staffLogout(); }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
                       <Shield size={16} className="shrink-0" />
@@ -645,7 +637,6 @@ function Layout({ children }: LayoutProps) {
       )}
 
       <InstallPWA />
-      {showStaffLogin && <StaffLoginModal onClose={() => setShowStaffLogin(false)} />}
     </div>
   );
 }

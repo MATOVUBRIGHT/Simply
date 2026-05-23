@@ -2,7 +2,6 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
-import { useStaffAuth } from '../contexts/StaffAuthContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSync } from '../contexts/SyncContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -31,9 +30,7 @@ export default function Settings() {
   const { setCurrency } = useCurrency();
   const { isOnline, isSyncing, pendingChanges, lastSyncTime, exportBackup, importBackup, isSyncEnabled, enableSync, disableSync, isSupabaseConfigured } = useSync();
   const { user, schoolId } = useAuth();
-  const { staffImpersonate } = useStaffAuth();
   const confirm = useConfirm();
-  const [impersonateId, setImpersonateId] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
@@ -421,7 +418,7 @@ export default function Settings() {
     }
   }
 
-  // --- Admin utilities: sign out all users, impersonate staff ---
+  // --- Admin utilities: sign out all users ---
   const showAdminUtilities = !!user?.id;
 
 
@@ -490,15 +487,6 @@ export default function Settings() {
       window.dispatchEvent(new CustomEvent('forceSignOutAllUsers'));
       addToast('All users signed out', 'info');
     } catch {}
-  }
-
-  async function handleImpersonate() {
-    if (!impersonateId || impersonateId.trim() === '') { addToast('Enter a Staff ID', 'error'); return; }
-    const sid = schoolId || user?.id || undefined;
-    const adminId = user?.id;
-    const res = await staffImpersonate(impersonateId.trim().toUpperCase(), sid, adminId);
-    if (!res.success) addToast(res.error || 'Impersonation failed', 'error');
-    else addToast('Signed in as staff', 'success');
   }
 
   async function cleanAllDuplicates() {
@@ -965,19 +953,8 @@ export default function Settings() {
               <h2 className="font-semibold">Admin Utilities</h2>
             </div>
             <div className="card-body space-y-4">
-              <p className="text-sm text-slate-600 dark:text-slate-400">Administrative tools: sign out all users or sign in as a staff member by Staff ID.</p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                <div className="md:col-span-2">
-                  <label className="form-label">Impersonate Staff (Staff ID)</label>
-                  <input className="form-input font-mono" value={impersonateId} onChange={e => setImpersonateId(e.target.value)} placeholder="e.g. TCH-001" />
-                </div>
-                <div>
-                  <button onClick={handleImpersonate} className="btn btn-primary w-full">Impersonate</button>
-                </div>
-              </div>
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                <button onClick={handleSignOutAll} className="btn btn-secondary">Sign out all users</button>
-              </div>
+              <p className="text-sm text-slate-600 dark:text-slate-400">Administrative tools for account sessions.</p>
+              <button onClick={handleSignOutAll} className="btn btn-secondary">Sign out all users</button>
             </div>
           </div>
         )}
