@@ -1,4 +1,4 @@
--- Production RLS repair for Schofy.
+-- Unrestricted app sync repair for Schofy.
 -- Supabase's web SQL editor does not support psql \i includes.
--- Open supabase/migrations/030_enable_tenant_rls.sql, paste that SQL into the
--- Supabase SQL editor, and run it to restore tenant-scoped RLS.
+-- Open supabase/migrations/031_restore_unrestricted_app_sync.sql, paste that SQL
+-- into the Supabase SQL editor, and run it to remove tenant RLS restrictions.

@@ -116,6 +116,7 @@ export default function Login() {
   const [resetSent, setResetSent] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [resetMode, setResetMode] = useState(false);
+  const [passwordResetComplete, setPasswordResetComplete] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [syncStatus, setSyncStatus] = useState<{
@@ -281,6 +282,7 @@ export default function Login() {
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setPasswordResetComplete(false);
 
     if (!supabase) {
       setError('Cloud authentication is not available. Please check your configuration.');
@@ -307,6 +309,7 @@ export default function Login() {
 
       setResetMode(false);
       setResetSent(false);
+      setPasswordResetComplete(true);
       setNewPassword('');
       setConfirmNewPassword('');
       setPassword('');
@@ -349,7 +352,7 @@ export default function Login() {
             )}
           </div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
-            {syncStatus.step === 'complete' ? 'Access verified' : syncStatus.step === 'syncing' ? 'Checking access' : 'Creating account'}
+            {syncStatus.step === 'complete' ? 'Access verified' : syncStatus.step === 'syncing' ? 'Checking secure access' : 'Creating account'}
           </h2>
           <p className="mt-2 font-medium text-emerald-700 dark:text-emerald-300">{syncStatus.message}</p>
           <div className="mt-6 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
@@ -639,8 +642,8 @@ export default function Login() {
 
       {showSuccess && (
         <SuccessPopup
-          message={isRegister ? 'Account created' : 'Welcome back'}
-          subMessage={resetMode ? 'Password updated. Sign in again with your new password.' : 'Taking you to your dashboard...'}
+          message={passwordResetComplete ? 'Password updated' : isRegister ? 'Account created' : 'Welcome back'}
+          subMessage={passwordResetComplete ? 'Password updated. Sign in again with your new password.' : 'Taking you to your dashboard...'}
         />
       )}
     </div>
