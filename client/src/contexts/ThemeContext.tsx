@@ -17,6 +17,20 @@ function sanitizeColor(color: string | null) {
   return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed) ? trimmed : DEFAULT_PRIMARY_COLOR;
 }
 
+function hexToRgb(color: string) {
+  const normalized = color.length === 4
+    ? `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`
+    : color;
+  const value = Number.parseInt(normalized.slice(1), 16);
+  return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
+}
+
+function readableSymbolColor(color: string) {
+  const { r, g, b } = hexToRgb(color);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.68 ? '#111827' : '#FFFFFF';
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     const stored = localStorage.getItem('theme');
@@ -38,7 +52,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const safeColor = sanitizeColor(primaryColor);
     document.documentElement.style.setProperty('--primary-color', safeColor);
     localStorage.setItem('primaryColor', safeColor);
-  }, [primaryColor]);
+    window.electronAPI?.setTitleBarTheme?.({
+      color: safeColor,
+      symbolColor: readableSymbolColor(safeColor),
+    }).catch(() => {});
+  }, [primaryColor, theme]);
 
   function toggleTheme() {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));

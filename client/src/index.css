@@ -5,6 +5,7 @@
 :root {
   --primary-color: #4F46E5;
   --primary-color-rgb: 79, 70, 229;
+  --electron-titlebar-height: 34px;
   --sidebar-width: 260px;
   /* Solid Color Palette */
   --solid-indigo: #4F46E5;
@@ -715,6 +716,28 @@ textarea.form-input {
   overflow: visible;
   background-color: var(--bg-secondary);
   border-color: var(--neutral-border);
+}
+
+html.electron-titlebar body {
+  padding-top: var(--electron-titlebar-height);
+}
+
+html.electron-titlebar body::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: var(--electron-titlebar-height);
+  background: var(--primary-color);
+  z-index: 9998;
+  -webkit-app-region: drag;
+}
+
+html.electron-titlebar button,
+html.electron-titlebar a,
+html.electron-titlebar input,
+html.electron-titlebar select,
+html.electron-titlebar textarea {
+  -webkit-app-region: no-drag;
 }
 
 .card-header {

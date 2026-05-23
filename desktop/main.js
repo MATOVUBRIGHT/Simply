@@ -6,6 +6,10 @@ const fs = require('fs');
 let mainWindow;
 let tray;
 
+const TITLE_BAR_COLOR = '#4F46E5';
+const TITLE_BAR_SYMBOL_COLOR = '#FFFFFF';
+const TITLE_BAR_HEIGHT = 34;
+
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!gotSingleInstanceLock) {
@@ -45,6 +49,14 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
+    title: 'Schofy',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: TITLE_BAR_COLOR,
+      symbolColor: TITLE_BAR_SYMBOL_COLOR,
+      height: TITLE_BAR_HEIGHT,
+    },
+    backgroundColor: TITLE_BAR_COLOR,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -54,6 +66,7 @@ function createWindow() {
     icon: getClientAssetPath('icon-512.png'),
     show: false,
   });
+  mainWindow.setMenuBarVisibility(false);
 
   const isDev = process.env.NODE_ENV === 'development';
 
@@ -200,6 +213,23 @@ ipcMain.handle('open-external', async (_event, url) => {
     console.error('[external] Failed to open link:', error);
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('set-title-bar-theme', async (_event, theme = {}) => {
+  if (!mainWindow || typeof mainWindow.setTitleBarOverlay !== 'function') {
+    return { success: false };
+  }
+
+  const color = typeof theme.color === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(theme.color)
+    ? theme.color
+    : TITLE_BAR_COLOR;
+  const symbolColor = typeof theme.symbolColor === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(theme.symbolColor)
+    ? theme.symbolColor
+    : TITLE_BAR_SYMBOL_COLOR;
+
+  mainWindow.setTitleBarOverlay({ color, symbolColor, height: TITLE_BAR_HEIGHT });
+  mainWindow.setBackgroundColor(color);
+  return { success: true };
 });
 
 ipcMain.handle('check-online', async () => {

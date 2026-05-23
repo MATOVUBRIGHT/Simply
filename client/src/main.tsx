@@ -12,6 +12,10 @@ import { getQueryClient } from './lib/queryClient';
 import { ConfirmProvider } from './components/ConfirmModal';
 import './index.css';
 
+if (window.electronAPI) {
+  document.documentElement.classList.add('electron-titlebar');
+}
+
 const queryClient = getQueryClient();
 const isFileProtocol = window.location.protocol === 'file:';
 const AppRouter = isFileProtocol ? HashRouter : BrowserRouter;
