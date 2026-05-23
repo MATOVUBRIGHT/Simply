@@ -144,16 +144,12 @@ export async function registerLocal(
   const startTime = performance.now();
   
   try {
-    console.log('Registration attempt for:', email);
     const existingUser = await userIndexDB.getUserByEmail(email);
     if (existingUser) {
-      console.log('User already exists');
       return { success: false, error: 'Email already registered' };
     }
 
-    console.log('Hashing password...');
     const passwordHash = await hashPassword(password);
-    console.log('Password hash length:', passwordHash.length);
 
     const user = await userIndexDB.createUser({
       email,
@@ -163,18 +159,13 @@ export async function registerLocal(
       databasePath: `schofy_user_db_${generateUUID()}`,
       isActive: true,
     });
-    console.log('User created in IndexedDB:', user.id);
-
     await userDBManager.openDatabase(user.id);
 
     // Sync to Supabase immediately if configured
-    console.log('Attempting to sync to Supabase...');
     const syncResult = await syncUserToSupabase(user);
     if (!syncResult.success) {
       console.warn('Supabase sync failed during registration:', syncResult.error);
       // Don't fail registration if Supabase is down - user can work offline
-    } else {
-      console.log('User successfully synced to Supabase');
     }
 
     await userIndexDB.saveSession({
@@ -199,12 +190,9 @@ export async function loginLocal(
   const startTime = performance.now();
   
   try {
-    console.log('Login attempt for email:', email);
     const user = await userIndexDB.getUserByEmail(email);
-    console.log('User found:', user ? 'yes' : 'no', user?.email);
     
     if (!user) {
-      console.log('User not found in database');
       return { success: false, error: 'Invalid email or password' };
     }
 
@@ -212,9 +200,7 @@ export async function loginLocal(
       return { success: false, error: 'Account is deactivated' };
     }
 
-    console.log('Verifying password...');
     const isValid = await verifyPassword(password, user.passwordHash);
-    console.log('Password valid:', isValid);
     
     if (!isValid) {
       return { success: false, error: 'Invalid email or password' };
@@ -229,8 +215,6 @@ export async function loginLocal(
     if (!syncResult.success) {
       console.warn('Supabase sync failed during login:', syncResult.error);
       // Don't fail login if Supabase is down - user can work offline
-    } else {
-      console.log('User synced to Supabase during login');
     }
 
     await userIndexDB.saveSession({

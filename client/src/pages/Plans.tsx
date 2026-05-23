@@ -28,6 +28,8 @@ export default function Plans() {
   const [upgradeToPlan, setUpgradeToPlan] = useState<PlanDefinition | null>(null);
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
   const [isSubmitting, setIsRefreshing] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(false);
+  const [accessNotice, setAccessNotice] = useState<{ type: 'success' | 'pending' | 'paused' | 'error'; message: string } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [transactionId, setTransactionId] = useState('');
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
@@ -39,12 +41,16 @@ export default function Plans() {
   const [renewPlan, setRenewPlan] = useState<typeof PLAN_DEFINITIONS[0] | null>(null);
 
   useEffect(() => {
-    if (user?.id || schoolId) loadPlanState();
+    if (user?.id || schoolId) void loadPlanState();
   }, [user?.id, schoolId]);
 
-  async function loadPlanState() {
+  async function loadPlanState(showLoader = false) {
     const authId = schoolId || user?.id;
     if (!authId) return;
+    if (showLoader) {
+      setCheckingAccess(true);
+      setAccessNotice(null);
+    }
     try {
       const [savedBillingCycle, usage, receipt] = await Promise.all([
         getCurrentBillingCycle(authId),
@@ -66,7 +72,34 @@ export default function Plans() {
         const pending = sub?.status === 'pending' || (meta.source === 'client' && !meta.approvedByAdmin && !meta.grantedByAdmin && !meta.extendedByAdmin && sub?.status !== 'active');
         const paused = sub?.status === 'paused' || meta.pausedByAdmin;
         const plan = PLAN_DEFINITIONS.find(p => p.id === sub?.plan) || null;
-        if (sub && plan && sub.status === 'active' && !pending && !paused) {
+        if (sub && pending) {
+          localStorage.setItem('schofy_sub_pending', '1');
+          setAccessNotice({
+            type: 'pending',
+            message: 'Your request is still waiting for admin approval. Access will unlock automatically after approval.',
+          });
+          effectiveUsage = {
+            ...usage,
+            plan: plan || usage.plan,
+            selectedPlanId: plan?.id || usage.selectedPlanId,
+            status: 'incomplete',
+            requiresPlanAction: true,
+          };
+        } else if (sub && paused) {
+          localStorage.setItem('schofy_sub_pending', '0');
+          setAccessNotice({
+            type: 'paused',
+            message: 'Your access is paused by admin. Contact Schofy support or your super admin to restore it.',
+          });
+          effectiveUsage = {
+            ...usage,
+            plan: plan || usage.plan,
+            selectedPlanId: plan?.id || usage.selectedPlanId,
+            status: 'incomplete',
+            requiresPlanAction: true,
+          };
+        } else if (sub && plan && sub.status === 'active') {
+          localStorage.setItem('schofy_sub_pending', '0');
           const expiry = sub.ends_at ? new Date(sub.ends_at) : null;
           const ms = expiry && !Number.isNaN(expiry.getTime()) ? expiry.getTime() - Date.now() : 0;
           const days = ms > 0 ? Math.ceil(ms / (24 * 60 * 60 * 1000)) : 0;
@@ -81,6 +114,15 @@ export default function Plans() {
             daysRemaining: ms <= 0 ? 0 : days,
             requiresPlanAction: ms <= 0,
           };
+          setAccessNotice({
+            type: ms <= 0 ? 'error' : 'success',
+            message: ms <= 0 ? 'This subscription is expired. Renew a plan to continue.' : 'Access verified. Your current plan is active.',
+          });
+        } else if (showLoader) {
+          setAccessNotice({
+            type: 'error',
+            message: 'No approved subscription was found yet. Choose a plan or request a trial to continue.',
+          });
         }
       }
 
@@ -91,6 +133,14 @@ export default function Plans() {
       setLatestReceipt(receipt);
     } catch (error) {
       console.error('Failed to load plan state:', error);
+      if (showLoader) {
+        setAccessNotice({
+          type: 'error',
+          message: 'Could not check access right now. Please confirm your connection and try again.',
+        });
+      }
+    } finally {
+      if (showLoader) setCheckingAccess(false);
     }
   }
 
@@ -196,10 +246,12 @@ Powered by Schofy`;
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void loadPlanState()}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            onClick={() => void loadPlanState(true)}
+            disabled={checkingAccess}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
-            Check access
+            {checkingAccess && <Loader2 size={13} className="animate-spin" />}
+            {checkingAccess ? 'Checking...' : 'Check access'}
           </button>
           {canProceedToApp && (
             <button
@@ -229,6 +281,18 @@ Powered by Schofy`;
       </div>
 
       {/* First-time user — no plan yet: show trial request */}
+      {accessNotice && (
+        <div className={`rounded-xl border p-4 text-sm font-semibold ${
+          accessNotice.type === 'success'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200'
+            : accessNotice.type === 'pending'
+              ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200'
+              : 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200'
+        }`}>
+          {accessNotice.message}
+        </div>
+      )}
+
       {!currentPlanId && (
         <div className="rounded-xl border border-violet-200 bg-violet-50 dark:border-violet-800 dark:bg-violet-900/20 p-4">
           <div className="flex items-center gap-3">

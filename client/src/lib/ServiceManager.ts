@@ -40,7 +40,7 @@ class ServiceManager {
         const session = await this.waitForAuth();
         
         const effectiveUserId = userId || session?.user?.id;
-        const effectiveSchoolId = schoolId || localStorage.getItem('schofy_current_school_id') || effectiveUserId;
+        const effectiveSchoolId = schoolId || effectiveUserId;
 
         if (!effectiveUserId || !effectiveSchoolId) {
           console.log('[ServiceManager] Missing user/school context, stopping at Auth stage');
@@ -116,6 +116,14 @@ class ServiceManager {
 
   getStage(): InitializationStage {
     return this.currentStage;
+  }
+
+  reset() {
+    this.currentStage = InitializationStage.STAGE_0_CORE;
+    this.initialized = false;
+    this._initPromise = null;
+    try { dataService.stopRealtimeSync(); } catch {}
+    try { syncService.disableSync(); } catch {}
   }
 }
 

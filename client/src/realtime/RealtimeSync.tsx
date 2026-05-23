@@ -50,7 +50,7 @@ function refreshActive(sid: string) {
 
 export function RealtimeSyncProvider({ children }: { children: React.ReactNode }) {
   const { schoolId, user } = useAuth();
-  const sid = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
+  const sid = schoolId || user?.id || '';
   
   const [isConnected, setIsConnected] = useState(false);
 

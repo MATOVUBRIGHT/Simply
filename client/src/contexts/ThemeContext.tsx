@@ -10,6 +10,12 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+const DEFAULT_PRIMARY_COLOR = '#4F46E5';
+
+function sanitizeColor(color: string | null) {
+  const trimmed = (color || '').trim();
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed) ? trimmed : DEFAULT_PRIMARY_COLOR;
+}
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
@@ -18,7 +24,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   });
 
   const [primaryColor, setPrimaryColorState] = useState(() => {
-    return localStorage.getItem('primaryColor') || '#4F46E5';
+    return sanitizeColor(localStorage.getItem('primaryColor'));
   });
 
   useEffect(() => {
@@ -29,8 +35,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--primary-color', primaryColor);
-    localStorage.setItem('primaryColor', primaryColor);
+    const safeColor = sanitizeColor(primaryColor);
+    document.documentElement.style.setProperty('--primary-color', safeColor);
+    localStorage.setItem('primaryColor', safeColor);
   }, [primaryColor]);
 
   function toggleTheme() {
@@ -38,7 +45,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }
 
   function setPrimaryColor(color: string) {
-    setPrimaryColorState(color);
+    setPrimaryColorState(sanitizeColor(color));
   }
 
   return (

@@ -7,6 +7,7 @@ import { serviceManager } from '../lib/ServiceManager';
 import { readElectronBackup, writeElectronBackup } from '../lib/database/StorageManager';
 import { generateUUID } from '../utils/uuid';
 import { prefetchCriticalTables } from '../lib/store';
+import { store } from '../lib/store';
 import { getSubscriptionAccessState } from '../utils/plans';
 
 export interface LocalUser {
@@ -36,6 +37,8 @@ const SESSION_KEY = 'schofy_session';
 
 function saveSession(user: LocalUser) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  localStorage.setItem('schofy_current_user_id', user.id);
+  localStorage.setItem('schofy_current_school_id', user.schoolId || user.id);
   void writeElectronBackup(SESSION_KEY, user);
 }
 
@@ -53,6 +56,16 @@ function getSession(): LocalUser | null {
 
 function clearSession() {
   localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem('schofy_current_user_id');
+  localStorage.removeItem('schofy_current_school_id');
+  localStorage.removeItem('schofy_sub_expiry');
+  localStorage.removeItem('schofy_sub_status');
+  localStorage.removeItem('schofy_sub_plan');
+  localStorage.removeItem('schofy_sub_pending');
+  localStorage.removeItem('schofy_sub_tid');
+  sessionStorage.removeItem('lastRoute');
+  store.clearAll();
+  void writeElectronBackup(SESSION_KEY, null);
 }
 
 async function getBackedUpSession(): Promise<LocalUser | null> {
@@ -120,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (session?.user) {
           const userData: LocalUser = {
             id: session.user.id,
-            schoolId: localStorage.getItem('schofy_current_school_id') || session.user.id,
+            schoolId: session.user.id,
             email: session.user.email || '',
             firstName: '', lastName: '', isActive: true, createdAt: new Date().toISOString()
           };
@@ -265,7 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: 'Please verify your email before signing in. Check your inbox for the verification link.' };
       }
 
-      const { data, error } = await usersApi.getByEmail(email);
+      const { data, error } = await usersApi.getById(authData.user.id);
 
       // If Supabase returns 402 (egress quota exceeded), fall back to cached session
       // so the user can still access the app and navigate to Plans to resolve billing
@@ -284,41 +297,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           // No cached session — create a minimal offline session so user can access the app
           // They'll see the subscription gate and can navigate to Plans
-          const offlineId = generateUUID();
-          const offlineUser: LocalUser = {
-            id: offlineId,
-            schoolId: offlineId,
-            email: email.toLowerCase(),
-            firstName: email.split('@')[0],
-            lastName: '',
-            isActive: true,
-            createdAt: new Date().toISOString(),
-          };
-          setUser(offlineUser);
-          setSchoolId(offlineUser.schoolId);
-          saveSession(offlineUser);
-          void userDBManager.openDatabase(offlineUser.schoolId).catch(() => {});
-          return { success: true };
+          return { success: false, error: 'Could not verify your account because Supabase quota is currently blocked. Please retry after the project is restored.' };
         }
         return { success: false, error: error.message };
       }
 
-      if (!data) {
-        return { success: false, error: 'No account found with this email' };
+      let account = data;
+
+      if (!account) {
+        const now = new Date().toISOString();
+        const meta = authData.user.user_metadata || {};
+        const firstName = String(meta.first_name || authData.user.email?.split('@')[0] || 'School');
+        const lastName = String(meta.last_name || '');
+        const phone = String(meta.phone || '');
+        const { data: createdUser, error: createUserError } = await supabase
+          .from('users')
+          .upsert(
+            {
+              id: authData.user.id,
+              school_id: authData.user.id,
+              email: authData.user.email?.toLowerCase() || email.toLowerCase(),
+              first_name: firstName,
+              last_name: lastName,
+              phone,
+              is_active: true,
+              created_at: now,
+              updated_at: now,
+            },
+            { onConflict: 'id' }
+          )
+          .select()
+          .single();
+
+        if (createUserError || !createdUser) {
+          return { success: false, error: createUserError?.message || 'Could not create your account profile' };
+        }
+
+        await supabase.from('schools').upsert({
+          id: authData.user.id,
+          name: `${firstName}'s School`,
+          phone,
+          email: authData.user.email?.toLowerCase() || email.toLowerCase(),
+          updated_at: now,
+        }, { onConflict: 'id' });
+
+        account = createdUser;
       }
 
-      if (!data.is_active) {
+      if (!account) {
+        return { success: false, error: 'No account found for this sign in' };
+      }
+
+      if (!account.is_active) {
         return { success: false, error: 'This account has been deactivated' };
       }
 
       const userData: LocalUser = {
-        id: data.id,
-        schoolId: data.school_id || data.id,
-        email: data.email,
-        firstName: data.first_name,
-        lastName: data.last_name,
-        isActive: data.is_active,
-        createdAt: data.created_at,
+        id: account.id,
+        schoolId: account.school_id || account.id,
+        email: account.email,
+        firstName: account.first_name,
+        lastName: account.last_name,
+        isActive: account.is_active,
+        createdAt: account.created_at,
       };
 
       setUser(userData);
@@ -377,12 +418,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const { data: existing } = await usersApi.emailExists(email);
-
-      if (existing?.id) {
-        return { success: false, error: 'An account with this email already exists' };
-      }
-
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.toLowerCase().trim(),
         password,
@@ -398,6 +433,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const newId = authData.user?.id || generateUUID();
       const now = new Date().toISOString();
+      if (!authData.session || !authData.user?.email_confirmed_at) {
+        await supabase.auth.signOut();
+        return { success: true, user: { id: newId }, needsVerification: true };
+      }
+
       const { data, error } = await supabase
         .from('users')
         .upsert(
@@ -430,11 +470,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: email.toLowerCase(),
         updated_at: now
       }, { onConflict: 'id' });
-
-      if (!authData.session || !authData.user?.email_confirmed_at) {
-        await supabase.auth.signOut();
-        return { success: true, user: { id: newId }, needsVerification: true };
-      }
 
       const userData: LocalUser = {
         id: data.id,
@@ -476,6 +511,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       if (supabase) await supabase.auth.signOut();
       dataService.stopRealtimeSync();
+      serviceManager.reset();
     } catch { /* ignore */ }
   }
 

@@ -300,7 +300,7 @@ function toRemote(data: any, remoteTable: string, contextSchoolId?: string): any
   return out;
 }
 
-const NO_SCHOOL_FILTER = new Set(['schools', 'users']);
+const NO_SCHOOL_FILTER = new Set(['schools']);
 
 function applyScope(query: any, table: string, sid: string): any {
   if (table === 'schools') return query.eq('id', sid);
@@ -1229,7 +1229,7 @@ class SupabaseDataService {
       }
 
       // 2. Attempt select to get the final server state (with triggers/defaults)
-      const { data: remoteData } = await this.db.from(rt).select('*').eq('id', id).maybeSingle();
+      const { data: remoteData } = await applyScope(this.db.from(rt).select('*').eq('id', id), rt, sid).maybeSingle();
       
       const finalRecord = remoteData ? mapToLocal(remoteData) : record;
       
@@ -1271,7 +1271,7 @@ class SupabaseDataService {
     delete payload.created_at;
     try {
       // 1. Attempt update
-      const { error: updateError } = await this.db.from(rt).update(payload).eq('id', id);
+      const { error: updateError } = await applyScope(this.db.from(rt).update(payload).eq('id', id), rt, sid);
       
       if (updateError) {
         console.error(`[update] ${rt} failed:`, updateError.code, updateError.message);
@@ -1280,7 +1280,7 @@ class SupabaseDataService {
       }
 
       // 2. Attempt select
-      const { data: remoteData } = await this.db.from(rt).select('*').eq('id', id).maybeSingle();
+      const { data: remoteData } = await applyScope(this.db.from(rt).select('*').eq('id', id), rt, sid).maybeSingle();
       const finalRecord = remoteData ? mapToLocal(remoteData) : { ...record, id };
 
       // Update cache
@@ -1329,7 +1329,7 @@ class SupabaseDataService {
 
     const rt = getSupabaseTable(tableName);
     try {
-      const { error } = await this.db.from(rt).delete().eq('id', id);
+      const { error } = await applyScope(this.db.from(rt).delete().eq('id', id), rt, sid);
       if (error) {
         enqueue({ op: 'delete', userId, tableName, recordId: id });
         return { success: true, syncedRemotely: false, savedLocally: true };
@@ -1371,7 +1371,7 @@ class SupabaseDataService {
 
     const rt = getSupabaseTable(tableName);
     try {
-      const { error } = await this.db.from(rt).delete().in('id', ids);
+      const { error } = await applyScope(this.db.from(rt).delete().in('id', ids), rt, sid);
       if (error) {
         for (const id of ids) enqueue({ op: 'delete', userId, tableName, recordId: id });
         return { success: true, syncedRemotely: false, savedLocally: true };
@@ -1666,22 +1666,22 @@ class SupabaseDataService {
               const { error: upsertError } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
               if (upsertError) throw upsertError;
               
-              const { data: remoteData } = await this.db.from(rt).select('*').eq('id', item.data.id).maybeSingle();
+              const { data: remoteData } = await applyScope(this.db.from(rt).select('*').eq('id', item.data.id), rt, sid).maybeSingle();
               if (remoteData) {
                 cacheApplyCreate(sid, item.tableName, mapToLocal(remoteData));
               }
             } else if (item.op === 'update' && item.recordId && item.data) {
               const payload = toRemote(item.data, rt, sid);
               delete payload.id; delete payload.created_at;
-              const { error: updateError } = await this.db.from(rt).update(payload).eq('id', item.recordId);
+              const { error: updateError } = await applyScope(this.db.from(rt).update(payload).eq('id', item.recordId), rt, sid);
               if (updateError) throw updateError;
               
-              const { data: remoteData } = await this.db.from(rt).select('*').eq('id', item.recordId).maybeSingle();
+              const { data: remoteData } = await applyScope(this.db.from(rt).select('*').eq('id', item.recordId), rt, sid).maybeSingle();
               if (remoteData) {
                 cacheApplyUpdate(sid, item.tableName, item.recordId, mapToLocal(remoteData));
               }
             } else if (item.op === 'delete' && item.recordId) {
-              const { error } = await this.db.from(rt).delete().eq('id', item.recordId);
+              const { error } = await applyScope(this.db.from(rt).delete().eq('id', item.recordId), rt, sid);
               if (error) throw error;
             } else if (item.op === 'saveSettings' && item.settings) {
               for (const [key, value] of Object.entries(item.settings)) {

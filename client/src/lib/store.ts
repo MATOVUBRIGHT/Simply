@@ -165,6 +165,14 @@ class DataStore {
       return (this.listeners.get(k)?.size ?? 0) > 0;
     });
   }
+
+  clearAll() {
+    this.state.clear();
+    this.fetching.clear();
+    this.debounceTimers.forEach(timer => clearTimeout(timer));
+    this.debounceTimers.clear();
+    this.listeners.forEach(listeners => listeners.forEach(listener => listener()));
+  }
 }
 
 export const store = new DataStore();
@@ -238,8 +246,7 @@ export function prefetchCriticalTables(sid: string) {
 // ── React hook ────────────────────────────────────────────────────────────────
 
 export function useTableData(sid: string | null | undefined, table: string) {
-  // Use localStorage sid as fallback so data is available before AuthContext sets schoolId
-  const safeSid = sid || localStorage.getItem('schofy_current_school_id') || '';
+  const safeSid = sid || '';
 
   const subscribe = useCallback(
     (listener: Listener) => {

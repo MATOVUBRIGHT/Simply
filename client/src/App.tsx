@@ -108,7 +108,10 @@ function MainApp() {
                     <Route path="/students/:id" element={<ErrorBoundary inline><StudentProfile /></ErrorBoundary>} />
                     <Route path="/students/:id/edit" element={<ErrorBoundary inline><StudentForm /></ErrorBoundary>} />
                     <Route path="/staff" element={<ErrorBoundary inline><Staff /></ErrorBoundary>} />
+                    <Route path="/teachers" element={<Navigate to="/staff" replace />} />
                     <Route path="/staff/new" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
+                    <Route path="/staff/:id" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
+                    <Route path="/teachers/:id" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
                     <Route path="/staff/:id/edit" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
                     <Route path="/payroll" element={<ErrorBoundary inline><Payroll /></ErrorBoundary>} />
                     <Route path="/classes" element={<ErrorBoundary inline><Classes /></ErrorBoundary>} />

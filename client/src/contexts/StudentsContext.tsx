@@ -18,8 +18,7 @@ const StudentsContext = createContext<StudentsContextType | undefined>(undefined
 
 export function StudentsProvider({ children }: { children: React.ReactNode }) {
   const { user, schoolId } = useAuth();
-  // Use localStorage fallback so students load before AuthContext fires
-  const tenantId = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
+  const tenantId = schoolId || user?.id || '';
 
   // Use the global store — all students, always fresh, works offline
   const { data: allStudentsData, loading, error, refresh } = useTableData(tenantId, 'students');
