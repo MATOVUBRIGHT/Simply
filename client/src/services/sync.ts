@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { isCloudSyncEnabled } from '../utils/desktopSyncPreference';
 
 class SyncService {
   private syncInterval: ReturnType<typeof setTimeout> | null = null;
@@ -69,7 +70,7 @@ class SyncService {
   }
 
   startBackgroundSync() {
-    if (!this.syncEnabled) return;
+    if (!this.syncEnabled || !isCloudSyncEnabled()) return;
 
     const schoolId = this.getSchoolId();
     if (!schoolId) return;
@@ -92,7 +93,7 @@ class SyncService {
     const scheduleNext = (delayMs: number) => {
       if (this.syncInterval) clearTimeout(this.syncInterval);
       this.syncInterval = setTimeout(async () => {
-        if (!this.syncEnabled || !navigator.onLine) return;
+        if (!this.syncEnabled || !navigator.onLine || !isCloudSyncEnabled()) return;
         const result = await this.runFullSyncCycle();
         // On success reset backoff; on failure increase it exponentially with jitter
         if (result && result.success) {
@@ -123,7 +124,7 @@ class SyncService {
   }
 
   async runFullSyncCycle(): Promise<{ success: boolean; pushed: number; pulled: number; failed: number; error?: string }> {
-    if (!this.syncEnabled || !navigator.onLine) {
+    if (!this.syncEnabled || !navigator.onLine || !isCloudSyncEnabled()) {
       return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Sync unavailable.' };
     }
 

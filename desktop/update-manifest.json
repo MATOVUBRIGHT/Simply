@@ -1,10 +1,10 @@
 {
-  "version": "1.0.6",
-  "downloadUrl": "https://github.com/MATOVUBRIGHT/Simply/releases/download/v1.0.6/Schofy%20Setup%201.0.6.exe",
+  "version": "1.0.7",
+  "downloadUrl": "https://github.com/MATOVUBRIGHT/Simply/releases/download/v1.0.7/Schofy%20Setup%201.0.7.exe",
   "notes": [
-    "Security hardening for the desktop shell and local backups",
-    "Login passwords are no longer saved in browser storage",
-    "Production debug helpers are no longer exposed globally"
+    "Desktop local-only storage mode can pause Supabase sync",
+    "Bundled auth logo and cover image load from local packaged files",
+    "Desktop title bar no longer follows the app theme color"
   ],
   "required": false
 }

@@ -25,7 +25,6 @@ interface Window {
     readBackup?: (key: string) => Promise<string | null>;
     getAppVersion?: () => Promise<string>;
     openExternal?: (url: string) => Promise<{ success: boolean; error?: string }>;
-    setTitleBarTheme?: (theme: { color: string; symbolColor: string }) => Promise<{ success: boolean; error?: string }>;
     checkOnline?: () => Promise<boolean>;
   };
 }

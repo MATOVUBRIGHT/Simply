@@ -269,23 +269,6 @@ ipcMain.handle('open-external', async (_event, url) => {
   }
 });
 
-ipcMain.handle('set-title-bar-theme', async (_event, theme = {}) => {
-  if (!mainWindow || typeof mainWindow.setTitleBarOverlay !== 'function') {
-    return { success: false };
-  }
-
-  const color = typeof theme.color === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(theme.color)
-    ? theme.color
-    : TITLE_BAR_COLOR;
-  const symbolColor = typeof theme.symbolColor === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(theme.symbolColor)
-    ? theme.symbolColor
-    : TITLE_BAR_SYMBOL_COLOR;
-
-  mainWindow.setTitleBarOverlay({ color, symbolColor, height: TITLE_BAR_HEIGHT });
-  mainWindow.setBackgroundColor(color);
-  return { success: true };
-});
-
 ipcMain.handle('check-online', async () => {
   return new Promise((resolve) => {
     http.get('http://localhost:3001/api/health', (res) => {

@@ -23,8 +23,9 @@ import { SuccessPopup } from '../components/SuccessPopup';
 
 type PolicyModal = 'terms' | 'privacy' | null;
 
-const APP_LOGO = '/schofy.logo.png';
-const AUTH_COVER = '/cover.jpg';
+const assetBase = import.meta.env.BASE_URL || './';
+const APP_LOGO = `${assetBase}schofy.logo.png`;
+const AUTH_COVER = `${assetBase}cover.jpg`;
 
 const policyCopy = {
   terms: {

@@ -67,7 +67,6 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.removeItem(STAFF_SESSION_KEY);
       localStorage.removeItem('schofy_session');
-      localStorage.removeItem('schofy_sync_enabled');
     } catch {}
     // Notify the app and other tabs
     try {

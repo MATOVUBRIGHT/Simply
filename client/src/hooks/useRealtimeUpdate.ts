@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { isCloudSyncEnabled } from '../utils/desktopSyncPreference';
 
 interface RealtimeUpdate {
   type: 'INSERT' | 'UPDATE' | 'DELETE';
@@ -38,18 +39,19 @@ export function useRealtimeUpdate(table?: string) {
 
     // Check connection status
     const checkConnection = () => {
-      const syncEnabled = localStorage.getItem('schofy_sync_enabled') === 'true';
-      setIsConnected(syncEnabled && navigator.onLine);
+      setIsConnected(isCloudSyncEnabled() && navigator.onLine);
     };
 
     checkConnection();
     window.addEventListener('online', checkConnection);
     window.addEventListener('offline', checkConnection);
+    window.addEventListener('schofyCloudSyncPreferenceChanged', checkConnection);
 
     return () => {
       window.removeEventListener('schofyDataRefresh', handleUpdate as EventListener);
       window.removeEventListener('online', checkConnection);
       window.removeEventListener('offline', checkConnection);
+      window.removeEventListener('schofyCloudSyncPreferenceChanged', checkConnection);
       
       if (table) {
         const tableName = table.charAt(0).toUpperCase() + table.slice(1);

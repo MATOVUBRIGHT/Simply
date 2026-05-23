@@ -13,6 +13,7 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { generateUUID } from '../../utils/uuid';
 import { addToRecycleBin } from '../../utils/recycleBin';
+import { isCloudSyncEnabled } from '../../utils/desktopSyncPreference';
 import {
   getStorageDB,
   enqueueItem,
@@ -710,7 +711,7 @@ class SupabaseDataService {
       }
     }
 
-    if (!isOnline() || !this.ok) return;
+    if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return;
 
     // Step 2: Request persistence and flush queue (Stage 2)
     const { requestPersistentStorage } = await import('./StorageManager');
@@ -801,7 +802,7 @@ class SupabaseDataService {
    * Used on bootstrap — seeds data for first-time use, doesn't override pending local changes.
    */
   private async _seedFromSupabase(sid: string, tableName: string): Promise<void> {
-    if (!isOnline() || !this.ok) return;
+    if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return;
 
     // Use Supabase Auth session when available, but allow anon-table auth too.
     const session = await this.waitForSession();
@@ -875,7 +876,7 @@ class SupabaseDataService {
   }
 
   startRealtimeSync(sid: string) {
-    if (!this.ok || !isOnline()) return;
+    if (!isCloudSyncEnabled() || !this.ok || !isOnline()) return;
     if (this._realtimeStarted && this._realtimeSid === sid) {
       console.log('[Realtime] Already started, skipping duplicate initialization');
       return;
@@ -996,7 +997,7 @@ class SupabaseDataService {
     
     // 2. Fetch only when needed. Realtime handles cross-device changes, so
     // cached data can live for hours without repeatedly spending API quota.
-    if (isOnline() && this.ok) {
+    if (isCloudSyncEnabled() && isOnline() && this.ok) {
       const entry = memCache.get(cacheKey(sid, tableName));
       const isStale = !entry || (Date.now() - entry.ts > REMOTE_CACHE_TTL_MS);
 
@@ -1113,7 +1114,7 @@ class SupabaseDataService {
       const found = cached.find(r => r.id === id);
       if (found) return found;
     }
-    if (!isOnline() || !this.ok) return null;
+    if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return null;
     const rt = getSupabaseTable(tableName);
     try {
       let q = this.db.from(rt).select('*').eq('id', id);
@@ -1148,7 +1149,7 @@ class SupabaseDataService {
     const sid = this.sid(userId);
     // Always check cache first — works offline and is instant
     const cached = cacheGet(sid, tableName) || [];
-    if (cached.length > 0 || !isOnline() || !this.ok) {
+    if (cached.length > 0 || !isCloudSyncEnabled() || !isOnline() || !this.ok) {
       return cached.filter((item: any) => item[fieldName] === value || item[camelToSnake(fieldName)] === value);
     }
     const rt = getSupabaseTable(tableName);
@@ -1203,6 +1204,10 @@ class SupabaseDataService {
     notifyUI(tableName);
 
     // If offline, queue for later
+    if (!isCloudSyncEnabled()) {
+      return { success: true, syncedRemotely: false, savedLocally: true, record };
+    }
+
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'create', userId, tableName, data: record });
       return { success: true, syncedRemotely: false, savedLocally: true, record };
@@ -1251,6 +1256,10 @@ class SupabaseDataService {
     // Optimistic cache update
     cacheApplyUpdate(sid, tableName, id, record);
     notifyUI(tableName);
+
+    if (!isCloudSyncEnabled()) {
+      return { success: true, syncedRemotely: false, savedLocally: true, record };
+    }
 
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'update', userId, tableName, recordId: id, data: record });
@@ -1314,6 +1323,10 @@ class SupabaseDataService {
     cacheApplyDelete(sid, tableName, id);
     notifyUI(tableName);
 
+    if (!isCloudSyncEnabled()) {
+      return { success: true, syncedRemotely: false, savedLocally: true };
+    }
+
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'delete', userId, tableName, recordId: id });
       return { success: true, syncedRemotely: false, savedLocally: true };
@@ -1352,6 +1365,10 @@ class SupabaseDataService {
     const existing = cacheGet(sid, tableName) || [];
     cacheSet(sid, tableName, existing.filter(r => !ids.includes(r.id)));
     notifyUI(tableName);
+
+    if (!isCloudSyncEnabled()) {
+      return { success: true, syncedRemotely: false, savedLocally: true };
+    }
 
     if (!isOnline() || !this.ok) {
       // Queue each delete individually
@@ -1397,6 +1414,10 @@ class SupabaseDataService {
     }
     cacheSet(sid, 'settings', updated);
     notifyUI('settings');
+
+    if (!isCloudSyncEnabled()) {
+      return { success: true, syncedRemotely: false, savedLocally: true };
+    }
 
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'saveSettings', userId, tableName: 'settings', settings });
@@ -1462,7 +1483,7 @@ class SupabaseDataService {
    * queued local writes are flushed, while broad table pulls are manual/on-demand.
    */
   async syncNow(schoolId: string): Promise<{ success: boolean; pushed: number; pulled: number; failed: number; error?: string }> {
-    if (!isOnline() || !this.ok) {
+    if (!isCloudSyncEnabled() || !isOnline() || !this.ok) {
       return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Offline or Supabase not configured' };
     }
 
@@ -1487,7 +1508,7 @@ class SupabaseDataService {
   }
 
   async forcePush(schoolId: string): Promise<{ success: boolean; pushed: number; failed: number; error?: string }> {
-    if (!isOnline() || !this.ok) return { success: false, pushed: 0, failed: 0, error: 'Offline' };
+    if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return { success: false, pushed: 0, failed: 0, error: 'Cloud sync disabled or offline' };
     
     try {
       console.log(`[Sync] Starting deep force push for ${schoolId}...`);
@@ -1547,7 +1568,7 @@ class SupabaseDataService {
   }
 
   async forcePull(schoolId: string): Promise<{ success: boolean; pulled: number; failed: number; error?: string }> {
-    if (!isOnline() || !this.ok) return { success: false, pulled: 0, failed: 0, error: 'Offline' };
+    if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return { success: false, pulled: 0, failed: 0, error: 'Cloud sync disabled or offline' };
     
     let pulled = 0;
     
@@ -1578,7 +1599,7 @@ class SupabaseDataService {
 
   /** Ensures the school record exists in Supabase so foreign keys don't fail */
   private async ensureSchoolExists(sid: string): Promise<void> {
-    if (!isOnline() || !this.ok) return;
+    if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return;
     try {
       const { data } = await this.db.from('schools').select('id').eq('id', sid).single();
       if (!data) {
@@ -1603,7 +1624,7 @@ class SupabaseDataService {
 
   // ── Offline queue flush with exponential backoff ─────────────────────────
   async flushOfflineQueue(): Promise<void> {
-    if (!isOnline() || !this.ok) return;
+    if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return;
     if (this._syncInProgress) {
       console.log('[offline] Sync already in progress, skipping');
       return;

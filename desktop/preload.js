@@ -17,9 +17,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Open a trusted update/download link in the user's default browser */
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
-  /** Match the native title bar to the current app theme */
-  setTitleBarTheme: (theme) => ipcRenderer.invoke('set-title-bar-theme', theme),
-
   /** Check if the backend is reachable */
   checkOnline: () => ipcRenderer.invoke('check-online'),
 });

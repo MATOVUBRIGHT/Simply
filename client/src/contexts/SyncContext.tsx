@@ -5,6 +5,8 @@ import { syncService } from '../services/sync';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { serviceManager } from '../lib/ServiceManager';
+import { isCloudSyncEnabled, isDesktopApp, setCloudSyncEnabled, SCHOFY_SYNC_ENABLED_KEY } from '../utils/desktopSyncPreference';
+import { dataService } from '../lib/database/SupabaseDataService';
 
 interface SyncContextType {
   isSyncing: boolean;
@@ -31,12 +33,25 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     localStorage.getItem('schofy_last_sync') ? new Date(localStorage.getItem('schofy_last_sync')!) : null
   );
   const [pendingChanges, setPendingChanges] = useState(0);
-  const [syncEnabled, setSyncEnabled] = useState(localStorage.getItem('schofy_sync_enabled') !== 'false');
+  const [syncEnabled, setSyncEnabled] = useState(isCloudSyncEnabled());
+  const desktopApp = isDesktopApp();
 
   useEffect(() => {
-    if (localStorage.getItem('schofy_sync_enabled') === null) {
-      localStorage.setItem('schofy_sync_enabled', 'true');
+    if (desktopApp && localStorage.getItem(SCHOFY_SYNC_ENABLED_KEY) === null) {
+      setCloudSyncEnabled(true);
     }
+  }, [desktopApp]);
+
+  useEffect(() => {
+    const onPreferenceChanged = () => {
+      setSyncEnabled(isCloudSyncEnabled());
+    };
+    window.addEventListener('schofyCloudSyncPreferenceChanged', onPreferenceChanged);
+    window.addEventListener('storage', onPreferenceChanged);
+    return () => {
+      window.removeEventListener('schofyCloudSyncPreferenceChanged', onPreferenceChanged);
+      window.removeEventListener('storage', onPreferenceChanged);
+    };
   }, []);
 
   useEffect(() => {
@@ -240,14 +255,16 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       }
 
       const sid = schoolId || user.id;
-      localStorage.setItem('schofy_sync_enabled', 'true');
+      setCloudSyncEnabled(true);
       setSyncEnabled(true);
       syncService.configure({ supabaseClient: supabase });
       syncService.setUserId(user.id);
       syncService.setSchoolId(sid);
       syncService.enableSync();
+      void dataService.bootstrapSession(user.id, sid, { wait: false });
       syncService.startBackgroundSync();
 
+      await dataService.forcePush(sid);
       await syncNow(false);
       addToast('Cloud sync enabled', 'success');
     } catch (error) {
@@ -257,10 +274,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   }, [addToast, user, schoolId, syncNow]);
 
   const disableSync = useCallback(() => {
-    localStorage.setItem('schofy_sync_enabled', 'false');
+    setCloudSyncEnabled(false);
     setSyncEnabled(false);
     syncService.stopBackgroundSync();
-    addToast('Cloud sync paused', 'info');
+    dataService.stopRealtimeSync();
+    addToast('Desktop local-only mode enabled', 'info');
   }, [addToast]);
 
   useEffect(() => {

@@ -10,6 +10,7 @@ import { ToastProvider } from './contexts/ToastContext';
 import { SyncProvider } from './contexts/SyncContext';
 import { getQueryClient } from './lib/queryClient';
 import { ConfirmProvider } from './components/ConfirmModal';
+import { isCloudSyncEnabled } from './utils/desktopSyncPreference';
 import './index.css';
 
 if (window.electronAPI) {
@@ -51,6 +52,7 @@ if (!isFileProtocol && !isAdminPath && 'serviceWorker' in navigator) {
 
 // Flush offline queue when connection is restored
 window.addEventListener('online', () => {
+  if (!isCloudSyncEnabled()) return;
   import('./lib/database/SupabaseDataService').then(({ dataService }) => {
     void (dataService as any).flushOfflineQueue?.();
   });

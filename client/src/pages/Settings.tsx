@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useConfirm } from '../components/ConfirmModal';
+import { isDesktopApp } from '../utils/desktopSyncPreference';
 
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -75,6 +76,7 @@ export default function Settings() {
   });
 
   const currentCurrency = currencies.find(c => c.code === settings.currency) || currencies[0];
+  const desktopApp = isDesktopApp();
 
   useEffect(() => {
     if (user?.id || schoolId) {
@@ -787,7 +789,7 @@ export default function Settings() {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                {isSyncEnabled ? (
+              {isSyncEnabled ? (
                   <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
                     Sync Enabled
                   </span>
@@ -830,36 +832,52 @@ export default function Settings() {
             </div>
 
             <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-              Schofy saves every change to this device first, then syncs to the cloud in the background (about every 8 seconds when
-              online). No manual sync is required. When you reconnect to the internet, pending changes upload automatically.
+              Schofy saves every change to this device first. When cloud sync is enabled, desktop changes upload during your signed-in
+              session and realtime updates are pulled only while the app is open.
             </p>
 
+            {desktopApp && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Desktop storage mode</h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                      {isSyncEnabled
+                        ? 'Local plus Supabase sync. Data stays on this computer and uploads while this session is online.'
+                        : 'Local-only. Data stays on this computer and Supabase calls are paused.'}
+                    </p>
+                  </div>
+                  {isSyncEnabled ? (
+                    <button type="button" onClick={disableSync} className="btn btn-secondary flex items-center gap-2 text-sm">
+                      <CloudOff size={16} />
+                      Use local only
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await enableSync();
+                        } catch (err) {
+                          console.error('Enable sync error:', err);
+                          addToast('Failed to enable sync. Check console for details.', 'error');
+                        }
+                      }}
+                      className="btn btn-primary flex items-center gap-2"
+                    >
+                      <Cloud size={16} />
+                      Sync with Supabase
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-3 items-center">
-              {isSyncEnabled ? (
-                <button type="button" onClick={disableSync} className="btn btn-secondary flex items-center gap-2 text-sm">
-                  <CloudOff size={16} />
-                  Pause cloud sync
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await enableSync();
-                    } catch (err) {
-                      console.error('Enable sync error:', err);
-                      addToast('Failed to enable sync. Check console for details.', 'error');
-                    }
-                  }}
-                  className="btn btn-primary flex items-center gap-2"
-                >
-                  <Cloud size={16} />
-                  Enable cloud sync
-                </button>
-              )}
               <button
                 type="button"
                 onClick={async () => {
+                  if (!isSyncEnabled) { addToast('Enable Supabase sync first', 'warning'); return; }
                   const sid = schoolId || user?.id;
                   if (!sid) { addToast('Not logged in', 'error'); return; }
                   addToast('Pulling all data from cloud...', 'info');
@@ -875,7 +893,8 @@ export default function Settings() {
                     addToast(err?.message || 'Pull failed', 'error');
                   }
                 }}
-                className="btn btn-secondary flex items-center gap-2 text-sm"
+                disabled={!isSyncEnabled}
+                className="btn btn-secondary flex items-center gap-2 text-sm disabled:opacity-60"
               >
                 <Download size={16} />
                 Pull from Cloud
@@ -883,6 +902,7 @@ export default function Settings() {
               <button
                 type="button"
                 onClick={async () => {
+                  if (!isSyncEnabled) { addToast('Enable Supabase sync first', 'warning'); return; }
                   const sid = schoolId || user?.id;
                   if (!sid) { addToast('Not logged in', 'error'); return; }
                   addToast('Pushing local data to cloud...', 'info');
@@ -897,7 +917,8 @@ export default function Settings() {
                     addToast(err?.message || 'Push failed', 'error');
                   }
                 }}
-                className="btn btn-secondary flex items-center gap-2 text-sm"
+                disabled={!isSyncEnabled}
+                className="btn btn-secondary flex items-center gap-2 text-sm disabled:opacity-60"
               >
                 <Upload size={16} />
                 Push to Cloud
@@ -950,7 +971,7 @@ export default function Settings() {
                 <h4 className="font-medium text-blue-800 dark:text-blue-300 mb-2">Cloud Sync Status</h4>
                 <div className="space-y-1 text-sm text-blue-700 dark:text-blue-400">
                   <p><strong>Connection:</strong> {isOnline ? 'Online' : 'Offline'}</p>
-                  <p><strong>Background sync:</strong> {isSyncEnabled ? 'On (automatic)' : 'Paused'}</p>
+                  <p><strong>Background sync:</strong> {isSyncEnabled ? 'On during this session' : desktopApp ? 'Local-only mode' : 'Paused'}</p>
                   <p className="text-xs mt-2 opacity-90">
                     Developer: run <code className="bg-blue-100/50 dark:bg-blue-950/50 px-1 rounded">await window.debugSync()</code> in
                     the console to compare local vs remote counts and the sync queue.
