@@ -104,7 +104,6 @@ export default function Login() {
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const [policyModal, setPolicyModal] = useState<PolicyModal>(null);
   const [error, setError] = useState('');
@@ -135,10 +134,9 @@ export default function Login() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const remembersEmail = localStorage.getItem('remember_me') === 'true';
-    const rememberedEmail = localStorage.getItem('remembered_email') || '';
-    setEmail(remembersEmail ? rememberedEmail : '');
-    setRememberMe(remembersEmail);
+    localStorage.removeItem('remembered_email');
+    localStorage.removeItem('remember_me');
+    setEmail('');
     setPassword('');
     setConfirmPassword('');
     const recoveryUrl = window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
@@ -249,13 +247,8 @@ export default function Login() {
         setSecuringAccount(false);
       }
 
-      if (rememberMe) {
-        localStorage.setItem('remembered_email', email.trim());
-        localStorage.setItem('remember_me', 'true');
-      } else {
-        localStorage.removeItem('remembered_email');
-        localStorage.removeItem('remember_me');
-      }
+      localStorage.removeItem('remembered_email');
+      localStorage.removeItem('remember_me');
 
       setShowSuccess(true);
       await new Promise((resolve) => setTimeout(resolve, isRegister ? 700 : 1200));
@@ -700,16 +693,7 @@ export default function Login() {
               )}
 
               {!isRegister && (
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    Remember me
-                  </label>
+                <div className="flex flex-wrap items-center justify-end gap-3">
                   <button
                     type="button"
                     onClick={handleForgotPassword}
