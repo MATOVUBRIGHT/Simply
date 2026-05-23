@@ -466,10 +466,6 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 
-INSERT INTO users (id, school_id, email, password_hash, role, first_name, last_name)
-VALUES ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'admin@school.com', '$2a$10$abcdefghijklmnopqrstuv', 'admin', 'Admin', 'User')
-ON CONFLICT DO NOTHING;
-
 -- =====================================================
 -- MIGRATION 014: Sync Logs
 -- =====================================================

@@ -41,11 +41,6 @@ npm run build
 npm run electron
 ```
 
-## Demo Credentials
-
-- **Email**: admin@school.com
-- **Password**: admin123
-
 ## Project Structure
 
 ```
@@ -115,9 +110,6 @@ npm run dev:server
 # Start client only
 npm run dev:client
 
-# Seed database with sample data
-cd server
-npm run seed
 ```
 
 ## License

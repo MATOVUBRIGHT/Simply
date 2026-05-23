@@ -1,11 +1,15 @@
 import { spawn } from 'node:child_process';
 
 const BASE_URL = process.env.SCHOFY_SMOKE_BASE_URL || 'http://localhost:3334';
-const LOGIN_EMAIL = process.env.SCHOFY_SMOKE_EMAIL || 'admin@school.com';
-const LOGIN_PASSWORD = process.env.SCHOFY_SMOKE_PASSWORD || 'admin123';
+const LOGIN_EMAIL = process.env.SCHOFY_SMOKE_EMAIL;
+const LOGIN_PASSWORD = process.env.SCHOFY_SMOKE_PASSWORD;
 const START_SERVER = process.env.SCHOFY_SMOKE_START_SERVER !== 'false';
 const START_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 12_000;
+
+if (!LOGIN_EMAIL || !LOGIN_PASSWORD) {
+  throw new Error('Set SCHOFY_SMOKE_EMAIL and SCHOFY_SMOKE_PASSWORD before running smoke tests.');
+}
 
 const endpoints = [
   '/api/classes',

@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { initDatabase, seedDatabase } from './db/init.js';
+import { initDatabase } from './db/init.js';
 import { authenticateToken } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
 import studentRoutes from './routes/students.js';
@@ -55,7 +55,6 @@ app.get('/api/health', (req, res) => {
 async function start() {
   try {
     await initDatabase();
-    await seedDatabase();
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });

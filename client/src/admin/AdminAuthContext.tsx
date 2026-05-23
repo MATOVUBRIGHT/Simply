@@ -5,11 +5,10 @@ const ADMIN_SESSION_KEY = 'schofy_admin_session';
 // Credentials baked in at build time from Vercel env vars.
 // If not set, fallback defaults are used.
 // To change: set VITE_ADMIN_EMAIL and VITE_ADMIN_PASSWORD in Vercel → Settings → Environment Variables, then redeploy.
-const ADMIN_EMAIL = (import.meta.env.VITE_ADMIN_EMAIL as string | undefined)?.trim() || 'admin@schofy.com';
-const ADMIN_PASSWORD = (import.meta.env.VITE_ADMIN_PASSWORD as string | undefined) || 'Schofy@2024!';
+const ADMIN_EMAIL = (import.meta.env.VITE_ADMIN_EMAIL as string | undefined)?.trim() || '';
+const ADMIN_PASSWORD = (import.meta.env.VITE_ADMIN_PASSWORD as string | undefined) || '';
 
 // Export for debug display on login page (email only, never password)
-export const ADMIN_EMAIL_HINT = ADMIN_EMAIL;
 
 interface AdminUser {
   email: string;
@@ -50,6 +49,10 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   function login(email: string, password: string): { success: boolean; error?: string } {
+    if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+      return { success: false, error: 'Admin login is not configured' };
+    }
+
     const emailMatch = email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim();
     const passMatch = password === ADMIN_PASSWORD;
 
@@ -64,9 +67,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       return { success: true };
     }
 
-    // Specific error messages to help diagnose
-    if (!emailMatch) return { success: false, error: 'Email not recognised' };
-    return { success: false, error: 'Incorrect password' };
+    return { success: false, error: 'Invalid credentials' };
   }
 
   function logout() {
