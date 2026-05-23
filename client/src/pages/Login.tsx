@@ -136,14 +136,14 @@ export default function Login() {
 
   useEffect(() => {
     const explicitlySavedEmail = localStorage.getItem('schofy_saved_login_email') || '';
-    const explicitlySavedPassword = localStorage.getItem('schofy_saved_login_password') || '';
+    localStorage.removeItem('schofy_saved_login_password');
     setEmail(explicitlySavedEmail);
-    setPassword(explicitlySavedPassword);
+    setPassword('');
     setConfirmPassword('');
     setSecurityCheckPassed(false);
     const clearTimer = window.setTimeout(() => {
       setEmail(localStorage.getItem('schofy_saved_login_email') || '');
-      setPassword(localStorage.getItem('schofy_saved_login_password') || '');
+      setPassword('');
       setConfirmPassword('');
     }, 250);
     const recoveryUrl = window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
@@ -286,8 +286,8 @@ export default function Login() {
       return;
     }
     localStorage.setItem('schofy_saved_login_email', cleanEmail);
-    localStorage.setItem('schofy_saved_login_password', password);
     setEmail(cleanEmail);
+    setPassword('');
     setConfirmPassword('');
     setSavedEmailNotice(true);
   };
@@ -606,7 +606,7 @@ export default function Login() {
 
               {savedEmailNotice && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-                  Login details saved for this device.
+                  Email saved for this device.
                 </div>
               )}
 

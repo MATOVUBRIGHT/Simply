@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, shell, session, safeStorage } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -37,6 +37,35 @@ function sanitizeKey(key) {
   return key.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 100);
 }
 
+function encryptBackup(data) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    return JSON.stringify({ version: 1, encrypted: false, data });
+  }
+
+  return JSON.stringify({
+    version: 1,
+    encrypted: true,
+    encoding: 'base64',
+    data: safeStorage.encryptString(data).toString('base64'),
+  });
+}
+
+function decryptBackup(fileContents) {
+  try {
+    const parsed = JSON.parse(fileContents);
+    if (parsed?.encrypted && parsed?.encoding === 'base64' && typeof parsed.data === 'string') {
+      return safeStorage.decryptString(Buffer.from(parsed.data, 'base64'));
+    }
+    if (parsed?.encrypted === false && typeof parsed.data === 'string') {
+      return parsed.data;
+    }
+  } catch {
+    // Legacy desktop backups were stored as raw JSON strings.
+  }
+
+  return fileContents;
+}
+
 function getClientAssetPath(fileName) {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'client-dist', fileName)
@@ -60,6 +89,9 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js'),
     },
@@ -69,6 +101,25 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
 
   const isDev = process.env.NODE_ENV === 'development';
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url);
+      if (['https:', 'http:'].includes(parsed.protocol)) {
+        shell.openExternal(parsed.toString());
+      }
+    } catch {
+      // Ignore malformed renderer navigation attempts.
+    }
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const allowedOrigin = isDev ? 'http://localhost:4201' : 'file://';
+    if (!url.startsWith(allowedOrigin)) {
+      event.preventDefault();
+    }
+  });
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:4201').catch(err => {
@@ -176,6 +227,9 @@ function createTray() {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('com.schofy.desktop');
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
+  });
   createWindow();
   createTray();
 });
@@ -248,7 +302,7 @@ ipcMain.handle('write-backup', async (event, key, data) => {
   try {
     const safe = sanitizeKey(key);
     const filePath = path.join(getBackupDir(), `${safe}.json`);
-    fs.writeFileSync(filePath, data, 'utf8');
+    fs.writeFileSync(filePath, encryptBackup(data), 'utf8');
     return { success: true };
   } catch (error) {
     console.error('[backup] Write failed:', error);
@@ -261,7 +315,7 @@ ipcMain.handle('read-backup', async (event, key) => {
     const safe = sanitizeKey(key);
     const filePath = path.join(getBackupDir(), `${safe}.json`);
     if (!fs.existsSync(filePath)) return null;
-    return fs.readFileSync(filePath, 'utf8');
+    return decryptBackup(fs.readFileSync(filePath, 'utf8'));
   } catch (error) {
     console.error('[backup] Read failed:', error);
     return null;

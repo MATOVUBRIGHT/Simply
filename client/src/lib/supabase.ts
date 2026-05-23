@@ -120,7 +120,7 @@ export async function checkDatabaseSchema(): Promise<void> {
   }
 }
 
-if (typeof window !== 'undefined') {
+if (import.meta.env.DEV && typeof window !== 'undefined') {
   (window as unknown as { SupabaseDebug?: Record<string, unknown> }).SupabaseDebug = {
     testSupabaseConnection,
     testUserInsert,
