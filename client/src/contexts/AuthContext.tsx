@@ -3,7 +3,8 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
 import { dataService, cacheReady } from '../lib/database/SupabaseDataService';
 import { usersApi } from '../services/apiService';
-import { syncService } from '../services/sync';
+import { serviceManager } from '../lib/ServiceManager';
+import { readElectronBackup, writeElectronBackup } from '../lib/database/StorageManager';
 import { generateUUID } from '../utils/uuid';
 import { prefetchCriticalTables } from '../lib/store';
 import { getSubscriptionAccessState } from '../utils/plans';
@@ -35,6 +36,7 @@ const SESSION_KEY = 'schofy_session';
 
 function saveSession(user: LocalUser) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  void writeElectronBackup(SESSION_KEY, user);
 }
 
 function getSession(): LocalUser | null {
@@ -53,16 +55,40 @@ function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
+async function getBackedUpSession(): Promise<LocalUser | null> {
+  const local = getSession();
+  if (local) return local;
+
+  const backedUp = await readElectronBackup(SESSION_KEY);
+  if (backedUp?.id) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(backedUp));
+    return backedUp as LocalUser;
+  }
+  return null;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
-  // Hard cap: never show spinner for more than 300ms — cached session restores instantly
+  // Ensure loading is false only after auth state is resolved
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 300);
-    return () => clearTimeout(t);
+    let active = true;
+
+    // Get initial session state
+    if (isSupabaseConfigured && supabase) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (active) setLoading(false);
+      }).catch(() => {
+        if (active) setLoading(false);
+      });
+    } else {
+      setLoading(false);
+    }
+
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -84,8 +110,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     void restoreSessionWithGuard(stale);
 
+    const { data: { subscription } } = supabase!.auth.onAuthStateChange((event, session) => {
+      console.log('Auth state changed:', event);
+      if (active) {
+        if (event === 'INITIAL_SESSION') {
+          setLoading(false);
+        }
+        
+        if (session?.user) {
+          const userData: LocalUser = {
+            id: session.user.id,
+            schoolId: localStorage.getItem('schofy_current_school_id') || session.user.id,
+            email: session.user.email || '',
+            firstName: '', lastName: '', isActive: true, createdAt: new Date().toISOString()
+          };
+          setUser(userData);
+          setSchoolId(userData.schoolId);
+          // Centralized initialization - ServiceManager handles staged startup
+          initializeSyncForUser(userData);
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setSchoolId(null);
+          clearSession();
+        }
+      }
+    });
+
     return () => {
       active = false;
+      subscription.unsubscribe();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('forceSignOutAllUsers', handleForceSignOut);
@@ -93,20 +146,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   function initializeSyncForUser(userData: LocalUser, options: { wait?: boolean } = {}): void {
-    // Everything is fire-and-forget — never block the UI
-    try {
-      syncService.configure({ supabaseClient: supabase! });
-      syncService.setUserId(userData.id);
-      syncService.setSchoolId(userData.schoolId);
-      localStorage.setItem('schofy_sync_enabled', 'true');
-      if (navigator.onLine) syncService.enableSync();
-    } catch { /* ignore */ }
-
-    // Bootstrap runs — store already seeded from main.tsx
-    // If wait is true, bootstrapSession will block until sync completes
-    const bootstrap = cacheReady.then(() => {
-      return dataService.bootstrapSession(userData.id, userData.schoolId, options);
-    });
+    // Trigger staged initialization via ServiceManager
+    const bootstrap = serviceManager.initialize(userData.id, userData.schoolId || userData.id);
 
     if (options.wait) {
       // Return the promise so it can be awaited
@@ -137,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function restoreSessionWithGuard(stale: () => boolean) {
-    const savedUser = getSession();
+    const savedUser = await getBackedUpSession();
     const online = typeof navigator !== 'undefined' && navigator.onLine;
 
     if (!isSupabaseConfigured || !supabase) {
@@ -201,7 +242,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (!isOnline) {
-      const savedUser = getSession();
+      const savedUser = await getBackedUpSession();
       if (savedUser && savedUser.email === email) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
@@ -222,7 +263,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           error.message?.includes('exceed_egress_quota');
         if (is402) {
           // Try cached session first
-          const savedUser = getSession();
+          const savedUser = await getBackedUpSession();
           if (savedUser && savedUser.email.toLowerCase() === email.toLowerCase()) {
             setUser(savedUser);
             setSchoolId(savedUser.schoolId);
@@ -402,6 +443,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (supabase) await supabase.auth.signOut();
       dataService.stopRealtimeSync();
     } catch { /* ignore */ }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-900 text-white font-sans">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <h2 className="text-xl font-semibold">Initializing workspace...</h2>
+          <p className="text-gray-400 mt-2">Connecting to Supabase and restoring session</p>
+        </div>
+      </div>
+    );
   }
 
   return (

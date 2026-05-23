@@ -4,6 +4,7 @@ import { useToast } from './ToastContext';
 import { syncService } from '../services/sync';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { serviceManager } from '../lib/ServiceManager';
 
 interface SyncContextType {
   isSyncing: boolean;
@@ -51,12 +52,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isSupabaseConfigured && supabase) {
-      syncService.configure({ supabaseClient: supabase });
-      if (syncEnabled) {
-        syncService.enableSync();
+      if (syncEnabled && user?.id) {
+        // Use serviceManager for centralized initialization
+        serviceManager.initialize(user.id, schoolId || user.schoolId || user.id);
       }
     }
-  }, [syncEnabled]);
+  }, [syncEnabled, user?.id, user?.schoolId, schoolId, isSupabaseConfigured]);
 
   useEffect(() => {
     const sid = schoolId || user?.id;

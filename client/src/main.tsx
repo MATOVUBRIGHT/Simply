@@ -1,5 +1,5 @@
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, HashRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import AdminApp from './admin/AdminApp';
@@ -13,12 +13,16 @@ import { ConfirmProvider } from './components/ConfirmModal';
 import './index.css';
 
 const queryClient = getQueryClient();
+const isFileProtocol = window.location.protocol === 'file:';
+const AppRouter = isFileProtocol ? HashRouter : BrowserRouter;
 
 // Detect if we're on the admin portal path
-const isAdminPath = window.location.pathname.startsWith('/admin');
+const isAdminPath = isFileProtocol
+  ? window.location.hash.startsWith('#/admin')
+  : window.location.pathname.startsWith('/admin');
 
 // Register service worker for offline support (main app only)
-if (!isAdminPath && 'serviceWorker' in navigator) {
+if (!isFileProtocol && !isAdminPath && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(reg => {
@@ -50,15 +54,12 @@ window.addEventListener('online', () => {
 
 // Bootstrap cache into store BEFORE React renders (main app only)
 if (!isAdminPath) {
-  import('./lib/database/SupabaseDataService').then(({ dataService, cacheReady }) => {
+  import('./lib/ServiceManager').then(({ serviceManager }) => {
     const session = localStorage.getItem('schofy_session');
     if (session) {
       try {
         const user = JSON.parse(session);
-        const sid = user.schoolId || user.id;
-        if (sid) {
-          cacheReady.then(() => dataService.bootstrapSession(user.id, sid));
-        }
+        serviceManager.initialize(user.id, user.schoolId || user.id);
       } catch { /* ignore */ }
     }
   });
@@ -68,15 +69,15 @@ if (!isAdminPath) {
 if (isAdminPath) {
   // Admin portal — minimal providers, no school auth
   ReactDOM.createRoot(document.getElementById('root')!).render(
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <AppRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AdminApp />
-    </BrowserRouter>
+    </AppRouter>
   );
 } else {
   // Main school app
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <AppRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ThemeProvider>
           <ToastProvider>
             <AuthProvider>
@@ -90,7 +91,7 @@ if (isAdminPath) {
             </AuthProvider>
           </ToastProvider>
         </ThemeProvider>
-      </BrowserRouter>
+      </AppRouter>
     </QueryClientProvider>
   );
 }

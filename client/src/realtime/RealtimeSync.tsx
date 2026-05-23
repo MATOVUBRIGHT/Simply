@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { store } from '../lib/store';
 import { dataService } from '../lib/database/SupabaseDataService';
@@ -14,12 +14,24 @@ const REALTIME_TABLES = [
   'payments', 'salary_payments', 'announcements', 'notifications',
   'attendance', 'exams', 'exam_results', 'transport_routes',
   'transport_assignments', 'bursaries', 'discounts', 'invoices', 'settings',
+  'timetable', 'point_transactions', 'inventory', 'expenses', 'audit_logs', 'library_books', 'library_issues',
+  'homework', 'behavior_logs', 'parent_messages', 'student_attendance',
+  'staff_attendance', 'exam_timetable', 'lesson_plans', 'student_resources',
+  'hostel_rooms', 'hostel_assignments', 'events', 'visitor_logs',
+  'certificates', 'schools', 'subscriptions', 'users', 'plans',
 ];
 
 const TABLE_NAME_MAP: Record<string, string> = {
   fee_structures: 'feeStructures', exam_results: 'examResults',
   transport_routes: 'transportRoutes', transport_assignments: 'transportAssignments',
-  salary_payments: 'salaryPayments',
+  salary_payments: 'salaryPayments', point_transactions: 'pointTransactions',
+  audit_logs: 'auditLogs',
+  library_books: 'libraryBooks', library_issues: 'libraryIssues',
+  behavior_logs: 'behaviorLogs', parent_messages: 'parentMessages',
+  student_attendance: 'studentAttendance', staff_attendance: 'staffAttendance',
+  exam_timetable: 'examTimetable', lesson_plans: 'lessonPlans',
+  student_resources: 'studentResources', hostel_rooms: 'hostelRooms',
+  hostel_assignments: 'hostelAssignments',
 };
 function localName(t: string) { return TABLE_NAME_MAP[t] || t; }
 
@@ -29,110 +41,51 @@ function refreshStale(sid: string) {
   store.refreshStale(sid, REALTIME_TABLES.map(localName));
 }
 
-const POLL_INTERVAL = 30_000; // 30 seconds — only for stale tables
+const POLL_INTERVAL = 10 * 60_000; // Safety net only; realtime handles normal updates
+
+function refreshActive(sid: string) {
+  if (!sid) return;
+  store.refreshActive(sid, REALTIME_TABLES.map(localName));
+}
 
 export function RealtimeSyncProvider({ children }: { children: React.ReactNode }) {
   const { schoolId, user } = useAuth();
   const sid = schoolId || user?.id || localStorage.getItem('schofy_current_school_id') || '';
   
   const [isConnected, setIsConnected] = useState(false);
-  const channelRef = useRef<any>(null);
-  const pollRef = useRef<number | null>(null);
-  const lastActiveRef = useRef<number>(Date.now());
 
-  // ── Single Supabase channel for all tables ──────────────────────────────────
+  // ── Delegation to dataService for all realtime logic ────────────────────────
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !sid) return;
+    if (!isSupabaseConfigured || !supabase || !sid || !user) return;
 
-    function connect() {
-      if (channelRef.current) {
-        try { supabase!.removeChannel(channelRef.current); } catch { /* ignore */ }
-      }
+    // We don't call it here directly if serviceManager is handling it.
+    // But for safety and consistency with current architecture:
+    dataService.startRealtimeSync(sid);
+    setIsConnected(true);
 
-      // Filter by school_id to reduce traffic and improve performance
-      let ch = supabase!.channel(`schofy-all:${sid}`);
-      for (const table of REALTIME_TABLES) {
-        const filter = table === 'schools' ? `id=eq.${sid}` : `school_id=eq.${sid}`;
-        
-        ch = ch.on('postgres_changes', { 
-          event: '*', 
-          schema: 'public', 
-          table,
-          filter
-        }, () => {
-          const local = localName(table);
-          // Trigger a background merge — pulls remote changes and merges without overriding pending local
-          void dataService.syncTable(sid, local);
-          store.onRemoteChange(sid, local);
-        }) as any;
-      }
-      ch.subscribe((status: string) => {
-        if (status === 'SUBSCRIBED') setIsConnected(true);
-        else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setIsConnected(false);
-      });
-      channelRef.current = ch;
-    }
+    const handleOnline = () => {
+      dataService.startRealtimeSync(sid);
+      refreshActive(sid);
+    };
 
-    connect();
+    const handleVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      dataService.startRealtimeSync(sid);
+      refreshActive(sid);
+    };
 
-    // Reconnect when coming back online
-    function onOnline() {
+    const interval = window.setInterval(() => refreshStale(sid), POLL_INTERVAL);
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisible);
       setIsConnected(false);
-      connect();
-      // First flush pending local changes to Supabase
-      void dataService.flushOfflineQueue().then(() => {
-        // Then pull fresh data from Supabase and merge
-        if (sid) {
-          void Promise.allSettled(
-            // Exclude settings — they have their own save path and must not be overwritten
-            REALTIME_TABLES.filter(t => t !== 'settings').map(t => dataService.syncTable(sid, localName(t)))
-          );
-        }
-      });
-    }
-
-    window.addEventListener('online', onOnline);
-    return () => {
-      window.removeEventListener('online', onOnline);
-      if (supabase && channelRef.current) {
-        try { supabase.removeChannel(channelRef.current); } catch { /* ignore */ }
-      }
+      dataService.stopRealtimeSync();
     };
-  }, [sid]);
-
-  // ── Polling fallback — only refreshes stale tables with active subscribers ──
-  useEffect(() => {
-    function startPoll() {
-      if (pollRef.current) return;
-      pollRef.current = window.setInterval(() => {
-        if (document.visibilityState === 'visible') refreshStale(sid);
-      }, POLL_INTERVAL);
-    }
-    function stopPoll() {
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    }
-    function onVisible() {
-      const away = Date.now() - lastActiveRef.current;
-      // Only refresh if away > 30s
-      if (away > 30_000) refreshStale(sid);
-      lastActiveRef.current = Date.now();
-      startPoll();
-    }
-    function onHidden() { lastActiveRef.current = Date.now(); stopPoll(); }
-
-    const onVisibilityChange = () =>
-      document.visibilityState === 'visible' ? onVisible() : onHidden();
-
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    window.addEventListener('focus', onVisible);
-    startPoll();
-
-    return () => {
-      stopPoll();
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.removeEventListener('focus', onVisible);
-    };
-  }, []);
+  }, [sid, user]);
 
   return (
     <RealtimeSyncContext.Provider value={{ isConnected }}>

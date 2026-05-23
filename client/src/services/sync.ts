@@ -3,8 +3,8 @@ import { dataService } from '../lib/database/SupabaseDataService';
 
 class SyncService {
   private syncInterval: ReturnType<typeof setTimeout> | null = null;
-  /** Background pull + push base interval (Cloud-First: more aggressive). */
-  private readonly SYNC_INTERVAL_MS = 30000; // 30 seconds (was 2 minutes)
+  /** Background queue-flush interval. Reads are on-demand to protect Supabase limits. */
+  private readonly SYNC_INTERVAL_MS = 5 * 60 * 1000;
   /** Maximum backoff interval when repeated failures occur. */
   private readonly MAX_BACKOFF_MS = 10 * 60 * 1000; // 10 minutes (was 30)
   private backoffMs: number | null = null;
@@ -123,8 +123,8 @@ class SyncService {
   }
 
   async runFullSyncCycle(): Promise<{ success: boolean; pushed: number; pulled: number; failed: number; error?: string }> {
-    if (!this.syncEnabled) {
-      return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Sync disabled.' };
+    if (!this.syncEnabled || !navigator.onLine) {
+      return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Sync unavailable.' };
     }
 
     const schoolId = this.getSchoolId();
@@ -138,7 +138,10 @@ class SyncService {
     this.syncInProgress = true;
 
     try {
+      // Run the lightweight automatic sync cycle.
       return await dataService.syncNow(schoolId);
+    } catch (e: any) {
+      return { success: false, pushed: 0, pulled: 0, failed: 0, error: e.message };
     } finally {
       this.syncInProgress = false;
     }

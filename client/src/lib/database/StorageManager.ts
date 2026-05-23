@@ -36,7 +36,8 @@ export function getStorageDB(): Promise<IDBDatabase> {
 
         // v1 store (cache data)
         if (!db.objectStoreNames.contains(CACHE_STORE)) {
-          db.createObjectStore(CACHE_STORE);
+          const s = db.createObjectStore(CACHE_STORE);
+          // Add index for faster lookups by key parts if needed
         }
 
         // v2 stores — offline queue and deleted IDs
@@ -44,6 +45,7 @@ export function getStorageDB(): Promise<IDBDatabase> {
           const qs = db.createObjectStore(QUEUE_STORE, { keyPath: 'id' });
           qs.createIndex('by_table', 'tableName', { unique: false });
           qs.createIndex('by_ts', 'ts', { unique: false });
+          qs.createIndex('by_user', 'userId', { unique: false });
         }
         
         if (!db.objectStoreNames.contains(DELETED_STORE)) {
@@ -52,7 +54,7 @@ export function getStorageDB(): Promise<IDBDatabase> {
         }
       };
 
-      req.onsuccess = () => {
+      req.onsuccess = async () => {
         _db = req.result;
 
         // Handle unexpected version changes (e.g. another tab upgraded)
@@ -153,6 +155,8 @@ export interface QueueItem {
 }
 
 const QUEUE_LS_KEY = 'schofy_offline_queue'; // legacy localStorage key
+const QUEUE_BACKUP_KEY = 'schofy_offline_queue';
+const DELETED_BACKUP_KEY = 'schofy_deleted_ids';
 
 /** Load all queue items — IDB primary, localStorage fallback */
 export async function loadQueue(): Promise<QueueItem[]> {
@@ -161,7 +165,7 @@ export async function loadQueue(): Promise<QueueItem[]> {
     return new Promise((resolve) => {
       const tx = db.transaction(QUEUE_STORE, 'readonly');
       const req = tx.objectStore(QUEUE_STORE).getAll();
-      req.onsuccess = () => {
+      req.onsuccess = async () => {
         const idbItems: QueueItem[] = req.result || [];
         // Also merge any items still in localStorage (migration path)
         const lsItems = _loadQueueLS();
@@ -172,12 +176,30 @@ export async function loadQueue(): Promise<QueueItem[]> {
         // Merge, deduplicate by id
         const merged = new Map<string, QueueItem>();
         for (const item of [...idbItems, ...lsItems]) merged.set(item.id, item);
-        resolve(Array.from(merged.values()).sort((a, b) => a.ts - b.ts));
+        const final = Array.from(merged.values()).sort((a, b) => a.ts - b.ts);
+        if (final.length > 0) {
+          void backupQueue(final);
+          resolve(final);
+          return;
+        }
+
+        void readElectronBackup(QUEUE_BACKUP_KEY).then(nativeQueue => {
+          resolve(Array.isArray(nativeQueue) ? nativeQueue.sort((a, b) => a.ts - b.ts) : []);
+        });
       };
-      req.onerror = () => resolve(_loadQueueLS());
+      req.onerror = () => {
+        const ls = _loadQueueLS();
+        if (ls.length > 0) resolve(ls);
+        else void readElectronBackup(QUEUE_BACKUP_KEY).then(nativeQueue => {
+          resolve(Array.isArray(nativeQueue) ? nativeQueue.sort((a, b) => a.ts - b.ts) : []);
+        });
+      };
     });
   } catch {
-    return _loadQueueLS();
+    const ls = _loadQueueLS();
+    if (ls.length > 0) return ls;
+    const nativeQueue = await readElectronBackup(QUEUE_BACKUP_KEY);
+    return Array.isArray(nativeQueue) ? nativeQueue.sort((a, b) => a.ts - b.ts) : [];
   }
 }
 
@@ -198,8 +220,13 @@ async function _migrateQueueFromLS(db: IDBDatabase, items: QueueItem[]): Promise
 }
 
 /** Add item to queue */
-export async function enqueueItem(item: Omit<QueueItem, 'id' | 'ts'>): Promise<void> {
-  const full: QueueItem = { ...item, id: _uuid(), ts: Date.now() };
+export async function enqueueItem(item: Omit<QueueItem, 'id' | 'ts'> | QueueItem): Promise<void> {
+  const incoming = item as Partial<QueueItem>;
+  const full: QueueItem = {
+    ...(item as Omit<QueueItem, 'id' | 'ts'>),
+    id: incoming.id || _uuid(),
+    ts: incoming.ts || Date.now(),
+  } as QueueItem;
   try {
     const db = await getStorageDB();
     const tx = db.transaction(QUEUE_STORE, 'readwrite');
@@ -210,6 +237,7 @@ export async function enqueueItem(item: Omit<QueueItem, 'id' | 'ts'>): Promise<v
     q.push(full);
     try { localStorage.setItem(QUEUE_LS_KEY, JSON.stringify(q)); } catch {}
   }
+  void loadQueue().then(backupQueue);
 }
 
 /** Remove item from queue by id */
@@ -224,6 +252,11 @@ export async function dequeueItem(id: string): Promise<void> {
       localStorage.setItem(QUEUE_LS_KEY, JSON.stringify(q));
     } catch {}
   }
+  void loadQueue().then(backupQueue);
+}
+
+async function backupQueue(queue: QueueItem[]): Promise<void> {
+  await writeElectronBackup(QUEUE_BACKUP_KEY, queue);
 }
 
 // ── Deleted IDs registry (IndexedDB-backed) ───────────────────────────────────
@@ -244,26 +277,38 @@ export async function getDeletedIds(sid: string, tableName: string): Promise<Set
     return new Promise((resolve) => {
       const tx = db.transaction(DELETED_STORE, 'readonly');
       const req = tx.objectStore(DELETED_STORE).get(key);
-      req.onsuccess = () => {
+      req.onsuccess = async () => {
         const idbIds: string[] = req.result || [];
         // Also check localStorage (migration)
         const lsReg = _loadDeletedLS();
         const lsIds: string[] = lsReg[key] || [];
-        const merged = new Set([...idbIds, ...lsIds]);
+        let merged = new Set([...idbIds, ...lsIds]);
         if (lsIds.length > 0) {
           // Migrate to IDB
           void _migrateDeletedFromLS(db, lsReg);
+        }
+        if (merged.size === 0) {
+          const nativeReg = await readElectronBackup(DELETED_BACKUP_KEY) as DeletedRegistry | null;
+          merged = new Set(nativeReg?.[key] || []);
         }
         resolve(merged);
       };
       req.onerror = () => {
         const reg = _loadDeletedLS();
-        resolve(new Set(reg[key] || []));
+        if (reg[key]?.length) {
+          resolve(new Set(reg[key]));
+        } else {
+          void readElectronBackup(DELETED_BACKUP_KEY).then((nativeReg: DeletedRegistry | null) => {
+            resolve(new Set(nativeReg?.[key] || []));
+          });
+        }
       };
     });
   } catch {
     const reg = _loadDeletedLS();
-    return new Set(reg[key] || []);
+    if (reg[key]?.length) return new Set(reg[key]);
+    const nativeReg = await readElectronBackup(DELETED_BACKUP_KEY) as DeletedRegistry | null;
+    return new Set(nativeReg?.[key] || []);
   }
 }
 
@@ -281,6 +326,12 @@ async function _migrateDeletedFromLS(db: IDBDatabase, reg: DeletedRegistry): Pro
 /** Mark a single ID as deleted */
 export async function markDeleted(sid: string, tableName: string, id: string): Promise<void> {
   const key = `${sid}:${tableName}`;
+  const reg = _loadDeletedLS();
+  if (!reg[key]) reg[key] = [];
+  if (!reg[key].includes(id)) reg[key].push(id);
+  try { localStorage.setItem(DELETED_LS_KEY, JSON.stringify(reg)); } catch {}
+  void writeElectronBackup(DELETED_BACKUP_KEY, reg);
+
   try {
     const db = await getStorageDB();
     const tx = db.transaction(DELETED_STORE, 'readwrite');
@@ -293,11 +344,7 @@ export async function markDeleted(sid: string, tableName: string, id: string): P
       }
     };
   } catch {
-    // Fallback to localStorage
-    const reg = _loadDeletedLS();
-    if (!reg[key]) reg[key] = [];
-    if (!reg[key].includes(id)) reg[key].push(id);
-    try { localStorage.setItem(DELETED_LS_KEY, JSON.stringify(reg)); } catch {}
+    // localStorage/native backup already updated above
   }
 }
 
@@ -305,6 +352,14 @@ export async function markDeleted(sid: string, tableName: string, id: string): P
 export async function markBatchDeleted(sid: string, tableName: string, ids: string[]): Promise<void> {
   if (!ids.length) return;
   const key = `${sid}:${tableName}`;
+  const reg = _loadDeletedLS();
+  if (!reg[key]) reg[key] = [];
+  for (const id of ids) {
+    if (!reg[key].includes(id)) reg[key].push(id);
+  }
+  try { localStorage.setItem(DELETED_LS_KEY, JSON.stringify(reg)); } catch {}
+  void writeElectronBackup(DELETED_BACKUP_KEY, reg);
+
   try {
     const db = await getStorageDB();
     const tx = db.transaction(DELETED_STORE, 'readwrite');
@@ -316,12 +371,7 @@ export async function markBatchDeleted(sid: string, tableName: string, ids: stri
       store.put(merged, key);
     };
   } catch {
-    const reg = _loadDeletedLS();
-    if (!reg[key]) reg[key] = [];
-    for (const id of ids) {
-      if (!reg[key].includes(id)) reg[key].push(id);
-    }
-    try { localStorage.setItem(DELETED_LS_KEY, JSON.stringify(reg)); } catch {}
+    // localStorage/native backup already updated above
   }
 }
 

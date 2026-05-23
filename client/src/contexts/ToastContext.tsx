@@ -73,42 +73,30 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, 400);
   }, []);
 
+  // Instant add toast without waiting for state
   const addToast = useCallback((message: string, type: ToastType = 'info') => {
-    playToastSound(type);
+    const id = Math.random().toString(36).substring(2, 9);
+    const newToast: Toast = { id, message, type };
 
+    // Batch updates: if there are many toasts, only show the last 3
     setToasts((prev) => {
-      const existingIndex = prev.findIndex(t => !t.isExiting);
-      if (existingIndex !== -1) {
-        const existing = prev[existingIndex];
-        const timeout = timeoutRefs.current.get(existing.id);
-        if (timeout) {
-          clearTimeout(timeout);
-          timeoutRefs.current.delete(existing.id);
-        }
-        
-        const newToasts = prev.filter(t => t.id !== existing.id);
-        const id = Date.now().toString();
-        const newToast: Toast = { id, message, type };
-        
-        const removeTimeout = setTimeout(() => {
-          removeToast(id);
-        }, 4000);
-        timeoutRefs.current.set(id, removeTimeout);
-        
-        return [...newToasts, newToast];
+      const active = prev.filter(t => !t.isExiting);
+      if (active.length >= 3) {
+        const oldest = active[0];
+        // We can't call removeToast here easily because of closure, 
+        // but we can mark it for exit in the state update
+        return prev.map(t => t.id === oldest.id ? { ...t, isExiting: true } : t).concat(newToast);
       }
-      
-      const id = Date.now().toString();
-      const newToast: Toast = { id, message, type };
-      
-      const removeTimeout = setTimeout(() => {
-        removeToast(id);
-      }, 4000);
-      timeoutRefs.current.set(id, removeTimeout);
-      
       return [...prev, newToast];
     });
-  }, [removeToast, playToastSound]);
+
+    playToastSound(type);
+
+    const removeTimeout = setTimeout(() => {
+      removeToast(id);
+    }, 5000);
+    timeoutRefs.current.set(id, removeTimeout);
+  }, [playToastSound, removeToast]);
 
   useEffect(() => {
     return () => {

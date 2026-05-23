@@ -29,6 +29,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js'),
     },
     icon: path.join(__dirname, '../client/public/favicon.svg'),
@@ -44,7 +45,11 @@ function createWindow() {
     });
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../client/dist/index.html')).catch(err => {
+    const indexPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'client-dist', 'index.html')
+      : path.join(__dirname, '../client/dist/index.html');
+
+    mainWindow.loadFile(indexPath).catch(err => {
       console.error('Failed to load production file:', err);
       mainWindow.show();
     });

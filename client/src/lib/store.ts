@@ -21,6 +21,8 @@ interface TableState {
 }
 
 const STALE_MS = 4 * 60 * 60_000; // 4 hours — data loaded once stays loaded; realtime + manual refresh keeps it fresh
+const FALLBACK_REFRESH_MS = 10 * 60_000; // Safety net only; realtime handles normal updates
+const ACTIVE_CATCHUP_MS = 2 * 60_000; // Avoid repeated focus/online refresh bursts
 
 class DataStore {
   private state = new Map<string, TableState>();
@@ -132,7 +134,20 @@ class DataStore {
       const s = this.get(sid, table);
       const k = this.key(sid, table);
       const hasSubscribers = (this.listeners.get(k)?.size ?? 0) > 0;
-      if (hasSubscribers && Date.now() - s.lastFetch > 30_000) {
+      if (hasSubscribers && Date.now() - s.lastFetch > FALLBACK_REFRESH_MS) {
+        void this.fetch(sid, table, true);
+      }
+    }
+  }
+
+  refreshActive(sid: string, tables: string[]) {
+    if (!sid) return;
+    for (const table of tables) {
+      const s = this.get(sid, table);
+      const k = this.key(sid, table);
+      const hasSubscribers = (this.listeners.get(k)?.size ?? 0) > 0;
+      if (hasSubscribers && Date.now() - s.lastFetch > ACTIVE_CATCHUP_MS) {
+        this.set(sid, table, { lastFetch: 0 });
         void this.fetch(sid, table, true);
       }
     }

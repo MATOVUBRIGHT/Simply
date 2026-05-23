@@ -1,6 +1,11 @@
+$envFile = Join-Path $PSScriptRoot "client\.env"
+$envLines = Get-Content $envFile
+$supabaseUrl = ($envLines | Where-Object { $_ -match '^VITE_SUPABASE_URL=' } | Select-Object -First 1) -replace '^VITE_SUPABASE_URL=', ''
+$anonKey = ($envLines | Where-Object { $_ -match '^VITE_SUPABASE_ANON_KEY=' } | Select-Object -First 1) -replace '^VITE_SUPABASE_ANON_KEY=', ''
+
 $headers = @{
-    "apikey" = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpicGV2YWp3dGpxenZ2Zmlra2JqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNDYxMzEsImV4cCI6MjA5MDcyMjEzMX0.RAuTnNM_ukLo2nB8SieB92ExM9x6kCkKhhOdBv--Jgc"
-    "Authorization" = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpicGV2YWp3dGpxenZ2Zmlra2JqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNDYxMzEsImV4cCI6MjA5MDcyMjEzMX0.RAuTnNM_ukLo2nB8SieB92ExM9x6kCkKhhOdBv--Jgc"
+    "apikey" = $anonKey
+    "Authorization" = "Bearer $anonKey"
 }
 
 Write-Host "=== RECORD COUNTS IN SUPABASE ===" -ForegroundColor Cyan
@@ -10,7 +15,7 @@ $tables = @("schools", "students", "staff", "classes", "subjects", "fees", "paym
 
 foreach ($table in $tables) {
     try {
-        $url = "https://zbpevajwtjqzvvfikkbj.supabase.co/rest/v1/$table?select=id"
+        $url = "$supabaseUrl/rest/v1/${table}?select=id"
         $response = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ContentType "application/json" -ErrorAction Stop
         $count = $response.Count
         $color = if ($count -gt 0) { "Green" } else { "Yellow" }
@@ -23,7 +28,7 @@ foreach ($table in $tables) {
 Write-Host ""
 Write-Host "=== SCHOOLS ===" -ForegroundColor Cyan
 try {
-    $url = "https://zbpevajwtjqzvvfikkbj.supabase.co/rest/v1/schools?select=name"
+    $url = "$supabaseUrl/rest/v1/schools?select=name"
     $response = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ContentType "application/json" -ErrorAction Stop
     $response | ForEach-Object { Write-Host "  - $($_.name)" }
 } catch {
