@@ -265,10 +265,10 @@ export default function Login() {
       className="min-h-screen bg-cover bg-center p-4"
       style={{ backgroundImage: `url(${AUTH_COVER})` }}
     >
-      <div className="absolute inset-0 bg-white/45 backdrop-blur-[1px]" />
+      <div className="absolute inset-0 bg-white/35" />
       <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-6xl items-center">
-        <div className="grid w-full overflow-hidden rounded-lg border border-white/50 bg-white/88 shadow-xl shadow-slate-900/15 backdrop-blur-md dark:border-slate-800/70 dark:bg-slate-900/88 lg:grid-cols-[1fr_28rem]">
-          <section className="hidden bg-white/10 px-10 py-12 text-slate-950 backdrop-blur-sm lg:flex lg:flex-col lg:justify-between">
+        <div className="grid w-full overflow-hidden rounded-lg border border-white/55 bg-white/82 shadow-xl shadow-slate-900/15 backdrop-blur-md dark:border-slate-800/70 dark:bg-slate-900/88 lg:grid-cols-[1fr_28rem]">
+          <section className="hidden bg-white/12 px-10 py-12 text-slate-950 lg:flex lg:flex-col lg:justify-between">
             <div>
               <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-white/85 p-2 shadow-sm ring-1 ring-white/60">
                 <img src={APP_LOGO} alt="Schofy" className="h-full w-full object-contain" />
@@ -278,10 +278,16 @@ export default function Login() {
                 Manage students, finance, attendance, reports, and school operations with offline support and cloud sync.
               </p>
             </div>
-            <div className="grid grid-cols-3 gap-3 text-xs font-medium text-slate-700">
-              <div className="rounded-lg border border-white/55 bg-white/45 p-3 backdrop-blur">Offline ready</div>
-              <div className="rounded-lg border border-white/55 bg-white/45 p-3 backdrop-blur">Realtime sync</div>
-              <div className="rounded-lg border border-white/55 bg-white/45 p-3 backdrop-blur">Secure access</div>
+            <div className="grid grid-cols-3 gap-3 text-xs font-semibold">
+              <span className="inline-flex h-10 items-center justify-center rounded-md border border-amber-200 bg-amber-100/90 px-3 text-amber-800 shadow-sm">
+                Offline ready
+              </span>
+              <span className="inline-flex h-10 items-center justify-center rounded-md border border-sky-200 bg-sky-100/90 px-3 text-sky-800 shadow-sm">
+                Realtime sync
+              </span>
+              <span className="inline-flex h-10 items-center justify-center rounded-md border border-emerald-200 bg-emerald-100/90 px-3 text-emerald-800 shadow-sm">
+                Secure access
+              </span>
             </div>
           </section>
 
