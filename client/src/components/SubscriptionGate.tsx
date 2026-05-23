@@ -214,9 +214,10 @@ export default function SubscriptionGate({ children }: Props) {
   if (checking && !isAllowedRoute) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
-        <div className="text-center">
-          <RefreshCw size={28} className="mx-auto mb-3 animate-spin text-indigo-600" />
-          <p className="text-sm font-medium text-slate-600 dark:text-slate-300">Checking access...</p>
+        <div className="w-full max-w-sm rounded-2xl border border-emerald-200 bg-white p-6 text-center shadow-xl dark:border-emerald-800 dark:bg-slate-900">
+          <RefreshCw size={30} className="mx-auto mb-3 animate-spin text-emerald-600" />
+          <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Checking secure access...</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Verifying your plan, account status, and device sync.</p>
         </div>
       </div>
     );
@@ -261,7 +262,7 @@ export default function SubscriptionGate({ children }: Props) {
     <>
       {children}
       {blocked && !isAllowedRoute && createPortal(
-        <div className="fixed inset-0 z-[99999] bg-black/75 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[99999] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
 
             {/* Coloured header */}

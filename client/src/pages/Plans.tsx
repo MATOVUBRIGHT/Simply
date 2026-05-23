@@ -109,6 +109,30 @@ export default function Plans() {
     setTransactionId('');
   };
 
+  async function requestTrialApproval() {
+    const authId = schoolId || user?.id;
+    if (!authId || !supabase) return;
+    const now = new Date().toISOString();
+    await supabase.from('subscriptions').insert({
+      id: crypto.randomUUID(),
+      school_id: authId,
+      user_id: user?.id || authId,
+      plan: 'trial',
+      status: 'pending',
+      starts_at: now,
+      ends_at: now,
+      metadata: {
+        source: 'client',
+        requestType: 'trial',
+        requestedBy: user?.email || '',
+        requestedAt: now,
+      },
+      created_at: now,
+      updated_at: now,
+    });
+    localStorage.setItem('schofy_sub_pending', '1');
+  }
+
   const handleDownloadInvoice = () => {
     const invoice = `SCHOFY RECEIPT
 ================
@@ -142,7 +166,7 @@ Powered by Schofy`;
   const canProceedToApp = accessState?.status === 'active' || accessState?.status === 'expiring';
 
   return (
-    <div className="relative space-y-4 text-slate-900 dark:text-white">
+    <div className="relative mx-auto min-h-screen w-full max-w-7xl space-y-5 px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-10">
       {(!currentPlanId || accessState?.status === 'expired') ? (
         <div className="rounded-xl border p-4 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
           <p className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -670,7 +694,7 @@ Powered by Schofy`;
                 href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Admin,\n\nI would like to request a free trial for my school.\n\nSchool email: ${user?.email}\nSchool ID: ${schoolId || user?.id}\n\nPlease activate the 7-day free trial. Thank you.`)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={() => setTrialRequested(true)}
+                onClick={() => { setTrialRequested(true); void requestTrialApproval(); }}
                 className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-all"
               >
                 <MessageCircle size={18} /> Send Trial Request via WhatsApp

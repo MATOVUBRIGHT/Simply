@@ -23,7 +23,7 @@ interface AuthContextType {
   user: LocalUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (email: string, password: string, firstName: string, lastName: string) => Promise<{ success: boolean; user?: { id: string }; error?: string }>;
+  register: (email: string, password: string, firstName: string, lastName: string, phone?: string) => Promise<{ success: boolean; user?: { id: string }; error?: string; needsVerification?: boolean }>;
   logout: () => Promise<void>;
   isOnline: boolean;
   schoolId: string | null;
@@ -236,7 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!stale()) setLoading(false);
   }
 
-  async function login(email: string, _password: string): Promise<{ success: boolean; error?: string }> {
+  async function login(email: string, password: string): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured || !supabase) {
       return { success: false, error: 'Supabase not configured. Cannot login.' };
     }
@@ -253,6 +253,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase().trim(),
+        password,
+      });
+      if (authError || !authData.user) {
+        return { success: false, error: 'Invalid email or password' };
+      }
+      if (!authData.user.email_confirmed_at) {
+        await supabase.auth.signOut();
+        return { success: false, error: 'Please verify your email before signing in. Check your inbox for the verification link.' };
+      }
+
       const { data, error } = await usersApi.getByEmail(email);
 
       // If Supabase returns 402 (egress quota exceeded), fall back to cached session
@@ -351,10 +363,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function register(
     email: string,
-    _password: string,
+    password: string,
     firstName: string,
-    lastName: string
-  ): Promise<{ success: boolean; user?: { id: string }; error?: string }> {
+    lastName: string,
+    phone = ''
+  ): Promise<{ success: boolean; user?: { id: string }; error?: string; needsVerification?: boolean }> {
     if (!isSupabaseConfigured || !supabase) {
       return { success: false, error: 'Supabase not configured. Cannot register.' };
     }
@@ -370,7 +383,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: 'An account with this email already exists' };
       }
 
-      const newId = generateUUID();
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email.toLowerCase().trim(),
+        password,
+        options: {
+          data: {
+            first_name: firstName,
+            last_name: lastName,
+            phone,
+          },
+        },
+      });
+      if (authError) return { success: false, error: authError.message };
+
+      const newId = authData.user?.id || generateUUID();
       const now = new Date().toISOString();
       const { data, error } = await supabase
         .from('users')
@@ -381,6 +407,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: email.toLowerCase(),
             first_name: firstName,
             last_name: lastName,
+            phone,
             is_active: true,
             created_at: now,
             updated_at: now,
@@ -399,8 +426,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await supabase.from('schools').upsert({
         id: newId,
         name: `${firstName}'s School`,
+        phone,
+        email: email.toLowerCase(),
         updated_at: now
       }, { onConflict: 'id' });
+
+      if (!authData.session || !authData.user?.email_confirmed_at) {
+        await supabase.auth.signOut();
+        return { success: true, user: { id: newId }, needsVerification: true };
+      }
 
       const userData: LocalUser = {
         id: data.id,

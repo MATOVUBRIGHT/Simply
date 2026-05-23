@@ -32,6 +32,7 @@ import { useSync } from '../contexts/SyncContext';
 import { UserRole, Notification as NotificationType } from '@schofy/shared';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { compressImageFile } from '../utils/imageCompression';
 import GlobalSearch from './GlobalSearch';
 import InstallPWA from './InstallPWA';
 import { useStaffAuth } from '../contexts/StaffAuthContext';
@@ -182,32 +183,23 @@ function Layout({ children }: LayoutProps) {
     return () => window.removeEventListener('settingsUpdated', handleSettingsUpdate);
   }, []);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        setProfileImage(result);
-        localStorage.setItem('profileImage', result);
-      };
-      reader.readAsDataURL(file);
+      const result = await compressImageFile(file, 800, 0.82);
+      setProfileImage(result);
+      localStorage.setItem('profileImage', result);
     }
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !tenantId) return;
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = reader.result as string;
-      // Save logo to settings so it persists and shows on reports
-      try {
-        await dataService.saveSettings(tenantId, { schoolLogo: base64 });
-        window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
-      } catch { /* ignore */ }
-    };
-    reader.readAsDataURL(file);
+    const base64 = await compressImageFile(file, 900, 0.84);
+    try {
+      await dataService.saveSettings(tenantId, { schoolLogo: base64 });
+      window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
+    } catch { /* ignore */ }
     e.target.value = '';
   };
 

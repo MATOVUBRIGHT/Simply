@@ -31,6 +31,8 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [revoking, setRevoking] = useState(false);
+  const [resettingActivity, setResettingActivity] = useState(false);
+  const [activityResetAt, setActivityResetAt] = useState(() => localStorage.getItem('schofy_admin_activity_reset_at') || '');
   const [showRevokeModal, setShowRevokeModal] = useState(false);
   const [revokeSuccess, setRevokeSuccess] = useState('');
 
@@ -74,7 +76,10 @@ export default function AdminDashboard() {
         else expiredSchools++;
       });
 
-      const recentSubscriptions: RecentSub[] = subs.slice(0, 10).map((sub: any) => ({
+      const visibleSubs = activityResetAt
+        ? subs.filter((sub: any) => new Date(sub.updated_at || 0).getTime() > new Date(activityResetAt).getTime())
+        : subs;
+      const recentSubscriptions: RecentSub[] = visibleSubs.slice(0, 10).map((sub: any) => ({
         id: sub.id,
         schoolId: String(sub.school_id || ''),
         schoolName: schoolNames[sub.school_id] || String(sub.school_id || '').slice(0, 8) + '...',
@@ -126,6 +131,23 @@ export default function AdminDashboard() {
       setError(err.message || 'Failed to revoke access');
     } finally {
       setRevoking(false);
+    }
+  }
+
+  async function resetRecentSubscriptionActivity() {
+    if (!supabase || resettingActivity) return;
+    setResettingActivity(true);
+    setError('');
+    try {
+      const now = new Date().toISOString();
+      localStorage.setItem('schofy_admin_activity_reset_at', now);
+      setActivityResetAt(now);
+      setStats(prev => prev ? { ...prev, recentSubscriptions: [] } : prev);
+      setRevokeSuccess('Recent Subscription Activity has been reset.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset subscription activity');
+    } finally {
+      setResettingActivity(false);
     }
   }
 
@@ -187,11 +209,20 @@ export default function AdminDashboard() {
 
       {/* Recent subscriptions */}
       <div className={`${t.surface} border rounded-2xl overflow-hidden`}>
-        <div className={`px-5 py-4 border-b ${t.divider} flex items-center gap-2`}>
-          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isDark ? 'bg-amber-900/40' : 'bg-amber-100'}`}>
-            <AlertTriangle size={14} className="text-amber-500" />
+        <div className={`px-5 py-4 border-b ${t.divider} flex items-center justify-between gap-2`}>
+          <div className="flex items-center gap-2">
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isDark ? 'bg-amber-900/40' : 'bg-amber-100'}`}>
+              <AlertTriangle size={14} className="text-amber-500" />
+            </div>
+            <h2 className={`text-sm font-semibold ${t.text}`}>Recent Subscription Activity</h2>
           </div>
-          <h2 className={`text-sm font-semibold ${t.text}`}>Recent Subscription Activity</h2>
+          <button
+            onClick={resetRecentSubscriptionActivity}
+            disabled={resettingActivity || !stats?.recentSubscriptions?.length}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 ${isDark ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+          >
+            {resettingActivity ? 'Resetting...' : 'Reset'}
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

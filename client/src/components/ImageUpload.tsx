@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { Upload, X, Camera } from 'lucide-react';
+import { compressImageFile } from '../utils/imageCompression';
 
 interface ImageUploadProps {
   value?: string;
@@ -13,18 +14,14 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  function handleFile(file: File) {
+  async function handleFile(file: File) {
     if (!file.type.startsWith('image/')) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target?.result as string;
-      setPreview(base64);
-      onChange(base64);
-    };
-    reader.readAsDataURL(file);
+    const compressed = await compressImageFile(file);
+    setPreview(compressed);
+    onChange(compressed);
   }
 
   function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -102,7 +99,7 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
               Click or drag to upload
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              JPG, PNG or GIF (max 2MB)
+      JPG, PNG or GIF, compressed for fast loading
             </p>
           </div>
         )}

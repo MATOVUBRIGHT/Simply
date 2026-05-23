@@ -710,19 +710,22 @@ textarea.form-input {
 
 /* Card Styles - Clean & Solid */
 .card {
-  @apply rounded-xl border overflow-hidden;
+  @apply rounded-xl border;
+  overflow: visible;
   background-color: var(--bg-secondary);
   border-color: var(--neutral-border);
 }
 
 .card-header {
-  @apply px-5 py-4 overflow-hidden;
+  @apply px-5 py-4;
+  overflow: visible;
   background-color: var(--bg-tertiary);
   border-bottom: 1px solid var(--neutral-border);
 }
 
 .card-body {
-  @apply p-5 overflow-hidden;
+  @apply p-5;
+  overflow: visible;
 }
 
 /* Text overflow prevention in cards */

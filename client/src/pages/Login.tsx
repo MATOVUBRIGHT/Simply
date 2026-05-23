@@ -101,6 +101,7 @@ export default function Login() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
@@ -110,6 +111,7 @@ export default function Login() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [securingAccount, setSecuringAccount] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{
     step: 'creating' | 'syncing' | 'complete' | 'error' | 'offline';
     message: string;
@@ -177,12 +179,31 @@ export default function Login() {
         setSecuringAccount(true);
         setSyncStatus({ step: 'creating', message: 'Creating your account...', progress: 20 });
 
-        const result = await register(email.trim(), password, firstName.trim(), lastName.trim());
+        if (!phone.trim()) {
+          setError('Phone number is required');
+          setSecuringAccount(false);
+          setLoading(false);
+          return;
+        }
+
+        const result = await register(email.trim(), password, firstName.trim(), lastName.trim(), phone.trim());
 
         if (!result.success) {
           setError(result.error || 'Registration failed');
           setSecuringAccount(false);
           setLoading(false);
+          return;
+        }
+
+        if (result.needsVerification) {
+          setSyncStatus({ step: 'complete', message: 'Verification email sent. Check your inbox before signing in.', progress: 100 });
+          await new Promise((resolve) => setTimeout(resolve, 900));
+          setVerificationSent(true);
+          setSecuringAccount(false);
+          setLoading(false);
+          setIsRegister(false);
+          setPassword('');
+          setConfirmPassword('');
           return;
         }
 
@@ -192,12 +213,18 @@ export default function Login() {
         await new Promise((resolve) => setTimeout(resolve, 900));
         setSecuringAccount(false);
       } else {
+        setSecuringAccount(true);
+        setSyncStatus({ step: 'syncing', message: 'Checking your secure access...', progress: 45 });
         const result = await login(email.trim(), password);
         if (!result.success) {
           setError(result.error || 'Login failed');
+          setSecuringAccount(false);
           setLoading(false);
           return;
         }
+        setSyncStatus({ step: 'complete', message: 'Access verified successfully.', progress: 100 });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        setSecuringAccount(false);
       }
 
       if (rememberMe) {
@@ -249,9 +276,9 @@ export default function Login() {
             )}
           </div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
-            {syncStatus.step === 'complete' ? 'Account created' : syncStatus.step === 'syncing' ? 'Syncing to cloud' : 'Creating account'}
+            {syncStatus.step === 'complete' ? 'Access verified' : syncStatus.step === 'syncing' ? 'Checking access' : 'Creating account'}
           </h2>
-          <p className="mt-2 text-slate-600 dark:text-slate-300">{syncStatus.message}</p>
+          <p className="mt-2 font-medium text-emerald-700 dark:text-emerald-300">{syncStatus.message}</p>
           <div className="mt-6 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
             <div className="h-full rounded-full transition-all duration-500" style={{ width: `${syncStatus.progress}%`, backgroundColor: primaryColor }} />
           </div>
@@ -333,6 +360,12 @@ export default function Login() {
                 </div>
               )}
 
+              {verificationSent && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+                  Verification email sent. Please verify your email, then sign in with your password.
+                </div>
+              )}
+
               {!isSupabaseConfigured && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
                   Cloud authentication is not configured yet.
@@ -348,6 +381,10 @@ export default function Login() {
                   <div>
                     <label className="form-label">Last name</label>
                     <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} className="form-input" placeholder="Last name" required />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="form-label">Phone number</label>
+                    <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="form-input" placeholder="0771234567" required autoComplete="tel" />
                   </div>
                 </div>
               )}
