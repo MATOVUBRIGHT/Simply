@@ -31,7 +31,8 @@
       }
     ],
     "icon": "../client/public/icon-512.png",
-    "artifactName": "${productName}-Setup-${version}-win7-${arch}.${ext}"
+    "artifactName": "${productName}-Setup-${version}-win7-${arch}.${ext}",
+    "signAndEditExecutable": false
   },
   "nsis": {
     "oneClick": false,
