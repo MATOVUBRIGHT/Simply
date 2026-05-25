@@ -139,7 +139,8 @@ export async function registerLocal(
   email: string,
   password: string,
   firstName: string,
-  lastName: string
+  lastName: string,
+  options: { syncToCloud?: boolean } = {}
 ): Promise<AuthResult> {
   const startTime = performance.now();
   
@@ -161,11 +162,13 @@ export async function registerLocal(
     });
     await userDBManager.openDatabase(user.id);
 
-    // Sync to Supabase immediately if configured
-    const syncResult = await syncUserToSupabase(user);
-    if (!syncResult.success) {
-      console.warn('Supabase sync failed during registration:', syncResult.error);
-      // Don't fail registration if Supabase is down - user can work offline
+    if (options.syncToCloud !== false) {
+      // Sync to Supabase immediately if configured
+      const syncResult = await syncUserToSupabase(user);
+      if (!syncResult.success) {
+        console.warn('Supabase sync failed during registration:', syncResult.error);
+        // Don't fail registration if Supabase is down - user can work offline
+      }
     }
 
     await userIndexDB.saveSession({
@@ -185,7 +188,8 @@ export async function registerLocal(
 
 export async function loginLocal(
   email: string,
-  password: string
+  password: string,
+  options: { syncToCloud?: boolean } = {}
 ): Promise<AuthResult> {
   const startTime = performance.now();
   
@@ -210,11 +214,13 @@ export async function loginLocal(
     
     await userIndexDB.updateLastLogin(user.id);
 
-    // Sync to Supabase if configured
-    const syncResult = await syncUserToSupabase(user);
-    if (!syncResult.success) {
-      console.warn('Supabase sync failed during login:', syncResult.error);
-      // Don't fail login if Supabase is down - user can work offline
+    if (options.syncToCloud !== false) {
+      // Sync to Supabase if configured
+      const syncResult = await syncUserToSupabase(user);
+      if (!syncResult.success) {
+        console.warn('Supabase sync failed during login:', syncResult.error);
+        // Don't fail login if Supabase is down - user can work offline
+      }
     }
 
     await userIndexDB.saveSession({

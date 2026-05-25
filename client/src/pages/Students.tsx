@@ -174,9 +174,14 @@ export default function Students() {
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [completedYearFilter, setCompletedYearFilter] = useState<string>('');
   const [planLimitMessage, setPlanLimitMessage] = useState<string | null>(null);
+  const [importRemaining, setImportRemaining] = useState<number | null>(null);
   const navigate = useNavigate();
   const statusFilterRef = useRef<HTMLDivElement>(null);
   const classFilterRef = useRef<HTMLDivElement>(null);
+  const statusFilterButtonRef = useRef<HTMLButtonElement>(null);
+  const classFilterButtonRef = useRef<HTMLButtonElement>(null);
+  const [statusDropdownPos, setStatusDropdownPos] = useState({ top: 0, left: 0 });
+  const [classDropdownPos, setClassDropdownPos] = useState({ top: 0, left: 0 });
   const isReloadingRef = useRef(false);
 
   const currentYear = new Date().getFullYear();
@@ -852,6 +857,7 @@ export default function Students() {
     setFieldMapping({});
     setImportPreview([]);
     setPlanLimitMessage(null);
+    setImportRemaining(null);
     setIsImporting(false);
     setImportProgress(0);
     if (fileInputRef.current) {
@@ -1001,6 +1007,16 @@ export default function Students() {
     setImportPreview(mappedData);
     setFlaggedItems(newFlaggedItems);
     setPlanLimitMessage(null);
+    const id = schoolId || user?.id;
+    if (id) {
+      void getSubscriptionAccessState(id, undefined, { authUserId: user?.id }).then(access => {
+        setImportRemaining(access.remaining);
+        const importable = mappedData.filter((_data, index) => !newFlaggedItems[index] || newFlaggedItems[index].action === 'duplicate').length;
+        if (access.plan && importable > access.remaining) {
+          setPlanLimitMessage(`Only ${access.remaining} student${access.remaining === 1 ? '' : 's'} remaining on ${access.plan.name}. This file has ${importable} importable student${importable === 1 ? '' : 's'}.`);
+        }
+      }).catch(() => setImportRemaining(null));
+    }
     setImportStep('preview');
   }
 
@@ -1179,6 +1195,32 @@ export default function Students() {
   const completedCount = allStudents.filter(s => s.status === 'completed').length;
   const totalEnrolled = allStudents.filter(s => s.status !== 'completed').length;
 
+  const getDropdownPosition = (button: HTMLButtonElement | null) => {
+    const rect = button?.getBoundingClientRect();
+    if (!rect) return { top: 0, left: 0 };
+    const width = 224;
+    return {
+      top: rect.bottom + 8,
+      left: Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)),
+    };
+  };
+
+  const updateDropdownPositions = useCallback(() => {
+    if (showStatusFilter) setStatusDropdownPos(getDropdownPosition(statusFilterButtonRef.current));
+    if (showClassFilter) setClassDropdownPos(getDropdownPosition(classFilterButtonRef.current));
+  }, [showStatusFilter, showClassFilter]);
+
+  useEffect(() => {
+    updateDropdownPositions();
+    if (!showStatusFilter && !showClassFilter) return;
+    window.addEventListener('scroll', updateDropdownPositions, true);
+    window.addEventListener('resize', updateDropdownPositions);
+    return () => {
+      window.removeEventListener('scroll', updateDropdownPositions, true);
+      window.removeEventListener('resize', updateDropdownPositions);
+    };
+  }, [showStatusFilter, showClassFilter, updateDropdownPositions]);
+
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
@@ -1353,7 +1395,12 @@ export default function Students() {
               {/* Status Filter Dropdown */}
               <div className="relative" ref={statusFilterRef}>
                 <button
-                  onClick={() => { setShowStatusFilter(!showStatusFilter); setShowClassFilter(false); }}
+                  ref={statusFilterButtonRef}
+                  onClick={() => {
+                    setStatusDropdownPos(getDropdownPosition(statusFilterButtonRef.current));
+                    setShowStatusFilter(!showStatusFilter);
+                    setShowClassFilter(false);
+                  }}
                   className={`btn btn-secondary flex items-center gap-2 ${viewFilter !== 'active' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
                 >
                   <Filter size={16} />
@@ -1364,15 +1411,18 @@ export default function Students() {
                   </span>
                   <ChevronDown size={14} className={`transition-transform duration-300 ${showStatusFilter ? 'rotate-180' : ''}`} />
                 </button>
-                {showStatusFilter && (
+                {showStatusFilter && createPortal(
                   <div 
-                    className={`absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden
+                    className={`fixed w-56 max-h-80 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-[99999]
                       ${showStatusFilter ? 'animate-dropdown-in' : 'animate-dropdown-out'}`}
                     style={{ 
+                      ...statusDropdownPos,
                       animationDuration: '400ms',
                       animationTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
                       animationFillMode: 'forwards'
                     }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
                   >
                     <div className="py-1">
                       <button
@@ -1424,14 +1474,20 @@ export default function Students() {
                         {viewFilter === 'completed' && <Check size={14} className="ml-auto" />}
                       </button>
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
 
               {/* Class Filter Dropdown */}
               <div className="relative" ref={classFilterRef}>
                 <button
-                  onClick={() => { setShowClassFilter(!showClassFilter); setShowStatusFilter(false); }}
+                  ref={classFilterButtonRef}
+                  onClick={() => {
+                    setClassDropdownPos(getDropdownPosition(classFilterButtonRef.current));
+                    setShowClassFilter(!showClassFilter);
+                    setShowStatusFilter(false);
+                  }}
                   className={`btn btn-secondary flex items-center gap-2 ${selectedClass ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
                 >
                   <span className="hidden sm:inline">
@@ -1439,14 +1495,17 @@ export default function Students() {
                   </span>
                   <ChevronDown size={14} className={`transition-transform duration-300 ${showClassFilter ? 'rotate-180' : ''}`} />
                 </button>
-                {showClassFilter && (
+                {showClassFilter && createPortal(
                   <div 
-                    className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden"
+                    className="fixed w-56 max-h-80 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-[99999] animate-dropdown-in"
                     style={{ 
+                      ...classDropdownPos,
                       animationDuration: '400ms',
                       animationTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
                       animationFillMode: 'forwards'
                     }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
                   >
                     <div className="py-1">
                       <button
@@ -1475,7 +1534,8 @@ export default function Students() {
                         </button>
                       ))}
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
             </div>
@@ -1817,7 +1877,7 @@ export default function Students() {
                         </span>
                       </div>
                       <div className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {group.students.map((student) => (
+                        {group.students.map((student, studentIndex) => (
                           <div 
                             key={student.id}
                             className={`flex items-center gap-4 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 cursor-pointer transition-colors ${selectedStudents.has(student.id) ? 'bg-violet-50 dark:bg-violet-900/20' : ''}`}
@@ -1838,6 +1898,9 @@ export default function Students() {
                                 )}
                               </div>
                             )}
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-xs font-bold text-violet-700 dark:bg-violet-900/40 dark:text-violet-200">
+                              {studentIndex + 1}
+                            </span>
                             <div className="flex items-center gap-3 flex-1">
                               {student.photoUrl ? (
                                 <img 
@@ -1906,7 +1969,7 @@ export default function Students() {
         {viewFilter !== 'completed' && showAll === false && totalPages > 1 && (
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>â€“
+              Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>-
               <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span> of{' '}
               <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students
             </p>
@@ -2092,13 +2155,25 @@ export default function Students() {
                     <div className="flex gap-3 ml-auto">
                       <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-3 py-1">
                         <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                          <strong>{importPreview.length - Object.keys(flaggedItems).length}</strong> new
+                          <strong>{importPreview.filter((_student, index) => !flaggedItems[index] || flaggedItems[index].action === 'duplicate').length}</strong> import available
                         </p>
                       </div>
                       {Object.keys(flaggedItems).length > 0 && (
                         <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-1">
                           <p className="text-sm text-amber-700 dark:text-amber-300">
                             <strong>{Object.keys(flaggedItems).length}</strong> duplicates
+                          </p>
+                        </div>
+                      )}
+                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-1">
+                        <p className="text-sm text-blue-700 dark:text-blue-300">
+                          <strong>{Object.entries(flaggedItems).filter(([, f]) => f.action === 'skip' || f.action === 'replace').length}</strong> not adding
+                        </p>
+                      </div>
+                      {importRemaining !== null && (
+                        <div className="bg-slate-100 dark:bg-slate-700 rounded-lg px-3 py-1">
+                          <p className="text-sm text-slate-700 dark:text-slate-300">
+                            <strong>{importRemaining}</strong> remaining
                           </p>
                         </div>
                       )}

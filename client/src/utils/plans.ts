@@ -41,7 +41,6 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
       'Up to 100 students',
       'Attendance tracking',
       'Fee management',
-      'Parent notifications',
       'Basic reports',
       'Email support',
     ],
@@ -60,7 +59,6 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
       'Up to 300 students',
       'Full attendance & gradebook',
       'Fee management & invoicing',
-      'Parent notifications',
       'Advanced reports',
       'Priority support',
       'Data export',
@@ -81,7 +79,6 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
       'Full attendance & gradebook',
       'Fee management & invoicing',
       'Payroll management',
-      'Parent notifications',
       'Advanced analytics',
       'Priority support',
       'API access',
@@ -99,13 +96,14 @@ const LOCAL_UNLIMITED_PLAN: PlanDefinition = {
   termPrice: 0,
   yearlyPrice: 0,
   period: 'local',
-  features: ['Desktop local-only access', 'Unlimited local records', 'Supabase sync paused'],
+  features: ['Desktop local-only access', 'Unlimited local records', 'Cloud sync paused'],
   notIncluded: [],
   popular: false,
   studentLimit: Number.MAX_SAFE_INTEGER,
 };
 
 const DEFAULT_BILLING_CYCLE: BillingCycle = 'term';
+const PLAN_CACHE_PREFIX = 'schofy_plan_cache_';
 const SETTINGS_KEYS = {
   currentPlanId: 'subscriptionPlanId',
   currentPlanEligible: 'subscriptionPlanEligible',
@@ -228,6 +226,67 @@ function classifySubscription(expiry: Date | null): { status: SubscriptionStatus
   return { status: 'active', daysRemaining: days };
 }
 
+function planCacheKey(tenantId: string) {
+  return `${PLAN_CACHE_PREFIX}${tenantId}`;
+}
+
+export function cachePlanStateLocally(tenantId: string, state: SubscriptionAccessState, pending = false) {
+  if (!tenantId || !state.selectedPlanId || state.selectedPlanId === LOCAL_UNLIMITED_PLAN.id) return;
+  const plan = getPlanById(state.selectedPlanId);
+  if (!plan) return;
+  const payload = {
+    selectedPlanId: state.selectedPlanId,
+    expiryDate: state.expiryDate,
+    status: state.status,
+    daysRemaining: state.daysRemaining,
+    used: state.used,
+    pending,
+    cachedAt: new Date().toISOString(),
+  };
+  localStorage.setItem(planCacheKey(tenantId), JSON.stringify(payload));
+  localStorage.setItem('schofy_sub_plan', state.selectedPlanId);
+  localStorage.setItem('schofy_sub_status', state.status);
+  localStorage.setItem('schofy_sub_pending', pending ? '1' : '0');
+  if (state.expiryDate) localStorage.setItem('schofy_sub_expiry', state.expiryDate);
+}
+
+function getCachedPlanState(tenantId: string, usedOverride?: number): SubscriptionAccessState | null {
+  const raw = localStorage.getItem(planCacheKey(tenantId));
+  let cached: any = null;
+  if (raw) {
+    try {
+      cached = JSON.parse(raw);
+    } catch {
+      cached = null;
+    }
+  }
+  const selectedPlanId = cached?.selectedPlanId || localStorage.getItem('schofy_sub_plan');
+  const plan = getPlanById(selectedPlanId);
+  if (!plan) return null;
+  const expiryIso = cached?.expiryDate || localStorage.getItem('schofy_sub_expiry') || null;
+  const expiryDate = expiryIso && !Number.isNaN(new Date(expiryIso).getTime()) ? new Date(expiryIso) : null;
+  const classified = classifySubscription(expiryDate);
+  const used = Number.isFinite(Number(usedOverride)) ? Number(usedOverride) : Number(cached?.used || 0);
+  const status = cached?.pending ? 'incomplete' : classified.status;
+  const remaining = Math.max(0, plan.studentLimit - used);
+  return {
+    plan,
+    selectedPlanId: plan.id,
+    used,
+    remaining,
+    eligible: remaining > 0 && (status === 'active' || status === 'expiring'),
+    expiryDate: expiryDate ? expiryDate.toISOString() : expiryIso,
+    status,
+    daysRemaining: status === 'incomplete' ? null : classified.daysRemaining,
+    requiresPlanAction: status === 'incomplete' || status === 'expired',
+  };
+}
+
+function hasAdminApproval(row: Record<string, unknown> | null | undefined): boolean {
+  const meta = (row?.metadata || {}) as Record<string, unknown>;
+  return Boolean(meta.approvedByAdmin || meta.grantedByAdmin || meta.extendedByAdmin);
+}
+
 /**
  * @param tenantId IndexedDB partition (usually `schoolId || user.id`).
  * @param opts.authUserId Account owner for `subscriptions.user_id` when it differs from tenantId.
@@ -255,6 +314,28 @@ export async function getSubscriptionAccessState(
 
   const authUserId = opts?.authUserId || tenantId;
   const subRow = await getLatestLocalSubscription(tenantId, authUserId);
+  const subStatus = subRow?.status != null ? String(subRow.status) : '';
+  if (subRow && (subStatus === 'pending' || !hasAdminApproval(subRow))) {
+    const used = await getPlanStudentCount(tenantId);
+    const offline = typeof navigator !== 'undefined' && !navigator.onLine;
+    const cached = offline ? getCachedPlanState(tenantId, used) : null;
+    if (cached && cached.status !== 'incomplete' && cached.status !== 'expired') return cached;
+    const requestedPlan = subRow.plan != null ? String(subRow.plan) : planId;
+    const pendingPlan = getPlanById(requestedPlan || '') || null;
+    const pendingState: SubscriptionAccessState = {
+      plan: pendingPlan,
+      selectedPlanId: pendingPlan?.id || requestedPlan || null,
+      used,
+      remaining: 0,
+      eligible: false,
+      expiryDate: null,
+      status: 'incomplete',
+      daysRemaining: null,
+      requiresPlanAction: true,
+    };
+    if (pendingPlan) cachePlanStateLocally(tenantId, pendingState, true);
+    return pendingState;
+  }
   const settingsPlanId = planId ?? (await getCurrentPlanId(tenantId));
   const planFromRow = subRow?.plan != null ? String(subRow.plan).trim() : '';
   const selectedPlanId =
@@ -264,6 +345,8 @@ export async function getSubscriptionAccessState(
   const used = await getPlanStudentCount(tenantId);
 
   if (!currentPlan) {
+    const cached = getCachedPlanState(tenantId, used);
+    if (cached) return cached;
     return {
       plan: null,
       selectedPlanId: null,
@@ -279,7 +362,8 @@ export async function getSubscriptionAccessState(
 
   const endsFromRow = pickEndsAt(subRow);
   const endsFromSettings = await getSetting<string>(tenantId, SETTINGS_KEYS.expiryDate);
-  const expiryIso = endsFromRow || endsFromSettings || null;
+  const cached = getCachedPlanState(tenantId, used);
+  const expiryIso = endsFromRow || endsFromSettings || cached?.expiryDate || null;
   const expiryDate = expiryIso && !Number.isNaN(new Date(expiryIso).getTime()) ? new Date(expiryIso) : null;
   const { status, daysRemaining } = classifySubscription(expiryDate);
   const remaining = Math.max(0, currentPlan.studentLimit - used);
@@ -287,7 +371,7 @@ export async function getSubscriptionAccessState(
 
   await persistPlanEligibility(tenantId, eligible);
 
-  return {
+  const state: SubscriptionAccessState = {
     plan: currentPlan,
     selectedPlanId,
     used,
@@ -298,6 +382,8 @@ export async function getSubscriptionAccessState(
     daysRemaining,
     requiresPlanAction: status === 'incomplete' || status === 'expired',
   };
+  cachePlanStateLocally(tenantId, state);
+  return state;
 }
 
 export async function getPlanUsage(tenantId: string, planId?: string, opts?: { authUserId?: string }) {
@@ -357,20 +443,20 @@ export async function saveCurrentPlan(
       schoolId: tenantId,
       userId: authUserId,
       plan: planId,
-      status: 'active',
+      status: 'pending',
       startsAt,
-      endsAt: nextExpiry.toISOString(),
-      metadata: meta,
+      endsAt: startsAt,
+      metadata: { ...meta, requestedEndsAt: nextExpiry.toISOString() },
     } as any);
   } else {
     await dataService.create(tenantId, 'subscriptions', {
       schoolId: tenantId,
       userId: authUserId,
       plan: planId,
-      status: 'active',
+      status: 'pending',
       startsAt,
-      endsAt: nextExpiry.toISOString(),
-      metadata: meta,
+      endsAt: startsAt,
+      metadata: { ...meta, requestedEndsAt: nextExpiry.toISOString() },
     } as any);
   }
 

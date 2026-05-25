@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -10,9 +10,8 @@ import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
-import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor, generateInvoicesFromStructure } from '../utils/feeStructures';
+import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor, generateInvoicesFromStructure, uniqueFeeStructures } from '../utils/feeStructures';
 import { ClassOption } from '../utils/classroom';
-import DropdownModal from '../components/DropdownModal';
 import { matchesStudentSearch } from '../utils/studentSearch';
 
 interface Invoice {
@@ -53,6 +52,18 @@ interface Discount {
   createdAt: string;
 }
 
+function termRank(term: string) {
+  const n = Number(String(term).replace(/[^0-9]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function isBeforeTerm(fee: Pick<Fee, 'term' | 'year'>, term: string, year: string) {
+  const feeYear = Number(fee.year || 0);
+  const selectedYear = Number(year || 0);
+  if (feeYear !== selectedYear) return feeYear < selectedYear;
+  return termRank(fee.term) < termRank(term);
+}
+
 export default function Invoices() {
   const { user, schoolId } = useAuth();
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -67,8 +78,13 @@ export default function Invoices() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const deepLinkedStudentRef = useRef(false);
   const statusFilterRef = useRef<HTMLDivElement>(null);
   const termFilterRef = useRef<HTMLDivElement>(null);
+  const statusFilterButtonRef = useRef<HTMLButtonElement>(null);
+  const termFilterButtonRef = useRef<HTMLButtonElement>(null);
+  const [statusDropdownPos, setStatusDropdownPos] = useState({ top: 0, left: 0 });
+  const [termDropdownPos, setTermDropdownPos] = useState({ top: 0, left: 0 });
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -78,6 +94,7 @@ export default function Invoices() {
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [viewMode, setViewMode] = useState<'invoices' | 'students'>('invoices');
+  const [managementPage, setManagementPage] = useState<'structures' | 'bursary' | 'discount' | null>(null);
   const [selectedStudentForView, setSelectedStudentForView] = useState<any | null>(null);
   
   const [showStructureModal, setShowStructureModal] = useState(false);
@@ -176,38 +193,62 @@ export default function Invoices() {
     refreshFees();
     refreshPayments();
   }
+  const activeInvoiceTerm = filterTerm !== 'all' ? filterTerm : selectedTerm;
+  const activeInvoiceYear = selectedYear;
   const studentInvoiceSummary = useMemo(() => {
     if (!allStudents || !fees || !payments) return [];
     
     return allStudents.map(student => {
       const studentFees = fees.filter(f => f.studentId === student.id);
-      const totalInvoiced = studentFees.reduce((sum, f) => sum + f.amount, 0);
-      const totalPaid = studentFees.reduce((sum, f) => {
+      const previousFees = studentFees.filter(f => isBeforeTerm(f, activeInvoiceTerm, activeInvoiceYear));
+      const currentFees = studentFees.filter(f => String(f.term) === String(activeInvoiceTerm) && String(f.year) === String(activeInvoiceYear));
+      const previousIds = new Set(previousFees.map(f => f.id));
+      const openingInvoiced = previousFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+      const openingPaid = payments
+        .filter(p => previousIds.has(p.feeId))
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const openingBalance = Math.max(0, openingInvoiced - openingPaid);
+      const totalInvoiced = currentFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+      const currentTermTotal = openingBalance + totalInvoiced;
+      const totalPaid = currentFees.reduce((sum, f) => {
         const feePayments = payments.filter(p => p.feeId === f.id);
-        return sum + feePayments.reduce((s, p) => s + p.amount, 0);
+        return sum + feePayments.reduce((s, p) => s + Number(p.amount || 0), 0);
       }, 0);
-      const balance = totalInvoiced - totalPaid;
-      const isInvoiced = studentFees.length > 0;
-      const status = !isInvoiced ? 'not_invoiced' : balance <= 0 ? 'paid' : 'pending';
+      const balance = Math.max(0, openingBalance + totalInvoiced - totalPaid);
+      const isInvoiced = currentFees.length > 0;
+      const status = !isInvoiced && openingBalance > 0 ? 'last_term_balance' : !isInvoiced ? 'not_invoiced' : balance <= 0 ? 'paid' : 'pending';
       
       return {
         id: student.id,
         studentName: `${student.firstName} ${student.lastName}`,
         admissionNo: student.admissionNo,
         classId: student.classId,
+        openingBalance,
         totalInvoiced,
+        currentTermTotal,
         totalPaid,
         balance,
-        invoiceCount: studentFees.length,
+        invoiceCount: currentFees.length,
         isInvoiced,
         status,
       };
     });
-  }, [allStudents, fees, payments]);
+  }, [allStudents, fees, payments, activeInvoiceTerm, activeInvoiceYear]);
+
+  useEffect(() => {
+    if (deepLinkedStudentRef.current || studentInvoiceSummary.length === 0) return;
+    const studentId = new URLSearchParams(window.location.search).get('student');
+    if (!studentId) return;
+    const summary = studentInvoiceSummary.find((row: any) => row.id === studentId);
+    if (!summary) return;
+    deepLinkedStudentRef.current = true;
+    setViewMode('students');
+    setSelectedStudentForView(summary);
+  }, [studentInvoiceSummary]);
 
   const filteredStudentSummary = studentInvoiceSummary.filter(s => {
     const search = searchTerm.toLowerCase();
-    if (search && !s.studentName.toLowerCase().includes(search)) return false;
+    if (search && !s.studentName.toLowerCase().includes(search) && !String(s.admissionNo || '').toLowerCase().includes(search)) return false;
     if (filterStatus === 'invoiced' && !s.isInvoiced) return false;
     if (filterStatus === 'not_invoiced' && s.isInvoiced) return false;
     if (filterStatus === 'paid' && s.status !== 'paid') return false;
@@ -278,6 +319,32 @@ export default function Invoices() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const getDropdownPosition = (button: HTMLButtonElement | null) => {
+    if (!button) return { top: 0, left: 0 };
+    const rect = button.getBoundingClientRect();
+    const width = 224;
+    return {
+      top: rect.bottom + 8,
+      left: Math.min(Math.max(8, rect.left), window.innerWidth - width - 8),
+    };
+  };
+
+  const updateDropdownPositions = useCallback(() => {
+    if (showStatusFilter) setStatusDropdownPos(getDropdownPosition(statusFilterButtonRef.current));
+    if (showTermFilter) setTermDropdownPos(getDropdownPosition(termFilterButtonRef.current));
+  }, [showStatusFilter, showTermFilter]);
+
+  useEffect(() => {
+    updateDropdownPositions();
+    if (!showStatusFilter && !showTermFilter) return;
+    window.addEventListener('scroll', updateDropdownPositions, true);
+    window.addEventListener('resize', updateDropdownPositions);
+    return () => {
+      window.removeEventListener('scroll', updateDropdownPositions, true);
+      window.removeEventListener('resize', updateDropdownPositions);
+    };
+  }, [showStatusFilter, showTermFilter, updateDropdownPositions]);
+
   useEffect(() => {
     if (user?.id || schoolId) {
       loadClasses();
@@ -346,14 +413,23 @@ export default function Invoices() {
     if (!id) return;
     try {
       const structures = await getFeeStructuresByClass(id, selectedClassId, selectedTerm, selectedYear);
-      setFeeStructures(structures);
-      setSelectedStructureIds(structures.filter(s => s.isRequired).map(s => s.id));
+      const unique = uniqueFeeStructures(structures);
+      setFeeStructures(unique);
+      setSelectedStructureIds(Array.from(new Set(unique.filter(s => s.isRequired).map(s => s.id))));
     } catch (error) {
       console.error('Failed to load fee structures:', error);
     }
   }
 
   const [savingStructure, setSavingStructure] = useState(false);
+  const [applyingStructures, setApplyingStructures] = useState(false);
+  const [deletingStructureId, setDeletingStructureId] = useState<string | null>(null);
+  const [savingBursary, setSavingBursary] = useState(false);
+  const [savingDiscount, setSavingDiscount] = useState(false);
+  const [deletingBursaryId, setDeletingBursaryId] = useState<string | null>(null);
+  const [deletingDiscountId, setDeletingDiscountId] = useState<string | null>(null);
+
+  const pageSelectClass = 'form-input form-select relative z-[70] min-w-0';
 
   async function handleCreateStructure() {
     const id = schoolId || user?.id;
@@ -375,9 +451,9 @@ export default function Invoices() {
         newStructure.isRequired,
         newStructure.description
       );
-      setFeeStructures(prev => [...prev, structure]);
+      setFeeStructures(prev => uniqueFeeStructures([...prev.filter(item => item.id !== structure.id), structure]));
       if (structure.isRequired) {
-        setSelectedStructureIds(prev => [...prev, structure.id]);
+        setSelectedStructureIds(prev => Array.from(new Set([...prev, structure.id])));
       }
       setNewStructure({ name: '', category: FeeCategory.TUITION, amount: 0, isRequired: true, description: '' });
       setShowAddStructureForm(false);
@@ -395,7 +471,8 @@ export default function Invoices() {
 
   async function handleDeleteStructure(idStructure: string) {
     const id = schoolId || user?.id;
-    if (!id) return;
+    if (!id || deletingStructureId) return;
+    setDeletingStructureId(idStructure);
     try {
       await deleteFeeStructure(id, idStructure);
       setFeeStructures(prev => prev.filter(s => s.id !== idStructure));
@@ -403,12 +480,14 @@ export default function Invoices() {
       addToast('Fee structure deleted', 'success');
     } catch (error) {
       addToast('Failed to delete fee structure', 'error');
+    } finally {
+      setDeletingStructureId(null);
     }
   }
 
   async function handleApplyStructuresToClasses() {
     const id = schoolId || user?.id;
-    if (!id) return;
+    if (!id || applyingStructures) return;
     if (selectedStructureIds.length === 0) {
       addToast('Select fees or requirements to apply', 'error');
       return;
@@ -418,6 +497,7 @@ export default function Invoices() {
       return;
     }
 
+    setApplyingStructures(true);
     try {
       const existing = await dataService.getAll(id, 'feeStructures');
       const selected = feeStructures.filter(structure => selectedStructureIds.includes(structure.id));
@@ -456,6 +536,140 @@ export default function Invoices() {
     } catch (error) {
       console.error('Failed to apply fee structures:', error);
       addToast('Failed to apply fees/requirements', 'error');
+    } finally {
+      setApplyingStructures(false);
+    }
+  }
+
+  async function handleAddBursary() {
+    const id = schoolId || user?.id;
+    if (!id || savingBursary) return;
+    if (selectedBursaryStudentIds.length === 0 || (!newBursary.isFull && newBursary.amount <= 0)) {
+      addToast('Select students and enter a bursary amount', 'error');
+      return;
+    }
+
+    setSavingBursary(true);
+    try {
+      const selectedIds = Array.from(new Set(selectedBursaryStudentIds));
+      const existingKeys = new Set(
+        bursaries
+          .filter(b => String(b.term) === String(selectedTerm) && String(b.year) === String(selectedYear))
+          .map(b => b.studentId)
+      );
+      const created: Bursary[] = [];
+
+      for (const studentId of selectedIds) {
+        if (existingKeys.has(studentId)) continue;
+        const student = students.find(s => s.id === studentId);
+        if (!student) continue;
+        const bursary: Bursary = {
+          id: uuidv4(),
+          studentId,
+          studentName: `${student.firstName} ${student.lastName}`,
+          amount: newBursary.isFull ? 0 : newBursary.amount,
+          isFull: newBursary.isFull,
+          term: selectedTerm,
+          year: selectedYear,
+          createdAt: new Date().toISOString()
+        };
+        await dataService.create(id, 'bursaries', bursary as any);
+        existingKeys.add(studentId);
+        created.push(bursary);
+      }
+
+      setBursaries(prev => [...prev, ...created]);
+      setSelectedBursaryStudentIds([]);
+      setNewBursary({ amount: 0, isFull: false });
+      addToast(created.length > 0 ? `Bursary added for ${created.length} student${created.length !== 1 ? 's' : ''}` : 'Selected students already have bursary records for this term', created.length > 0 ? 'success' : 'info');
+    } catch (error) {
+      addToast('Failed to add bursary', 'error');
+    } finally {
+      setSavingBursary(false);
+    }
+  }
+
+  async function handleDeleteBursary(idBursary: string) {
+    const id = schoolId || user?.id;
+    if (!id || deletingBursaryId) return;
+    setDeletingBursaryId(idBursary);
+    try {
+      await dataService.delete(id, 'bursaries', idBursary);
+      setBursaries(prev => prev.filter(br => br.id !== idBursary));
+      addToast('Bursary removed', 'success');
+    } catch (error) {
+      addToast('Failed to remove bursary', 'error');
+    } finally {
+      setDeletingBursaryId(null);
+    }
+  }
+
+  async function handleAddDiscount() {
+    const id = schoolId || user?.id;
+    if (!id || savingDiscount) return;
+    if (selectedDiscountStudentIds.length === 0 || newDiscount.amount <= 0) {
+      addToast('Select students and enter a discount value', 'error');
+      return;
+    }
+    if (newDiscount.type === 'percentage' && newDiscount.amount > 100) {
+      addToast('Percentage discount cannot exceed 100%', 'error');
+      return;
+    }
+
+    setSavingDiscount(true);
+    try {
+      const selectedIds = Array.from(new Set(selectedDiscountStudentIds));
+      const existingKeys = new Set(
+        discounts
+          .filter(d => String(d.term) === String(selectedTerm) && String(d.year) === String(selectedYear))
+          .map(d => d.studentId)
+      );
+      const created: Discount[] = [];
+
+      for (const studentId of selectedIds) {
+        if (existingKeys.has(studentId)) continue;
+        const student = students.find(s => s.id === studentId);
+        if (!student) continue;
+        const discount: Discount = {
+          id: uuidv4(),
+          studentId,
+          studentName: `${student.firstName} ${student.lastName}`,
+          classId: student.classId,
+          className: classes.find(c => c.id === student.classId)?.name || 'No class',
+          amount: newDiscount.amount,
+          type: newDiscount.type,
+          term: selectedTerm,
+          year: selectedYear,
+          createdAt: new Date().toISOString()
+        };
+        await dataService.create(id, 'discounts', discount as any);
+        existingKeys.add(studentId);
+        created.push(discount);
+      }
+
+      setDiscounts(prev => [...prev, ...created]);
+      setSelectedDiscountStudentIds([]);
+      setNewDiscount({ amount: 0, type: 'fixed' });
+      addToast(created.length > 0 ? `Discount added for ${created.length} student${created.length !== 1 ? 's' : ''}` : 'Selected students already have discount records for this term', created.length > 0 ? 'success' : 'info');
+    } catch (error) {
+      addToast('Failed to add discount', 'error');
+    } finally {
+      setSavingDiscount(false);
+    }
+  }
+
+  async function handleDeleteDiscount(idDiscount: string) {
+    const id = schoolId || user?.id;
+    if (!id || deletingDiscountId) return;
+    setDeletingDiscountId(idDiscount);
+    try {
+      await dataService.delete(id, 'discounts', idDiscount);
+      setDiscounts(prev => prev.filter(disc => disc.id !== idDiscount));
+      addToast('Discount removed', 'success');
+    } catch (error) {
+      addToast('Failed to remove discount', 'error');
+    } finally {
+      setDeletingDiscountId(null);
     }
   }
 
@@ -542,7 +756,7 @@ export default function Invoices() {
   async function handleBulkInvoiceWithData(description: string, amount: number, term: string) {
     // Redirect to fee structures instead of manual entry
     setShowCreateModal(false);
-    setShowStructureModal(true);
+    setManagementPage('structures');
   }
 
   // Invoice a single student using their class fee structures
@@ -551,9 +765,9 @@ export default function Invoices() {
     if (!id || !classId) { addToast('Student has no class assigned', 'error'); return; }
     const structures = await getFeeStructuresByClass(id, classId, selectedTerm, selectedYear);
     if (structures.length === 0) {
-      // No fee structures — open the structure modal for this class
+      // No fee structures yet, so take the user to the fee structures page for this class.
       setSelectedClassId(classId);
-      setShowStructureModal(true);
+      setManagementPage('structures');
       addToast('No fee structures found. Please set up fees for this class first.', 'info');
       return;
     }
@@ -615,7 +829,7 @@ export default function Invoices() {
       }
       if (totalInvoiced === 0) {
         addToast('No fee structures found. Set up fee structures per class first.', 'info');
-        setShowStructureModal(true);
+        setManagementPage('structures');
       } else {
         addToast(`Invoiced ${totalInvoiced} fees across ${classesProcessed} classes`, 'success');
         refreshInvoices();
@@ -846,13 +1060,21 @@ export default function Invoices() {
     return true;
   });
 
+  const currentTermBursaries = useMemo(() => {
+    return bursaries.filter(b => String(b.term) === String(selectedTerm) && String(b.year) === String(selectedYear));
+  }, [bursaries, selectedTerm, selectedYear]);
+
+  const currentTermDiscounts = useMemo(() => {
+    return discounts.filter(d => String(d.term) === String(selectedTerm) && String(d.year) === String(selectedYear));
+  }, [discounts, selectedTerm, selectedYear]);
+
   const stats = {
-    total: invoices.reduce((sum, i) => sum + i.amount, 0),
-    collected: invoices.reduce((sum, i) => sum + i.paidAmount, 0),
-    pending: invoices.reduce((sum, i) => sum + (i.amount - i.paidAmount), 0),
-    count: invoices.length,
-    bursary: bursaries.reduce((sum, b) => sum + b.amount, 0),
-    discount: discounts.reduce((sum, d) => d.type === 'percentage' ? sum : sum + d.amount, 0),
+    total: filteredInvoices.reduce((sum, i) => sum + i.amount, 0),
+    collected: filteredInvoices.reduce((sum, i) => sum + i.paidAmount, 0),
+    pending: filteredInvoices.reduce((sum, i) => sum + (i.amount - i.paidAmount), 0),
+    count: filteredInvoices.length,
+    bursary: currentTermBursaries.reduce((sum, b) => sum + b.amount, 0),
+    discount: currentTermDiscounts.reduce((sum, d) => d.type === 'percentage' ? sum : sum + d.amount, 0),
   };
 
   const statusConfig = {
@@ -879,159 +1101,363 @@ export default function Invoices() {
           </button>
         </div>
       )}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">
-            Student Invoices
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage and track all student invoices</p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <div className="relative" ref={exportMenuRef}>
-            <button 
-              onClick={() => setShowExportMenu(!showExportMenu)} 
-              className="btn btn-secondary"
-              title="Export"
-            >
-              <Download size={16} />
-              <span className="hidden sm:inline">Export</span>
-              <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
-            </button>
-            {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
-                <button
-                  onClick={handleExportPDF}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+      {!managementPage && (
+        <>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-800 dark:text-white">
+                Student Invoices
+              </h1>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage and track all student invoices</p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <div className="relative" ref={exportMenuRef}>
+                <button 
+                  onClick={() => setShowExportMenu(!showExportMenu)} 
+                  className="btn btn-secondary"
+                  title="Export"
                 >
-                  <Printer size={14} />
-                  Export PDF
+                  <Download size={16} />
+                  <span className="hidden sm:inline">Export</span>
+                  <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
                 </button>
-                <button
-                  onClick={handleExportCSV}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <Download size={14} />
-                  Export CSV
-                </button>
-                <button
-                  onClick={handleExportExcel}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <FileText size={14} />
-                  Export Excel
+                {showExportMenu && (
+                  <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
+                    <button
+                      onClick={handleExportPDF}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      <Printer size={14} />
+                      Export PDF
+                    </button>
+                    <button
+                      onClick={handleExportCSV}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      <Download size={14} />
+                      Export CSV
+                    </button>
+                    <button
+                      onClick={handleExportExcel}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      <FileText size={14} />
+                      Export Excel
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary">
+                <Upload size={16} />
+                <span className="hidden sm:inline">Import</span>
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+              />
+              <button onClick={() => { setManagementPage('structures'); setShowStructureModal(false); }} className="btn btn-secondary">
+                <Settings size={16} />
+                <span className="hidden sm:inline">Fee Structures</span>
+              </button>
+              <button onClick={() => { setManagementPage('bursary'); setShowBursaryModal(false); }} className="btn btn-secondary">
+                <Award size={16} />
+                <span className="hidden sm:inline">Bursary</span>
+              </button>
+              <button onClick={() => { setManagementPage('discount'); setShowDiscountModal(false); }} className="btn btn-secondary">
+                <Percent size={16} />
+                <span className="hidden sm:inline">Discount</span>
+              </button>
+              <button
+                onClick={handleBulkInvoiceAllClasses}
+                className="btn btn-secondary"
+                title="Invoice all students in all classes using their fee structures"
+              >
+                <Users size={16} />
+                <span className="hidden sm:inline">Invoice All Classes</span>
+              </button>
+              <button 
+                onClick={() => { setManagementPage('structures'); setShowStructureModal(false); }}
+                className="btn btn-primary shadow-lg shadow-primary-500/25"
+              >
+                <Plus size={18} /> Generate Invoices
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="card-solid-indigo p-5">
+              <div className="flex items-center gap-4">
+                <div className="stat-icon stat-icon-violet text-white">
+                  <FileText size={24} />
+                </div>
+                <div>
+                  <p className="text-sm text-white/80">Total Invoiced</p>
+                  <p className="text-2xl font-bold text-white">
+                    {formatMoney(stats.total)}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="card-solid-emerald p-5">
+              <div className="flex items-center gap-4">
+                <div className="stat-icon stat-icon-green text-white">
+                  <DollarSign size={24} />
+                </div>
+                <div>
+                  <p className="text-sm text-white/80">Collected</p>
+                  <p className="text-2xl font-bold text-white">
+                    {formatMoney(stats.collected)}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="card-solid-rose p-5">
+              <div className="flex items-center gap-4">
+                <div className="stat-icon stat-icon-red text-white">
+                  <Clock size={24} />
+                </div>
+                <div>
+                  <p className="text-sm text-white/80">Pending</p>
+                  <p className="text-2xl font-bold text-white">
+                    {formatMoney(stats.pending)}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="card-solid-amber p-5">
+              <div className="flex items-center gap-4">
+                <div className="stat-icon text-white" style={{background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'}}>
+                  <Award size={24} />
+                </div>
+                <div>
+                  <p className="text-sm text-white/80">Bursary</p>
+                  <p className="text-2xl font-bold text-white">
+                    {formatMoney(stats.bursary)}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="card-solid-cyan p-5">
+              <div className="flex items-center gap-4">
+                <div className="stat-icon stat-icon-blue text-white">
+                  <Percent size={24} />
+                </div>
+                <div>
+                  <p className="text-sm text-white/80">Discount</p>
+                  <p className="text-2xl font-bold text-white">
+                    {formatMoney(stats.discount)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {managementPage && (
+        <div className="space-y-5">
+          <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary-500">Finance Management</p>
+                <h1 className="mt-1 text-2xl font-bold text-slate-800 dark:text-white">
+                  {managementPage === 'structures' ? 'Fee Structures' : managementPage === 'bursary' ? 'Bursary Management' : 'Discount Management'}
+                </h1>
+                <p className="text-sm text-slate-500">
+                  {managementPage === 'structures'
+                    ? 'Set class fees and requirements, then apply them to students or other classes.'
+                    : managementPage === 'bursary'
+                      ? 'Select students for full or partial bursary support for the selected term.'
+                      : 'Select students and apply fixed or percentage discounts for the selected term.'}
+                </p>
+              </div>
+              <button onClick={() => setManagementPage(null)} className="btn btn-secondary">
+                <ArrowRight size={16} className="rotate-180" /> Back to Invoices
+              </button>
+            </div>
+          </div>
+
+          {managementPage === 'structures' && (
+            <div className="space-y-5 p-5">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto_auto] md:items-end">
+                <div className="relative z-[80] dropdown-parent">
+                  <label className="form-label">Class / Grade</label>
+                  <select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)} className={pageSelectClass}>
+                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div className="relative z-[80] dropdown-parent">
+                  <label className="form-label">Term</label>
+                  <select value={selectedTerm} onChange={(e) => setSelectedTerm(e.target.value)} className={`${pageSelectClass} w-32`}>
+                    <option value="1">Term 1</option>
+                    <option value="2">Term 2</option>
+                    <option value="3">Term 3</option>
+                  </select>
+                </div>
+                <div className="relative z-[80] dropdown-parent">
+                  <label className="form-label">Year</label>
+                  <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className={`${pageSelectClass} w-32`}>
+                    <option value={new Date().getFullYear().toString()}>{new Date().getFullYear()}</option>
+                    <option value={(new Date().getFullYear() + 1).toString()}>{new Date().getFullYear() + 1}</option>
+                  </select>
+                </div>
+                <button onClick={() => setShowAddStructureForm(true)} className="btn btn-primary">
+                  <Plus size={16} /> Add Fee
                 </button>
               </div>
-            )}
-          </div>
-          <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary">
-            <Upload size={16} />
-            <span className="hidden sm:inline">Import</span>
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileSelect}
-            accept=".csv,.xlsx,.xls"
-            className="hidden"
-          />
-          <button onClick={() => setShowStructureModal(true)} className="btn btn-secondary">
-            <Settings size={16} />
-            <span className="hidden sm:inline">Fee Structures</span>
-          </button>
-          <button onClick={() => setShowBursaryModal(true)} className="btn btn-secondary">
-            <Award size={16} />
-            <span className="hidden sm:inline">Bursary</span>
-          </button>
-          <button onClick={() => setShowDiscountModal(true)} className="btn btn-secondary">
-            <Percent size={16} />
-            <span className="hidden sm:inline">Discount</span>
-          </button>
-          <button
-            onClick={handleBulkInvoiceAllClasses}
-            className="btn btn-secondary"
-            title="Invoice all students in all classes using their fee structures"
-          >
-            <Users size={16} />
-            <span className="hidden sm:inline">Invoice All Classes</span>
-          </button>
-          <button 
-            onClick={() => setShowStructureModal(true)}
-            className="btn btn-primary shadow-lg shadow-primary-500/25"
-          >
-            <Plus size={18} /> Generate Invoices
-          </button>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="card-solid-indigo p-5">
-          <div className="flex items-center gap-4">
-            <div className="stat-icon stat-icon-violet text-white">
-              <FileText size={24} />
-            </div>
-            <div>
-              <p className="text-sm text-white/80">Total Invoiced</p>
-              <p className="text-2xl font-bold text-white">
-                {formatMoney(stats.total)}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="card-solid-emerald p-5">
-          <div className="flex items-center gap-4">
-            <div className="stat-icon stat-icon-green text-white">
-              <DollarSign size={24} />
-            </div>
-            <div>
-              <p className="text-sm text-white/80">Collected</p>
-              <p className="text-2xl font-bold text-white">
-                {formatMoney(stats.collected)}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="card-solid-rose p-5">
-          <div className="flex items-center gap-4">
-            <div className="stat-icon stat-icon-red text-white">
-              <Clock size={24} />
-            </div>
-            <div>
-              <p className="text-sm text-white/80">Pending</p>
-              <p className="text-2xl font-bold text-white">
-                {formatMoney(stats.pending)}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="card-solid-amber p-5">
-          <div className="flex items-center gap-4">
-            <div className="stat-icon text-white" style={{background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'}}>
-              <Award size={24} />
-            </div>
-            <div>
-              <p className="text-sm text-white/80">Bursary</p>
-              <p className="text-2xl font-bold text-white">
-                {formatMoney(stats.bursary)}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="card-solid-cyan p-5">
-          <div className="flex items-center gap-4">
-            <div className="stat-icon stat-icon-blue text-white">
-              <Percent size={24} />
-            </div>
-            <div>
-              <p className="text-sm text-white/80">Discount</p>
-              <p className="text-2xl font-bold text-white">
-                {formatMoney(stats.discount)}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+              {showAddStructureForm && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-800 dark:bg-emerald-900/20">
+                  <h3 className="mb-3 font-semibold text-emerald-800 dark:text-emerald-200">Add Fee Structure</h3>
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+                    <input value={newStructure.name} onChange={(e) => setNewStructure({ ...newStructure, name: e.target.value })} className="form-input" placeholder="Name" />
+                    <select value={newStructure.category} onChange={(e) => setNewStructure({ ...newStructure, category: e.target.value as FeeCategory })} className={pageSelectClass}>
+                      {Object.values(FeeCategory).map(category => <option key={category} value={category}>{getCategoryLabel(category)}</option>)}
+                    </select>
+                    <input type="number" value={newStructure.amount || ''} onChange={(e) => setNewStructure({ ...newStructure, amount: parseFloat(e.target.value) || 0 })} className="form-input" placeholder={`Amount (${currency.symbol})`} />
+                    <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
+                      <input type="checkbox" checked={newStructure.isRequired} onChange={(e) => setNewStructure({ ...newStructure, isRequired: e.target.checked })} />
+                      Required
+                    </label>
+                    <button onClick={handleCreateStructure} disabled={savingStructure} className="btn btn-primary justify-center disabled:opacity-70">
+                      {savingStructure ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
-      <div className="card">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-semibold uppercase text-slate-500">Selected class</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{classes.find(c => c.id === selectedClassId)?.name || 'No class'}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-semibold uppercase text-slate-500">Items</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{feeStructures.length}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+                  <p className="text-xs font-semibold uppercase text-slate-500">Total per student</p>
+                  <p className="mt-1 text-lg font-bold text-primary-600">{formatMoney(feeStructures.reduce((sum, s) => sum + s.amount, 0))}</p>
+                </div>
+              </div>
+
+              <div className="table-container">
+                <table>
+                  <thead><tr><th>No.</th><th>Select</th><th>Name</th><th>Category</th><th>Type</th><th>Amount</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {feeStructures.length === 0 ? (
+                      <tr><td colSpan={7} className="py-10 text-center text-slate-500">No fee structures for this class.</td></tr>
+                    ) : feeStructures.map((structure, index) => (
+                      <tr key={structure.id}>
+                        <td className="font-semibold text-slate-500">{index + 1}</td>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectedStructureIds.includes(structure.id)}
+                            onChange={(e) => setSelectedStructureIds(prev => e.target.checked ? Array.from(new Set([...prev, structure.id])) : prev.filter(id => id !== structure.id))}
+                            className="w-4 h-4 rounded border-slate-300"
+                          />
+                        </td>
+                        <td className="font-medium">{structure.name}</td>
+                        <td><span className={`badge ${getCategoryColor(structure.category)}`}>{getCategoryLabel(structure.category)}</span></td>
+                        <td>{structure.isRequired ? <span className="badge badge-danger">Requirement</span> : <span className="badge badge-info">Optional fee</span>}</td>
+                        <td className="font-bold">{formatMoney(structure.amount)}</td>
+                        <td><button onClick={() => handleDeleteStructure(structure.id)} disabled={!!deletingStructureId} className="p-2 text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-50">{deletingStructureId === structure.id ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Trash2 size={16} />}</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {feeStructures.length > 0 && (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-white p-4 dark:border-slate-600 dark:bg-slate-800">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-800 dark:text-white">Apply selected fees or requirements</p>
+                      <p className="text-xs text-slate-500">Copy selected numbered items to other classes.</p>
+                    </div>
+                    <button onClick={handleApplyStructuresToClasses} disabled={applyingStructures || selectedStructureIds.length === 0 || applyClassIds.length === 0} className="btn btn-secondary disabled:opacity-50">
+                      {applyingStructures ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <ArrowRight size={16} />} {applyingStructures ? 'Applying...' : 'Apply to Classes'}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {classes.filter(c => c.id !== selectedClassId).map((c, index) => (
+                      <label key={c.id} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${applyClassIds.includes(c.id) ? 'border-primary-400 bg-primary-50 dark:bg-primary-900/20' : 'border-slate-200 dark:border-slate-700'}`}>
+                        <span className="w-6 text-xs font-bold text-slate-400">{index + 1}.</span>
+                        <input type="checkbox" checked={applyClassIds.includes(c.id)} onChange={(e) => setApplyClassIds(prev => e.target.checked ? Array.from(new Set([...prev, c.id])) : prev.filter(id => id !== c.id))} className="w-4 h-4 rounded border-slate-300" />
+                        <span className="text-slate-700 dark:text-slate-200">{c.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {managementPage === 'bursary' && (
+            <div className="space-y-5 p-5">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_240px]">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px]">
+                    <div className="relative"><SearchIcon size={18} className="search-input-icon" /><input value={searchStudent} onChange={(e) => setSearchStudent(e.target.value)} className="search-input" placeholder="Search full name or ID..." /></div>
+                    <div className="relative z-[80] dropdown-parent"><select value={filterBursaryClass} onChange={(e) => setFilterBursaryClass(e.target.value)} className={pageSelectClass}><option value="all">All Classes</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+                    {filteredBursaryStudents.map((s, index) => (
+                      <label key={s.id} className="flex items-center gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0 dark:border-slate-700">
+                        <span className="w-7 text-xs font-bold text-slate-400">{index + 1}.</span>
+                        <input type="checkbox" checked={selectedBursaryStudentIds.includes(s.id)} onChange={(e) => setSelectedBursaryStudentIds(prev => e.target.checked ? Array.from(new Set([...prev, s.id])) : prev.filter(id => id !== s.id))} />
+                        <span className="min-w-0"><span className="block font-medium">{s.firstName} {s.lastName}</span><span className="block text-xs text-slate-500">{s.studentId || s.admissionNo || 'No ID'} - {classes.find(c => c.id === s.classId)?.name || 'No class'}</span></span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+                  <p className="font-semibold text-amber-800 dark:text-amber-200">{selectedBursaryStudentIds.length} selected</p>
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={newBursary.isFull} onChange={(e) => setNewBursary({ ...newBursary, isFull: e.target.checked, amount: e.target.checked ? 0 : newBursary.amount })} />Full bursary</label>
+                  <input type="number" value={newBursary.amount || ''} onChange={(e) => setNewBursary({ ...newBursary, amount: parseFloat(e.target.value) || 0 })} className="form-input" placeholder={`Amount (${currency.symbol})`} disabled={newBursary.isFull} />
+                  <button onClick={handleAddBursary} disabled={savingBursary} className="btn btn-primary w-full justify-center disabled:opacity-70">{savingBursary ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <UserPlus size={16} />} {savingBursary ? 'Saving...' : 'Add Bursary'}</button>
+                </div>
+              </div>
+              <div className="table-container"><table><thead><tr><th>No.</th><th>Student</th><th>Term</th><th>Type</th><th>Amount</th><th>Action</th></tr></thead><tbody>{currentTermBursaries.length === 0 ? <tr><td colSpan={6} className="py-10 text-center text-slate-500">No bursaries for Term {selectedTerm}, {selectedYear}.</td></tr> : currentTermBursaries.map((b, index) => <tr key={b.id}><td className="font-semibold text-slate-500">{index + 1}</td><td className="font-medium">{b.studentName}</td><td>Term {b.term}, {b.year}</td><td>{b.isFull ? <span className="badge badge-success">Full bursary</span> : <span className="badge badge-warning">Partial</span>}</td><td className="font-bold text-amber-600">{b.isFull ? 'Paid in full' : formatMoney(b.amount)}</td><td><button onClick={() => handleDeleteBursary(b.id)} disabled={!!deletingBursaryId} className="p-2 text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-50">{deletingBursaryId === b.id ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Trash2 size={16} />}</button></td></tr>)}</tbody></table></div>
+            </div>
+          )}
+
+          {managementPage === 'discount' && (
+            <div className="space-y-5 p-5">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_260px]">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px]">
+                    <div className="relative"><SearchIcon size={18} className="search-input-icon" /><input value={searchDiscountStudent} onChange={(e) => setSearchDiscountStudent(e.target.value)} className="search-input" placeholder="Search full name or ID..." /></div>
+                    <div className="relative z-[80] dropdown-parent"><select value={filterDiscountClass} onChange={(e) => setFilterDiscountClass(e.target.value)} className={pageSelectClass}><option value="all">All Classes</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+                    {filteredDiscountStudents.map((s, index) => (
+                      <label key={s.id} className="flex items-center gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0 dark:border-slate-700">
+                        <span className="w-7 text-xs font-bold text-slate-400">{index + 1}.</span>
+                        <input type="checkbox" checked={selectedDiscountStudentIds.includes(s.id)} onChange={(e) => setSelectedDiscountStudentIds(prev => e.target.checked ? Array.from(new Set([...prev, s.id])) : prev.filter(id => id !== s.id))} />
+                        <span className="min-w-0"><span className="block font-medium">{s.firstName} {s.lastName}</span><span className="block text-xs text-slate-500">{s.studentId || s.admissionNo || 'No ID'} - {classes.find(c => c.id === s.classId)?.name || 'No class'}</span></span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-3 rounded-xl border border-cyan-200 bg-cyan-50 p-4 dark:border-cyan-800 dark:bg-cyan-900/20">
+                  <p className="font-semibold text-cyan-800 dark:text-cyan-200">{selectedDiscountStudentIds.length} selected</p>
+                  <select value={newDiscount.type} onChange={(e) => setNewDiscount({ ...newDiscount, type: e.target.value as 'fixed' | 'percentage' })} className={pageSelectClass}><option value="fixed">Fixed Amount</option><option value="percentage">Percentage (%)</option></select>
+                  <input type="number" value={newDiscount.amount || ''} onChange={(e) => setNewDiscount({ ...newDiscount, amount: parseFloat(e.target.value) || 0 })} className="form-input" placeholder={newDiscount.type === 'percentage' ? '10' : `Amount (${currency.symbol})`} max={newDiscount.type === 'percentage' ? 100 : undefined} />
+                  <button onClick={handleAddDiscount} disabled={savingDiscount} className="btn btn-primary w-full justify-center disabled:opacity-70">{savingDiscount ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Plus size={16} />} {savingDiscount ? 'Saving...' : 'Add Discount'}</button>
+                </div>
+              </div>
+              <div className="table-container"><table><thead><tr><th>No.</th><th>Student</th><th>Class</th><th>Term</th><th>Discount</th><th>Action</th></tr></thead><tbody>{currentTermDiscounts.length === 0 ? <tr><td colSpan={6} className="py-10 text-center text-slate-500">No discounts for Term {selectedTerm}, {selectedYear}.</td></tr> : currentTermDiscounts.map((d, index) => <tr key={d.id}><td className="font-semibold text-slate-500">{index + 1}</td><td className="font-medium">{d.studentName || 'Discount'}</td><td>{d.className || '-'}</td><td>Term {d.term}, {d.year}</td><td className="font-bold text-cyan-600">{d.type === 'percentage' ? `${d.amount}%` : formatMoney(d.amount)}</td><td><button onClick={() => handleDeleteDiscount(d.id)} disabled={!!deletingDiscountId} className="p-2 text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-50">{deletingDiscountId === d.id ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Trash2 size={16} />}</button></td></tr>)}</tbody></table></div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!managementPage && <div className="card">
         <div className="card-header">
           <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1064,9 +1490,14 @@ export default function Invoices() {
                 className="search-input"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
-                onClick={() => setShowStatusFilter(true)}
+                ref={statusFilterButtonRef}
+                onClick={() => {
+                  setStatusDropdownPos(getDropdownPosition(statusFilterButtonRef.current));
+                  setShowStatusFilter(!showStatusFilter);
+                  setShowTermFilter(false);
+                }}
                 className={`btn btn-secondary flex items-center gap-2 ${filterStatus !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
               >
                 <Filter size={16} />
@@ -1076,171 +1507,101 @@ export default function Invoices() {
                     : (filterStatus === 'all' ? 'All Status' : filterStatus === 'paid' ? 'Paid' : filterStatus === 'partial' ? 'Partial' : 'Pending')
                   }
                 </span>
-                <ChevronDown size={14} />
+                <ChevronDown size={14} className={`transition-transform duration-300 ${showStatusFilter ? 'rotate-180' : ''}`} />
               </button>
-              <DropdownModal
-                isOpen={showStatusFilter}
-                onClose={() => setShowStatusFilter(false)}
-                title={viewMode === 'students' ? "Filter Students" : "Filter by Status"}
-                icon={<Filter size={20} />}
-              >
-                <div className="p-2 space-y-1">
-                  {viewMode === 'students' && (
-                    <>
+              {showStatusFilter && createPortal(
+                <div
+                  className="fixed w-56 max-h-80 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-[99999] animate-dropdown-in"
+                  style={{
+                    ...statusDropdownPos,
+                    animationDuration: '400ms',
+                    animationTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+                    animationFillMode: 'forwards',
+                  }}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="py-1">
+                    {(viewMode === 'students'
+                      ? [
+                          { value: 'all', label: 'All Students', icon: CheckCircle },
+                          { value: 'invoiced', label: 'Invoiced', icon: CheckCircle, iconClass: 'text-emerald-500' },
+                          { value: 'not_invoiced', label: 'Not Invoiced', icon: XCircle, iconClass: 'text-orange-500' },
+                          { value: 'paid', label: 'Cleared (Paid)', icon: CheckCircle, iconClass: 'text-green-500' },
+                          { value: 'pending', label: 'With Balance', icon: Clock, iconClass: 'text-amber-500' },
+                        ]
+                      : [
+                          { value: 'all', label: 'All Status', icon: CheckCircle },
+                          { value: 'paid', label: 'Paid', icon: CheckCircle, iconClass: 'text-emerald-500' },
+                          { value: 'partial', label: 'Partial', icon: Clock, iconClass: 'text-amber-500' },
+                          { value: 'pending', label: 'Pending', icon: XCircle, iconClass: 'text-red-500' },
+                        ]
+                    ).map(({ value, label, icon: Icon, iconClass }) => (
                       <button
-                        onClick={() => { setFilterStatus('all'); setShowStatusFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                          filterStatus === 'all' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        key={value}
+                        onClick={() => { setFilterStatus(value); setShowStatusFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          filterStatus === value
+                            ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
                         }`}
                       >
-                        <CheckCircle size={18} />
-                        <span className="font-medium">All Students</span>
-                        {filterStatus === 'all' && <CheckIcon size={16} className="ml-auto" />}
+                        <Icon size={16} className={iconClass} />
+                        {label}
+                        {filterStatus === value && <CheckIcon size={14} className="ml-auto" />}
                       </button>
-                      <button
-                        onClick={() => { setFilterStatus('invoiced'); setShowStatusFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                          filterStatus === 'invoiced' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <CheckCircle size={18} className="text-emerald-500" />
-                        <span className="font-medium">Invoiced</span>
-                        {filterStatus === 'invoiced' && <CheckIcon size={16} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterStatus('not_invoiced'); setShowStatusFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                          filterStatus === 'not_invoiced' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <XCircle size={18} className="text-orange-500" />
-                        <span className="font-medium">Not Invoiced</span>
-                        {filterStatus === 'not_invoiced' && <CheckIcon size={16} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterStatus('paid'); setShowStatusFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                          filterStatus === 'paid' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <CheckCircle size={18} className="text-green-500" />
-                        <span className="font-medium">Cleared (Paid)</span>
-                        {filterStatus === 'paid' && <CheckIcon size={16} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterStatus('pending'); setShowStatusFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                          filterStatus === 'pending' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <Clock size={18} className="text-amber-500" />
-                        <span className="font-medium">With Balance</span>
-                        {filterStatus === 'pending' && <CheckIcon size={16} className="ml-auto" />}
-                      </button>
-                    </>
-                  )}
-                  {viewMode === 'invoices' && (
-                    <>
-                      <button
-                        onClick={() => { setFilterStatus('all'); setShowStatusFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                          filterStatus === 'all' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <CheckCircle size={18} />
-                        <span className="font-medium">All Status</span>
-                        {filterStatus === 'all' && <CheckIcon size={16} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterStatus('paid'); setShowStatusFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                          filterStatus === 'paid' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <CheckCircle size={18} className="text-emerald-500" />
-                        <span className="font-medium">Paid</span>
-                        {filterStatus === 'paid' && <CheckIcon size={16} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterStatus('partial'); setShowStatusFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                          filterStatus === 'partial' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <Clock size={18} className="text-amber-500" />
-                        <span className="font-medium">Partial</span>
-                        {filterStatus === 'partial' && <CheckIcon size={16} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterStatus('pending'); setShowStatusFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                          filterStatus === 'pending' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        <XCircle size={18} className="text-red-500" />
-                        <span className="font-medium">Pending</span>
-                        {filterStatus === 'pending' && <CheckIcon size={16} className="ml-auto" />}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </DropdownModal>
+                    ))}
+                  </div>
+                </div>,
+                document.body
+              )}
 
               <button
-                onClick={() => setShowTermFilter(true)}
+                ref={termFilterButtonRef}
+                onClick={() => {
+                  setTermDropdownPos(getDropdownPosition(termFilterButtonRef.current));
+                  setShowTermFilter(!showTermFilter);
+                  setShowStatusFilter(false);
+                }}
                 className={`btn btn-secondary flex items-center gap-2 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
               >
                 <span className="hidden sm:inline">
                   {filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}
                 </span>
                 <span className="sm:hidden">Terms</span>
-                <ChevronDown size={14} />
+                <ChevronDown size={14} className={`transition-transform duration-300 ${showTermFilter ? 'rotate-180' : ''}`} />
               </button>
-              <DropdownModal
-                isOpen={showTermFilter}
-                onClose={() => setShowTermFilter(false)}
-                title="Filter by Term"
-                icon={<Filter size={20} />}
-              >
-                <div className="p-2 space-y-1">
-                  <button
-                    onClick={() => { setFilterTerm('all'); setShowTermFilter(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      filterTerm === 'all' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <span className="font-medium">All Terms</span>
-                    {filterTerm === 'all' && <CheckIcon size={16} className="ml-auto" />}
-                  </button>
-                  <button
-                    onClick={() => { setFilterTerm('1'); setShowTermFilter(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      filterTerm === '1' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <span className="font-medium">Term 1</span>
-                    {filterTerm === '1' && <CheckIcon size={16} className="ml-auto" />}
-                  </button>
-                  <button
-                    onClick={() => { setFilterTerm('2'); setShowTermFilter(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      filterTerm === '2' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <span className="font-medium">Term 2</span>
-                    {filterTerm === '2' && <CheckIcon size={16} className="ml-auto" />}
-                  </button>
-                  <button
-                    onClick={() => { setFilterTerm('3'); setShowTermFilter(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      filterTerm === '3' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <span className="font-medium">Term 3</span>
-                    {filterTerm === '3' && <CheckIcon size={16} className="ml-auto" />}
-                  </button>
-                </div>
-              </DropdownModal>
+              {showTermFilter && createPortal(
+                <div
+                  className="fixed w-56 max-h-80 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-[99999] animate-dropdown-in"
+                  style={{
+                    ...termDropdownPos,
+                    animationDuration: '400ms',
+                    animationTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+                    animationFillMode: 'forwards',
+                  }}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="py-1">
+                    {['all', '1', '2', '3'].map(term => (
+                      <button
+                        key={term}
+                        onClick={() => { setFilterTerm(term); setShowTermFilter(false); }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          filterTerm === term
+                            ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {term === 'all' ? 'All Terms' : `Term ${term}`}
+                        {filterTerm === term && <CheckIcon size={14} className="ml-auto" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>,
+                document.body
+              )}
             </div>
           </div>
         </div>
@@ -1249,10 +1610,12 @@ export default function Invoices() {
             <table>
               <thead>
                 <tr>
+                  <th>No.</th>
                   <th>Student</th>
                   <th>ID</th>
                   <th>Invoices</th>
-                  <th>Total Invoiced</th>
+                  <th>Last Term</th>
+                  <th>Current Term Total</th>
                   <th>Total Paid</th>
                   <th>Balance</th>
                   <th>Status</th>
@@ -1262,7 +1625,7 @@ export default function Invoices() {
               <tbody>
                 {!studentInvoiceSummary || studentInvoiceSummary.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12">
+                    <td colSpan={10} className="text-center py-12">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                           <Users size={32} className="text-violet-400" />
@@ -1273,7 +1636,7 @@ export default function Invoices() {
                   </tr>
                 ) : filteredStudentSummary.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12">
+                    <td colSpan={10} className="text-center py-12">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                           <Search size={32} className="text-violet-400" />
@@ -1282,24 +1645,44 @@ export default function Invoices() {
                       </div>
                     </td>
                   </tr>
-                ) : filteredStudentSummary.map(student => (
+                ) : filteredStudentSummary.map((student, index) => (
                   <tr
                     key={student.id}
                     className="cursor-pointer hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 transition-colors"
                     onClick={() => setSelectedStudentForView(student)}
                   >
+                    <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                     <td className="font-medium text-indigo-600 dark:text-indigo-400">{student.studentName}</td>
                     <td className="text-slate-500">{student.admissionNo}</td>
                     <td>
                       <span className="badge badge-info">{student.invoiceCount}</span>
                     </td>
-                    <td className="font-semibold">{formatMoney(student.totalInvoiced)}</td>
+                    <td>
+                      {student.openingBalance > 0 ? (
+                        <span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">{formatMoney(student.openingBalance)}</span>
+                      ) : (
+                        <span className="text-slate-400 text-sm">-</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className="font-semibold">{formatMoney(student.currentTermTotal)}</span>
+                      {student.openingBalance > 0 && (
+                        <span className="ml-2 badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300 text-[10px]">
+                          top-up
+                        </span>
+                      )}
+                    </td>
                     <td className="text-emerald-600 font-semibold">{formatMoney(student.totalPaid)}</td>
                     <td className={student.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>
                       {formatMoney(student.balance)}
                     </td>
                     <td>
-                      {student.status === 'not_invoiced' ? (
+                      {student.status === 'last_term_balance' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">
+                          <Clock size={12} />
+                          Last term balance
+                        </span>
+                      ) : student.status === 'not_invoiced' ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
                           <XCircle size={12} />
                           Not Invoiced
@@ -1332,6 +1715,7 @@ export default function Invoices() {
             <table>
               <thead>
                 <tr>
+                  <th>No.</th>
                   <th>Student</th>
                   <th>Description</th>
                   <th>Amount</th>
@@ -1345,28 +1729,29 @@ export default function Invoices() {
               <tbody>
                 {!fees || !payments || !allStudents ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12">
+                    <td colSpan={9} className="text-center py-12">
                       <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-200 border-t-primary-500 mx-auto"></div>
                     </td>
                   </tr>
                 ) : filteredInvoices.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12">
+                    <td colSpan={9} className="text-center py-12">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                           <FileText size={32} className="text-violet-400" />
                         </div>
                         <p className="text-slate-500 font-medium">No invoices found</p>
-                        <button onClick={() => setShowStructureModal(true)} className="text-primary-500 hover:text-primary-600 text-sm">
+                        <button onClick={() => setManagementPage('structures')} className="text-primary-500 hover:text-primary-600 text-sm">
                           Generate invoices from fee structures
                         </button>
                       </div>
                     </td>
                   </tr>
-                ) : filteredInvoices.map(invoice => {
+                ) : filteredInvoices.map((invoice, index) => {
                   const StatusIcon = statusConfig[invoice.status].icon;
                   return (
                     <tr key={invoice.id}>
+                      <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                       <td className="font-medium">{invoice.studentName}</td>
                       <td>{invoice.description}</td>
                       <td className="font-semibold">{formatMoney(invoice.amount)}</td>
@@ -1402,7 +1787,7 @@ export default function Invoices() {
             </table>
           )}
         </div>
-      </div>
+      </div>}
 
       {showCreateModal && (
         <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
@@ -1430,8 +1815,9 @@ export default function Invoices() {
                         <span className="font-medium text-sm">Select All Students</span>
                       </label>
                     </div>
-                    {students.map(student => (
+                    {students.map((student, index) => (
                       <label key={student.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer border-b border-slate-100 dark:border-slate-700 last:border-0">
+                        <span className="w-6 text-xs font-bold text-slate-400">{index + 1}.</span>
                         <input
                           type="checkbox"
                           checked={selectedStudents.includes(student.id)}
@@ -1479,7 +1865,7 @@ export default function Invoices() {
                   </div>
                   <div>
                     <label className="form-label">Term</label>
-                    <select id="bulk-term" className="form-input">
+                    <select id="bulk-term" className="form-input form-select">
                       <option value="1">Term 1</option>
                       <option value="2">Term 2</option>
                       <option value="3">Term 3</option>
@@ -2086,15 +2472,15 @@ export default function Invoices() {
             </div>
 
             <div className="p-5 max-h-[40vh] overflow-y-auto">
-              {bursaries.length === 0 ? (
+              {currentTermBursaries.length === 0 ? (
                 <div className="text-center py-8">
                   <Award size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-                  <p className="text-slate-500 font-medium">No bursaries added</p>
-                  <p className="text-sm text-slate-400 mt-1">Add bursaries to reduce invoiced amounts</p>
+                  <p className="text-slate-500 font-medium">No bursaries for Term {selectedTerm}, {selectedYear}</p>
+                  <p className="text-sm text-slate-400 mt-1">Last-term bursaries stay in last term. Add new bursaries for this term if needed.</p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {bursaries.map(b => (
+                  {currentTermBursaries.map(b => (
                     <div key={b.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                       <div>
                         <p className="font-medium text-slate-800 dark:text-white">{b.studentName}</p>
@@ -2122,7 +2508,7 @@ export default function Invoices() {
             <div className="p-5 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
               <div className="flex justify-between items-center">
                 <p className="font-medium text-slate-700 dark:text-slate-300">
-                  Total Bursary: <span className="text-amber-600 font-bold">{formatMoney(bursaries.reduce((sum, b) => sum + b.amount, 0))}</span>
+                  Total Bursary: <span className="text-amber-600 font-bold">{formatMoney(currentTermBursaries.reduce((sum, b) => sum + b.amount, 0))}</span>
                 </p>
                 <button onClick={() => setShowBursaryModal(false)} className="btn btn-secondary">Close</button>
               </div>
@@ -2278,15 +2664,15 @@ export default function Invoices() {
             </div>
 
             <div className="p-5 max-h-[40vh] overflow-y-auto">
-              {discounts.length === 0 ? (
+              {currentTermDiscounts.length === 0 ? (
                 <div className="text-center py-8">
                   <Percent size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-                  <p className="text-slate-500 font-medium">No discounts added</p>
-                  <p className="text-sm text-slate-400 mt-1">Add student discounts to reduce invoiced amounts</p>
+                  <p className="text-slate-500 font-medium">No discounts for Term {selectedTerm}, {selectedYear}</p>
+                  <p className="text-sm text-slate-400 mt-1">Last-term discounts stay in last term. Add new discounts for this term if needed.</p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {discounts.map(d => (
+                  {currentTermDiscounts.map(d => (
                     <div key={d.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                       <div>
                         <p className="font-medium text-slate-800 dark:text-white">{d.studentName || d.className || 'Discount'}</p>
@@ -2316,7 +2702,7 @@ export default function Invoices() {
             <div className="p-5 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
               <div className="flex justify-between items-center">
                 <p className="font-medium text-slate-700 dark:text-slate-300">
-                  Total Discount Value: <span className="text-cyan-600 font-bold">{formatMoney(discounts.reduce((sum, d) => d.type === 'percentage' ? sum : sum + d.amount, 0))}</span>
+                  Total Discount Value: <span className="text-cyan-600 font-bold">{formatMoney(currentTermDiscounts.reduce((sum, d) => d.type === 'percentage' ? sum : sum + d.amount, 0))}</span>
                 </p>
                 <button onClick={() => setShowDiscountModal(false)} className="btn btn-secondary">Close</button>
               </div>
@@ -2361,10 +2747,51 @@ export default function Invoices() {
               ))}
             </div>
 
+            {/* Term ledger summary for invoice template */}
+            {(() => {
+              const studentFees = fees.filter(f => f.studentId === selectedStudentForView.id);
+              const activeYear = activeInvoiceYear;
+              const activeTerm = activeInvoiceTerm;
+              const previousFees = studentFees.filter((f: any) => isBeforeTerm(f, activeTerm, activeYear));
+              const currentFees = studentFees.filter((f: any) => String(f.term) === String(activeTerm) && String(f.year) === String(activeYear));
+              const previousIds = new Set(previousFees.map((f: any) => f.id));
+              const currentIds = new Set(currentFees.map((f: any) => f.id));
+              const opening = Math.max(0, previousFees.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0) - payments.filter((p: any) => previousIds.has(p.feeId)).reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0));
+              const invoiced = currentFees.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0);
+              const currentTotal = opening + invoiced;
+              const paid = payments.filter((p: any) => currentIds.has(p.feeId)).reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+              const closing = Math.max(0, opening + invoiced - paid);
+              return (
+                <div className="grid grid-cols-4 divide-x divide-slate-200 dark:divide-slate-700 border-b border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/30">
+                  {[
+                    { label: `Opening T${activeTerm}`, value: formatMoney(opening), color: opening > 0 ? 'text-amber-600' : 'text-slate-700 dark:text-slate-200' },
+                    { label: `Current Term ${activeTerm}`, value: formatMoney(currentTotal), color: 'text-indigo-600 dark:text-indigo-300' },
+                    { label: 'Paid', value: formatMoney(paid), color: 'text-emerald-600 dark:text-emerald-300' },
+                    { label: 'Closing', value: formatMoney(closing), color: closing > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300' },
+                  ].map(s => (
+                    <div key={s.label} className="px-4 py-3 text-center">
+                      <p className="text-[11px] text-slate-400 mb-0.5">{s.label}</p>
+                      <p className={`font-bold text-sm ${s.color}`}>{s.value}</p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
             {/* Invoice list */}
             <div className="overflow-y-auto flex-1">
               {(() => {
                 const studentFees = fees.filter(f => f.studentId === selectedStudentForView.id);
+                const activeYear = activeInvoiceYear;
+                const activeTerm = activeInvoiceTerm;
+                const previousFees = studentFees
+                  .filter((f: any) => isBeforeTerm(f, activeTerm, activeYear))
+                  .sort((a: any, b: any) => Number(a.year || 0) - Number(b.year || 0) || termRank(a.term) - termRank(b.term));
+                const currentFees = studentFees
+                  .filter((f: any) => String(f.term) === String(activeTerm) && String(f.year) === String(activeYear))
+                  .sort((a: any, b: any) => new Date(a.createdAt || '').getTime() - new Date(b.createdAt || '').getTime());
+                const previousIds = new Set(previousFees.map((fee: any) => fee.id));
+                const opening = Math.max(0, previousFees.reduce((sum: number, fee: any) => sum + Number(fee.amount || 0), 0) - payments.filter((payment: any) => previousIds.has(payment.feeId)).reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0));
                 if (studentFees.length === 0) {
                   return (
                     <div className="flex flex-col items-center gap-3 py-12">
@@ -2376,39 +2803,87 @@ export default function Invoices() {
                     </div>
                   );
                 }
+                const renderFeeRows = (rows: any[], mode: 'previous' | 'current', startAt = 0) => rows.map((fee: any, index: number) => {
+                  const feePayments = payments.filter(p => p.feeId === fee.id);
+                  const paid = feePayments.reduce((s: number, p: any) => s + p.amount, 0);
+                  const bal = fee.amount - paid;
+                  const status = bal <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
+                  return (
+                    <tr key={fee.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                      <td className="px-5 py-3 text-xs font-semibold text-slate-400">{startAt + index + 1}</td>
+                      <td className="px-5 py-3 font-medium text-slate-800 dark:text-white">{fee.description}</td>
+                      <td className="px-5 py-3"><span className={`badge text-xs ${mode === 'previous' ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300' : 'badge-info'}`}>Term {fee.term}, {fee.year}</span></td>
+                      <td className="px-5 py-3 text-right font-semibold">{formatMoney(fee.amount)}</td>
+                      <td className="px-5 py-3 text-right text-emerald-600">{formatMoney(paid)}</td>
+                      <td className={`px-5 py-3 text-right font-semibold ${bal > 0 ? (mode === 'previous' ? 'text-pink-600 dark:text-pink-300' : 'text-red-600') : 'text-emerald-600'}`}>{formatMoney(bal)}</td>
+                      <td className="px-5 py-3 text-center">
+                        <span className={`badge text-xs ${status === 'paid' ? 'badge-success' : status === 'partial' ? 'badge-warning' : mode === 'previous' ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300' : 'badge-danger'}`}>{mode === 'previous' && status !== 'paid' ? 'carried' : status}</span>
+                      </td>
+                    </tr>
+                  );
+                });
                 return (
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
-                      <tr>
-                        <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Description</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Term</th>
-                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</th>
-                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Paid</th>
-                        <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Balance</th>
-                        <th className="px-5 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                      {studentFees.map((fee: any) => {
-                        const feePayments = payments.filter(p => p.feeId === fee.id);
-                        const paid = feePayments.reduce((s: number, p: any) => s + p.amount, 0);
-                        const bal = fee.amount - paid;
-                        const status = bal <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
-                        return (
-                          <tr key={fee.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                            <td className="px-5 py-3 font-medium text-slate-800 dark:text-white">{fee.description}</td>
-                            <td className="px-5 py-3"><span className="badge badge-info text-xs">Term {fee.term}</span></td>
-                            <td className="px-5 py-3 text-right font-semibold">{formatMoney(fee.amount)}</td>
-                            <td className="px-5 py-3 text-right text-emerald-600">{formatMoney(paid)}</td>
-                            <td className={`px-5 py-3 text-right font-semibold ${bal > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatMoney(bal)}</td>
-                            <td className="px-5 py-3 text-center">
-                              <span className={`badge text-xs ${status === 'paid' ? 'badge-success' : status === 'partial' ? 'badge-warning' : 'badge-danger'}`}>{status}</span>
-                            </td>
+                  <div className="space-y-4 p-4">
+                    <div className="overflow-hidden rounded-xl border border-pink-200 dark:border-pink-900/50">
+                      <div className="bg-pink-50 px-4 py-2 dark:bg-pink-900/20">
+                        <p className="text-sm font-semibold text-pink-700 dark:text-pink-300">Previous Term Details / Opening Balance</p>
+                      </div>
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 dark:bg-slate-700/50">
+                          <tr>
+                            <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">No.</th>
+                            <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Description</th>
+                            <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Term</th>
+                            <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</th>
+                            <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Paid</th>
+                            <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Balance</th>
+                            <th className="px-5 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                          {previousFees.length === 0 ? (
+                            <tr><td colSpan={7} className="px-5 py-6 text-center text-sm text-slate-400">No previous term details.</td></tr>
+                          ) : renderFeeRows(previousFees, 'previous')}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
+                      <div className="bg-slate-50 px-4 py-2 dark:bg-slate-800/70">
+                        <p className="text-sm font-semibold text-slate-800 dark:text-white">Current Term {activeTerm}, {activeYear}</p>
+                        {opening > 0 && <p className="text-xs font-medium text-pink-600 dark:text-pink-300">Includes opening top-up of {formatMoney(opening)} carried into the current term.</p>}
+                      </div>
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 dark:bg-slate-700/50">
+                          <tr>
+                            <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">No.</th>
+                            <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Description</th>
+                            <th className="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Term</th>
+                            <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</th>
+                            <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Paid</th>
+                            <th className="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Balance</th>
+                            <th className="px-5 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                          {opening > 0 && (
+                            <tr className="bg-pink-50/80 dark:bg-pink-900/10">
+                              <td className="px-5 py-3 text-xs font-semibold text-pink-500">{1}</td>
+                              <td className="px-5 py-3 font-medium text-slate-800 dark:text-white">Opening balance top-up</td>
+                              <td className="px-5 py-3"><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">Current Term {activeTerm}, {activeYear}</span></td>
+                              <td className="px-5 py-3 text-right font-semibold">{formatMoney(opening)}</td>
+                              <td className="px-5 py-3 text-right text-emerald-600">{formatMoney(0)}</td>
+                              <td className="px-5 py-3 text-right font-semibold text-pink-600 dark:text-pink-300">{formatMoney(opening)}</td>
+                              <td className="px-5 py-3 text-center"><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300 text-xs">current top-up</span></td>
+                            </tr>
+                          )}
+                          {currentFees.length === 0 && opening <= 0 ? (
+                            <tr><td colSpan={7} className="px-5 py-6 text-center text-sm text-slate-400">No current term invoices yet.</td></tr>
+                          ) : renderFeeRows(currentFees, 'current', opening > 0 ? 1 : 0)}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 );
               })()}
 

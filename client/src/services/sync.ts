@@ -5,7 +5,7 @@ import { isCloudSyncEnabled } from '../utils/desktopSyncPreference';
 class SyncService {
   private syncInterval: ReturnType<typeof setTimeout> | null = null;
   /** Background queue-flush interval. Reads are on-demand to protect Supabase limits. */
-  private readonly SYNC_INTERVAL_MS = 15 * 60 * 1000;
+  private readonly SYNC_INTERVAL_MS = 5 * 60 * 1000;
   /** Maximum backoff interval when repeated failures occur. */
   private readonly MAX_BACKOFF_MS = 10 * 60 * 1000; // 10 minutes (was 30)
   private backoffMs: number | null = null;
@@ -15,6 +15,7 @@ class SyncService {
   private syncEnabled = false;
   private syncInProgress = false;
   private visibilityHandler: (() => void) | null = null;
+  private lastAutomaticSyncAt = 0;
 
   configure(options: { supabaseClient?: SupabaseClient }) {
     // Supabase client is provided through shared singleton in lib/supabase.
@@ -58,7 +59,8 @@ class SyncService {
     if (typeof document === 'undefined' || this.visibilityHandler) return;
     this.visibilityHandler = () => {
       if (document.visibilityState !== 'visible' || !this.syncEnabled || !navigator.onLine) return;
-      void this.runFullSyncCycle();
+      if (Date.now() - this.lastAutomaticSyncAt < this.SYNC_INTERVAL_MS) return;
+      void this.runFullSyncCycle('automatic');
     };
     document.addEventListener('visibilitychange', this.visibilityHandler);
   }
@@ -86,7 +88,7 @@ class SyncService {
     this.intervalSchoolId = schoolId;
 
     dataService.startRealtimeSync(schoolId);
-    void this.runFullSyncCycle();
+    void this.runFullSyncCycle('automatic');
 
     // Adaptive scheduler: use setTimeout so we can apply exponential backoff on failures.
     this.backoffMs = null; // reset any previous backoff
@@ -94,7 +96,7 @@ class SyncService {
       if (this.syncInterval) clearTimeout(this.syncInterval);
       this.syncInterval = setTimeout(async () => {
         if (!this.syncEnabled || !navigator.onLine || !isCloudSyncEnabled()) return;
-        const result = await this.runFullSyncCycle();
+        const result = await this.runFullSyncCycle('automatic');
         // On success reset backoff; on failure increase it exponentially with jitter
         if (result && result.success) {
           this.backoffMs = null;
@@ -123,7 +125,7 @@ class SyncService {
     dataService.stopRealtimeSync();
   }
 
-  async runFullSyncCycle(): Promise<{ success: boolean; pushed: number; pulled: number; failed: number; error?: string }> {
+  async runFullSyncCycle(source: 'automatic' | 'manual' = 'automatic'): Promise<{ success: boolean; pushed: number; pulled: number; failed: number; error?: string }> {
     if (!this.syncEnabled || !navigator.onLine || !isCloudSyncEnabled()) {
       return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Sync unavailable.' };
     }
@@ -140,7 +142,11 @@ class SyncService {
 
     try {
       // Run the lightweight automatic sync cycle.
-      return await dataService.syncNow(schoolId);
+      const result = await dataService.syncNow(schoolId);
+      if (source === 'automatic') {
+        this.lastAutomaticSyncAt = Date.now();
+      }
+      return result;
     } catch (e: any) {
       return { success: false, pushed: 0, pulled: 0, failed: 0, error: e.message };
     } finally {

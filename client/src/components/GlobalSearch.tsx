@@ -25,7 +25,7 @@ const pages = [
   { path: '/attendance', title: 'Attendance', subtitle: 'Track attendance', icon: Calendar, keywords: ['attendance', 'present', 'absent', 'mark'] },
   { path: '/subjects', title: 'Subjects', subtitle: 'Manage subjects', icon: BookOpen, keywords: ['subjects', 'subject', 'subjects', 'courses'] },
   { path: '/grades', title: 'Exams & Grades', subtitle: 'Manage exams and grades', icon: Award, keywords: ['exams', 'grades', 'results', 'marks', 'scores'] },
-  { path: '/finance', title: 'Fees & Finance', subtitle: 'Financial management', icon: Receipt, keywords: ['finance', 'fees', 'payments', 'money'] },
+  { path: '/finance', title: 'Fees & Finance', subtitle: 'Financial management', icon: Receipt, keywords: ['finance', 'fees', 'payments', 'money', 'ledger', 'opening balance', 'closing balance'] },
   { path: '/day-boarding', title: 'Day & Boarding', subtitle: 'Day and boarding students', icon: Users, keywords: ['day', 'boarding', 'boys', 'girls', 'students'] },
   { path: '/invoices', title: 'Invoices', subtitle: 'View invoices', icon: FileBarChart, keywords: ['invoices', 'billing', 'receipts'] },
   { path: '/transport', title: 'Transport', subtitle: 'Transport management', icon: Bus, keywords: ['transport', 'bus', 'transportation', 'routes'] },

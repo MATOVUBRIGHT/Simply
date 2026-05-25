@@ -1,0 +1,45 @@
+{
+  "appId": "com.schofy.desktop",
+  "productName": "Schofy",
+  "electronVersion": "22.3.27",
+  "directories": {
+    "output": "../dist/desktop-win7"
+  },
+  "files": [
+    "main.js",
+    "preload.js",
+    "installer.nsh",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../client/dist",
+      "to": "client-dist",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64",
+          "ia32"
+        ]
+      }
+    ],
+    "icon": "../client/public/icon-512.png",
+    "artifactName": "${productName}-Setup-${version}-win7-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Schofy",
+    "include": "installer.nsh"
+  }
+}

@@ -9,6 +9,7 @@ import { useStudents } from '../contexts/StudentsContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useToast } from '../contexts/ToastContext';
 import LiveEditable from '../components/LiveEditable';
+import { openPrintPreview } from '../utils/printPreview';
 
 // ΓöÇΓöÇ Grade helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function ordinal(n: number): string {
@@ -546,7 +547,7 @@ export default function ReportCard() {
         <button onClick={openEditor} className="btn btn-secondary flex items-center gap-2">
           <Settings size={16} /> Full Settings
         </button>
-        <button onClick={() => window.print()} className="btn btn-primary flex items-center gap-2">
+        <button onClick={() => openPrintPreview('Report Card', '#report-card-print')} className="btn btn-primary flex items-center gap-2">
           <Download size={16} /> Export PDF
         </button>
       </div>
@@ -1072,7 +1073,7 @@ export default function ReportCard() {
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-slate-200 dark:border-slate-700 shrink-0 overflow-x-auto">
+            <div className="flex flex-wrap border-b border-slate-200 dark:border-slate-700 shrink-0">
               {[
                 { id: 'school', label: 'School Info', icon: Building },
                 { id: 'design', label: 'Design', icon: Palette },

@@ -10,8 +10,8 @@
  * - Cache is versioned — old caches are deleted on activate
  */
 
-const CACHE_VERSION = 'schofy-v7';
-const ASSET_CACHE = 'schofy-assets-v7';
+const CACHE_VERSION = 'schofy-v8';
+const ASSET_CACHE = 'schofy-assets-v8';
 
 // Core files to pre-cache on install
 const PRECACHE_URLS = [
@@ -74,6 +74,19 @@ self.addEventListener('fetch', event => {
 
   // Skip chrome-extension and other non-http(s) protocols
   if (!url.protocol.startsWith('http')) return;
+
+  // Admin and dev-server module paths must stay network-owned.
+  if (
+    url.origin === self.location.origin &&
+    (
+      url.pathname.startsWith('/admin') ||
+      url.pathname.startsWith('/src/') ||
+      url.pathname.startsWith('/@vite') ||
+      url.pathname.includes('/node_modules/.vite/')
+    )
+  ) {
+    return;
+  }
 
   // Skip range requests (audio/video streaming) — can't cache partial responses
   if (req.headers.get('range')) return;

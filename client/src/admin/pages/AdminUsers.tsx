@@ -31,7 +31,7 @@ export default function AdminUsers() {
   useEffect(() => { loadUsers(); }, []);
 
   async function loadUsers() {
-    if (!supabase) { setError('Supabase not configured'); setLoading(false); return; }
+    if (!supabase) { setError('Cloud space is not configured'); setLoading(false); return; }
     setLoading(true);
     try {
       const [usersRes, subsRes, settingsRes] = await Promise.all([

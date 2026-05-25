@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AlertTriangle, CreditCard, LogOut, RefreshCw, Clock, MessageCircle, Phone } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { getSubscriptionAccessState, SubscriptionAccessState, PLAN_DEFINITIONS } from '../utils/plans';
+import { cachePlanStateLocally, getSubscriptionAccessState, SubscriptionAccessState, PLAN_DEFINITIONS } from '../utils/plans';
 import { supabase } from '../lib/supabase';
 import { cacheReady } from '../lib/database/SupabaseDataService';
 
@@ -18,9 +18,11 @@ const OFFLINE_PENDING_KEY  = 'schofy_sub_pending'; // payment submitted but not 
 
 export function cacheSubscriptionLocally(state: SubscriptionAccessState, pending = false) {
   if (state.expiryDate) localStorage.setItem(OFFLINE_EXPIRY_KEY, state.expiryDate);
-  localStorage.setItem(OFFLINE_STATUS_KEY, state.status);
-  localStorage.setItem(OFFLINE_PLAN_KEY, state.selectedPlanId || '');
+  if (state.status) localStorage.setItem(OFFLINE_STATUS_KEY, state.status);
+  if (state.selectedPlanId) localStorage.setItem(OFFLINE_PLAN_KEY, state.selectedPlanId);
   localStorage.setItem(OFFLINE_PENDING_KEY, pending ? '1' : '0');
+  const tenantId = localStorage.getItem('schofy_current_school_id') || localStorage.getItem('schofy_current_user_id') || '';
+  if (tenantId) cachePlanStateLocally(tenantId, state, pending);
 }
 
 function getOfflineStatus(): { blocked: boolean; reason: BlockReason; planId: string | null; pending: boolean } {
@@ -60,6 +62,10 @@ function classifyRemoteExpiry(expiryIso: string | null): Pick<SubscriptionAccess
   return { status: days <= 14 ? 'expiring' : 'active', daysRemaining: days, expiryDate: expiry.toISOString() };
 }
 
+function hasAdminApproval(meta: Record<string, any>) {
+  return Boolean(meta.approvedByAdmin || meta.grantedByAdmin || meta.extendedByAdmin);
+}
+
 export default function SubscriptionGate({ children }: Props) {
   const { user, schoolId, logout } = useAuth();
   const navigate  = useNavigate();
@@ -79,10 +85,24 @@ export default function SubscriptionGate({ children }: Props) {
     setCheckProgress(18);
     if (!user) { setChecking(false); return; }
     if (isAllowedRoute) { setBlocked(false); setChecking(false); return; }
+    if (user.localOnly || localStorage.getItem('schofy_local_only_session') === 'true') {
+      setBlocked(false);
+      setBlockReason('incomplete');
+      setPlanName('Offline mode only');
+      setExpiryDate(localStorage.getItem(OFFLINE_EXPIRY_KEY));
+      setPendingTid(null);
+      setCheckProgress(100);
+      setChecking(false);
+      return;
+    }
 
-    // Ensure the data cache is loaded before checking subscription status
-    // This prevents "incomplete" status being returned just because IndexedDB hasn't opened yet
-    await cacheReady;
+    const online = typeof navigator === 'undefined' ? true : navigator.onLine;
+
+    // Wait briefly for IndexedDB, but never let offline startup hang on secure access.
+    await Promise.race([
+      cacheReady,
+      new Promise((resolve) => setTimeout(resolve, online ? 1500 : 250)),
+    ]);
     setCheckProgress(55);
 
     const tenantId = schoolId || user.id;
@@ -90,13 +110,42 @@ export default function SubscriptionGate({ children }: Props) {
     // Always read local cache first — works 100% offline
     let state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
 
+    const applyLocalState = (pendingFlag = localStorage.getItem(OFFLINE_PENDING_KEY) === '1') => {
+      const pending = pendingFlag && (state.status === 'incomplete' || !state.plan);
+      cacheSubscriptionLocally(state, pending);
+      setPlanName(state.plan?.name || null);
+      setExpiryDate(state.expiryDate);
+      setPendingTid(null);
+
+      if (pending) {
+        setBlocked(true);
+        setBlockReason('pending');
+        setPendingTid(localStorage.getItem('schofy_sub_tid'));
+      } else if (state.status === 'expired' || state.status === 'incomplete') {
+        setBlocked(true);
+        setBlockReason(state.status as BlockReason);
+      } else if (state.plan && state.used > state.plan.studentLimit) {
+        setBlocked(true);
+        setBlockReason('limit');
+      } else {
+        setBlocked(false);
+      }
+    };
+
+    if (!online) {
+      applyLocalState();
+      setCheckProgress(100);
+      setChecking(false);
+      return;
+    }
+
     try {
       // Check Supabase for latest subscription row (online only)
       let isPaused  = false;
       let isPending = false;
       let tid: string | null = null;
 
-      if (supabase) {
+      if (supabase && online) {
         setCheckProgress(72);
         const { data: subRows } = await supabase
           .from('subscriptions')
@@ -108,12 +157,13 @@ export default function SubscriptionGate({ children }: Props) {
         const sub = subRows?.[0];
         if (sub) {
           const meta = sub.metadata || {};
+          const adminApproved = hasAdminApproval(meta);
           isPaused  = sub.status === 'paused';
-          isPending = sub.status === 'pending' || (meta.source === 'client' && !meta.approvedByAdmin && !meta.grantedByAdmin && !meta.extendedByAdmin && sub.status !== 'active');
+          isPending = sub.status === 'pending' || !adminApproved;
           tid = meta.transactionId || null;
           if (!isPaused && meta.pausedByAdmin) isPaused = true;
 
-          if (!isPaused && !isPending && sub.status === 'active') {
+          if (!isPaused && !isPending && sub.status === 'active' && adminApproved) {
             const isFreeTier = meta.accessType === 'free_trial' || meta.requestType === 'trial' || sub.plan === 'trial';
             const remotePlan = PLAN_DEFINITIONS.find(p => p.id === sub.plan) || (isFreeTier || meta.grantedByAdmin || meta.approvedByAdmin ? PLAN_DEFINITIONS[0] : null);
             const remoteExpiry = classifyRemoteExpiry(sub.ends_at || null);
@@ -131,6 +181,14 @@ export default function SubscriptionGate({ children }: Props) {
               };
             }
           }
+        } else {
+          state = {
+            ...state,
+            status: 'incomplete',
+            eligible: false,
+            remaining: 0,
+            requiresPlanAction: true,
+          };
         }
       }
 
@@ -167,31 +225,7 @@ export default function SubscriptionGate({ children }: Props) {
       }
     } catch {
       // Offline — use the local state we already loaded above
-      cacheSubscriptionLocally(state);
-      if (state.status === 'expired' || state.status === 'incomplete') {
-        setBlocked(true);
-        setBlockReason(state.status as BlockReason);
-        setPlanName(state.plan?.name || null);
-        setExpiryDate(state.expiryDate);
-        setPendingTid(null);
-      } else if (state.plan && state.used > state.plan.studentLimit) {
-        setBlocked(true);
-        setBlockReason('limit');
-        setPlanName(state.plan.name);
-        setExpiryDate(state.expiryDate);
-        setPendingTid(null);
-      } else {
-        // Check localStorage pending flag
-        const pending = localStorage.getItem(OFFLINE_PENDING_KEY) === '1';
-        if (pending) {
-          setBlocked(true); setBlockReason('pending');
-          setPlanName(state.plan?.name || null);
-          setPendingTid(localStorage.getItem('schofy_sub_tid'));
-          setExpiryDate(null);
-        } else {
-          setBlocked(false);
-        }
-      }
+      applyLocalState();
     } finally {
       setCheckProgress(100);
       setTimeout(() => setChecking(false), 120);
@@ -221,12 +255,12 @@ export default function SubscriptionGate({ children }: Props) {
   if (checking && !isAllowedRoute) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
-        <div className="w-full max-w-sm rounded-2xl border border-emerald-200 bg-white p-6 text-center shadow-xl dark:border-emerald-800 dark:bg-slate-900">
-          <RefreshCw size={30} className="mx-auto mb-3 animate-spin text-emerald-600" />
-          <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Checking secure access...</p>
+        <div className="w-full max-w-sm rounded-2xl border bg-white p-6 text-center shadow-xl dark:bg-slate-900" style={{ borderColor: 'rgba(45, 163, 45, 0.35)' }}>
+          <RefreshCw size={30} className="mx-auto mb-3 animate-spin" style={{ color: 'var(--solid-emerald)' }} />
+          <p className="text-sm font-semibold" style={{ color: 'var(--solid-emerald)' }}>Checking secure access...</p>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Verifying your plan, account status, and device sync.</p>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-            <div className="h-full rounded-full bg-emerald-500 transition-all duration-150" style={{ width: `${checkProgress}%` }} />
+            <div className="h-full rounded-full transition-all duration-150" style={{ width: `${checkProgress}%`, backgroundColor: 'var(--solid-emerald)' }} />
           </div>
         </div>
       </div>

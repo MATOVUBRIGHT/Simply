@@ -673,7 +673,7 @@ export default function Subjects() {
     setIsImporting(true);
     setImportProgress(0);
 
-    // Build case-insensitive class name → ID lookup
+    // Build case-insensitive class name to ID lookup
     const normClass = (s: string) => s.toLowerCase().replace(/[\s._\-]/g, '');
     const classLookup = new Map<string, string>();
     (classes as any[]).forEach((c: any) => {
@@ -771,15 +771,7 @@ export default function Subjects() {
           )
         : classSubjects;
       if (filtered.length === 0) return null;
-      // Deduplicate by name within each class — keep the first occurrence
-      const seen = new Set<string>();
-      const deduped = filtered.filter((s: any) => {
-        const key = s.name?.toLowerCase().trim();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      return { cls, subjects: deduped.sort((a: any, b: any) => a.name.localeCompare(b.name)) };
+      return { cls, subjects: [...filtered].sort((a: any, b: any) => a.name.localeCompare(b.name)) };
     }).filter(Boolean) as { cls: any; subjects: any[] }[];
   }, [classesSorted, subjects, searchTerm]);
 

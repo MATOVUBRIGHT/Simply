@@ -13,7 +13,7 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { generateUUID } from '../../utils/uuid';
 import { addToRecycleBin } from '../../utils/recycleBin';
-import { isCloudSyncEnabled } from '../../utils/desktopSyncPreference';
+import { isCloudSyncEnabled, isDesktopApp } from '../../utils/desktopSyncPreference';
 import {
   getStorageDB,
   enqueueItem,
@@ -26,6 +26,8 @@ import {
   writeElectronBackup,
   readElectronBackup,
 } from './StorageManager';
+import { decryptJson, encryptJson } from './StorageCrypto';
+import { userDBManager } from './UserDatabaseManager';
 
 export type SyncStatus = 'synced' | 'pending' | 'failed';
 
@@ -404,16 +406,16 @@ async function loadPersistedCache() {
     const tx = db.transaction('data', 'readonly');
     const req = tx.objectStore('data').get(PERSIST_KEY);
     req.onsuccess = async () => {
-      let parsed = req.result;
+      let parsed = await decryptJson<Record<string, CacheEntry>>(req.result);
       if (!parsed) {
         // Fallback to legacy localStorage cache
         const saved = localStorage.getItem(PERSIST_KEY);
         if (saved) {
-          try { parsed = JSON.parse(saved); } catch {}
+          try { parsed = await decryptJson<Record<string, CacheEntry>>(JSON.parse(saved)); } catch {}
         }
       }
       if (!parsed) {
-        parsed = await readElectronBackup(PERSIST_KEY);
+        parsed = await decryptJson<Record<string, CacheEntry>>(await readElectronBackup(PERSIST_KEY));
       }
       if (parsed) {
         for (const [k, v] of Object.entries(parsed)) {
@@ -422,42 +424,43 @@ async function loadPersistedCache() {
       }
       
       // Load critical fallbacks (ensures settings are always available)
-      _loadCriticalFallbacks();
+      await _loadCriticalFallbacks();
       resolveCacheReady();
     };
     req.onerror = async () => { 
-      const native = await readElectronBackup(PERSIST_KEY);
+      const native = await decryptJson<Record<string, CacheEntry>>(await readElectronBackup(PERSIST_KEY));
       if (native) {
         for (const [k, v] of Object.entries(native)) {
           memCache.set(k, v as CacheEntry);
         }
       }
-      _loadCriticalFallbacks();
+      await _loadCriticalFallbacks();
       resolveCacheReady(); 
     };
   } catch {
-    const native = await readElectronBackup(PERSIST_KEY);
+    const native = await decryptJson<Record<string, CacheEntry>>(await readElectronBackup(PERSIST_KEY));
     if (native) {
       for (const [k, v] of Object.entries(native)) {
         memCache.set(k, v as CacheEntry);
       }
     }
-    _loadCriticalFallbacks();
+    await _loadCriticalFallbacks();
     resolveCacheReady();
   }
 }
 
-function _loadCriticalFallbacks() {
+async function _loadCriticalFallbacks() {
   try {
     const sid = localStorage.getItem('schofy_current_school_id');
     if (!sid) return;
     
-    ['settings', 'schools', 'users'].forEach(table => {
+    for (const table of ['settings', 'schools', 'users']) {
       const key = `schofy_critical_${sid}_${table}`;
       const saved = localStorage.getItem(key);
       if (saved) {
         try {
-          const data = JSON.parse(saved);
+          const data = await decryptJson<any[]>(JSON.parse(saved));
+          if (!data) return;
           const k = cacheKey(sid, table);
           // Only overwrite if not already in memCache or if memCache is older
           if (!memCache.has(k)) {
@@ -465,7 +468,7 @@ function _loadCriticalFallbacks() {
           }
         } catch {}
       }
-    });
+    }
   } catch {}
 }
 void loadPersistedCache();
@@ -485,16 +488,18 @@ function _flushCache() {
     const obj: Record<string, CacheEntry> = {};
     for (const [k, v] of memCache) obj[k] = v;
     
-    // Save to localStorage synchronously as an emergency fallback for page unload
-    try { localStorage.setItem(PERSIST_KEY, JSON.stringify(obj)); } catch {}
-
     getCacheDB().then(db => {
-      const tx = db.transaction('data', 'readwrite');
-      tx.objectStore('data').put(obj, PERSIST_KEY);
-      // Also write Electron native backup (no-op in browser)
-      void writeElectronBackup('schofy_data_cache', obj);
+      void encryptJson(obj).then(encrypted => {
+        const tx = db.transaction('data', 'readwrite');
+        tx.objectStore('data').put(encrypted, PERSIST_KEY);
+        try { localStorage.setItem(PERSIST_KEY, JSON.stringify(encrypted)); } catch {}
+        // Also write Electron native backup (no-op in browser)
+        void writeElectronBackup('schofy_data_cache', encrypted);
+      });
     }).catch(() => {
-      // already saved to localStorage above
+      void encryptJson(obj).then(encrypted => {
+        try { localStorage.setItem(PERSIST_KEY, JSON.stringify(encrypted)); } catch {}
+      });
     });
   } catch { /* error building obj */ }
 }
@@ -507,6 +512,7 @@ if (typeof window !== 'undefined') {
 // ── Offline queue ─────────────────────────────────────────────────────────────
 // Now backed by IndexedDB via StorageManager. localStorage retained as fallback.
 const QUEUE_KEY = 'schofy_offline_queue';
+const DEAD_LETTER_KEY = 'schofy_sync_dead_letter';
 
 interface QueueItem {
   id: string;
@@ -542,6 +548,27 @@ function dequeue(id: string) {
   saveQueueSync(loadQueueSync().filter(i => i.id !== id));
 }
 
+function deadLetter(item: QueueItem, reason: string) {
+  try {
+    const existing = JSON.parse(localStorage.getItem(DEAD_LETTER_KEY) || '[]');
+    const next = [
+      ...existing.filter((x: any) => x.queueId !== item.id),
+      {
+        queueId: item.id,
+        op: item.op,
+        tableName: item.tableName,
+        recordId: item.recordId || item.data?.id || null,
+        reason,
+        failedAt: new Date().toISOString(),
+      },
+    ].slice(-200);
+    localStorage.setItem(DEAD_LETTER_KEY, JSON.stringify(next));
+    window.dispatchEvent(new CustomEvent('schofySyncDeadLetter', { detail: next[next.length - 1] }));
+  } catch {
+    /* best effort */
+  }
+}
+
 function isOnline() { return navigator.onLine; }
 
 function isRecoverableCloudProblem(error: any): boolean {
@@ -567,12 +594,19 @@ function notifyCloudProblem(error: any) {
   if (!isRecoverableCloudProblem(error)) return;
   window.dispatchEvent(new CustomEvent('schofyCloudProblem', {
     detail: {
-      message: 'Supabase is unavailable or your free-tier limit may be reached. You can keep working locally on this desktop.',
+      message: 'Cloud space is unavailable or your free-tier limit may be reached. You can keep working locally on this desktop.',
     },
   }));
 }
 // ── Cache helpers ─────────────────────────────────────────────────────────────
 function cacheKey(sid: string, table: string) { return `${sid}:${table}`; }
+
+function recordBelongsToSchool(record: any, schoolId: string, tableName: string): boolean {
+  if (!record || !schoolId) return false;
+  if (tableName === 'schools') return record.id === schoolId || record.schoolId === schoolId || record.school_id === schoolId;
+  if (tableName === 'plans') return false;
+  return record.schoolId === schoolId || record.school_id === schoolId;
+}
 
 function cacheGet(sid: string, table: string): any[] | null {
   const e = memCache.get(cacheKey(sid, table));
@@ -586,6 +620,7 @@ function cacheGetAny(sid: string, table: string): any[] | null {
 function cacheSet(sid: string, table: string, data: any[]) {
   memCache.set(cacheKey(sid, table), { data, ts: Date.now() });
   persistCache();
+  void mirrorTableToDesktopDB(sid, table, data);
   
   // Critical tables: Save to localStorage immediately (no debounce, sync)
   // This ensures that even if the page is refreshed or crashed, 
@@ -593,8 +628,54 @@ function cacheSet(sid: string, table: string, data: any[]) {
   if (table === 'settings' || table === 'schools' || table === 'users') {
     try {
       const key = `schofy_critical_${sid}_${table}`;
-      localStorage.setItem(key, JSON.stringify(data));
+      void encryptJson(data).then(encrypted => {
+        try { localStorage.setItem(key, JSON.stringify(encrypted)); } catch {}
+      });
     } catch {}
+  }
+}
+
+async function mirrorTableToDesktopDB(sid: string, table: string, data: any[]): Promise<void> {
+  if (!isDesktopApp() || !sid || !table) return;
+  try {
+    await userDBManager.ensureDatabaseOpen(sid);
+    for (const record of data) {
+      if (record?.id) {
+        await userDBManager.put(sid, table, record);
+      }
+    }
+  } catch {
+    // Some sync-cache tables do not have a dedicated local DB store yet.
+  }
+}
+
+async function deleteFromDesktopDB(sid: string, table: string, id: string): Promise<void> {
+  if (!isDesktopApp() || !sid || !table || !id) return;
+  try {
+    await userDBManager.delete(sid, table, id);
+  } catch {
+    // Store not present or record already gone.
+  }
+}
+
+async function hydrateCacheFromDesktopDB(sid: string): Promise<void> {
+  if (!isDesktopApp() || !sid) return;
+  try {
+    await userDBManager.ensureDatabaseOpen(sid);
+  } catch {
+    return;
+  }
+
+  for (const table of ALL_SYNC_TABLES) {
+    if (memCache.has(cacheKey(sid, table))) continue;
+    try {
+      const rows = await userDBManager.getAll(sid, table);
+      if (rows.length > 0) {
+        memCache.set(cacheKey(sid, table), { data: rows, ts: Date.now() });
+      }
+    } catch {
+      // Store not present for this table in the local desktop DB.
+    }
   }
 }
 
@@ -619,6 +700,7 @@ function cacheApplyUpdate(sid: string, tableName: string, id: string, data: any)
 function cacheApplyDelete(sid: string, tableName: string, id: string) {
   const existing = cacheGet(sid, tableName) || [];
   cacheSet(sid, tableName, existing.filter(r => r.id !== id));
+  void deleteFromDesktopDB(sid, tableName, id);
 }
 
 function notifyUI(table: string) {
@@ -669,9 +751,11 @@ const REMOTE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 class SupabaseDataService {
   private static instance: SupabaseDataService;
   private _realtimeStarted = false;
+  private _realtimeStarting = false;
   private _realtimeChannel: any = null;
   private _realtimeSid: string | null = null;
   private _realtimeReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private _realtimeStopTimer: ReturnType<typeof setTimeout> | null = null;
   private _isInitialized = false;
   private _syncInProgress = false;
   private _lastSyncAttempt = 0;
@@ -727,6 +811,7 @@ class SupabaseDataService {
 
     // Step 0: One-time migration from legacy databases
     await this._migrateLegacyData(userId, sid);
+    await hydrateCacheFromDesktopDB(sid);
 
     // Step 1: Instant load from cache (Stage 1)
     const storeRef = (globalThis as any).__schofyStore;
@@ -906,7 +991,11 @@ class SupabaseDataService {
 
   startRealtimeSync(sid: string) {
     if (!isCloudSyncEnabled() || !this.ok || !isOnline()) return;
-    if (this._realtimeStarted && this._realtimeSid === sid) {
+    if (this._realtimeStopTimer) {
+      clearTimeout(this._realtimeStopTimer);
+      this._realtimeStopTimer = null;
+    }
+    if ((this._realtimeStarted || this._realtimeStarting) && this._realtimeSid === sid) {
       console.log('[Realtime] Already started, skipping duplicate initialization');
       return;
     }
@@ -915,9 +1004,13 @@ class SupabaseDataService {
     this.stopRealtimeSync();
 
     console.log(`[Realtime] Starting sync for school: ${sid}`);
+    this._realtimeStarting = true;
+    this._realtimeSid = sid;
 
     // 2. Use Supabase Auth session when available, but allow anon-table auth too.
     this.waitForSession().then(session => {
+      this._realtimeStarting = false;
+      if (this._realtimeSid !== sid) return;
       if (!session) {
         console.warn('[Realtime] Postponing connection: Supabase unavailable');
         this._realtimeStarted = false;
@@ -989,6 +1082,11 @@ class SupabaseDataService {
       });
 
       this._realtimeChannel = ch;
+    }).catch((error) => {
+      if (this._realtimeSid !== sid) return;
+      this._realtimeStarting = false;
+      this._realtimeStarted = false;
+      console.warn('[Realtime] Failed to start sync channel:', error?.message || error);
     });
   }
 
@@ -999,6 +1097,7 @@ class SupabaseDataService {
 
   stopRealtimeSync() {
     this._realtimeStarted = false;
+    this._realtimeStarting = false;
     this._realtimeSid = null;
     if (this._realtimeReconnectTimer) {
       clearTimeout(this._realtimeReconnectTimer);
@@ -1009,6 +1108,14 @@ class SupabaseDataService {
       this._realtimeChannel = null;
       console.log('[Realtime] Disconnected from school sync channel');
     }
+  }
+
+  scheduleRealtimeStop(delayMs = 750) {
+    if (this._realtimeStopTimer) clearTimeout(this._realtimeStopTimer);
+    this._realtimeStopTimer = setTimeout(() => {
+      this._realtimeStopTimer = null;
+      this.stopRealtimeSync();
+    }, delayMs);
   }
 
   /** Public: merge a single table from Supabase into local cache (conflict-safe) */
@@ -1397,6 +1504,9 @@ class SupabaseDataService {
     // Optimistic cache delete
     const existing = cacheGet(sid, tableName) || [];
     cacheSet(sid, tableName, existing.filter(r => !ids.includes(r.id)));
+    for (const id of ids) {
+      void deleteFromDesktopDB(sid, tableName, id);
+    }
     notifyUI(tableName);
 
     if (!isCloudSyncEnabled()) {
@@ -1519,7 +1629,7 @@ class SupabaseDataService {
    */
   async syncNow(schoolId: string): Promise<{ success: boolean; pushed: number; pulled: number; failed: number; error?: string }> {
     if (!isCloudSyncEnabled() || !isOnline() || !this.ok) {
-      return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Offline or Supabase not configured' };
+      return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Offline or cloud space is not configured' };
     }
 
     try {
@@ -1553,18 +1663,20 @@ class SupabaseDataService {
       await this.ensureSchoolExists(schoolId);
       await this.flushOfflineQueue();
 
-      // 2. Scan ALL entries in memCache (even those from other/old school IDs)
-      // and push them to the CURRENT schoolId in Supabase.
+      // 2. Push only records from the active school's cache namespace.
+      // Never rewrite tenant ownership during sync.
       let pushedCount = 0;
       let failedCount = 0;
 
       for (const tableName of ALL_SYNC_TABLES) {
-        // Find ALL records for this table across ANY school ID in cache
         const allLocalRecords: any[] = [];
         for (const [key, entry] of memCache.entries()) {
           const [_, table] = key.split(':');
+          if (!key.startsWith(`${schoolId}:`)) continue;
           if (table === tableName && entry.data && entry.data.length > 0) {
-            allLocalRecords.push(...entry.data);
+            allLocalRecords.push(
+              ...entry.data.filter(record => recordBelongsToSchool(record, schoolId, tableName))
+            );
           }
         }
 
@@ -1757,7 +1869,8 @@ class SupabaseDataService {
             const msg = e.message || '';
             if (isUnrecoverable(msg)) {
               unrecoverable = true;
-              console.warn(`[offline] Discarding unrecoverable ${item.op} on ${item.tableName}:`, msg);
+              deadLetter(item, msg);
+              console.warn(`[offline] Sync item moved to failed review ${item.op} on ${item.tableName}:`, msg);
               break;
             }
             console.warn(`[offline] Attempt ${attempt + 1} failed for ${item.op} on ${item.tableName}:`, msg);

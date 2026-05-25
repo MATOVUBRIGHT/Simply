@@ -99,7 +99,7 @@ export function PortalDropdown({ triggerRef, isOpen, onClose, children, id }: Po
     <div
       ref={panelRef}
       id={id}
-      className="fixed z-[99999] inline-flex flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 animate-dropdown-in whitespace-nowrap"
+      className="fixed z-[99999] flex flex-wrap items-center gap-1 overflow-visible p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 animate-dropdown-in"
       style={{
         top: pos.top,
         right: pos.right,

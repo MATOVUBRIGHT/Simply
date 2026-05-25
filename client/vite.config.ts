@@ -11,10 +11,6 @@ export default defineConfig(({ mode }) => ({
       '@schofy/shared': path.resolve(__dirname, '../shared/src')
     }
   },
-  // Strip console.log/debug in production
-  esbuild: {
-    drop: mode === 'production' ? ['console', 'debugger'] : [],
-  },
   server: {
     host: true,
     port: 4201,
@@ -43,7 +39,13 @@ export default defineConfig(({ mode }) => ({
     sourcemap: false,
     chunkSizeWarningLimit: 1000, // Raised to 1MB since we have good chunking
     target: 'es2020',
-    minify: 'esbuild',
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: mode === 'production',
+        drop_debugger: mode === 'production',
+      },
+    },
     rollupOptions: {
       output: {
         // Granular manual chunks — keeps initial bundle tiny

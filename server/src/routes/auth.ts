@@ -49,7 +49,7 @@ router.post('/login', (req: Request, res: Response) => {
 
 router.post('/register', (req: Request, res: Response) => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password } = req.body;
     const normalizedEmail = getStringParam(email)?.toLowerCase();
 
     if (!normalizedEmail || !password) {
@@ -67,17 +67,18 @@ router.post('/register', (req: Request, res: Response) => {
     const hashedPassword = bcrypt.hashSync(password, 10);
     const now = new Date().toISOString();
 
+    const defaultRole = 'user';
     db.run('INSERT INTO users (id, email, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [id, normalizedEmail, hashedPassword, role || 'admin', now, now]);
+      [id, normalizedEmail, hashedPassword, defaultRole, now, now]);
     saveDatabase();
 
-    const token = jwt.sign({ userId: id, role: role || 'admin' }, getJwtSecret(), { expiresIn: '7d' });
+    const token = jwt.sign({ userId: id, role: defaultRole }, getJwtSecret(), { expiresIn: '7d' });
 
     res.json({
       success: true,
       data: {
         token,
-        user: { id, email: normalizedEmail, role: role || 'admin', created_at: now, updated_at: now },
+        user: { id, email: normalizedEmail, role: defaultRole, created_at: now, updated_at: now },
       },
     });
   } catch (error) {

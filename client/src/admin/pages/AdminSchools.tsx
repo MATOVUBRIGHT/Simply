@@ -29,7 +29,7 @@ export default function AdminSchools() {
   useEffect(() => { loadSchools(); }, []);
 
   async function loadSchools() {
-    if (!supabase) { setError('Supabase not configured'); setLoading(false); return; }
+    if (!supabase) { setError('Cloud space is not configured'); setLoading(false); return; }
     setLoading(true);
     try {
       const [usersRes, subsRes, studentsRes, settingsRes] = await Promise.all([

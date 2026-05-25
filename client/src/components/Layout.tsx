@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -27,9 +28,13 @@ import {
   RefreshCw,
   ChevronLeft,
   Shield,
+  Send,
+  ExternalLink,
+  Paperclip,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
+import { useToast } from '../contexts/ToastContext';
 import { UserRole, Notification as NotificationType } from '@schofy/shared';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
 import { dataService } from '../lib/database/SupabaseDataService';
@@ -40,7 +45,10 @@ import { useStaffAuth } from '../contexts/StaffAuthContext';
 import { getSubscriptionAccessState, SubscriptionAccessState } from '../utils/plans';
 import { getRecycleBin } from '../utils/recycleBin';
 import RealtimeStatus from './RealtimeStatus';
-import { useTableData } from '../lib/store';
+import { store, useTableData } from '../lib/store';
+import { supabase } from '../lib/supabase';
+import { parseAdminMessageLink } from '../utils/adminMessageLinks';
+import { downloadAttachment, openExternalLink } from '../utils/externalActions';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -78,12 +86,16 @@ function Layout({ children }: LayoutProps) {
   const [showRenewPopup, setShowRenewPopup] = useState(false);
   const [subscriptionState, setSubscriptionState] = useState<SubscriptionAccessState | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [broadcastPopup, setBroadcastPopup] = useState<NotificationType | null>(null);
+  const [broadcastReply, setBroadcastReply] = useState('');
+  const [sendingBroadcastReply, setSendingBroadcastReply] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, schoolId, logout, isOnline } = useAuth();
   const { isStaffMode, staffSession, staffLogout } = useStaffAuth();
   const tenantId = schoolId || user?.id;
-  const { isSyncing } = useSync();
+  const { isSyncing, syncNow, isSyncEnabled } = useSync();
+  const { addToast } = useToast();
   const headerRef = useRef<HTMLDivElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
@@ -96,33 +108,53 @@ function Layout({ children }: LayoutProps) {
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
+    if (!isOnline) {
+      addToast('You are offline. Local data is still available.', 'warning');
+      return;
+    }
+    if (!isSyncEnabled) {
+      addToast('Enable cloud sync first', 'warning');
+      return;
+    }
     setIsRefreshing(true);
     try {
-      const sid = schoolId || user?.id;
-      if (sid) {
-        const { store } = await import('../lib/store');
-        const { dataService } = await import('../lib/database/SupabaseDataService');
-        // Flush offline queue first, then sync all tables
-        await dataService.flushOfflineQueue();
-        const tables = [
-          'students','staff','classes','subjects','fees','payments',
-          'announcements','attendance','feeStructures','exams','examResults',
-          'transportRoutes','salaryPayments','bursaries','discounts','notifications',
-        ];
-        await Promise.allSettled(tables.map(t => dataService.syncTable(sid, t)));
-      }
-    } catch { /* ignore */ }
+      await syncNow(true);
+    } catch {
+      addToast('Sync will retry automatically', 'error');
+    }
     finally {
       setTimeout(() => setIsRefreshing(false), 500);
     }
-  }, [isRefreshing, schoolId, user?.id]);
+  }, [addToast, isOnline, isRefreshing, isSyncEnabled, syncNow]);
 
   useEffect(() => {
     loadNotifications();
     checkUpcomingEvents();
     checkSubscriptionStatus();
     loadDeletedItemsCount();
-  }, []);
+  }, [user?.id]);
+
+  useEffect(() => {
+    const refreshNotifications = (event: Event) => {
+      const table = (event as CustomEvent<{ table?: string }>).detail?.table;
+      if (!table || table === 'notifications') void loadNotifications();
+    };
+    window.addEventListener('dataRefresh', refreshNotifications);
+    window.addEventListener('schofyDataRefresh', refreshNotifications);
+    return () => {
+      window.removeEventListener('dataRefresh', refreshNotifications);
+      window.removeEventListener('schofyDataRefresh', refreshNotifications);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    const latestBroadcast = notifications.find((n: any) =>
+      !n.read &&
+      parseAdminMessageLink(n.link) &&
+      localStorage.getItem(`schofy_broadcast_popup_seen_${n.id}`) !== '1'
+    );
+    if (latestBroadcast) setBroadcastPopup(latestBroadcast);
+  }, [notifications]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -283,6 +315,50 @@ function Layout({ children }: LayoutProps) {
     }
   }
 
+  async function closeBroadcastPopup(markRead = false) {
+    if (!broadcastPopup || !user?.id) {
+      setBroadcastPopup(null);
+      return;
+    }
+    localStorage.setItem(`schofy_broadcast_popup_seen_${broadcastPopup.id}`, '1');
+    if (markRead) {
+      try {
+        await dataService.update(user.id, 'notifications', broadcastPopup.id, { read: true } as any);
+        await loadNotifications();
+      } catch { /* ignore */ }
+    }
+    setBroadcastPopup(null);
+    setBroadcastReply('');
+  }
+
+  async function sendBroadcastReply() {
+    if (!broadcastPopup || !broadcastReply.trim() || !supabase || !user?.id) return;
+    setSendingBroadcastReply(true);
+    try {
+      const linkMeta = parseAdminMessageLink(broadcastPopup.link);
+      const parentId = linkMeta?.messageId || '';
+      if (!parentId || !linkMeta?.allowReply) return;
+      const now = new Date().toISOString();
+      await supabase.from('admin_messages').insert({
+        id: crypto.randomUUID(),
+        title: `Reply: ${broadcastPopup.title}`,
+        body: broadcastReply.trim(),
+        target_schools: [],
+        sent_at: now,
+        sent_by: user.email || 'School',
+        direction: 'reply',
+        parent_id: parentId,
+        school_id: schoolId || user.id,
+        school_name: schoolName || user.email || 'School',
+      });
+      await closeBroadcastPopup(true);
+    } catch (error) {
+      console.error('Failed to send broadcast reply:', error);
+    } finally {
+      setSendingBroadcastReply(false);
+    }
+  }
+
   async function clearAllNotifications() {
     if (!user?.id) return;
     try {
@@ -309,8 +385,10 @@ function Layout({ children }: LayoutProps) {
     return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
   };
 
-  const planLabel = subscriptionState?.plan?.name ?? 'No subscription';
+  const isLocalOnlyAccount = Boolean(user?.localOnly || localStorage.getItem('schofy_local_only_session') === 'true');
+  const planLabel = isLocalOnlyAccount ? 'Offline mode only' : subscriptionState?.plan?.name ?? 'No subscription';
   const planStatusLabel = (() => {
+    if (isLocalOnlyAccount) return isOnline ? 'Local desktop account. Cloud sync is off.' : 'Local desktop account. Fully offline.';
     if (!subscriptionState) return 'No plan selected';
     if (subscriptionState.status === 'incomplete') return 'Choose a plan';
     if (subscriptionState.status === 'active') return 'Active';
@@ -323,15 +401,86 @@ function Layout({ children }: LayoutProps) {
   })();
 
   const filteredMenuItems = user ? menuItems : [];
+  const broadcastLinkMeta = parseAdminMessageLink(broadcastPopup?.link);
 
   return (
-    <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950 overflow-x-auto">
+    <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950 overflow-x-hidden">
       {/* Mobile Sidebar Overlay */}
       {mobileSidebarOpen && (
         <div 
           className="fixed inset-0 bg-slate-900/60 z-[45] lg:hidden"
           onClick={() => setMobileSidebarOpen(false)}
         />
+      )}
+      {broadcastPopup && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="px-5 py-4 text-white" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-white/70">Super Admin Broadcast</p>
+                  <h2 className="mt-1 text-lg font-bold">{broadcastPopup.title}</h2>
+                </div>
+                <button onClick={() => void closeBroadcastPopup(false)} className="rounded-lg p-1 hover:bg-white/15">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="space-y-4 p-5">
+              {broadcastLinkMeta?.imageUrl && (
+                <img src={broadcastLinkMeta.imageUrl} alt="" className="max-h-56 w-full rounded-xl border border-slate-200 object-cover dark:border-slate-700" />
+              )}
+              <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">{broadcastPopup.message}</p>
+              {broadcastLinkMeta?.actionUrl && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await openExternalLink(broadcastLinkMeta.actionUrl);
+                    await closeBroadcastPopup(true);
+                  }}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                >
+                  <ExternalLink size={16} />
+                  Open update link
+                </button>
+              )}
+              {broadcastLinkMeta?.attachmentUrl && (
+                <button
+                  type="button"
+                  onClick={() => downloadAttachment(broadcastLinkMeta.attachmentUrl, broadcastLinkMeta.attachmentName)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                >
+                  <Paperclip size={16} />
+                  Download {broadcastLinkMeta.attachmentName || 'attachment'}
+                </button>
+              )}
+              {broadcastLinkMeta?.allowReply && (
+                <textarea
+                  value={broadcastReply}
+                  onChange={e => setBroadcastReply(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  placeholder="Reply to super admin..."
+                />
+              )}
+              <div className="flex gap-2">
+                <button onClick={() => void closeBroadcastPopup(true)} className="flex-1 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+                  Mark read
+                </button>
+                {broadcastLinkMeta?.allowReply && (
+                  <button
+                    onClick={sendBroadcastReply}
+                    disabled={sendingBroadcastReply || !broadcastReply.trim()}
+                    className="flex-1 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {sendingBroadcastReply ? 'Sending...' : <span className="inline-flex items-center gap-2"><Send size={15} /> Reply</span>}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* Sidebar -- always fixed, never scrolls away */}
@@ -459,11 +608,11 @@ function Layout({ children }: LayoutProps) {
               {/* Refresh button -- replaces sync text */}
               <button
                 onClick={handleRefresh}
-                disabled={isRefreshing}
+                disabled={isRefreshing || isSyncing}
                 className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all disabled:opacity-60"
-                title="Refresh all data"
+                title={isSyncing ? 'Syncing data...' : 'Sync data now'}
               >
-                <RefreshCw size={17} className={`text-white/90 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <RefreshCw size={17} className={`text-white/90 ${isRefreshing || isSyncing ? 'animate-spin' : ''}`} />
               </button>
 
               {/* Notifications */}
@@ -565,7 +714,7 @@ function Layout({ children }: LayoutProps) {
                   <p className="font-bold text-slate-800 dark:text-white">{user?.firstName || user?.email?.split('@')[0] || 'User'}</p>
                   <p className="text-xs text-slate-500 mt-0.5 truncate">{user?.email || ''}</p>
                   <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5">
-                    <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700">Plan: {planLabel}</span>
+                    <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${isLocalOnlyAccount ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700'}`}>{isLocalOnlyAccount ? planLabel : `Plan: ${planLabel}`}</span>
                     <span className="text-[10px] font-medium uppercase px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600">Admin</span>
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1">{planStatusLabel}</p>
@@ -608,14 +757,16 @@ function Layout({ children }: LayoutProps) {
             className="shrink-0 text-center text-sm font-medium py-2.5 px-4 bg-amber-400 text-amber-950 border-b border-amber-500/30"
             role="status"
           >
-            Offline - you can keep working. Changes stay on this device and sync automatically when the connection returns.
+            {isLocalOnlyAccount
+              ? 'Offline mode only account - everything stays on this desktop and all features remain available locally.'
+              : 'Offline - you can keep working. Changes stay on this device and sync automatically when the connection returns.'}
           </div>
         )}
 
         {/* Page Content — scrolls vertically, allows horizontal scroll on small screens */}
         <main className="flex-1 min-h-0 bg-[#f8fafc] dark:bg-slate-950" style={{ isolation: 'auto' }}>
-          <div className="h-full overflow-y-auto p-4 sm:p-6 lg:p-8">
-            <div className="w-full min-w-0">
+          <div className="app-page-scroll h-full overflow-y-auto p-4 sm:p-6 lg:p-8">
+            <div className="app-page-content w-full min-w-0">
               {children}
             </div>
           </div>

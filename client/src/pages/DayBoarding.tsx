@@ -1,25 +1,43 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BedDouble, Home, Users, Search, GraduationCap } from 'lucide-react';
+import { BedDouble, Home, Users, Search, GraduationCap, Save } from 'lucide-react';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { useTableData } from '../lib/store';
+import { dataService } from '../lib/database/SupabaseDataService';
 import { getBoardingStatus } from '../utils/studentBoarding';
 import { matchesStudentSearch } from '../utils/studentSearch';
 
+const HOSTEL_KEYS = ['hosteldormitory', 'hostel', 'dormitory', 'dorm', 'boardinghouse'];
+
 export default function DayBoarding() {
   const { user, schoolId } = useAuth();
+  const { addToast } = useToast();
   const sid = schoolId || user?.id || '';
   const students = useActiveStudents();
   const { data: classesData } = useTableData(sid, 'classes');
   const [search, setSearch] = useState('');
+  const [hostelDrafts, setHostelDrafts] = useState<Record<string, string>>({});
+  const [savingHostelId, setSavingHostelId] = useState<string | null>(null);
 
   const className = (classId?: string) => (classesData as any[]).find(c => c.id === classId)?.name || 'No class';
+
+  const getHostel = (student: any) => {
+    const direct = student.hostel || student.hostelName || student.dormitory || student.dormitoryName;
+    if (direct) return String(direct);
+    const field = (student.customFields || []).find((item: any) => {
+      const key = String(item?.id || item?.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return HOSTEL_KEYS.includes(key);
+    });
+    return field?.value ? String(field.value) : '';
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return students.filter((student: any) => {
       if (!q) return true;
-      return matchesStudentSearch(student, q, [className(student.classId)]);
+      return matchesStudentSearch(student, q, [className(student.classId), getHostel(student)]);
     });
   }, [students, search, classesData]);
 
@@ -34,7 +52,36 @@ export default function DayBoarding() {
     return next;
   }, [filtered]);
 
-  const renderList = (title: string, list: any[]) => (
+  const handleAssignHostel = async (student: any) => {
+    if (!sid || savingHostelId) return;
+    const value = (hostelDrafts[student.id] ?? getHostel(student)).trim();
+    if (!value) {
+      addToast('Enter a dormitory or hostel name', 'error');
+      return;
+    }
+
+    setSavingHostelId(student.id);
+    try {
+      const fields = Array.isArray(student.customFields) ? student.customFields : [];
+      const nextFields = [
+        ...fields.filter((item: any) => {
+          const key = String(item?.id || item?.label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return !HOSTEL_KEYS.includes(key);
+        }),
+        { id: 'hostelDormitory', label: 'Hostel / Dormitory', value },
+      ];
+
+      await dataService.update(sid, 'students', student.id, { customFields: nextFields });
+      setHostelDrafts(prev => ({ ...prev, [student.id]: value }));
+      addToast('Hostel assigned', 'success');
+    } catch (error) {
+      addToast('Failed to assign hostel', 'error');
+    } finally {
+      setSavingHostelId(null);
+    }
+  };
+
+  const renderList = (title: string, list: any[], showHostel = false) => (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/70 flex items-center justify-between">
         <p className="font-semibold text-slate-800 dark:text-white">{title}</p>
@@ -43,14 +90,37 @@ export default function DayBoarding() {
       <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-[420px] overflow-y-auto">
         {list.length === 0 ? (
           <p className="px-4 py-6 text-sm text-slate-500 text-center">No students</p>
-        ) : list.map(student => (
-          <Link key={student.id} to={`/students/${student.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
-            <div className="min-w-0">
-              <p className="font-medium text-slate-800 dark:text-white truncate">{student.firstName} {student.lastName}</p>
-              <p className="text-xs text-slate-500 truncate">{student.studentId || student.admissionNo || 'No ID'} · {className(student.classId)}</p>
+        ) : list.map((student, index) => (
+          <div key={student.id} className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500 dark:bg-slate-700 dark:text-slate-300">{index + 1}</span>
+                <Link to={`/students/${student.id}`} className="min-w-0">
+                  <p className="font-medium text-slate-800 dark:text-white truncate">{student.firstName} {student.lastName}</p>
+                  <p className="text-xs text-slate-500 truncate">{student.studentId || student.admissionNo || 'No ID'} - {className(student.classId)}</p>
+                </Link>
+              </div>
+              <GraduationCap size={16} className="text-slate-400 shrink-0" />
             </div>
-            <GraduationCap size={16} className="text-slate-400 shrink-0" />
-          </Link>
+            {showHostel && (
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+                <input
+                  value={hostelDrafts[student.id] ?? getHostel(student)}
+                  onChange={e => setHostelDrafts(prev => ({ ...prev, [student.id]: e.target.value }))}
+                  className="form-input"
+                  placeholder="Assign dormitory / hostel"
+                />
+                <button
+                  onClick={() => handleAssignHostel(student)}
+                  disabled={savingHostelId === student.id}
+                  className="btn btn-secondary justify-center disabled:opacity-70"
+                >
+                  {savingHostelId === student.id ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Save size={16} />}
+                  {savingHostelId === student.id ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            )}
+          </div>
         ))}
       </div>
     </div>
@@ -68,7 +138,7 @@ export default function DayBoarding() {
         </div>
         <div className="relative">
           <Search size={18} className="search-input-icon" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search students..." className="search-input w-full sm:w-64" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search students, class, hostel..." className="search-input w-full sm:w-64" />
         </div>
       </div>
 
@@ -111,8 +181,8 @@ export default function DayBoarding() {
             <span className="badge badge-info">{boardingTotal}</span>
           </div>
           <div className="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
-            {renderList('Boys', groups.boarding.boys)}
-            {renderList('Girls', groups.boarding.girls)}
+            {renderList('Boys', groups.boarding.boys, true)}
+            {renderList('Girls', groups.boarding.girls, true)}
           </div>
         </section>
       </div>

@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 
-import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2, Clock } from 'lucide-react';
+import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2, Clock, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen } from '../utils/plans';
+import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, cachePlanStateLocally, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { supabase } from '../lib/supabase';
+import { isDesktopApp } from '../utils/desktopSyncPreference';
 
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
@@ -30,7 +31,7 @@ export default function Plans() {
   const [isSubmitting, setIsRefreshing] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(false);
   const [accessProgress, setAccessProgress] = useState(0);
-  const [accessNotice, setAccessNotice] = useState<{ type: 'success' | 'pending' | 'paused' | 'error'; message: string } | null>(null);
+  const [accessNotice, setAccessNotice] = useState<{ type: 'success' | 'pending' | 'paused' | 'error' | 'info'; message: string } | null>(null);
   const [accessPopup, setAccessPopup] = useState<{ title: string; message: string; days: number | null; canProceed: boolean } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [transactionId, setTransactionId] = useState('');
@@ -41,10 +42,21 @@ export default function Plans() {
   const [trialRequested, setTrialRequested] = useState(false);
   const [showRenewModal, setShowRenewModal] = useState(false);
   const [renewPlan, setRenewPlan] = useState<typeof PLAN_DEFINITIONS[0] | null>(null);
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
 
   useEffect(() => {
     if (user?.id || schoolId) void loadPlanState();
   }, [user?.id, schoolId]);
+
+  useEffect(() => {
+    const updateOnline = () => setIsOnline(typeof navigator === 'undefined' ? true : navigator.onLine);
+    window.addEventListener('online', updateOnline);
+    window.addEventListener('offline', updateOnline);
+    return () => {
+      window.removeEventListener('online', updateOnline);
+      window.removeEventListener('offline', updateOnline);
+    };
+  }, []);
 
   async function loadPlanState(showLoader = false) {
     const authId = schoolId || user?.id;
@@ -65,13 +77,28 @@ export default function Plans() {
       ]);
 
       let effectiveUsage = usage;
-      if (supabase) {
-        const { data: rows } = await supabase
-          .from('subscriptions')
-          .select('status, ends_at, metadata, plan')
-          .eq('school_id', authId)
-          .order('updated_at', { ascending: false })
-          .limit(1);
+      if (supabase && isOnline) {
+        let rows: any[] | null = null;
+        let cloudUnavailable = false;
+        try {
+          const result = await supabase
+            .from('subscriptions')
+            .select('status, ends_at, metadata, plan')
+            .eq('school_id', authId)
+            .order('updated_at', { ascending: false })
+            .limit(1);
+          rows = result.data || null;
+          if (result.error) throw result.error;
+        } catch (cloudError) {
+          cloudUnavailable = true;
+          console.warn('Plan cloud check unavailable; using offline plan cache.', cloudError);
+          if (showLoader) {
+            setAccessNotice({
+              type: 'info',
+              message: 'Cloud access check is unavailable. Plans are still available offline using your local subscription cache.',
+            });
+          }
+        }
         const sub = rows?.[0];
         const meta = sub?.metadata || {};
         const pending = sub?.status === 'pending' || (meta.source === 'client' && !meta.approvedByAdmin && !meta.grantedByAdmin && !meta.extendedByAdmin && sub?.status !== 'active');
@@ -133,7 +160,7 @@ export default function Plans() {
               canProceed: ms > 0,
             });
           }
-        } else if (showLoader) {
+        } else if (showLoader && !cloudUnavailable) {
           setAccessNotice({
             type: 'error',
             message: 'No approved subscription was found yet. Choose a plan or request a trial to continue.',
@@ -145,6 +172,7 @@ export default function Plans() {
       setCurrentPlanId(effectiveUsage.selectedPlanId);
       setStudentCount(effectiveUsage.used);
       setAccessState(effectiveUsage);
+      cachePlanStateLocally(authId, effectiveUsage, localStorage.getItem('schofy_sub_pending') === '1');
       setLatestReceipt(receipt);
       if (showLoader) {
         setAccessProgress(100);
@@ -167,6 +195,13 @@ export default function Plans() {
   }
 
   const handleSubscribe = (planId: string) => {
+    if (!isOnline) {
+      setAccessNotice({
+        type: 'info',
+        message: 'You are offline. Your current plan remains active from the local cache, but plan changes require internet.',
+      });
+      return;
+    }
     const plan = PLAN_DEFINITIONS.find(p => p.id === planId);
     if (!plan) return;
     setSelectedPlan(plan);
@@ -183,7 +218,13 @@ export default function Plans() {
 
   async function requestTrialApproval() {
     const authId = schoolId || user?.id;
-    if (!authId || !supabase) return;
+    if (!authId || !supabase || !isOnline) {
+      setAccessNotice({
+        type: 'info',
+        message: 'Trial requests require internet so the admin can receive and approve them.',
+      });
+      return;
+    }
     const now = new Date().toISOString();
     await supabase.from('subscriptions').insert({
       id: crypto.randomUUID(),
@@ -236,6 +277,14 @@ Powered by Schofy`;
   const currentCycle = latestReceipt?.billingCycle || null;
   const currentCycleLabel = currentCycle === 'monthly' ? 'Current Monthly' : currentCycle === 'yearly' ? 'Current Yearly' : currentCycle === 'term' ? 'Current Term' : 'Current';
   const canProceedToApp = accessState?.status === 'active' || accessState?.status === 'expiring';
+  const isLocalUnlimitedPlan = currentPlanId === 'local_unlimited' || accessState?.selectedPlanId === 'local_unlimited';
+  const receiptPlan = PLAN_DEFINITIONS.find(p => p.id === latestReceipt?.planId);
+  const cachedRealPlan = !isLocalUnlimitedPlan ? (accessState?.plan || PLAN_DEFINITIONS.find(p => p.id === currentPlanId)) : receiptPlan || null;
+  const displayPlanId = cachedRealPlan?.id || (!isLocalUnlimitedPlan ? currentPlanId : null);
+  const currentPlanName = cachedRealPlan?.name || (isLocalUnlimitedPlan ? 'Desktop Offline Plan' : 'selected');
+  const currentPlanLimit = cachedRealPlan?.studentLimit || 0;
+  const currentPlanLimitLabel = currentPlanLimit >= Number.MAX_SAFE_INTEGER ? 'Unlimited' : currentPlanLimit || 'N/A';
+  const showBackToApp = Boolean(user && isDesktopApp());
 
   return (
     <div className="relative mx-auto min-h-screen w-full max-w-7xl space-y-5 px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-10">
@@ -248,7 +297,7 @@ Powered by Schofy`;
       ) : (
         <div className="rounded-xl border p-4 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800">
           <p className="text-sm font-semibold text-slate-900 dark:text-white">
-            Your account is unlocked! Enjoy features and student limits based on your selected {PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.name} plan below. Real-time cloud sync active across all your devices.
+            Your account is unlocked! Current plan: {currentPlanName}. {isOnline ? 'Plan changes are available online.' : 'You are offline, so plan changes are paused until internet returns.'}
           </p>
         </div>
       )}
@@ -266,6 +315,16 @@ Powered by Schofy`;
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {showBackToApp && (
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              <ArrowLeft size={13} />
+              Back to app
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void loadPlanState(true)}
@@ -278,8 +337,8 @@ Powered by Schofy`;
           {checkingAccess && (
             <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
               <div
-                className="h-full rounded-full bg-emerald-500 transition-all duration-150"
-                style={{ width: `${accessProgress}%` }}
+                className="h-full rounded-full transition-all duration-150"
+                style={{ width: `${accessProgress}%`, backgroundColor: 'var(--solid-emerald)' }}
               />
             </div>
           )}
@@ -287,7 +346,8 @@ Powered by Schofy`;
             <button
               type="button"
               onClick={() => navigate('/')}
-              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+              className="rounded-lg px-3 py-2 text-xs font-semibold text-white brightness-100 transition hover:brightness-110"
+              style={{ backgroundColor: 'var(--solid-emerald)' }}
             >
               Proceed to app
             </button>
@@ -315,6 +375,8 @@ Powered by Schofy`;
         <div className={`rounded-xl border p-4 text-sm font-semibold ${
           accessNotice.type === 'success'
             ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200'
+            : accessNotice.type === 'info'
+              ? 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200'
             : accessNotice.type === 'pending'
               ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200'
               : 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200'
@@ -369,7 +431,7 @@ Powered by Schofy`;
                 accessState.status === 'expiring' ? 'text-amber-900 dark:text-amber-100' :
                 'text-green-900 dark:text-green-100'
               }`}>
-                {PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.name || 'Unknown'} Plan
+                {currentPlanName} Plan
                 {accessState.status === 'expired' && ' — Expired'}
                 {accessState.status === 'expiring' && ` — Expires in ${accessState.daysRemaining} days`}
                 {accessState.status === 'active' && ' — Active'}
@@ -379,7 +441,7 @@ Powered by Schofy`;
                 accessState.status === 'expiring' ? 'text-amber-600 dark:text-amber-400' :
                 'text-green-600 dark:text-green-400'
               }`}>
-                <span>Students: {studentCount}/{PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.studentLimit || 0}</span>
+                <span>Students: {studentCount}/{currentPlanLimitLabel}</span>
                 {accessState.expiryDate && <span>Expires: {new Date(accessState.expiryDate).toLocaleDateString()}</span>}
                 <span className="capitalize">{currentCycle} billing</span>
               </div>
@@ -405,7 +467,7 @@ Powered by Schofy`;
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
         {PLAN_DEFINITIONS.map((plan) => {
           const isAtLimit = !checkPlanLimit(plan.id);
-          const isCurrentPlan = plan.id === currentPlanId && billingCycle === currentCycle;
+          const isCurrentPlan = plan.id === displayPlanId && billingCycle === currentCycle;
           return (
             <div
               key={plan.id}
@@ -481,19 +543,21 @@ Powered by Schofy`;
                   ) : isAtLimit ? (
                     <button
                       onClick={() => { setUpgradeToPlan(plan); setShowUpgradeModal(true); }}
-                      className="w-full py-3 rounded-xl text-sm font-medium bg-red-500 hover:bg-red-600 text-white flex items-center justify-center gap-2"
+                      disabled={!isOnline}
+                      className="w-full py-3 rounded-xl text-sm font-medium bg-red-500 hover:bg-red-600 text-white flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      <AlertTriangle size={16} /> Upgrade Now
+                      <AlertTriangle size={16} /> {isOnline ? 'Upgrade Now' : 'Online required'}
                     </button>
                   ) : (
                     <button
                       onClick={() => handleSubscribe(plan.id)}
+                      disabled={!isOnline}
                       className={`w-full py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-2 ${
                         plan.popular ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' :
                         'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-900 dark:text-white'
-                      }`}
+                      } disabled:cursor-not-allowed disabled:opacity-60`}
                     >
-                      <CreditCard size={16} /> Subscribe
+                      <CreditCard size={16} /> {isOnline ? 'Subscribe' : 'Online required'}
                     </button>
                   )}
                 </div>
@@ -512,11 +576,11 @@ Powered by Schofy`;
           <div className="grid grid-cols-4 gap-3">
             <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg text-center">
               <p className="text-[10px] text-slate-500 dark:text-slate-400">Plan</p>
-              <p className="text-sm font-bold text-slate-900 dark:text-white capitalize">{currentPlanId || 'None'}</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-white capitalize">{currentPlanName || 'None'}</p>
             </div>
             <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg text-center">
               <p className="text-[10px] text-slate-500 dark:text-slate-400">Students</p>
-              <p className="text-sm font-bold text-slate-900 dark:text-white">{studentCount}/{PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.studentLimit || 0}</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-white">{studentCount}/{currentPlanLimitLabel}</p>
             </div>
             <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg text-center">
               <p className="text-[10px] text-slate-500 dark:text-slate-400">Billing</p>
@@ -526,8 +590,8 @@ Powered by Schofy`;
               <p className="text-[10px] text-slate-500 dark:text-slate-400">Amount</p>
               <p className="text-sm font-bold text-slate-900 dark:text-white">
                 ${billingCycle === 'monthly'
-                  ? PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.monthlyPrice ?? 0
-                  : PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.termPrice ?? 0}
+                  ? cachedRealPlan?.monthlyPrice ?? 0
+                  : cachedRealPlan?.termPrice ?? 0}
               </p>
             </div>
           </div>
@@ -902,14 +966,14 @@ Powered by Schofy`;
 
       {accessPopup && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-xl border border-emerald-200 bg-white p-5 text-center shadow-2xl dark:border-emerald-800 dark:bg-slate-900">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+          <div className="w-full max-w-sm rounded-xl border bg-white p-5 text-center shadow-2xl dark:bg-slate-900" style={{ borderColor: 'rgba(45, 163, 45, 0.35)' }}>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: 'rgba(45, 163, 45, 0.12)', color: 'var(--solid-emerald)' }}>
               <Check size={22} />
             </div>
             <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">{accessPopup.title}</h2>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{accessPopup.message}</p>
             {accessPopup.days !== null && (
-              <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+              <p className="mt-3 text-sm font-semibold" style={{ color: 'var(--solid-emerald)' }}>
                 {accessPopup.days} day{accessPopup.days === 1 ? '' : 's'} remaining
               </p>
             )}
@@ -925,7 +989,8 @@ Powered by Schofy`;
                 type="button"
                 onClick={() => navigate('/')}
                 disabled={!accessPopup.canProceed}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-white brightness-100 transition hover:brightness-110 disabled:opacity-60"
+                style={{ backgroundColor: 'var(--solid-emerald)' }}
               >
                 Proceed
               </button>

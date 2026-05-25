@@ -1,14 +1,17 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, shell, session, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, shell, session, safeStorage, dialog } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const http = require('http');
 const fs = require('fs');
 
 let mainWindow;
 let tray;
+let zoomFactor = 1;
 
-const TITLE_BAR_COLOR = '#4F46E5';
-const TITLE_BAR_SYMBOL_COLOR = '#FFFFFF';
-const TITLE_BAR_HEIGHT = 34;
+const ZOOM_FILE = 'schofy-zoom.json';
+const ZOOM_STEP = 0.1;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2;
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -37,9 +40,39 @@ function sanitizeKey(key) {
   return key.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 100);
 }
 
+const ALLOWED_BACKUP_KEYS = new Set([
+  'schofy_session',
+  'schofy_data_cache',
+  'schofy_offline_queue',
+  'schofy_deleted_ids',
+  'schofy_storage_wrapped_key',
+  'schofy_storage_device_secret',
+]);
+
+function isTrustedIpcSender(event) {
+  const url = event?.senderFrame?.url || '';
+  if (!url) return false;
+  if (url.startsWith('file://')) return true;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:'
+      && ['localhost', '127.0.0.1'].includes(parsed.hostname)
+      && parsed.port === '4201';
+  } catch {
+    return false;
+  }
+}
+
+function validateBackupRequest(event, key) {
+  if (!isTrustedIpcSender(event)) throw new Error('Untrusted renderer');
+  const safe = sanitizeKey(String(key || ''));
+  if (!ALLOWED_BACKUP_KEYS.has(safe)) throw new Error('Backup key is not allowed');
+  return safe;
+}
+
 function encryptBackup(data) {
   if (!safeStorage.isEncryptionAvailable()) {
-    return JSON.stringify({ version: 1, encrypted: false, data });
+    throw new Error('OS secure storage is unavailable; refusing to write plaintext backup data.');
   }
 
   return JSON.stringify({
@@ -72,20 +105,85 @@ function getClientAssetPath(fileName) {
     : path.join(__dirname, '../client/public', fileName);
 }
 
+function getZoomFilePath() {
+  return path.join(app.getPath('userData'), ZOOM_FILE);
+}
+
+function loadZoomFactor() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(getZoomFilePath(), 'utf8'));
+    const next = Number(parsed.zoomFactor);
+    if (Number.isFinite(next)) {
+      zoomFactor = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
+    }
+  } catch {
+    zoomFactor = 1;
+  }
+}
+
+function saveZoomFactor() {
+  try {
+    fs.writeFileSync(getZoomFilePath(), JSON.stringify({ zoomFactor }), 'utf8');
+  } catch {
+    // Non-critical preference.
+  }
+}
+
+function zoomPercent() {
+  return Math.round(zoomFactor * 100);
+}
+
+function showZoomPercent() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const percent = zoomPercent();
+  mainWindow.setTitle(`Schofy - School Management System (${percent}%)`);
+  mainWindow.webContents.executeJavaScript(`
+    (() => {
+      const id = 'schofy-zoom-indicator';
+      let el = document.getElementById(id);
+      if (!el) {
+        el = document.createElement('div');
+        el.id = id;
+        el.style.cssText = 'position:fixed;right:18px;top:18px;z-index:2147483647;padding:8px 12px;border-radius:8px;background:rgba(15,23,42,.88);color:white;font:600 13px system-ui,Segoe UI,sans-serif;box-shadow:0 8px 24px rgba(15,23,42,.24);transition:opacity .18s ease;pointer-events:none';
+        document.body.appendChild(el);
+      }
+      el.textContent = 'Zoom ${percent}%';
+      el.style.opacity = '1';
+      clearTimeout(window.__schofyZoomTimer);
+      window.__schofyZoomTimer = setTimeout(() => { el.style.opacity = '0'; }, 1200);
+    })();
+  `).catch(() => {});
+}
+
+function applyZoom(options = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.setZoomFactor(zoomFactor);
+  saveZoomFactor();
+  showZoomPercent();
+  if (options.rebuildMenu !== false) createMenu();
+}
+
+function changeZoom(delta) {
+  zoomFactor = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round((zoomFactor + delta) * 10) / 10));
+  applyZoom();
+}
+
+function resetZoom() {
+  zoomFactor = 1;
+  applyZoom();
+}
+
 function createWindow() {
+  loadZoomFactor();
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1024,
     minHeight: 700,
     title: 'Schofy',
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: TITLE_BAR_COLOR,
-      symbolColor: TITLE_BAR_SYMBOL_COLOR,
-      height: TITLE_BAR_HEIGHT,
-    },
-    backgroundColor: TITLE_BAR_COLOR,
+    frame: true,
+    autoHideMenuBar: true,
+    backgroundColor: '#FFFFFF',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -99,6 +197,22 @@ function createWindow() {
     show: false,
   });
   mainWindow.setMenuBarVisibility(false);
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (!input.control && !input.meta) return;
+    if (input.type !== 'keyDown') return;
+    const key = String(input.key || '');
+    const code = String(input.code || '');
+    if (key === '+' || key === '=' || code === 'Equal' || code === 'NumpadAdd') {
+      event.preventDefault();
+      changeZoom(ZOOM_STEP);
+    } else if (key === '-' || key === '_' || code === 'Minus' || code === 'NumpadSubtract') {
+      event.preventDefault();
+      changeZoom(-ZOOM_STEP);
+    } else if (key === '0' || code === 'Digit0' || code === 'Numpad0') {
+      event.preventDefault();
+      resetZoom();
+    }
+  });
 
   const isDev = process.env.NODE_ENV === 'development';
 
@@ -132,7 +246,7 @@ function createWindow() {
       ? path.join(process.resourcesPath, 'client-dist', 'index.html')
       : path.join(__dirname, '../client/dist/index.html');
 
-    mainWindow.loadFile(indexPath).catch(err => {
+    mainWindow.loadURL(pathToFileURL(indexPath).toString()).catch(err => {
       console.error('Failed to load production file:', err);
       mainWindow.show();
     });
@@ -149,6 +263,7 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
+    applyZoom({ rebuildMenu: false });
     mainWindow.show();
   });
 
@@ -160,6 +275,7 @@ function createWindow() {
 }
 
 function createMenu() {
+  const percent = zoomPercent();
   const template = [
     {
       label: 'File',
@@ -185,9 +301,10 @@ function createMenu() {
         { role: 'forceReload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        { label: `Zoom: ${percent}%`, enabled: false },
+        { label: 'Zoom In', accelerator: 'CommandOrControl+=', click: () => changeZoom(ZOOM_STEP) },
+        { label: 'Zoom Out', accelerator: 'CommandOrControl+-', click: () => changeZoom(-ZOOM_STEP) },
+        { label: 'Reset Zoom', accelerator: 'CommandOrControl+0', click: () => resetZoom() },
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
@@ -261,6 +378,31 @@ ipcMain.handle('open-external', async (_event, url) => {
       throw new Error('Only http and https links can be opened');
     }
 
+    const approvedHosts = new Set([
+      'github.com',
+      'www.github.com',
+      'github-releases.githubusercontent.com',
+      'wa.me',
+      'api.whatsapp.com',
+      'supabase.com',
+      'cloud.supabase.com',
+      'schofy.com',
+      'www.schofy.com',
+    ]);
+
+    if (!approvedHosts.has(parsed.hostname.toLowerCase())) {
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Open Link', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'Open external link?',
+        message: 'This link opens outside Schofy.',
+        detail: parsed.toString(),
+      });
+      if (result.response !== 0) return { success: false, error: 'Open cancelled' };
+    }
+
     await shell.openExternal(parsed.toString());
     return { success: true };
   } catch (error) {
@@ -283,7 +425,10 @@ ipcMain.handle('check-online', async () => {
 
 ipcMain.handle('write-backup', async (event, key, data) => {
   try {
-    const safe = sanitizeKey(key);
+    const safe = validateBackupRequest(event, key);
+    if (typeof data !== 'string' || data.length > 25 * 1024 * 1024) {
+      throw new Error('Invalid backup payload');
+    }
     const filePath = path.join(getBackupDir(), `${safe}.json`);
     fs.writeFileSync(filePath, encryptBackup(data), 'utf8');
     return { success: true };
@@ -295,7 +440,7 @@ ipcMain.handle('write-backup', async (event, key, data) => {
 
 ipcMain.handle('read-backup', async (event, key) => {
   try {
-    const safe = sanitizeKey(key);
+    const safe = validateBackupRequest(event, key);
     const filePath = path.join(getBackupDir(), `${safe}.json`);
     if (!fs.existsSync(filePath)) return null;
     return decryptBackup(fs.readFileSync(filePath, 'utf8'));

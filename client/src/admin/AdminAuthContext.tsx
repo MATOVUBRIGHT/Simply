@@ -2,13 +2,17 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 
 const ADMIN_SESSION_KEY = 'schofy_admin_session';
 
-// Credentials baked in at build time from Vercel env vars.
-// If not set, fallback defaults are used.
-// To change: set VITE_ADMIN_EMAIL and VITE_ADMIN_PASSWORD in Vercel → Settings → Environment Variables, then redeploy.
+// Production credentials are baked in at build time from environment variables.
+// To change them, set VITE_ADMIN_EMAIL and VITE_ADMIN_PASSWORD in your deployment environment, then redeploy.
 const ADMIN_EMAIL = (import.meta.env.VITE_ADMIN_EMAIL as string | undefined)?.trim() || '';
 const ADMIN_PASSWORD = (import.meta.env.VITE_ADMIN_PASSWORD as string | undefined) || '';
+const LOCAL_TEST_ADMIN_EMAIL = 'admin@school.com';
+const LOCAL_TEST_ADMIN_PASSWORD = 'Admin 123';
 
-// Export for debug display on login page (email only, never password)
+function isLocalAdminDemoEnabled() {
+  if (typeof window === 'undefined') return false;
+  return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+}
 
 interface AdminUser {
   email: string;
@@ -34,7 +38,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as AdminUser;
-        // Session expires after 8 hours
+        // Session expires after 8 hours.
         const loginTime = new Date(parsed.loginAt).getTime();
         if (Date.now() - loginTime < 8 * 60 * 60 * 1000) {
           setAdmin(parsed);
@@ -49,22 +53,31 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   function login(email: string, password: string): { success: boolean; error?: string } {
-    if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
-      return { success: false, error: 'Admin login is not configured' };
-    }
+    const normalizedEmail = email.toLowerCase().trim();
+    const configuredEmail = ADMIN_EMAIL.toLowerCase().trim();
+    const configuredMatch = Boolean(ADMIN_EMAIL && ADMIN_PASSWORD)
+      && normalizedEmail === configuredEmail
+      && password === ADMIN_PASSWORD;
+    const localTestMatch = isLocalAdminDemoEnabled()
+      && normalizedEmail === LOCAL_TEST_ADMIN_EMAIL
+      && password === LOCAL_TEST_ADMIN_PASSWORD;
 
-    const emailMatch = email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim();
-    const passMatch = password === ADMIN_PASSWORD;
-
-    if (emailMatch && passMatch) {
+    if (configuredMatch || localTestMatch) {
       const adminUser: AdminUser = {
-        email: email.toLowerCase().trim(),
+        email: normalizedEmail,
         name: 'Super Admin',
         loginAt: new Date().toISOString(),
       };
       setAdmin(adminUser);
       localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(adminUser));
       return { success: true };
+    }
+
+    if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+      return {
+        success: false,
+        error: isLocalAdminDemoEnabled() ? 'Invalid credentials' : 'Admin login is not configured',
+      };
     }
 
     return { success: false, error: 'Invalid credentials' };

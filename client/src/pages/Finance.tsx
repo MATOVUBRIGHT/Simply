@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
-import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight, Building2, Plus, Trash2, Edit, Save, Award, Percent } from 'lucide-react';
+import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight, Building2, Plus, Trash2, Edit, Save, Award, Percent, Printer } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,10 +13,29 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { matchesStudentSearch } from '../utils/studentSearch';
+import { openPrintPreview } from '../utils/printPreview';
+
+function termRank(term: string) {
+  const n = Number(String(term).replace(/[^0-9]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function isBeforeTerm(fee: Pick<Fee, 'term' | 'year'>, term: string, year: string) {
+  const feeYear = Number(fee.year || 0);
+  const selectedYear = Number(year || 0);
+  if (feeYear !== selectedYear) return feeYear < selectedYear;
+  return termRank(fee.term) < termRank(term);
+}
+
+function normalizeImportDate(value: unknown) {
+  if (!value) return '';
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
 
 export default function Finance() {
   const { user, schoolId } = useAuth();
-  const [activeTab, setActiveTab] = useState<'students' | 'invoices' | 'payments' | 'accounts'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'ledger' | 'invoices' | 'payments' | 'accounts'>('students');
   const { addToast } = useToast();
   const { formatMoney } = useCurrency();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -29,18 +48,34 @@ export default function Finance() {
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [duplicateImportRows, setDuplicateImportRows] = useState<Set<number>>(new Set());
   const [isImporting, setIsImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTerm, setFilterTerm] = useState('all');
+  const [filterYear, setFilterYear] = useState('all');
   const [showTermFilter, setShowTermFilter] = useState(false);
   const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
   const [expandedPayments, setExpandedPayments] = useState<Set<string>>(new Set());
+  const [selectedLedgerStudentId, setSelectedLedgerStudentId] = useState<string | null>(null);
   // Payment modal state
   const [payModal, setPayModal] = useState<{ feeId: string; studentId: string; amount: number; studentName: string; description: string } | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState<string>(PaymentMethod.CASH);
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    const student = params.get('student');
+    if (tab === 'ledger' || tab === 'invoices' || tab === 'payments' || tab === 'accounts' || tab === 'students') {
+      setActiveTab(tab);
+    }
+    if (student) {
+      setSelectedLedgerStudentId(student);
+      if (!tab) setActiveTab('ledger');
+    }
+  }, []);
 
   const students = useActiveStudents();
   const sid = schoolId || user?.id || '';
@@ -49,23 +84,34 @@ export default function Finance() {
   const { data: settingsData } = useTableData(sid, 'settings');
   const { data: bursariesData } = useTableData(sid, 'bursaries');
   const { data: discountsData } = useTableData(sid, 'discounts');
+  const settingsMap = useMemo(() => {
+    const obj: Record<string, any> = {};
+    (settingsData as any[]).forEach((s: any) => { obj[s.key] = s.value; });
+    return obj;
+  }, [settingsData]);
 
   // Derive payment accounts from settings
   const bankAccounts = useMemo(() => {
-    const obj: Record<string, string> = {};
-    (settingsData as any[]).forEach((s: any) => { obj[s.key] = s.value; });
     const accounts = [];
     for (const suffix of ['', '2', '3']) {
-      const name = obj[`bankAccountName${suffix}`];
-      const number = obj[`bankAccountNumber${suffix}`];
-      const bank = obj[`bankName${suffix}`];
-      const method = obj[`paymentMethod${suffix}`];
+      const name = settingsMap[`bankAccountName${suffix}`];
+      const number = settingsMap[`bankAccountNumber${suffix}`];
+      const bank = settingsMap[`bankName${suffix}`];
+      const method = settingsMap[`paymentMethod${suffix}`];
       if (name || number || bank) {
         accounts.push({ accountName: name || '', accountNumber: number || '', bankName: bank || '', paymentMethod: method || '' });
       }
     }
     return accounts;
-  }, [settingsData]);
+  }, [settingsMap]);
+  const filteredBankAccounts = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return bankAccounts;
+    return bankAccounts.filter(acc =>
+      [acc.accountName, acc.accountNumber, acc.bankName, acc.paymentMethod]
+        .some(value => String(value || '').toLowerCase().includes(q))
+    );
+  }, [bankAccounts, searchTerm]);
 
   function toggleInvoice(id: string) {
     setExpandedInvoices(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -129,6 +175,69 @@ export default function Finance() {
     exportToExcel(data, 'payments', [{ key: 'studentName' as any, label: 'Student' }, { key: 'purpose' as any, label: 'Purpose' }, { key: 'amount' as any, label: 'Amount' }, { key: 'method' as any, label: 'Method' }, { key: 'date' as any, label: 'Date' }]);
     addToast('Exported Excel', 'success'); setShowExportMenu(false);
   }
+  function getLedgerExportRows() {
+    return ledgerRows.map(row => ({
+      studentName: row.studentName,
+      admissionNo: row.admissionNo,
+      term: ledgerTerm,
+      year: ledgerYear,
+      openingBalance: row.openingBalance,
+      invoiced: row.invoiced,
+      paid: row.paid,
+    closingBalance: row.closingBalance,
+    upfrontCredit: row.upfrontCredit,
+      invoiceCount: row.invoiceCount,
+    }));
+  }
+  function handleExportLedgerCSV() {
+    exportToCSV(getLedgerExportRows(), `fee-ledger-term-${ledgerTerm}-${ledgerYear}`, [
+      { key: 'studentName' as any, label: 'Student' },
+      { key: 'admissionNo' as any, label: 'ID Number' },
+      { key: 'term' as any, label: 'Term' },
+      { key: 'year' as any, label: 'Year' },
+      { key: 'openingBalance' as any, label: 'Opening Balance' },
+      { key: 'invoiced' as any, label: 'Invoiced' },
+      { key: 'paid' as any, label: 'Paid' },
+      { key: 'closingBalance' as any, label: 'Closing Balance' },
+      { key: 'upfrontCredit' as any, label: 'Upfront Credit' },
+      { key: 'invoiceCount' as any, label: 'Invoices' },
+    ]);
+    addToast('Ledger exported CSV', 'success'); setShowExportMenu(false);
+  }
+  function handleExportLedgerExcel() {
+    exportToExcel(getLedgerExportRows(), `fee-ledger-term-${ledgerTerm}-${ledgerYear}`, [
+      { key: 'studentName' as any, label: 'Student' },
+      { key: 'admissionNo' as any, label: 'ID Number' },
+      { key: 'term' as any, label: 'Term' },
+      { key: 'year' as any, label: 'Year' },
+      { key: 'openingBalance' as any, label: 'Opening Balance' },
+      { key: 'invoiced' as any, label: 'Invoiced' },
+      { key: 'paid' as any, label: 'Paid' },
+      { key: 'closingBalance' as any, label: 'Closing Balance' },
+      { key: 'upfrontCredit' as any, label: 'Upfront Credit' },
+      { key: 'invoiceCount' as any, label: 'Invoices' },
+    ]);
+    addToast('Ledger exported Excel', 'success'); setShowExportMenu(false);
+  }
+
+  function handleExportLedgerPDF() {
+    exportToPDF(`Fee Ledger - Term ${ledgerTerm} ${ledgerYear}`, getLedgerExportRows(), [
+      { key: 'studentName', label: 'Student' },
+      { key: 'admissionNo', label: 'ID Number' },
+      { key: 'openingBalance', label: 'Opening Balance' },
+      { key: 'invoiced', label: 'Invoiced' },
+      { key: 'paid', label: 'Paid' },
+      { key: 'closingBalance', label: 'Closing Balance' },
+      { key: 'upfrontCredit', label: 'Upfront Credit' },
+      { key: 'invoiceCount', label: 'Invoices' },
+    ], `fee-ledger-term-${ledgerTerm}-${ledgerYear}`);
+    addToast('Ledger exported PDF', 'success'); setShowExportMenu(false);
+  }
+
+  function handlePrintLedger() {
+    setShowExportMenu(false);
+    window.setTimeout(() => openPrintPreview(`Fee Ledger - Term ${ledgerTerm} ${ledgerYear}`), 50);
+  }
 
   const paymentExpectedFields = [
     { key: 'studentName', label: 'Student Name', required: true },
@@ -154,6 +263,7 @@ export default function Finance() {
   function closeImportModal() {
     setShowImportModal(false); setImportStep('upload');
     setCsvHeaders([]); setCsvData([]); setFieldMapping({}); setImportPreview([]);
+    setDuplicateImportRows(new Set());
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -195,17 +305,43 @@ export default function Finance() {
       paymentExpectedFields.forEach(f => { const h = fieldMapping[f.key]; if (h) { const i = csvHeaders.indexOf(h); if (i !== -1) rec[f.key] = row[i]; } });
       return rec;
     }).filter(r => r.studentName && r.amount);
+    const duplicateRows = new Set<number>();
+    const seen = new Set<string>();
+    mapped.forEach((record, index) => {
+      const student = students.find(x => matchesStudentSearch(x, record.studentName));
+      const normalizedDate = normalizeImportDate(record.date);
+      const normalizedMethod = String(record.method || PaymentMethod.CASH).toLowerCase();
+      const key = `${student?.id || record.studentName}|${Number(record.amount || 0)}|${normalizedDate}|${normalizedMethod}`;
+      if (seen.has(key)) duplicateRows.add(index);
+      seen.add(key);
+      if (student) {
+        const existing = (payments as Payment[]).some(payment =>
+          payment.studentId === student.id &&
+          Number(payment.amount || 0) === Number(record.amount || 0) &&
+          String(payment.method || '').toLowerCase() === normalizedMethod &&
+          (!normalizedDate || normalizeImportDate(payment.date) === normalizedDate)
+        );
+        if (existing) duplicateRows.add(index);
+      }
+    });
+    setDuplicateImportRows(duplicateRows);
     setImportPreview(mapped); setImportStep('preview');
   }
 
   async function executeImport() {
     const id = schoolId || user?.id;
     if (!importPreview.length || !id) { addToast('No valid records', 'error'); return; }
+    if (importPreview.length - duplicateImportRows.size <= 0) {
+      addToast('All rows are duplicates. Nothing to import.', 'warning');
+      return;
+    }
     setIsImporting(true);
     try {
       let count = 0;
       const now = new Date().toISOString();
-      for (const d of importPreview) {
+      for (let i = 0; i < importPreview.length; i++) {
+        if (duplicateImportRows.has(i)) continue;
+        const d = importPreview[i];
         const s = students.find(x => matchesStudentSearch(x, d.studentName));
         if (!s) continue;
         await dataService.create(id, 'payments', { id: uuidv4(), feeId: '', studentId: s.id, amount: parseFloat(d.amount), method: (d.method as PaymentMethod) || PaymentMethod.CASH, date: d.date || now, createdAt: now } as any);
@@ -232,19 +368,34 @@ export default function Finance() {
   // -- Derived data ------------------------------------------------------------
   const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
   const totalInvoiced = fees.reduce((s, f) => s + f.amount, 0);
-  const totalPending = totalInvoiced - totalCollected;
+  const termOptions = useMemo(() => {
+    const values = Array.from(new Set([settingsMap.currentTerm || '1', ...(fees as Fee[]).map(f => f.term)]
+      .map(value => String(value || '').trim())
+      .filter(Boolean)));
+    return values.sort((a, b) => termRank(a) - termRank(b) || a.localeCompare(b));
+  }, [fees, settingsMap.currentTerm]);
+  const yearOptions = useMemo(() => {
+    const values = Array.from(new Set([settingsMap.academicYear || String(new Date().getFullYear()), ...(fees as Fee[]).map(f => f.year)]
+      .map(value => String(value || '').trim())
+      .filter(Boolean)));
+    return values.sort((a, b) => Number(b) - Number(a) || b.localeCompare(a));
+  }, [fees, settingsMap.academicYear]);
+  const ledgerTerm = String(filterTerm === 'all' ? (settingsMap.currentTerm || termOptions[termOptions.length - 1] || String(new Date().getMonth() < 4 ? 1 : new Date().getMonth() < 8 ? 2 : 3)) : filterTerm);
+  const ledgerYear = String(filterYear === 'all' ? (settingsMap.academicYear || yearOptions[0] || String(new Date().getFullYear())) : filterYear);
   const bursaryByStudent = useMemo(() => {
     const map = new Map<string, { amount: number; isFull: boolean; count: number }>();
     (bursariesData as any[]).forEach((b: any) => {
+      if (String(b.term) !== String(ledgerTerm) || String(b.year) !== String(ledgerYear)) return;
       const current = map.get(b.studentId) || { amount: 0, isFull: false, count: 0 };
       map.set(b.studentId, { amount: current.amount + Number(b.amount || 0), isFull: current.isFull || Boolean(b.isFull), count: current.count + 1 });
     });
     return map;
-  }, [bursariesData]);
+  }, [bursariesData, ledgerTerm, ledgerYear]);
   const discountByStudent = useMemo(() => {
     const map = new Map<string, { amount: number; percentage: number; count: number }>();
     (discountsData as any[]).forEach((d: any) => {
       if (!d.studentId) return;
+      if (String(d.term) !== String(ledgerTerm) || String(d.year) !== String(ledgerYear)) return;
       const current = map.get(d.studentId) || { amount: 0, percentage: 0, count: 0 };
       map.set(d.studentId, {
         amount: current.amount + (d.type === 'percentage' ? 0 : Number(d.amount || 0)),
@@ -253,18 +404,105 @@ export default function Finance() {
       });
     });
     return map;
-  }, [discountsData]);
+  }, [discountsData, ledgerTerm, ledgerYear]);
   const studentsOnBursary = students.filter(s => bursaryByStudent.has(s.id)).length;
   const studentsWithDiscount = students.filter(s => discountByStudent.has(s.id)).length;
 
+  const formatDiscountTag = (discount?: { amount: number; percentage: number; count: number }) => {
+    if (!discount) return '';
+    if (discount.percentage > 0 && discount.amount > 0) return `${discount.percentage}% + ${formatMoney(discount.amount)}`;
+    if (discount.percentage > 0) return `${discount.percentage}%`;
+    return formatMoney(discount.amount);
+  };
+
+  const renderFinanceTags = (bursary?: { amount: number; isFull: boolean; count: number }, discount?: { amount: number; percentage: number; count: number }) => {
+    if (!bursary && !discount) return <span className="text-slate-400 text-sm">-</span>;
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {bursary?.isFull && <span className="badge badge-success text-[10px]">Full bursary</span>}
+        {bursary && !bursary.isFull && <span className="badge badge-warning text-[10px]">Bursary {formatMoney(bursary.amount)}</span>}
+        {discount && <span className="badge badge-info text-[10px]">Discount {formatDiscountTag(discount)}</span>}
+      </div>
+    );
+  };
+
+  const getPayableAmount = (
+    amount: number,
+    bursary?: { amount: number; isFull: boolean; count: number },
+    discount?: { amount: number; percentage: number; count: number }
+  ) => {
+    if (bursary?.isFull) return 0;
+    const percent = Math.min(100, Math.max(0, discount?.percentage || 0));
+    const afterPercent = Math.max(0, amount - (amount * percent) / 100);
+    return Math.max(0, afterPercent - (discount?.amount || 0) - (bursary?.amount || 0));
+  };
+
+  const getStudentTermBreakdown = (studentId: string) => {
+    const studentFees = (fees as Fee[]).filter(f => f.studentId === studentId);
+    const previousFees = studentFees.filter(f => isBeforeTerm(f, ledgerTerm, ledgerYear));
+    const currentFees = studentFees.filter(f => String(f.term) === String(ledgerTerm) && String(f.year) === String(ledgerYear));
+    const previousFeeIds = new Set(previousFees.map(f => f.id));
+    const currentFeeIds = new Set(currentFees.map(f => f.id));
+    const previousInvoiced = previousFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+    const previousPaid = (payments as Payment[])
+      .filter(p => previousFeeIds.has(p.feeId))
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const currentInvoiced = currentFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+    const currentPaid = (payments as Payment[])
+      .filter(p => currentFeeIds.has(p.feeId))
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const bursary = bursaryByStudent.get(studentId);
+    const discount = discountByStudent.get(studentId);
+    const hasFullBursary = Boolean(bursary?.isFull);
+    const openingPayable = previousInvoiced;
+    const currentPayable = getPayableAmount(currentInvoiced, bursary, discount);
+    const openingBalance = Math.max(0, openingPayable - previousPaid);
+    const openingCredit = Math.max(0, previousPaid - openingPayable);
+    const effectiveCurrentPaid = hasFullBursary ? Math.max(currentPaid, currentInvoiced) : currentPaid;
+    const closingBalance = Math.max(0, openingBalance + currentPayable - currentPaid - openingCredit);
+    const upfrontCredit = hasFullBursary ? 0 : Math.max(0, openingCredit + currentPaid - currentPayable);
+    return {
+      previousFees,
+      currentFees,
+      previousInvoiced,
+      previousPaid,
+      currentInvoiced,
+      currentPayable,
+      currentPaid,
+      effectiveCurrentPaid,
+      openingBalance,
+      closingBalance,
+      upfrontCredit,
+      bursary,
+      discount,
+      hasFullBursary,
+    };
+  };
+
   const studentFinanceSummary = students.map(student => {
-    const sf = fees.filter(f => f.studentId === student.id);
-    const inv = sf.reduce((a, f) => a + f.amount, 0);
-    const paid = payments.filter(p => p.feeId ? sf.some(f => f.id === p.feeId) : p.studentId === student.id).reduce((a, p) => a + p.amount, 0);
-    const bursary = bursaryByStudent.get(student.id);
-    const discount = discountByStudent.get(student.id);
-    return { id: student.id, studentName: `${student.firstName} ${student.lastName}`, studentId: student.studentId, totalInvoiced: inv, totalPaid: paid, balance: inv - paid, invoiceCount: sf.length, isCleared: sf.length > 0 && inv - paid <= 0, bursary, discount };
-  }).filter(s => filterTerm === 'all' ? s.invoiceCount > 0 : s.invoiceCount > 0);
+    const breakdown = getStudentTermBreakdown(student.id);
+    const hasActivity = breakdown.currentFees.length > 0 || breakdown.openingBalance > 0 || breakdown.currentPaid > 0;
+    return {
+      id: student.id,
+      studentName: `${student.firstName} ${student.lastName}`,
+      studentId: student.studentId,
+      totalInvoiced: breakdown.currentInvoiced,
+      openingBalance: breakdown.openingBalance,
+      payable: breakdown.currentPayable,
+      totalPaid: breakdown.effectiveCurrentPaid,
+      actualPaid: breakdown.currentPaid,
+      balance: breakdown.closingBalance,
+      upfrontCredit: breakdown.upfrontCredit,
+      invoiceCount: breakdown.currentFees.length,
+      isCleared: hasActivity && (breakdown.hasFullBursary || breakdown.closingBalance <= 0),
+      hasCurrentInvoice: breakdown.currentFees.length > 0,
+      bursary: breakdown.bursary,
+      discount: breakdown.discount,
+      hasFullBursary: breakdown.hasFullBursary,
+    };
+  }).filter(s => s.invoiceCount > 0 || s.openingBalance > 0 || s.totalPaid > 0);
+
+  const totalPending = studentFinanceSummary.reduce((sum, s) => sum + s.balance, 0);
 
   const filteredStudentFinance = studentFinanceSummary.filter(s => {
     const student = students.find(x => x.id === s.id);
@@ -273,17 +511,28 @@ export default function Finance() {
 
   // Group fees by student for Invoices tab
   const invoicesByStudent = students.map(student => {
-    const sf = fees.filter(f => {
-      const q = searchTerm.toLowerCase();
-      const matchSearch = !q || matchesStudentSearch(student, q) || f.description.toLowerCase().includes(q);
-      const matchTerm = filterTerm === 'all' || f.term === filterTerm;
-      return f.studentId === student.id && matchSearch && matchTerm;
-    });
-    if (sf.length === 0) return null;
-    const totalInv = sf.reduce((a, f) => a + f.amount, 0);
-    const totalPaid = sf.reduce((a, f) => a + payments.filter(p => p.feeId === f.id).reduce((x, p) => x + p.amount, 0), 0);
-    return { student, fees: sf, totalInv, totalPaid, balance: totalInv - totalPaid };
-  }).filter(Boolean) as { student: any; fees: Fee[]; totalInv: number; totalPaid: number; balance: number }[];
+    const q = searchTerm.toLowerCase();
+    const breakdown = getStudentTermBreakdown(student.id);
+    const sf = breakdown.currentFees.filter(f => !q || matchesStudentSearch(student, q) || f.description.toLowerCase().includes(q));
+    const matchStudent = !q || matchesStudentSearch(student, q);
+    if (sf.length === 0 && !breakdown.openingBalance && !matchStudent) return null;
+    if (sf.length === 0 && breakdown.openingBalance <= 0) return null;
+    return {
+      student,
+      fees: sf,
+      openingBalance: breakdown.openingBalance,
+      totalInv: breakdown.currentInvoiced,
+      payable: breakdown.currentPayable,
+      totalPaid: breakdown.effectiveCurrentPaid,
+      actualPaid: breakdown.currentPaid,
+      balance: breakdown.closingBalance,
+      upfrontCredit: breakdown.upfrontCredit,
+      bursary: breakdown.bursary,
+      discount: breakdown.discount,
+      hasFullBursary: breakdown.hasFullBursary,
+      hasCurrentInvoice: breakdown.currentFees.length > 0,
+    };
+  }).filter(Boolean) as { student: any; fees: Fee[]; openingBalance: number; totalInv: number; payable: number; totalPaid: number; actualPaid: number; balance: number; upfrontCredit: number; bursary?: { amount: number; isFull: boolean; count: number }; discount?: { amount: number; percentage: number; count: number }; hasFullBursary: boolean; hasCurrentInvoice: boolean }[];
 
   // Group payments by student for Payments tab
   const paymentsByStudent = students.map(student => {
@@ -298,8 +547,86 @@ export default function Finance() {
     return { student, payments: sorted, total };
   }).filter(Boolean) as { student: any; payments: Payment[]; total: number }[];
 
+  const ledgerRows = useMemo(() => {
+    return students.map(student => {
+      const studentFees = (fees as Fee[]).filter(f => f.studentId === student.id);
+      const previousFees = studentFees.filter(f => isBeforeTerm(f, ledgerTerm, ledgerYear));
+      const currentFees = studentFees.filter(f => String(f.term) === String(ledgerTerm) && String(f.year) === String(ledgerYear));
+      const previousFeeIds = new Set(previousFees.map(f => f.id));
+      const currentFeeIds = new Set(currentFees.map(f => f.id));
+      const openingInvoiced = previousFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+      const openingPaid = (payments as Payment[])
+        .filter(p => previousFeeIds.has(p.feeId))
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const invoiced = currentFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+      const paid = (payments as Payment[])
+        .filter(p => currentFeeIds.has(p.feeId))
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const bursary = bursaryByStudent.get(student.id);
+      const discount = discountByStudent.get(student.id);
+      const hasFullBursary = Boolean(bursary?.isFull);
+      const adjustments = (bursary?.amount || 0) + (discount?.amount || 0);
+      const openingPayable = openingInvoiced;
+      const currentPayable = getPayableAmount(invoiced, bursary, discount);
+      const openingBalance = Math.max(0, openingPayable - openingPaid);
+      const openingCredit = Math.max(0, openingPaid - openingPayable);
+      const effectivePaid = hasFullBursary ? Math.max(paid, invoiced) : paid;
+      const closingBalance = Math.max(0, openingBalance + currentPayable - paid - openingCredit);
+      const upfrontCredit = hasFullBursary ? 0 : Math.max(0, openingCredit + paid - currentPayable);
+      const lastFee = [...studentFees].sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime())[0];
+      return {
+        student,
+        studentName: `${student.firstName} ${student.lastName}`,
+        admissionNo: student.admissionNo || student.studentId || '',
+        openingBalance,
+        invoiced,
+        payable: currentPayable,
+        paid: effectivePaid,
+        adjustments,
+        closingBalance,
+        upfrontCredit,
+        invoiceCount: currentFees.length,
+        lastActivity: lastFee?.createdAt || '',
+        bursary,
+        discount,
+        hasFullBursary,
+      };
+    }).filter(row => {
+      const matchesSearch = matchesStudentSearch(row.student, searchTerm);
+      const hasLedgerActivity = row.openingBalance > 0 || row.invoiced > 0 || row.paid > 0 || row.closingBalance > 0;
+      return matchesSearch && hasLedgerActivity;
+    });
+  }, [students, fees, payments, ledgerTerm, ledgerYear, bursaryByStudent, discountByStudent, searchTerm]);
+
+  const ledgerTotals = useMemo(() => ledgerRows.reduce((acc, row) => ({
+    openingBalance: acc.openingBalance + row.openingBalance,
+    invoiced: acc.invoiced + row.invoiced,
+    paid: acc.paid + row.paid,
+    closingBalance: acc.closingBalance + row.closingBalance,
+    upfrontCredit: acc.upfrontCredit + row.upfrontCredit,
+  }), { openingBalance: 0, invoiced: 0, paid: 0, closingBalance: 0, upfrontCredit: 0 }), [ledgerRows]);
+
+  const selectedLedgerRow = selectedLedgerStudentId ? ledgerRows.find(row => row.student.id === selectedLedgerStudentId) : null;
+  const selectedLedgerPreviousFees = selectedLedgerStudentId
+    ? (fees as Fee[])
+        .filter(f => f.studentId === selectedLedgerStudentId && isBeforeTerm(f, ledgerTerm, ledgerYear))
+        .sort((a, b) => Number(a.year || 0) - Number(b.year || 0) || termRank(a.term) - termRank(b.term))
+    : [];
+  const selectedLedgerCurrentFees = selectedLedgerStudentId
+    ? (fees as Fee[])
+        .filter(f => f.studentId === selectedLedgerStudentId && String(f.term) === String(ledgerTerm) && String(f.year) === String(ledgerYear))
+        .sort((a, b) => new Date(a.createdAt || '').getTime() - new Date(b.createdAt || '').getTime())
+    : [];
+  const selectedLedgerFees = [...selectedLedgerPreviousFees, ...selectedLedgerCurrentFees];
+  const selectedLedgerPayments = selectedLedgerStudentId
+    ? (payments as Payment[])
+        .filter(p => p.studentId === selectedLedgerStudentId || selectedLedgerFees.some(f => f.id === p.feeId))
+        .sort((a, b) => new Date(a.date || '').getTime() - new Date(b.date || '').getTime())
+    : [];
+
   const tabs = [
     { id: 'students', label: 'Students', icon: Users },
+    { id: 'ledger', label: 'Ledger', icon: FileText },
     { id: 'invoices', label: 'Invoices', icon: FileText },
     { id: 'payments', label: 'Payments', icon: Receipt },
     { id: 'accounts', label: 'Accounts', icon: Building2 },
@@ -314,7 +641,7 @@ export default function Finance() {
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Track fees, invoices, and payments</p>
         </div>
         <div className="flex items-center gap-2">
-          {(activeTab === 'invoices' || activeTab === 'payments') && (
+          {!selectedLedgerRow && (activeTab === 'ledger' || activeTab === 'invoices' || activeTab === 'payments') && (
             <div className="relative" ref={exportMenuRef}>
               <button onClick={() => setShowExportMenu(!showExportMenu)} className="btn btn-secondary">
                 <Download size={16} /><span className="hidden sm:inline">Export</span>
@@ -330,11 +657,17 @@ export default function Finance() {
                     <button onClick={handleExportPaymentsCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Download size={14} />Export CSV</button>
                     <button onClick={handleExportPaymentsExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export Excel</button>
                   </>}
+                  {activeTab === 'ledger' && <>
+                    <button onClick={handleExportLedgerCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Download size={14} />Export CSV</button>
+                    <button onClick={handleExportLedgerExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export Excel</button>
+                    <button onClick={handleExportLedgerPDF} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} />Export PDF</button>
+                    <button onClick={handlePrintLedger} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Printer size={14} />Print Ledger</button>
+                  </>}
                 </div>
               )}
             </div>
           )}
-          {activeTab === 'payments' && (
+          {!selectedLedgerRow && activeTab === 'payments' && (
             <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary">
               <Upload size={16} /><span className="hidden sm:inline">Import</span>
             </button>
@@ -344,7 +677,7 @@ export default function Finance() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
+      {activeTab === 'students' && <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
         <div className="card-solid-emerald p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Receipt size={24} className="text-white" /></div>
@@ -381,46 +714,76 @@ export default function Finance() {
             <div><p className="text-sm font-medium text-white/80">With Discount</p><p className="text-2xl font-bold text-white">{studentsWithDiscount}</p></div>
           </div>
         </div>
+      </div>}
+
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-500">{activeTab === 'ledger' ? `Term ${ledgerTerm} ${ledgerYear}` : 'Finance'}</p>
+          <h2 className="mt-0.5 text-xl font-bold text-slate-800 dark:text-white">
+            {selectedLedgerRow ? selectedLedgerRow.studentName : tabs.find(tab => tab.id === activeTab)?.label || 'Students'}
+          </h2>
+          {selectedLedgerRow && <p className="mt-0.5 text-sm text-slate-500">{selectedLedgerRow.admissionNo || 'No ID'}</p>}
+        </div>
       </div>
 
-      {/* Main Card */}
-      <div className="card">
-        <div className="card-header">
-          <div className="flex flex-wrap gap-4 items-center justify-between">
-            <div className="flex gap-2 flex-wrap">
-              {tabs.map(tab => (
+      {/* Finance pages */}
+      <div className={activeTab === 'students' ? 'card' : 'space-y-3'}>
+        <div className={activeTab === 'students' ? 'card-header' : ''}>
+          <div className={`flex gap-2 items-center justify-between ${activeTab === 'ledger' && !selectedLedgerRow ? 'flex-nowrap' : 'flex-wrap'}`}>
+            <div className={`flex gap-2 ${activeTab === 'ledger' && !selectedLedgerRow ? 'flex-nowrap overflow-x-auto' : 'flex-wrap'}`}>
+              {selectedLedgerRow ? (
+                <button onClick={() => setSelectedLedgerStudentId(null)} className="btn btn-secondary">
+                  <ArrowRight size={16} className="rotate-180" /> Back to Ledger
+                </button>
+              ) : tabs.map(tab => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}>
                   <tab.icon size={16} />{tab.label}
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2 shrink-0 flex-wrap">
-              {activeTab === 'invoices' && (
+            <div className={`flex items-center gap-2 shrink-0 ${activeTab === 'ledger' && !selectedLedgerRow ? 'flex-nowrap' : 'flex-wrap'}`}>
+              {!selectedLedgerRow && (activeTab === 'ledger' || activeTab === 'invoices') && (
                 <div className="relative" ref={termFilterRef}>
                   <button onClick={() => setShowTermFilter(!showTermFilter)}
                     className="btn btn-secondary flex items-center gap-2">
                     <Filter size={16} />
-                    <span className="hidden sm:inline">{filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}</span>
+                    <span className="hidden sm:inline">{activeTab === 'ledger' ? `Term ${ledgerTerm}` : filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}</span>
                     <ChevronDown size={14} className={`transition-transform ${showTermFilter ? 'rotate-180' : ''}`} />
                   </button>
                   {showTermFilter && (
                     <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden">
-                      {['all', '1', '2', '3'].map(t => (
+                      {(activeTab === 'ledger' ? (termOptions.length ? termOptions : ['1', '2', '3']) : ['all', '1', '2', '3']).map(t => (
                         <button key={t} onClick={() => { setFilterTerm(t); setShowTermFilter(false); }}
-                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${filterTerm === t ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${(activeTab === 'ledger' ? ledgerTerm === t : filterTerm === t) ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
                           {t === 'all' ? 'All Terms' : `Term ${t}`}
-                          {filterTerm === t && <Check size={14} className="ml-auto" />}
+                          {(activeTab === 'ledger' ? ledgerTerm === t : filterTerm === t) && <Check size={14} className="ml-auto" />}
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
               )}
-              <div className="relative">
+              {!selectedLedgerRow && activeTab === 'ledger' && (
+                <select
+                  value={filterYear}
+                  onChange={e => setFilterYear(e.target.value)}
+                  className="form-input form-select relative z-[70] w-28 py-2 text-sm"
+                >
+                  {(yearOptions.length ? yearOptions : [String(new Date().getFullYear())]).map(year => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                </select>
+              )}
+              {activeTab === 'ledger' && (
+                <button onClick={handlePrintLedger} className="btn btn-secondary">
+                  <Printer size={16} /> Print
+                </button>
+              )}
+              {!selectedLedgerRow && <div className="relative shrink-0">
                 <Search size={18} className="search-input-icon" />
                 <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search..." className="search-input w-48" />
-              </div>
+              </div>}
             </div>
           </div>
         </div>
@@ -429,26 +792,29 @@ export default function Finance() {
         {activeTab === 'students' && (
           <div className="table-container">
             <table>
-              <thead><tr><th>Student</th><th>ID Number</th><th>Invoices</th><th>Bursary</th><th>Discount</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></tr></thead>
+              <thead><tr><th>No.</th><th>Student</th><th>ID Number</th><th>Invoices</th><th>Tags</th><th>Last Term</th><th>Current Invoiced</th><th>Payable</th><th>Total Paid</th><th>Upfront Credit</th><th>Balance</th><th>Status</th></tr></thead>
               <tbody>
                 {filteredStudentFinance.length === 0 ? (
-                  <tr><td colSpan={9} className="text-center py-12">
+                  <tr><td colSpan={12} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><Users size={24} className="text-violet-400" /></div>
                       <p className="text-slate-500 font-medium">No invoiced students</p>
                     </div>
                   </td></tr>
-                ) : filteredStudentFinance.map(s => (
+                ) : filteredStudentFinance.map((s, index) => (
                   <tr key={s.id}>
+                    <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                     <td className="font-medium">{s.studentName}</td>
                     <td className="text-slate-500">{s.studentId}</td>
                     <td><span className="badge badge-info">{s.invoiceCount}</span></td>
-                    <td>{s.bursary ? <span className="badge badge-warning">{s.bursary.isFull ? 'Full bursary' : formatMoney(s.bursary.amount)}</span> : <span className="text-slate-400 text-sm">-</span>}</td>
-                    <td>{s.discount ? <span className="badge badge-info">{s.discount.percentage > 0 ? `${s.discount.percentage}%` : formatMoney(s.discount.amount)}</span> : <span className="text-slate-400 text-sm">-</span>}</td>
+                    <td>{renderFinanceTags(s.bursary, s.discount)}</td>
+                    <td>{s.openingBalance > 0 ? <span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">Last term {formatMoney(s.openingBalance)}</span> : <span className="text-slate-400 text-sm">-</span>}</td>
                     <td className="font-semibold">{formatMoney(s.totalInvoiced)}</td>
+                    <td className="font-semibold text-indigo-600 dark:text-indigo-300">{formatMoney(s.payable)}</td>
                     <td className="text-emerald-600 font-semibold">{formatMoney(s.totalPaid)}</td>
+                    <td>{s.upfrontCredit > 0 ? <span className="badge badge-success">{formatMoney(s.upfrontCredit)}</span> : <span className="text-slate-400 text-sm">-</span>}</td>
                     <td className={s.balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>{formatMoney(s.balance)}</td>
-                    <td>{s.isCleared ? <span className="badge badge-success">Cleared</span> : s.balance > 0 ? <span className="badge badge-danger">Balance: {formatMoney(s.balance)}</span> : <span className="badge badge-warning">No Invoice</span>}</td>
+                    <td>{!s.hasCurrentInvoice && s.openingBalance > 0 ? <span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">Last term balance</span> : s.hasFullBursary ? <span className="badge badge-success">Paid</span> : s.isCleared ? <span className="badge badge-success">Cleared</span> : s.balance > 0 ? <span className="badge badge-danger">Balance: {formatMoney(s.balance)}</span> : <span className="badge badge-warning">No Invoice</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -456,51 +822,264 @@ export default function Finance() {
           </div>
         )}
 
+        {/* Ledger Tab - term statement with opening and closing balance */}
+        {activeTab === 'ledger' && (
+          <div className="space-y-3 print-area">
+            {selectedLedgerRow ? (
+              <div className="mx-auto max-w-5xl rounded-sm border border-slate-200 bg-white p-6 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 print:border-0 print:bg-white print:p-0 print:text-black print:shadow-none">
+                <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between dark:border-slate-700">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-400">Student Ledger Statement</p>
+                    <h3 className="mt-1 text-2xl font-bold">{selectedLedgerRow.studentName}</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">ID: {selectedLedgerRow.admissionNo || '-'} | Term {ledgerTerm}, {ledgerYear}</p>
+                  </div>
+                  <div className="text-left text-sm sm:text-right">
+                    <p className="font-semibold">Schofy Finance</p>
+                    <p className="text-slate-500 dark:text-slate-400">Printed {new Date().toLocaleDateString()}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-slate-700 dark:bg-slate-700 sm:grid-cols-5">
+                  {[
+                    { label: 'Opening Balance', value: selectedLedgerRow.openingBalance, color: selectedLedgerRow.openingBalance > 0 ? 'text-pink-600' : 'text-slate-700 dark:text-slate-200' },
+                    { label: 'Current Invoiced', value: selectedLedgerRow.invoiced, color: 'text-indigo-600 dark:text-indigo-300' },
+                    { label: 'Current Paid', value: selectedLedgerRow.paid, color: 'text-emerald-600 dark:text-emerald-300' },
+                    { label: 'Closing Balance', value: selectedLedgerRow.closingBalance, color: selectedLedgerRow.closingBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300' },
+                    { label: 'Upfront Credit', value: selectedLedgerRow.upfrontCredit, color: 'text-emerald-600 dark:text-emerald-300' },
+                  ].map(item => (
+                    <div key={item.label} className="bg-white p-3 dark:bg-slate-900 print:bg-white">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
+                      <p className={`mt-1 text-lg font-bold tabular-nums ${item.color}`}>{formatMoney(item.value)}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6 space-y-6">
+                  <section>
+                    <h4 className="mb-2 text-sm font-bold uppercase tracking-wide text-pink-600 dark:text-pink-300">Previous Term Balance Details</h4>
+                    <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 dark:bg-slate-800">
+                          <tr><th>No.</th><th>Description</th><th>Term</th><th className="text-right">Amount</th><th className="text-right">Paid</th><th className="text-right">Balance</th></tr>
+                        </thead>
+                        <tbody>
+                          {selectedLedgerPreviousFees.length === 0 ? (
+                            <tr><td colSpan={6} className="py-6 text-center text-slate-500">No previous term balance.</td></tr>
+                          ) : selectedLedgerPreviousFees.map((fee, index) => {
+                            const paid = selectedLedgerPayments.filter(p => p.feeId === fee.id).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                            const balance = Math.max(0, Number(fee.amount || 0) - paid);
+                            return (
+                              <tr key={fee.id}>
+                                <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
+                                <td className="font-medium">{fee.description}</td>
+                                <td>Term {fee.term}, {fee.year}</td>
+                                <td className="text-right font-semibold tabular-nums">{formatMoney(fee.amount)}</td>
+                                <td className="text-right tabular-nums text-emerald-600">{formatMoney(paid)}</td>
+                                <td className="text-right font-semibold tabular-nums text-pink-600 dark:text-pink-300">{formatMoney(balance)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h4 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Current Term Fees List</h4>
+                    <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 dark:bg-slate-800">
+                          <tr><th>No.</th><th>Fee</th><th>Term</th><th className="text-right">Amount</th><th className="text-right">Paid</th><th className="text-right">Balance</th></tr>
+                        </thead>
+                        <tbody>
+                          {selectedLedgerCurrentFees.length === 0 ? (
+                            <tr><td colSpan={6} className="py-6 text-center text-slate-500">No current term fees yet.</td></tr>
+                          ) : selectedLedgerCurrentFees.map((fee, index) => {
+                            const paid = selectedLedgerPayments.filter(p => p.feeId === fee.id).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                            const balance = Math.max(0, Number(fee.amount || 0) - paid);
+                            return (
+                              <tr key={fee.id}>
+                                <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
+                                <td className="font-medium">{fee.description}</td>
+                                <td>Term {fee.term}, {fee.year}</td>
+                                <td className="text-right font-semibold tabular-nums">{formatMoney(fee.amount)}</td>
+                                <td className="text-right tabular-nums text-emerald-600">{formatMoney(paid)}</td>
+                                <td className={`text-right font-semibold tabular-nums ${balance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatMoney(balance)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h4 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Payment Activity</h4>
+                    <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 dark:bg-slate-800">
+                          <tr><th>No.</th><th>Date</th><th>Method</th><th>Reference</th><th className="text-right">Amount</th></tr>
+                        </thead>
+                        <tbody>
+                          {selectedLedgerPayments.length === 0 ? (
+                            <tr><td colSpan={5} className="py-6 text-center text-slate-500">No payment activity.</td></tr>
+                          ) : selectedLedgerPayments.map((payment, index) => (
+                            <tr key={payment.id}>
+                              <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
+                              <td>{payment.date ? new Date(payment.date).toLocaleDateString() : '-'}</td>
+                              <td className="capitalize">{payment.method?.replace('_', ' ') || 'payment'}</td>
+                              <td>{payment.reference || '-'}</td>
+                              <td className="text-right font-semibold tabular-nums text-emerald-600">{formatMoney(payment.amount)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            ) : (
+              <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Opening Balance</p>
+                <p className="mt-1 text-lg font-bold tabular-nums text-slate-900 dark:text-white">{formatMoney(ledgerTotals.openingBalance)}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invoiced</p>
+                <p className="mt-1 text-lg font-bold tabular-nums text-indigo-600 dark:text-indigo-300">{formatMoney(ledgerTotals.invoiced)}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Paid</p>
+                <p className="mt-1 text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-300">{formatMoney(ledgerTotals.paid)}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Closing Balance</p>
+                <p className={`mt-1 text-lg font-bold tabular-nums ${ledgerTotals.closingBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300'}`}>{formatMoney(ledgerTotals.closingBalance)}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Upfront Credit</p>
+                <p className="mt-1 text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-300">{formatMoney(ledgerTotals.upfrontCredit)}</p>
+              </div>
+            </div>
+
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>No.</th>
+                    <th>Student</th>
+                    <th>ID Number</th>
+                    <th className="text-right">Opening Balance</th>
+                    <th className="text-right">Invoiced</th>
+                    <th className="text-right">Payable</th>
+                    <th className="text-right">Paid</th>
+                    <th className="text-right">Closing Balance</th>
+                    <th className="text-right">Upfront Credit</th>
+                    <th>Invoices</th>
+                    <th>Tags</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ledgerRows.length === 0 ? (
+                    <tr><td colSpan={13} className="text-center py-12">
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="w-12 h-12 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center"><FileText size={24} className="text-indigo-400" /></div>
+                        <p className="text-slate-500 font-medium">No ledger activity for Term {ledgerTerm} {ledgerYear}</p>
+                        <p className="text-sm text-slate-400">Invoices from previous terms appear here as opening balances.</p>
+                      </div>
+                    </td></tr>
+                  ) : ledgerRows.map((row, index) => (
+                    <tr key={row.student.id} onClick={() => setSelectedLedgerStudentId(row.student.id)} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
+                      <td className="font-medium">{row.studentName}</td>
+                      <td className="text-slate-500">{row.admissionNo || '-'}</td>
+                      <td className={`text-right tabular-nums ${row.openingBalance > 0 ? 'font-semibold text-amber-600' : 'text-slate-500'}`}>{formatMoney(row.openingBalance)}</td>
+                      <td className="text-right tabular-nums font-semibold text-indigo-600 dark:text-indigo-300">{formatMoney(row.invoiced)}</td>
+                      <td className="text-right tabular-nums font-semibold text-indigo-600 dark:text-indigo-300">{formatMoney(row.payable)}</td>
+                      <td className="text-right tabular-nums font-semibold text-emerald-600">{formatMoney(row.paid)}</td>
+                      <td className={`text-right tabular-nums ${row.closingBalance > 0 ? 'font-semibold text-red-600' : 'font-semibold text-emerald-600'}`}>{formatMoney(row.closingBalance)}</td>
+                      <td className="text-right tabular-nums">{row.upfrontCredit > 0 ? <span className="badge badge-success">{formatMoney(row.upfrontCredit)}</span> : <span className="text-slate-400 text-sm">-</span>}</td>
+                      <td><span className="badge badge-info">{row.invoiceCount}</span></td>
+                      <td>{renderFinanceTags(row.bursary, row.discount)}</td>
+                      <td>{row.invoiceCount === 0 && row.openingBalance > 0 ? <span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">Last term balance</span> : row.hasFullBursary ? <span className="badge badge-success">Paid</span> : row.closingBalance <= 0 ? <span className="badge badge-success">Cleared</span> : <span className="badge badge-danger">Balance</span>}</td>
+                      <td><button onClick={(e) => { e.stopPropagation(); setSelectedLedgerStudentId(row.student.id); }} className="btn btn-secondary text-xs py-1.5"><FileText size={12} /> View</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Invoices Tab - one row per student, expandable fee history */}
         {activeTab === 'invoices' && (
           <div className="table-container">
             <table>
-              <thead><tr><th style={{width:'32px'}}></th><th>Student</th><th>Invoices</th><th>Total Invoiced</th><th>Total Paid</th><th>Balance</th><th>Status</th></tr></thead>
+              <thead><tr><th style={{width:'32px'}}></th><th>No.</th><th>Student</th><th>Invoices</th><th>Tags</th><th>Last Term</th><th>Current Total</th><th>Payable</th><th>Total Paid</th><th>Upfront Credit</th><th>Balance</th><th>Status</th></tr></thead>
               <tbody>
                 {invoicesByStudent.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-12">
+                  <tr><td colSpan={12} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><FileText size={24} className="text-violet-400" /></div>
                       <p className="text-slate-500 font-medium">No invoices yet</p>
                     </div>
                   </td></tr>
-                ) : invoicesByStudent.map(({ student, fees: sf, totalInv, totalPaid, balance }) => {
+                ) : invoicesByStudent.map(({ student, fees: sf, openingBalance, totalInv, payable, totalPaid, upfrontCredit, balance, bursary, discount, hasFullBursary, hasCurrentInvoice }, index) => {
                   const isExpanded = expandedInvoices.has(student.id);
-                  const status = balance <= 0 ? 'Paid' : totalPaid > 0 ? 'Partial' : 'Pending';
+                  const status = !hasCurrentInvoice && openingBalance > 0 ? 'Last term' : balance <= 0 ? 'Paid' : totalPaid > 0 ? 'Partial' : 'Pending';
                   const badge: Record<string, string> = { Paid: 'badge-success', Partial: 'badge-warning', Pending: 'badge-danger' };
                   return (
                     <React.Fragment key={student.id}>
                       <tr className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40" onClick={() => toggleInvoice(student.id)}>
                         <td><ChevronRight size={16} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} /></td>
+                        <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                         <td className="font-medium">{student.firstName} {student.lastName}</td>
                         <td><span className="badge badge-info">{sf.length}</span></td>
-                        <td className="font-semibold">{formatMoney(totalInv)}</td>
+                        <td>{renderFinanceTags(bursary, discount)}</td>
+                        <td>{openingBalance > 0 ? <span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">{formatMoney(openingBalance)}</span> : <span className="text-slate-400 text-sm">-</span>}</td>
+                        <td>
+                          <span className="font-semibold">{formatMoney(openingBalance + totalInv)}</span>
+                          {openingBalance > 0 && (
+                            <span className="ml-2 badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300 text-[10px]">
+                              top-up
+                            </span>
+                          )}
+                        </td>
+                        <td className="font-semibold text-indigo-600 dark:text-indigo-300">{formatMoney(payable)}</td>
                         <td className="text-emerald-600 font-semibold">{formatMoney(totalPaid)}</td>
+                        <td>{upfrontCredit > 0 ? <span className="badge badge-success">{formatMoney(upfrontCredit)}</span> : <span className="text-slate-400 text-sm">-</span>}</td>
                         <td className={balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>{formatMoney(balance)}</td>
-                        <td><span className={`badge ${badge[status]}`}>{status}</span></td>
+                        <td><span className={`badge ${status === 'Last term' ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300' : badge[status]}`}>{status}</span></td>
                       </tr>
                       {isExpanded && sf.map(fee => {
-                        const paid = payments.filter(p => p.feeId === fee.id).reduce((a, p) => a + p.amount, 0);
-                        const feeStatus = paid >= fee.amount ? 'Paid' : paid > 0 ? 'Partial' : 'Pending';
+                        const actualPaid = payments.filter(p => p.feeId === fee.id).reduce((a, p) => a + p.amount, 0);
+                        const feePayable = getPayableAmount(fee.amount, bursary, discount);
+                        const paid = hasFullBursary ? Math.max(actualPaid, fee.amount) : actualPaid;
+                        const feeBalance = hasFullBursary ? 0 : Math.max(0, feePayable - actualPaid);
+                        const feeStatus = hasFullBursary || actualPaid >= feePayable ? 'Paid' : actualPaid > 0 ? 'Partial' : 'Pending';
                         return (
                           <tr key={fee.id} className="bg-slate-50/70 dark:bg-slate-800/30">
                             <td></td>
-                            <td colSpan={2} className="pl-8 text-sm text-slate-600 dark:text-slate-300">
-                              <span className="text-slate-400 mr-2">?</span>{fee.description}
+                            <td></td>
+                            <td colSpan={3} className="pl-8 text-sm text-slate-600 dark:text-slate-300">
+                              <Receipt size={12} className="inline mr-2 text-slate-400" />{fee.description}
                               {fee.term && <span className="ml-2 badge badge-info text-[10px]">Term {fee.term}</span>}
+                              {hasFullBursary && <span className="ml-2 badge badge-success text-[10px]">Full bursary</span>}
                             </td>
                             <td className="text-sm">{formatMoney(fee.amount)}</td>
+                            <td className="text-sm text-indigo-600 dark:text-indigo-300">{formatMoney(feePayable)}</td>
                             <td className="text-sm text-emerald-600">{formatMoney(paid)}</td>
-                            <td className={`text-sm ${fee.amount - paid > 0 ? 'text-red-500' : 'text-emerald-600'}`}>{formatMoney(fee.amount - paid)}</td>
+                            <td className="text-sm text-slate-400">-</td>
+                            <td className={`text-sm ${feeBalance > 0 ? 'text-red-500' : 'text-emerald-600'}`}>{formatMoney(feeBalance)}</td>
                             <td>
                               <div className="flex items-center gap-2">
                                 <span className={`badge ${badge[feeStatus]} text-[10px]`}>{feeStatus}</span>
-                                {feeStatus !== 'Paid' && <button onClick={e => { e.stopPropagation(); openPayModal(fee.id, fee.studentId!, fee.amount - paid); }} className="btn btn-secondary text-xs py-1 px-2"><CreditCard size={11} /> Pay</button>}
+                                {feeStatus !== 'Paid' && <button onClick={e => { e.stopPropagation(); openPayModal(fee.id, fee.studentId!, feeBalance); }} className="btn btn-secondary text-xs py-1 px-2"><CreditCard size={11} /> Pay</button>}
                               </div>
                             </td>
                           </tr>
@@ -518,22 +1097,23 @@ export default function Finance() {
         {activeTab === 'payments' && (
           <div className="table-container">
             <table>
-              <thead><tr><th style={{width:'32px'}}></th><th>Student</th><th>Payments</th><th>Total Paid</th><th>Last Payment</th></tr></thead>
+              <thead><tr><th style={{width:'32px'}}></th><th>No.</th><th>Student</th><th>Payments</th><th>Total Paid</th><th>Last Payment</th></tr></thead>
               <tbody>
                 {paymentsByStudent.length === 0 ? (
-                  <tr><td colSpan={5} className="text-center py-12">
+                  <tr><td colSpan={6} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center"><Receipt size={24} className="text-green-400" /></div>
                       <p className="text-slate-500 font-medium">No payments recorded</p>
                     </div>
                   </td></tr>
-                ) : paymentsByStudent.map(({ student, payments: sp, total }) => {
+                ) : paymentsByStudent.map(({ student, payments: sp, total }, index) => {
                   const isExpanded = expandedPayments.has(student.id);
                   const last = sp[0];
                   return (
                     <>
                       <tr key={student.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40" onClick={() => togglePayment(student.id)}>
                         <td><ChevronRight size={16} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} /></td>
+                        <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                         <td className="font-medium">{student.firstName} {student.lastName}</td>
                         <td><span className="badge badge-info">{sp.length}</span></td>
                         <td className="font-bold text-emerald-600 dark:text-emerald-400">{formatMoney(total)}</td>
@@ -545,8 +1125,9 @@ export default function Finance() {
                         return (
                           <tr key={p.id} className="bg-slate-50/70 dark:bg-slate-800/30">
                             <td></td>
+                            <td></td>
                             <td colSpan={2} className="pl-8 text-sm text-slate-600 dark:text-slate-300">
-                              <span className="text-slate-400 mr-2">?</span>
+                              <Receipt size={12} className="inline mr-2 text-slate-400" />
                               <span className="font-medium">{dt.toLocaleDateString()}</span>
                               <span className="text-slate-400 ml-1">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                               {fee && <span className="ml-2 text-slate-500">- {fee.description}</span>}
@@ -564,7 +1145,7 @@ export default function Finance() {
           </div>
         )}
 
-        {/* Accounts Tab — payment accounts embedded on invoices */}
+        {/* Accounts Tab - payment accounts embedded on invoices */}
         {activeTab === 'accounts' && (
           <div className="p-6 space-y-6">
             <div className="flex items-center justify-between">
@@ -577,22 +1158,22 @@ export default function Finance() {
               </a>
             </div>
 
-            {bankAccounts.length === 0 ? (
+            {filteredBankAccounts.length === 0 ? (
               <div className="flex flex-col items-center gap-4 py-16 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl">
                 <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
                   <Building2 size={28} className="text-slate-400" />
                 </div>
                 <div className="text-center">
-                  <p className="font-semibold text-slate-700 dark:text-slate-200">No payment accounts configured</p>
-                  <p className="text-sm text-slate-400 mt-1">Add bank accounts in Settings → Payment Accounts</p>
+                  <p className="font-semibold text-slate-700 dark:text-slate-200">{bankAccounts.length === 0 ? 'No payment accounts configured' : 'No accounts match your search'}</p>
+                  <p className="text-sm text-slate-400 mt-1">{bankAccounts.length === 0 ? 'Add bank accounts in Settings > Payment Accounts' : 'Try another account name, number, bank, or method.'}</p>
                 </div>
-                <a href="/settings" className="btn btn-primary text-sm py-1.5">
+                {bankAccounts.length === 0 && <a href="/settings" className="btn btn-primary text-sm py-1.5">
                   <Plus size={14} /> Add Accounts in Settings
-                </a>
+                </a>}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {bankAccounts.map((acc, i) => (
+                {filteredBankAccounts.map((acc, i) => (
                   <div key={i} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -607,7 +1188,7 @@ export default function Finance() {
                     <div className="mt-4 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-slate-400 uppercase tracking-wider">Account No.</span>
-                        <span className="font-mono text-sm font-bold text-indigo-600 dark:text-indigo-400">{acc.accountNumber || '—'}</span>
+                        <span className="font-mono text-sm font-bold text-indigo-600 dark:text-indigo-400">{acc.accountNumber || '-'}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-slate-400 uppercase tracking-wider">Method</span>
@@ -630,7 +1211,7 @@ export default function Finance() {
                 <div>
                   <p className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">Invoice Integration</p>
                   <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">
-                    All {bankAccounts.length} account{bankAccounts.length > 1 ? 's are' : ' is'} automatically embedded on student invoices in the Payment Details section. To update accounts, go to <a href="/settings" className="underline font-semibold">Settings → Payment Accounts</a>.
+                    All {bankAccounts.length} account{bankAccounts.length > 1 ? 's are' : ' is'} automatically embedded on student invoices in the Payment Details section. To update accounts, go to <a href="/settings" className="underline font-semibold">Settings &gt; Payment Accounts</a>.
                   </p>
                 </div>
               </div>
@@ -697,24 +1278,34 @@ export default function Finance() {
                     <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span><ArrowRight size={12} />
                     <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3 Preview</span>
                   </div>
-                  <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300"><strong>{importPreview.length}</strong> payments ready to import</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
+                      <p className="text-sm text-emerald-700 dark:text-emerald-300"><strong>{importPreview.length - duplicateImportRows.size}</strong> payments available</p>
+                    </div>
+                    <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-2.5">
+                      <p className="text-sm text-amber-700 dark:text-amber-300"><strong>{duplicateImportRows.size}</strong> duplicates skipped</p>
+                    </div>
                   </div>
                   <div className="max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
-                      <thead><tr className="bg-slate-50 dark:bg-slate-700/50"><th className="px-3 py-2 text-left">Student</th><th className="px-3 py-2 text-left">Amount</th><th className="px-3 py-2 text-left">Date</th></tr></thead>
+                      <thead><tr className="bg-slate-50 dark:bg-slate-700/50"><th className="px-3 py-2 text-left">Student</th><th className="px-3 py-2 text-left">Amount</th><th className="px-3 py-2 text-left">Date</th><th className="px-3 py-2 text-left">Status</th></tr></thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {importPreview.slice(0, 10).map((r, i) => (
-                          <tr key={i}><td className="px-3 py-2">{r.studentName}</td><td className="px-3 py-2">{r.amount}</td><td className="px-3 py-2">{r.date}</td></tr>
+                          <tr key={i} className={duplicateImportRows.has(i) ? 'bg-amber-50 dark:bg-amber-900/10' : ''}>
+                            <td className="px-3 py-2">{r.studentName}</td>
+                            <td className="px-3 py-2">{r.amount}</td>
+                            <td className="px-3 py-2">{r.date}</td>
+                            <td className="px-3 py-2">{duplicateImportRows.has(i) ? <span className="badge badge-warning">Duplicate</span> : <span className="badge badge-success">Available</span>}</td>
+                          </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                   <div className="flex justify-end gap-2 pt-2">
                     <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
-                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                    <button onClick={executeImport} disabled={isImporting || importPreview.length - duplicateImportRows.size <= 0} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
                       {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check size={14} />}
-                      Import
+                      Import {importPreview.length - duplicateImportRows.size}
                     </button>
                   </div>
                 </div>

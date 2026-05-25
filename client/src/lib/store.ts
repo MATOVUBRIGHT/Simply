@@ -149,9 +149,18 @@ class DataStore {
     }
   }
 
-  refreshCurrentPage(sid: string) {
+  async refreshCurrentPage(sid: string, force = false): Promise<void> {
     if (!sid) return;
-    this.refreshActive(sid, this.getActiveTables(sid));
+    const activeTables = this.getActiveTables(sid);
+    if (!force) {
+      this.refreshActive(sid, activeTables);
+      return;
+    }
+    const refreshes = activeTables.map(table => {
+      this.set(sid, table, { lastFetch: 0 });
+      return this.fetch(sid, table, true);
+    });
+    await Promise.allSettled(refreshes);
   }
 
   getActiveTables(sid: string, tables?: string[]): string[] {

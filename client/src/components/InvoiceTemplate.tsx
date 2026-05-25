@@ -2,6 +2,7 @@ import React from 'react';
 import { Phone, Mail, MapPin, Printer, Download, X, Palette, Check, RefreshCw } from 'lucide-react';
 import { useCurrency } from '../hooks/useCurrency';
 import LiveEditable from './LiveEditable';
+import { openPrintPreview } from '../utils/printPreview';
 
 export interface InvoiceLabels {
   invoiceTitle: string;
@@ -19,6 +20,10 @@ export interface InvoiceLabels {
   accountNameLabel: string;
   methodLabel: string;
   subtotalLabel: string;
+  openingBalanceLabel: string;
+  termChargesLabel: string;
+  paidLabel: string;
+  closingBalanceLabel: string;
   taxLabel: string;
   grandTotalLabel: string;
   termsTitle: string;
@@ -44,6 +49,10 @@ export const DEFAULT_INVOICE_LABELS: InvoiceLabels = {
   accountNameLabel: 'Name:',
   methodLabel: 'Payment Method:',
   subtotalLabel: 'Subtotal',
+  openingBalanceLabel: 'Opening Balance',
+  termChargesLabel: 'This Term',
+  paidLabel: 'Paid',
+  closingBalanceLabel: 'Closing Balance',
   taxLabel: 'Tax',
   grandTotalLabel: 'Total',
   termsTitle: 'Terms and Conditions',
@@ -77,10 +86,13 @@ interface InvoiceTemplateProps {
     dueDate: string;
     items: { description: string; amount: number; qty: number }[];
     subtotal: number;
+    openingBalance?: number;
+    termCharges?: number;
     tax: number;
     total: number;
     paid: number;
     balance: number;
+    closingBalance?: number;
     status: string;
     term: string;
     year: string;
@@ -165,7 +177,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
         </div>
         <div className="flex items-center gap-2">
           <button 
-            onClick={() => window.print()} 
+            onClick={() => openPrintPreview('Invoice', '#invoice-print')} 
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold transition-all"
           >
             <Download size={16} />
@@ -319,15 +331,33 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
             </div>
             <div className="flex justify-between text-sm">
               <span className="font-black uppercase tracking-widest text-slate-400">
+                <LiveEditable value={labels.openingBalanceLabel} onSave={v => updateLabel('openingBalanceLabel', v)} isLiveEditing={isLiveEditing} />
+              </span>
+              <span className="font-bold text-slate-800">{formatMoney(invoice.openingBalance || 0)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="font-black uppercase tracking-widest text-slate-400">
+                <LiveEditable value={labels.termChargesLabel} onSave={v => updateLabel('termChargesLabel', v)} isLiveEditing={isLiveEditing} />
+              </span>
+              <span className="font-bold text-slate-800">{formatMoney(invoice.termCharges ?? invoice.subtotal)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="font-black uppercase tracking-widest text-slate-400">
+                <LiveEditable value={labels.paidLabel} onSave={v => updateLabel('paidLabel', v)} isLiveEditing={isLiveEditing} />
+              </span>
+              <span className="font-bold text-emerald-600">{formatMoney(invoice.paid || 0)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="font-black uppercase tracking-widest text-slate-400">
                 <LiveEditable value={labels.taxLabel} onSave={v => updateLabel('taxLabel', v)} isLiveEditing={isLiveEditing} />
               </span>
               <span className="font-bold text-slate-800">{formatMoney(invoice.tax)}</span>
             </div>
             <div className="flex justify-between items-center pt-3 border-t-2 border-slate-900">
               <span className="text-lg font-black uppercase tracking-widest text-slate-900">
-                <LiveEditable value={labels.grandTotalLabel} onSave={v => updateLabel('grandTotalLabel', v)} isLiveEditing={isLiveEditing} />
+                <LiveEditable value={labels.closingBalanceLabel || labels.grandTotalLabel} onSave={v => updateLabel('closingBalanceLabel', v)} isLiveEditing={isLiveEditing} />
               </span>
-              <span className="text-2xl font-black text-slate-900">{formatMoney(invoice.total)}</span>
+              <span className="text-2xl font-black text-slate-900">{formatMoney(invoice.closingBalance ?? invoice.balance ?? invoice.total)}</span>
             </div>
           </div>
         </div>

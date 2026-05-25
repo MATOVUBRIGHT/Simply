@@ -6,21 +6,21 @@ const USER_SELECT =
 export const usersApi = {
   async getById(id: string) {
     if (!isSupabaseConfigured || !supabase) {
-      return { data: null, error: new Error('Supabase not configured') };
+      return { data: null, error: new Error('Cloud space is not configured') };
     }
     return supabase.from('users').select(USER_SELECT).eq('id', id).maybeSingle();
   },
 
   async getByEmail(email: string) {
     if (!isSupabaseConfigured || !supabase) {
-      return { data: null, error: new Error('Supabase not configured') };
+      return { data: null, error: new Error('Cloud space is not configured') };
     }
     return supabase.from('users').select(USER_SELECT).eq('email', email.toLowerCase()).maybeSingle();
   },
 
   async emailExists(email: string) {
     if (!isSupabaseConfigured || !supabase) {
-      return { data: null, error: new Error('Supabase not configured') };
+      return { data: null, error: new Error('Cloud space is not configured') };
     }
     return supabase.from('users').select('id').eq('email', email.toLowerCase()).maybeSingle();
   },

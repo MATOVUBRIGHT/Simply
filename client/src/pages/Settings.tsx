@@ -43,6 +43,9 @@ export default function Settings() {
   const [isPromoting, setIsPromoting] = useState(false);
   const [promoteProgress, setPromoteProgress] = useState(0);
   const [promoteStatus, setPromoteStatus] = useState('');
+  const [showCloudBackupModal, setShowCloudBackupModal] = useState(false);
+  const [backupAccount, setBackupAccount] = useState(user?.email || '');
+  const [isCloudBackingUp, setIsCloudBackingUp] = useState(false);
   const [settings, setSettings] = useState({
     schoolName: 'My School',
     schoolAddress: '',
@@ -57,9 +60,6 @@ export default function Settings() {
     term3Start: '',
     term3End: '',
     currency: 'USD',
-    busFee: '100',
-    libraryFee: '50',
-    sportsFee: '75',
     schoolType: 'nursery_primary',
     bankAccountName: '',
     bankAccountNumber: '',
@@ -75,7 +75,6 @@ export default function Settings() {
     paymentMethod3: '',
   });
 
-  const currentCurrency = currencies.find(c => c.code === settings.currency) || currencies[0];
   const desktopApp = isDesktopApp();
 
   useEffect(() => {
@@ -358,7 +357,10 @@ export default function Settings() {
     setPromoteProgress(0);
     setPromoteStatus('Preparing students...');
     try {
-      // Load all classes sorted by level
+      // Promotion keeps each student's existing record ID intact. It only moves
+      // active students to their next class or marks final-class students done.
+      // Fees, invoices, bursaries, and discounts are term records and are not
+      // copied into the new term; admins assign those again after promotion.
       const allClasses = await dataService.getAll(id, 'classes');
       const sorted = [...allClasses].sort((a: any, b: any) => (a.level ?? 0) - (b.level ?? 0));
 
@@ -432,7 +434,7 @@ export default function Settings() {
       window.dispatchEvent(new CustomEvent('dataRefresh'));
       window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'students' } }));
       setShowPromoteModal(false);
-      addToast(`Term started: ${promoted} students promoted, ${graduated} graduated`, 'success');
+      addToast(`Term started: ${promoted} students promoted, ${graduated} graduated. New term fees and bursaries are unassigned.`, 'success');
     } catch (err: any) {
       addToast(err?.message || 'Promotion failed', 'error');
     } finally {
@@ -562,6 +564,26 @@ export default function Settings() {
     }
   }
 
+  async function startCloudBackup() {
+    const account = backupAccount.trim();
+    if (!account) {
+      addToast('Enter the Gmail or cloud account to use for backup', 'warning');
+      return;
+    }
+    setIsCloudBackingUp(true);
+    try {
+      localStorage.setItem('schofy_last_cloud_backup_account', account);
+      await exportBackup();
+      window.open(`https://drive.google.com/drive/my-drive?schofyBackupAccount=${encodeURIComponent(account)}`, '_blank', 'noopener,noreferrer');
+      addToast('Backup exported. Google Drive opened. Upload the downloaded backup file there.', 'success');
+      setShowCloudBackupModal(false);
+    } catch (error: any) {
+      addToast(error?.message || 'Cloud backup could not start', 'error');
+    } finally {
+      setIsCloudBackingUp(false);
+    }
+  }
+
   const colorOptions = [
     { color: '#4F46E5', name: 'Indigo' },
     { color: '#2da32d', name: 'Green' },
@@ -606,7 +628,7 @@ export default function Settings() {
             </div>
             <div>
               <label className="form-label">School Type</label>
-              <select name="schoolType" value={settings.schoolType} onChange={handleChange} className="form-input">
+              <select name="schoolType" value={settings.schoolType} onChange={handleChange} className="form-input form-select">
                 <option value="nursery">Nursery Only</option>
                 <option value="nursery_primary">Nursery &amp; Primary</option>
                 <option value="primary">Primary Only</option>
@@ -638,7 +660,7 @@ export default function Settings() {
             </div>
             <div>
               <label className="form-label">Current Term</label>
-              <select name="currentTerm" value={settings.currentTerm} onChange={handleChange} className="form-input">
+              <select name="currentTerm" value={settings.currentTerm} onChange={handleChange} className="form-input form-select">
                 <option value="1">Term 1</option>
                 <option value="2">Term 2</option>
                 <option value="3">Term 3</option>
@@ -706,23 +728,11 @@ export default function Settings() {
           <div className="card-body grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div>
               <label className="form-label">Currency</label>
-              <select name="currency" value={settings.currency} onChange={handleChange} className="form-input">
+              <select name="currency" value={settings.currency} onChange={handleChange} className="form-input form-select">
                 {currencies.map(c => (
                   <option key={c.code} value={c.code}>{c.symbol} {c.code} - {c.name}</option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="form-label">Bus Fee ({currentCurrency.symbol})</label>
-              <input type="number" name="busFee" value={settings.busFee} onChange={handleChange} className="form-input" />
-            </div>
-            <div>
-              <label className="form-label">Library Fee ({currentCurrency.symbol})</label>
-              <input type="number" name="libraryFee" value={settings.libraryFee} onChange={handleChange} className="form-input" />
-            </div>
-            <div>
-              <label className="form-label">Sports Fee ({currentCurrency.symbol})</label>
-              <input type="number" name="sportsFee" value={settings.sportsFee} onChange={handleChange} className="form-input" />
             </div>
           </div>
         </div>
@@ -778,7 +788,7 @@ export default function Settings() {
         <div className="card">
           <div className="card-header flex items-center gap-2">
             <Cloud size={20} />
-            <h2 className="font-semibold">Cloud Sync (Supabase)</h2>
+            <h2 className="font-semibold">Cloud Space Sync</h2>
           </div>
           <div className="card-body space-y-6">
             <div className="flex items-center justify-between">
@@ -843,8 +853,8 @@ export default function Settings() {
                     <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Desktop storage mode</h3>
                     <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
                       {isSyncEnabled
-                        ? 'Local plus Supabase sync. Data stays on this computer and uploads while this session is online.'
-                        : 'Local-only. Data stays on this computer and Supabase calls are paused.'}
+                        ? 'Local plus cloud sync. Data stays on this computer and uploads while this session is online.'
+                        : 'Local-only. Data stays on this computer and cloud calls are paused.'}
                     </p>
                   </div>
                   {isSyncEnabled ? (
@@ -866,7 +876,7 @@ export default function Settings() {
                       className="btn btn-primary flex items-center gap-2"
                     >
                       <Cloud size={16} />
-                      Sync with Supabase
+                      Sync with Cloud
                     </button>
                   )}
                 </div>
@@ -877,7 +887,7 @@ export default function Settings() {
               <button
                 type="button"
                 onClick={async () => {
-                  if (!isSyncEnabled) { addToast('Enable Supabase sync first', 'warning'); return; }
+                  if (!isSyncEnabled) { addToast('Enable cloud sync first', 'warning'); return; }
                   const sid = schoolId || user?.id;
                   if (!sid) { addToast('Not logged in', 'error'); return; }
                   addToast('Pulling all data from cloud...', 'info');
@@ -887,7 +897,7 @@ export default function Settings() {
                       addToast(`Pulled ${result.pulled} records from cloud`, 'success');
                       window.dispatchEvent(new CustomEvent('dataRefresh'));
                     } else {
-                      addToast(result.error || 'Pull failed — check your connection', 'error');
+                      addToast(result.error || 'Pull failed - check your connection', 'error');
                     }
                   } catch (err: any) {
                     addToast(err?.message || 'Pull failed', 'error');
@@ -902,7 +912,7 @@ export default function Settings() {
               <button
                 type="button"
                 onClick={async () => {
-                  if (!isSyncEnabled) { addToast('Enable Supabase sync first', 'warning'); return; }
+                  if (!isSyncEnabled) { addToast('Enable cloud sync first', 'warning'); return; }
                   const sid = schoolId || user?.id;
                   if (!sid) { addToast('Not logged in', 'error'); return; }
                   addToast('Pushing local data to cloud...', 'info');
@@ -911,7 +921,7 @@ export default function Settings() {
                     if (result.success) {
                       addToast(`Pushed ${result.pushed} records to cloud`, 'success');
                     } else {
-                      addToast(result.error || 'Push failed — check your connection', 'error');
+                      addToast(result.error || 'Push failed - check your connection', 'error');
                     }
                   } catch (err: any) {
                     addToast(err?.message || 'Push failed', 'error');
@@ -938,6 +948,17 @@ export default function Settings() {
                   <Download size={16} />
                   Export Backup
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBackupAccount(localStorage.getItem('schofy_last_cloud_backup_account') || user?.email || '');
+                    setShowCloudBackupModal(true);
+                  }}
+                  className="btn btn-secondary flex items-center gap-2"
+                >
+                  <Cloud size={16} />
+                  Cloud Backup
+                </button>
                 <label className="btn btn-secondary flex items-center gap-2 cursor-pointer">
                   <Upload size={16} />
                   Import Backup
@@ -962,7 +983,7 @@ export default function Settings() {
                 </button>
               </div>
               <p className="text-xs text-slate-500 mt-2">
-                Export your data as JSON for backup. Import to restore data from a backup file. Clean duplicates removes repeated entries from all tables.
+                Export your data as JSON for backup. Cloud Backup exports the same file, asks for the Gmail account, then opens Google Drive so you can upload the backup directly.
               </p>
             </div>
 
@@ -973,8 +994,7 @@ export default function Settings() {
                   <p><strong>Connection:</strong> {isOnline ? 'Online' : 'Offline'}</p>
                   <p><strong>Background sync:</strong> {isSyncEnabled ? 'On during this session' : desktopApp ? 'Local-only mode' : 'Paused'}</p>
                   <p className="text-xs mt-2 opacity-90">
-                    Developer: run <code className="bg-blue-100/50 dark:bg-blue-950/50 px-1 rounded">await window.debugSync()</code> in
-                    the console to compare local vs remote counts and the sync queue.
+                    Data is saved locally first, then merged with cloud space when sync is enabled.
                   </p>
                 </div>
               </div>
@@ -1067,6 +1087,47 @@ export default function Settings() {
         </div>
       </form>
 
+      {showCloudBackupModal && createPortal((
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !isCloudBackingUp) setShowCloudBackupModal(false);
+          }}
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center gap-3 border-b border-slate-200 bg-emerald-50 p-5 dark:border-slate-700 dark:bg-emerald-900/20">
+              <Cloud size={22} className="text-emerald-600 dark:text-emerald-300" />
+              <div>
+                <h2 className="font-bold text-slate-900 dark:text-white">Cloud Backup</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Export a backup and open Google Drive.</p>
+              </div>
+            </div>
+            <div className="space-y-4 p-5">
+              <div>
+                <label className="form-label">Gmail account</label>
+                <input
+                  type="email"
+                  value={backupAccount}
+                  onChange={(event) => setBackupAccount(event.target.value)}
+                  className="form-input"
+                  placeholder="name@gmail.com"
+                />
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                Schofy will export your backup file first, then open Google Drive in a new tab. Upload the downloaded backup file to that Drive account to keep it safe.
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 px-5 pb-5">
+              <button type="button" onClick={() => setShowCloudBackupModal(false)} className="btn btn-secondary" disabled={isCloudBackingUp}>Cancel</button>
+              <button type="button" onClick={startCloudBackup} className="btn btn-primary flex items-center gap-2" disabled={isCloudBackingUp}>
+                {isCloudBackingUp ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Upload size={16} />}
+                {isCloudBackingUp ? 'Preparing...' : 'Export & Open'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
+
       {/* Promote Students Modal */}
       {showPromoteModal && createPortal((
         <div
@@ -1087,7 +1148,7 @@ export default function Settings() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="form-label">New Term</label>
-                  <select value={promoteNewTerm} onChange={e => setPromoteNewTerm(e.target.value)} className="form-input">
+                  <select value={promoteNewTerm} onChange={e => setPromoteNewTerm(e.target.value)} className="form-input form-select">
                     <option value="1">Term 1</option>
                     <option value="2">Term 2</option>
                     <option value="3">Term 3</option>

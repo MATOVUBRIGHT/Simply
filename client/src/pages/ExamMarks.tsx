@@ -8,6 +8,7 @@ import { useTableData } from '../lib/store';
 import { useStudents } from '../contexts/StudentsContext';
 import { exportToExcel } from '../utils/export';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
+import { openPrintPreview } from '../utils/printPreview';
 
 function getGrade(score: number): string {
   if (score >= 90) return 'D1';
@@ -428,7 +429,7 @@ export default function ExamMarks() {
               <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden">
                 <button onClick={handleExportCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><FileText size={14} /> Export CSV</button>
                 <button onClick={handleExportExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><FileText size={14} /> Export Excel</button>
-                <button onClick={() => { window.print(); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><Download size={14} /> Print / PDF</button>
+                <button onClick={() => { openPrintPreview('Exam Marks', '#exam-marks-print'); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><Download size={14} /> Print / PDF</button>
               </div>
             )}
           </div>
@@ -482,45 +483,47 @@ export default function ExamMarks() {
         </div>
       )}
 
-      {/* Empty states */}
-      {(examResults as any[]).length === 0 ? (
-        <div className="card p-12 text-center">
-          <GraduationCap size={40} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-500 font-medium">No exam results yet</p>
-          <p className="text-sm text-slate-400 mt-1">Add grades from the Grades page</p>
-        </div>
-      ) : !hasResults ? (
-        <div className="card p-12 text-center">
-          <GraduationCap size={40} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-500 font-medium">No results match the current filters</p>
-        </div>
-      ) : classGroups.map(group => {
-        const { classId, className, classExams, allSubjects, matrix } = group;
-        const visibleMatrix = selectedStudents.size > 0 ? matrix.filter(r => selectedStudents.has(r.student.id)) : matrix;
-        if (visibleMatrix.length === 0) return null;
-        const totalCols = classExams.length * (allSubjects.length + 3) + 5;
-        const isWide = totalCols > COMPACT_COL_LIMIT;
-
-        return (
-          <div key={classId} className="card overflow-hidden">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between flex-wrap gap-2">
-              <div>
-                <h2 className="font-bold text-slate-800 dark:text-white text-lg">{className}</h2>
-                <p className="text-sm text-slate-500">
-                  {classExams.length} exam{classExams.length !== 1 ? 's' : ''} - {visibleMatrix.length} student{visibleMatrix.length !== 1 ? 's' : ''} - {allSubjects.length} subject{allSubjects.length !== 1 ? 's' : ''}
-                </p>
-              </div>
-              {isWide && (
-                <button onClick={() => setFullViewClassId(classId)}
-                  className="btn btn-secondary flex items-center gap-2 text-sm print:hidden">
-                  <Maximize2 size={15} /> View Full
-                </button>
-              )}
-            </div>
-            {renderTable(group)}
+      <div id="exam-marks-print" className="print-area space-y-4">
+        {/* Empty states */}
+        {(examResults as any[]).length === 0 ? (
+          <div className="card p-12 text-center">
+            <GraduationCap size={40} className="mx-auto text-slate-300 mb-3" />
+            <p className="text-slate-500 font-medium">No exam results yet</p>
+            <p className="text-sm text-slate-400 mt-1">Add grades from the Grades page</p>
           </div>
-        );
-      })}
+        ) : !hasResults ? (
+          <div className="card p-12 text-center">
+            <GraduationCap size={40} className="mx-auto text-slate-300 mb-3" />
+            <p className="text-slate-500 font-medium">No results match the current filters</p>
+          </div>
+        ) : classGroups.map(group => {
+          const { classId, className, classExams, allSubjects, matrix } = group;
+          const visibleMatrix = selectedStudents.size > 0 ? matrix.filter(r => selectedStudents.has(r.student.id)) : matrix;
+          if (visibleMatrix.length === 0) return null;
+          const totalCols = classExams.length * (allSubjects.length + 3) + 5;
+          const isWide = totalCols > COMPACT_COL_LIMIT;
+
+          return (
+            <div key={classId} className="card overflow-hidden">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h2 className="font-bold text-slate-800 dark:text-white text-lg">{className}</h2>
+                  <p className="text-sm text-slate-500">
+                    {classExams.length} exam{classExams.length !== 1 ? 's' : ''} - {visibleMatrix.length} student{visibleMatrix.length !== 1 ? 's' : ''} - {allSubjects.length} subject{allSubjects.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                {isWide && (
+                  <button onClick={() => setFullViewClassId(classId)}
+                    className="btn btn-secondary flex items-center gap-2 text-sm print:hidden">
+                    <Maximize2 size={15} /> View Full
+                  </button>
+                )}
+              </div>
+              {renderTable(group)}
+            </div>
+          );
+        })}
+      </div>
 
       {/* Full-screen modal for wide tables */}
       {fullViewGroup && createPortal(

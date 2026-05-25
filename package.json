@@ -15,10 +15,19 @@
     "dev:server": "npm run dev --workspace=server",
     "dev:desktop": "npm run dev --workspace=desktop",
     "build": "npm run build --workspace=client && npm run build --workspace=server",
-    "electron": "npm run start --workspace=desktop"
+    "electron": "npm run start --workspace=desktop",
+    "build:desktop:win7": "npm run build --workspace=client && npm run build:win7 --workspace=desktop"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
     "cross-env": "^10.1.0"
+  },
+  "overrides": {
+    "dompurify": "3.4.5",
+    "jspdf": "4.2.1",
+    "lodash": "4.18.1",
+    "qs": "6.15.2",
+    "ws": "8.21.0",
+    "esbuild": "0.28.0"
   }
 }

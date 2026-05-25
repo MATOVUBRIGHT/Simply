@@ -6,6 +6,35 @@ export interface FeeStructureWithTotal extends FeeStructure {
   totalAmount: number;
 }
 
+function feeStructureKey(s: Partial<FeeStructure>) {
+  return [
+    s.classId || '',
+    String(s.term || ''),
+    String(s.year || ''),
+    String(s.name || '').trim().toLowerCase(),
+    String(s.category || ''),
+    Number(s.amount || 0),
+    Boolean(s.isRequired),
+  ].join('|');
+}
+
+export function uniqueFeeStructures(structures: FeeStructure[]): FeeStructure[] {
+  const byId = new Set<string>();
+  const byKey = new Set<string>();
+  const unique: FeeStructure[] = [];
+
+  for (const structure of structures) {
+    const id = String(structure.id || '');
+    const key = feeStructureKey(structure);
+    if ((id && byId.has(id)) || byKey.has(key)) continue;
+    if (id) byId.add(id);
+    byKey.add(key);
+    unique.push(structure);
+  }
+
+  return unique;
+}
+
 export async function getFeeStructuresByClass(
   userId: string,
   classId: string,
@@ -13,12 +42,12 @@ export async function getFeeStructuresByClass(
   year?: string
 ): Promise<FeeStructure[]> {
   const all = await dataService.getAll(userId, 'feeStructures');
-  return all.filter((s: FeeStructure) => {
+  return uniqueFeeStructures(all.filter((s: FeeStructure) => {
     if (s.classId !== classId) return false;
     if (term && s.term !== term) return false;
     if (year && String(s.year) !== String(year)) return false;
     return true;
-  });
+  }));
 }
 
 export async function getAllFeeStructures(
@@ -27,11 +56,11 @@ export async function getAllFeeStructures(
   year?: string
 ): Promise<FeeStructure[]> {
   const all = await dataService.getAll(userId, 'feeStructures');
-  return all.filter((s: FeeStructure) => {
+  return uniqueFeeStructures(all.filter((s: FeeStructure) => {
     if (term && s.term !== term) return false;
     if (year && String(s.year) !== String(year)) return false;
     return true;
-  });
+  }));
 }
 
 export async function createFeeStructure(
@@ -50,9 +79,10 @@ export async function createFeeStructure(
   if (!isUUID) throw new Error('Invalid class selected. Please select a valid class.');
 
   const existing = await dataService.getAll(userId, 'feeStructures');
+  const cleanName = name.trim();
   const duplicate = existing.find((s: FeeStructure) =>
     s.classId === classId &&
-    s.name?.toLowerCase() === name?.toLowerCase() &&
+    s.name?.trim().toLowerCase() === cleanName.toLowerCase() &&
     s.category === category &&
     s.term === term &&
     String(s.year) === String(year)
@@ -62,7 +92,7 @@ export async function createFeeStructure(
   const structure: FeeStructure = {
     id: uuidv4(),
     classId,
-    name,
+    name: cleanName,
     category,
     amount,
     isRequired,

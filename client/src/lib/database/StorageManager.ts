@@ -11,6 +11,7 @@
  * This module is a drop-in replacement for the localStorage-based queue/deleted-ids
  * helpers in SupabaseDataService. All existing callers keep the same sync API.
  */
+import { decryptJson, encryptJson } from './StorageCrypto';
 
 // ── IndexedDB setup ───────────────────────────────────────────────────────────
 
@@ -166,7 +167,9 @@ export async function loadQueue(): Promise<QueueItem[]> {
       const tx = db.transaction(QUEUE_STORE, 'readonly');
       const req = tx.objectStore(QUEUE_STORE).getAll();
       req.onsuccess = async () => {
-        const idbItems: QueueItem[] = req.result || [];
+        const rawItems: any[] = req.result || [];
+        const idbItems = (await Promise.all(rawItems.map(item => decryptJson<QueueItem>(item))))
+          .filter(Boolean) as QueueItem[];
         // Also merge any items still in localStorage (migration path)
         const lsItems = _loadQueueLS();
         if (lsItems.length > 0) {
@@ -212,7 +215,16 @@ async function _migrateQueueFromLS(db: IDBDatabase, items: QueueItem[]): Promise
   try {
     const tx = db.transaction(QUEUE_STORE, 'readwrite');
     const store = tx.objectStore(QUEUE_STORE);
-    for (const item of items) store.put(item);
+    for (const item of items) {
+      const encrypted: any = await encryptJson(item);
+      if (encrypted?.__schofyEncrypted) {
+        encrypted.id = item.id;
+        encrypted.tableName = item.tableName;
+        encrypted.ts = item.ts;
+        encrypted.userId = item.userId;
+      }
+      store.put(encrypted);
+    }
     tx.oncomplete = () => {
       localStorage.removeItem(QUEUE_LS_KEY);
     };
@@ -230,7 +242,14 @@ export async function enqueueItem(item: Omit<QueueItem, 'id' | 'ts'> | QueueItem
   try {
     const db = await getStorageDB();
     const tx = db.transaction(QUEUE_STORE, 'readwrite');
-    tx.objectStore(QUEUE_STORE).put(full);
+    const encrypted: any = await encryptJson(full);
+    if (encrypted?.__schofyEncrypted) {
+      encrypted.id = full.id;
+      encrypted.tableName = full.tableName;
+      encrypted.ts = full.ts;
+      encrypted.userId = full.userId;
+    }
+    tx.objectStore(QUEUE_STORE).put(encrypted);
   } catch {
     // Fallback to localStorage
     const q = _loadQueueLS();
@@ -278,7 +297,8 @@ export async function getDeletedIds(sid: string, tableName: string): Promise<Set
       const tx = db.transaction(DELETED_STORE, 'readonly');
       const req = tx.objectStore(DELETED_STORE).get(key);
       req.onsuccess = async () => {
-        const idbIds: string[] = req.result || [];
+        const decrypted = await decryptJson<string[]>(req.result);
+        const idbIds: string[] = decrypted || [];
         // Also check localStorage (migration)
         const lsReg = _loadDeletedLS();
         const lsIds: string[] = lsReg[key] || [];
@@ -316,7 +336,7 @@ async function _migrateDeletedFromLS(db: IDBDatabase, reg: DeletedRegistry): Pro
   try {
     const tx = db.transaction(DELETED_STORE, 'readwrite');
     const store = tx.objectStore(DELETED_STORE);
-    for (const [key, ids] of Object.entries(reg)) store.put(ids, key);
+    for (const [key, ids] of Object.entries(reg)) store.put(await encryptJson(ids), key);
     tx.oncomplete = () => {
       localStorage.removeItem(DELETED_LS_KEY);
     };
@@ -334,15 +354,16 @@ export async function markDeleted(sid: string, tableName: string, id: string): P
 
   try {
     const db = await getStorageDB();
-    const tx = db.transaction(DELETED_STORE, 'readwrite');
-    const store = tx.objectStore(DELETED_STORE);
-    const getReq = store.get(key);
-    getReq.onsuccess = () => {
-      const existing: string[] = getReq.result || [];
-      if (!existing.includes(id)) {
-        store.put([...existing, id], key);
-      }
-    };
+    const existing = await new Promise<string[]>((resolve) => {
+      const tx = db.transaction(DELETED_STORE, 'readonly');
+      const getReq = tx.objectStore(DELETED_STORE).get(key);
+      getReq.onsuccess = async () => resolve(await decryptJson<string[]>(getReq.result) || []);
+      getReq.onerror = () => resolve([]);
+    });
+    if (!existing.includes(id)) {
+      const tx = db.transaction(DELETED_STORE, 'readwrite');
+      tx.objectStore(DELETED_STORE).put(await encryptJson([...existing, id]), key);
+    }
   } catch {
     // localStorage/native backup already updated above
   }
@@ -362,14 +383,15 @@ export async function markBatchDeleted(sid: string, tableName: string, ids: stri
 
   try {
     const db = await getStorageDB();
+    const existing = await new Promise<string[]>((resolve) => {
+      const tx = db.transaction(DELETED_STORE, 'readonly');
+      const getReq = tx.objectStore(DELETED_STORE).get(key);
+      getReq.onsuccess = async () => resolve(await decryptJson<string[]>(getReq.result) || []);
+      getReq.onerror = () => resolve([]);
+    });
+    const merged = [...new Set([...existing, ...ids])];
     const tx = db.transaction(DELETED_STORE, 'readwrite');
-    const store = tx.objectStore(DELETED_STORE);
-    const getReq = store.get(key);
-    getReq.onsuccess = () => {
-      const existing: string[] = getReq.result || [];
-      const merged = [...new Set([...existing, ...ids])];
-      store.put(merged, key);
-    };
+    tx.objectStore(DELETED_STORE).put(await encryptJson(merged), key);
   } catch {
     // localStorage/native backup already updated above
   }

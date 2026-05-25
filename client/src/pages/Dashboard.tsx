@@ -560,7 +560,7 @@ export default function Dashboard() {
               >
                 <ChevronLeft size={20} className="text-slate-600" />
               </button>
-              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <div className="flex flex-wrap items-center justify-center gap-2 pb-1">
                 {years.map(year => (
                   <button 
                     key={year}

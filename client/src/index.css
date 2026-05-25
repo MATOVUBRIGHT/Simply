@@ -5,7 +5,6 @@
 :root {
   --primary-color: #4F46E5;
   --primary-color-rgb: 79, 70, 229;
-  --electron-titlebar-height: 34px;
   --sidebar-width: 260px;
   /* Solid Color Palette */
   --solid-indigo: #4F46E5;
@@ -52,12 +51,7 @@ body {
 }
 
 html {
-  scroll-behavior: smooth;
-}
-
-/* Allow horizontal scrolling for the entire app when content overflows */
-html, body, #root {
-  overflow-x: auto;
+  scroll-behavior: auto;
 }
 
 /* Custom Selection */
@@ -83,11 +77,6 @@ html, body, #root {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-primary);
-}
-
-/* Smooth touch scrolling everywhere */
-* {
-  -webkit-overflow-scrolling: touch;
 }
 
 /* Animations */
@@ -157,6 +146,14 @@ html, body, #root {
   min-height: 100%;
   will-change: transform, opacity;
   animation-fill-mode: both;
+}
+
+.app-page-scroll {
+  scrollbar-gutter: stable;
+}
+
+.app-page-content {
+  min-height: 100%;
 }
 
 .page-shell-enter {
@@ -470,6 +467,40 @@ html, body, #root {
   overscroll-behavior-x: contain;
 }
 
+/* List/table cards should use the visible page area instead of collapsing to content. */
+.card:has(> .table-container),
+.card:has(> .card-body > .table-container),
+.card:has(> .card-body .table-container),
+.card:has(> .overflow-x-auto),
+.list-card {
+  display: flex;
+  flex-direction: column;
+  min-height: clamp(360px, calc(100dvh - 360px), 760px);
+  max-height: calc(100dvh - 160px);
+}
+
+.card:has(> .table-container) > .table-container,
+.card:has(> .card-body > .table-container) > .card-body,
+.card:has(> .card-body .table-container) > .card-body,
+.card:has(> .overflow-x-auto) > .overflow-x-auto,
+.list-card > .table-container,
+.list-card > .card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.card:has(> .table-container) > .table-container,
+.card:has(> .card-body > .table-container) > .card-body > .table-container,
+.card:has(> .card-body .table-container) .table-container,
+.list-card .table-container {
+  overflow: auto !important;
+  overscroll-behavior: contain;
+}
+
+.table-container {
+  min-height: min(260px, 45dvh);
+}
+
 /* Ensure tables inside cards also scroll */
 .card .table-container,
 .card > .overflow-x-auto {
@@ -550,6 +581,17 @@ select.form-input,
   background-size: 1.25rem;
   padding-right: 2.5rem;
   border-color: #e2e8f0;
+}
+
+select.form-input option,
+.form-select option {
+  @apply bg-white text-slate-900;
+  padding: 0.65rem 0.85rem;
+}
+
+.dark select.form-input option,
+.dark .form-select option {
+  @apply bg-slate-800 text-slate-100;
 }
 
 .dark select.form-input,
@@ -716,28 +758,6 @@ textarea.form-input {
   overflow: visible;
   background-color: var(--bg-secondary);
   border-color: var(--neutral-border);
-}
-
-html.electron-titlebar body {
-  padding-top: var(--electron-titlebar-height);
-}
-
-html.electron-titlebar body::before {
-  content: '';
-  position: fixed;
-  inset: 0 0 auto 0;
-  height: var(--electron-titlebar-height);
-  background: var(--primary-color);
-  z-index: 9998;
-  -webkit-app-region: drag;
-}
-
-html.electron-titlebar button,
-html.electron-titlebar a,
-html.electron-titlebar input,
-html.electron-titlebar select,
-html.electron-titlebar textarea {
-  -webkit-app-region: no-drag;
 }
 
 .card-header {
@@ -1622,9 +1642,8 @@ html.electron-titlebar textarea {
 
 /* Page content wrapper — horizontal scroll without clipping dropdowns */
 .page-content-scroll {
-  overflow-x: auto;
+  overflow-x: visible;
   overflow-y: visible;
-  -webkit-overflow-scrolling: touch;
 }
 
 /* Action button rows — always horizontal, never wrap, never shrink */
@@ -1633,9 +1652,8 @@ html.electron-titlebar textarea {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   flex-shrink: 0;
-  white-space: nowrap;
 }
 
 .action-row .btn,
@@ -1650,15 +1668,9 @@ html.electron-titlebar textarea {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
+  flex-wrap: wrap;
+  overflow: visible;
   padding-bottom: 2px;
-}
-
-.filter-row::-webkit-scrollbar {
-  display: none;
 }
 
 .filter-row > * {
@@ -1671,7 +1683,7 @@ html.electron-titlebar textarea {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
@@ -1685,7 +1697,7 @@ html.electron-titlebar textarea {
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 /* Tables — always scroll horizontally */
@@ -1699,15 +1711,59 @@ html.electron-titlebar textarea {
   min-width: 600px;
 }
 
+/* Global overflow protection for wide content across all pages */
+.table-container {
+  max-width: 100%;
+  overflow-x: auto !important;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-container table {
+  min-width: max-content;
+}
+
+.card,
+.modal-card,
+.page-shell,
+.page-content-scroll,
+.card-body,
+.modal-body {
+  max-width: 100%;
+}
+
+.card-header,
+.filter-row,
+.action-row,
+.flex.gap-2.flex-wrap,
+.flex.gap-3.flex-wrap,
+.flex.gap-4.flex-wrap {
+  min-width: 0;
+  overflow: visible;
+}
+
 /* Dropdown menus — always on top, never clipped */
 .dropdown-menu {
   position: absolute;
-  z-index: 9999;
+  z-index: 99999;
   background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
 }
 
 .dark .dropdown-menu {
   background: #1e293b;
+  border-color: #334155;
+}
+
+.relative > [class*="absolute"][class*="bg-white"][class*="shadow"],
+.relative > [class*="absolute"][class*="dark:bg-slate-800"][class*="shadow"] {
+  z-index: 99999 !important;
+  border-radius: 0.75rem;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
 }
 
 /* Prevent overflow-hidden from clipping dropdowns on page containers */
@@ -1723,8 +1779,7 @@ html.electron-titlebar textarea {
 /* Mobile: ensure all page content scrolls */
 @media (max-width: 768px) {
   .page-shell {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    overflow-x: visible;
   }
 
   /* Buttons never shrink below their natural size */
@@ -1736,17 +1791,11 @@ html.electron-titlebar textarea {
   /* Filter buttons row scrolls */
   .flex.gap-2.flex-wrap,
   .flex.gap-1.flex-wrap {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    flex-wrap: wrap;
+    overflow: visible;
     padding-bottom: 2px;
   }
 
-  .flex.gap-2.flex-wrap::-webkit-scrollbar,
-  .flex.gap-1.flex-wrap::-webkit-scrollbar {
-    display: none;
-  }
 }
 
 /* Zoom-safe: buttons keep their size at any zoom level */
@@ -1802,5 +1851,109 @@ html.electron-titlebar textarea {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  @page {
+    size: auto;
+    margin: 12mm;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  aside,
+  header,
+  .toast-container,
+  .fixed.bottom-5,
+  .print-hidden,
+  .no-print {
+    display: none !important;
+  }
+
+  main,
+  main > div,
+  .page-shell,
+  .card,
+  .card-body,
+  .table-container,
+  .modal,
+  .modal-card {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    border-color: #d1d5db !important;
+  }
+
+  .print-area {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .btn,
+  button,
+  input,
+  select,
+  textarea,
+  .dropdown-menu {
+    display: none !important;
+  }
+
+  table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: auto !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  th,
+  td {
+    padding: 6px 8px !important;
+    border: 1px solid #d1d5db !important;
+    color: #000000 !important;
+    background: #ffffff !important;
+    white-space: normal !important;
+  }
+
+  .badge {
+    border: 1px solid #9ca3af !important;
+    color: #000000 !important;
+    background: #ffffff !important;
   }
 }

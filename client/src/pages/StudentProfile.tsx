@@ -35,6 +35,7 @@ export default function StudentProfile() {
   const [updatingClass, setUpdatingClass] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'fees' | 'reports'>('info');
   const [expandedFee, setExpandedFee] = useState<string | null>(null);
+  const [showLedgerModal, setShowLedgerModal] = useState(false);
 
   // Pay modal state
   const [showPayModal, setShowPayModal] = useState<{ feeId: string; remaining: number; desc: string } | null>(null);
@@ -53,6 +54,7 @@ export default function StudentProfile() {
   const { data: examResultsData } = useTableData(sid, 'examResults');
   const { data: examsData } = useTableData(sid, 'exams');
   const { data: attendanceData } = useTableData(sid, 'attendance');
+  const { data: settingsData } = useTableData(sid, 'settings');
 
   const student = useMemo(() =>
     (studentsData.find((s: any) => s.id === id) as Student) || null,
@@ -78,8 +80,30 @@ export default function StudentProfile() {
   const totalInvoiced = feeRows.reduce((s: number, f: any) => s + (f.amount || 0), 0);
   const totalPaid = feeRows.reduce((s: number, f: any) => s + f.paid, 0);
   const totalBalance = Math.max(0, totalInvoiced - totalPaid);
-  const studentBursaries = useMemo(() => (bursariesData as any[]).filter((b: any) => b.studentId === id), [bursariesData, id]);
-  const studentDiscounts = useMemo(() => (discountsData as any[]).filter((d: any) => d.studentId === id), [discountsData, id]);
+  const settingsMap = useMemo(() => {
+    const obj: Record<string, any> = {};
+    (settingsData as any[]).forEach((row: any) => { obj[row.key] = row.value; });
+    return obj;
+  }, [settingsData]);
+  const currentTerm = settingsMap.currentTerm || '1';
+  const currentYear = settingsMap.academicYear || String(new Date().getFullYear());
+  const studentBursaries = useMemo(() => (bursariesData as any[]).filter((b: any) => b.studentId === id && String(b.term) === String(currentTerm) && String(b.year) === String(currentYear)), [bursariesData, id, currentTerm, currentYear]);
+  const studentDiscounts = useMemo(() => (discountsData as any[]).filter((d: any) => d.studentId === id && String(d.term) === String(currentTerm) && String(d.year) === String(currentYear)), [discountsData, id, currentTerm, currentYear]);
+  const previousFees = useMemo(() => studentFees.filter((fee: any) => {
+    const feeYear = Number(fee.year || 0);
+    const selectedYear = Number(currentYear || 0);
+    const feeTerm = Number(String(fee.term || '').replace(/[^0-9]/g, '')) || 0;
+    const selectedTerm = Number(String(currentTerm || '').replace(/[^0-9]/g, '')) || 0;
+    return feeYear < selectedYear || (feeYear === selectedYear && feeTerm < selectedTerm);
+  }), [studentFees, currentTerm, currentYear]);
+  const currentTermFees = useMemo(() => studentFees.filter((fee: any) => String(fee.term) === String(currentTerm) && String(fee.year) === String(currentYear)), [studentFees, currentTerm, currentYear]);
+  const previousFeeIds = useMemo(() => new Set(previousFees.map((fee: any) => fee.id)), [previousFees]);
+  const currentTermInvoiced = currentTermFees.reduce((sum: number, fee: any) => sum + Number(fee.amount || 0), 0);
+  const currentTermPaid = paymentsData
+    .filter((payment: any) => currentTermFees.some((fee: any) => fee.id === payment.feeId))
+    .reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
+  const openingBalance = Math.max(0, previousFees.reduce((sum: number, fee: any) => sum + Number(fee.amount || 0), 0) - paymentsData.filter((payment: any) => previousFeeIds.has(payment.feeId)).reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0));
+  const currentTermTotal = openingBalance + currentTermInvoiced;
   const hasFullBursary = studentBursaries.some((b: any) => b.isFull);
   const bursaryAmount = studentBursaries.reduce((sum: number, b: any) => sum + Number(b.amount || 0), 0);
   const discountAmount = studentDiscounts.filter((d: any) => d.type !== 'percentage').reduce((sum: number, d: any) => sum + Number(d.amount || 0), 0);
@@ -87,42 +111,36 @@ export default function StudentProfile() {
   const overallStatus: 'paid' | 'partial' | 'pending' | 'none' =
     feeRows.length === 0 ? 'none' : totalBalance <= 0 ? 'paid' : totalPaid > 0 ? 'partial' : 'pending';
 
-  // ── Exam results — grouped by term so same-term exams show as one report ──
+  // ── Exam results — one academic document per exam ─────────────────────────
   const studentResults = useMemo(() =>
     examResultsData.filter((r: any) => r.studentId === id),
     [examResultsData, id]);
 
   const examsWithResults = useMemo(() => {
-    // Group by term+year — combine all exams in the same term into one report entry
-    const termMap = new Map<string, { term: string; year: string; exams: any[]; results: any[] }>();
+    const examMap = new Map<string, { exam: any; results: any[] }>();
 
     studentResults.forEach((r: any) => {
       const exam = examsData.find((e: any) => e.id === r.examId) as any;
       if (!exam) return;
-      const key = `${exam.term}:${exam.year}`;
-      if (!termMap.has(key)) {
-        termMap.set(key, { term: exam.term, year: exam.year, exams: [], results: [] });
+      if (!examMap.has(exam.id)) {
+        examMap.set(exam.id, { exam, results: [] });
       }
-      const entry = termMap.get(key)!;
-      if (!entry.exams.find((e: any) => e.id === exam.id)) entry.exams.push(exam);
-      entry.results.push(r);
+      examMap.get(exam.id)!.results.push(r);
     });
 
-    return Array.from(termMap.values())
+    return Array.from(examMap.values())
       .sort((a, b) => {
-        if (String(b.year) !== String(a.year)) return String(b.year).localeCompare(String(a.year));
-        return String(b.term).localeCompare(String(a.term));
+        if (String(b.exam.year) !== String(a.exam.year)) return String(b.exam.year).localeCompare(String(a.exam.year));
+        if (String(b.exam.term) !== String(a.exam.term)) return String(b.exam.term).localeCompare(String(a.exam.term));
+        return String(b.exam.name).localeCompare(String(a.exam.name));
       })
       .map(entry => ({
-        // Use the first exam as the "primary" exam for the report card link
-        exam: entry.exams[0],
-        exams: entry.exams,
+        exam: entry.exam,
+        exams: [entry.exam],
         results: entry.results,
-        term: entry.term,
-        year: entry.year,
-        label: entry.exams.length === 1
-          ? entry.exams[0].name
-          : `Term ${entry.term} ${entry.year} (${entry.exams.length} exams)`,
+        term: entry.exam.term,
+        year: entry.exam.year,
+        label: entry.exam.name,
       }));
   }, [studentResults, examsData]);
 
@@ -229,7 +247,11 @@ export default function StudentProfile() {
             {studentDiscounts.length > 0 && <span className="badge badge-info">Discount: {discountPercent > 0 ? `${discountPercent}%` : formatMoney(discountAmount)}</span>}
           </div>
         </div>
-        <Link to={`/students/${student.id}/edit`} className="btn btn-primary"><Edit size={18} />Edit</Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setActiveTab('fees')} className="btn btn-secondary"><Receipt size={18} /> Invoice</button>
+          <button type="button" onClick={() => setShowLedgerModal(true)} className="btn btn-secondary"><FileText size={18} /> Ledger</button>
+          <Link to={`/students/${student.id}/edit`} className="btn btn-primary"><Edit size={18} />Edit</Link>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -341,12 +363,13 @@ export default function StudentProfile() {
           {/* Summary — plain white cards, status shown as badge only */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="card p-4">
-              <p className="text-xs text-slate-500 mb-1">Total Invoiced</p>
-              <p className="text-xl font-bold text-slate-800 dark:text-white">{formatMoney(totalInvoiced)}</p>
+              <p className="text-xs text-slate-500 mb-1">Current Term {currentTerm}</p>
+              <p className="text-xl font-bold text-indigo-600 dark:text-indigo-300">{formatMoney(currentTermTotal)}</p>
+              {openingBalance > 0 && <p className="mt-1 text-[11px] font-semibold text-pink-600 dark:text-pink-300">Includes {formatMoney(openingBalance)} opening top-up</p>}
             </div>
             <div className="card p-4">
-              <p className="text-xs text-slate-500 mb-1">Total Paid</p>
-              <p className="text-xl font-bold text-emerald-600">{formatMoney(totalPaid)}</p>
+              <p className="text-xs text-slate-500 mb-1">All Invoiced</p>
+              <p className="text-xl font-bold text-slate-800 dark:text-white">{formatMoney(totalInvoiced)}</p>
             </div>
             <div className="card p-4">
               <p className="text-xs text-slate-500 mb-1">Balance Due</p>
@@ -379,7 +402,9 @@ export default function StudentProfile() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-slate-800 dark:text-white text-sm">{fee.description}</span>
-                          <span className="badge badge-info text-xs">Term {fee.term}</span>
+                          <span className={`badge text-xs ${String(fee.term) === String(currentTerm) && String(fee.year) === String(currentYear) ? 'badge-info' : 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300'}`}>
+                            {String(fee.term) === String(currentTerm) && String(fee.year) === String(currentYear) ? `Current Term ${fee.term}` : `Last term ${fee.term}`}
+                          </span>
                           <span className={`badge text-xs ${statusBadge[fee.status]}`}>{fee.status}</span>
                         </div>
                         <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
@@ -478,23 +503,18 @@ export default function StudentProfile() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {examsWithResults.map(({ exam, exams: termExams, results, label, term, year }) => {
+                  {examsWithResults.map(({ exam, results, label, term, year }) => {
                     const uniqueSubjects = new Set(results.map((r: any) => r.subjectId || r.subjectName)).size;
                     const scored = results.filter((r: any) => r.score !== null && r.score !== undefined);
                     const avg = scored.length > 0
                       ? Math.round(scored.reduce((s: number, r: any) => s + (Number(r.score) || 0), 0) / scored.length) : 0;
                     return (
-                      <div key={`${term}:${year}`} className="flex items-center justify-between p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                      <div key={exam.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                         <div>
                           <p className="font-semibold text-slate-800 dark:text-white">{label}</p>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            Term {term} · {year} · {uniqueSubjects} subject{uniqueSubjects !== 1 ? 's' : ''} · Avg: {avg}%
+                            Separate exam · Term {term} · {year} · {uniqueSubjects} subject{uniqueSubjects !== 1 ? 's' : ''} · Avg: {avg}%
                           </p>
-                          {termExams.length > 1 && (
-                            <p className="text-xs text-slate-400 mt-0.5">
-                              {termExams.map((e: any) => e.name).join(' + ')}
-                            </p>
-                          )}
                         </div>
                         <Link to={`/report-card/${student.id}?exam=${exam.id}`} className="btn btn-primary text-sm flex items-center gap-2 shrink-0">
                           <Printer size={15} /> View Report
@@ -579,6 +599,92 @@ export default function StudentProfile() {
                 <button onClick={handleRecordPayment} disabled={paying} className="btn btn-primary">
                   {paying ? 'Saving...' : 'Record Payment'}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      , document.body)}
+
+      {showLedgerModal && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowLedgerModal(false)}>
+          <div className="modal-card w-full max-w-4xl max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <FileText size={18} className="text-white" />
+                <div>
+                  <h3 className="font-bold text-white">{student.firstName} {student.lastName} Ledger</h3>
+                  <p className="text-xs text-white/75">Current Term {currentTerm}, {currentYear}</p>
+                </div>
+              </div>
+              <button onClick={() => setShowLedgerModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5 space-y-5">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {[
+                  { label: 'Opening Balance', value: openingBalance, color: openingBalance > 0 ? 'text-pink-600 dark:text-pink-300' : 'text-slate-700 dark:text-slate-200' },
+                  { label: `Current Term ${currentTerm}`, value: currentTermTotal, color: 'text-indigo-600 dark:text-indigo-300' },
+                  { label: 'Current Paid', value: currentTermPaid, color: 'text-emerald-600 dark:text-emerald-300' },
+                  { label: 'All Paid', value: totalPaid, color: 'text-emerald-600 dark:text-emerald-300' },
+                  { label: 'Balance', value: totalBalance, color: totalBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300' },
+                ].map(item => (
+                  <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+                    <p className="text-[11px] font-semibold uppercase text-slate-400">{item.label}</p>
+                    <p className={`mt-1 text-lg font-bold ${item.color}`}>{formatMoney(item.value)}</p>
+                  </div>
+                ))}
+              </div>
+
+              {openingBalance > 0 && (
+                <div className="rounded-xl border border-pink-200 bg-pink-50 p-3 text-sm text-pink-700 dark:border-pink-900/50 dark:bg-pink-900/20 dark:text-pink-300">
+                  Opening balance top-up of <strong>{formatMoney(openingBalance)}</strong> is carried into Current Term {currentTerm}.
+                </div>
+              )}
+
+              <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
+                <div className="bg-slate-50 px-4 py-3 dark:bg-slate-800/70">
+                  <p className="text-sm font-bold text-slate-800 dark:text-white">Ledger Items</p>
+                </div>
+                <div className="table-container max-h-[46vh]">
+                  <table>
+                    <thead>
+                      <tr><th>No.</th><th>Description</th><th>Term</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                      {openingBalance > 0 && (
+                        <tr className="bg-pink-50/80 dark:bg-pink-900/10">
+                          <td>1</td>
+                          <td className="font-medium">Opening balance top-up</td>
+                          <td><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">Current Term {currentTerm}</span></td>
+                          <td>{formatMoney(openingBalance)}</td>
+                          <td>{formatMoney(0)}</td>
+                          <td className="font-semibold text-pink-600 dark:text-pink-300">{formatMoney(openingBalance)}</td>
+                          <td><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">top-up</span></td>
+                        </tr>
+                      )}
+                      {currentTermFees.length === 0 && openingBalance <= 0 ? (
+                        <tr><td colSpan={7} className="text-center py-8 text-slate-400">No current term ledger items.</td></tr>
+                      ) : currentTermFees.map((fee: any, index: number) => {
+                        const feePayments = paymentsData.filter((payment: any) => payment.feeId === fee.id);
+                        const paid = feePayments.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
+                        const balance = Math.max(0, Number(fee.amount || 0) - paid);
+                        const status = balance <= 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending';
+                        return (
+                          <tr key={fee.id}>
+                            <td>{index + 1 + (openingBalance > 0 ? 1 : 0)}</td>
+                            <td className="font-medium">{fee.description}</td>
+                            <td><span className="badge badge-info">Current Term {fee.term}</span></td>
+                            <td>{formatMoney(fee.amount || 0)}</td>
+                            <td className="text-emerald-600 font-semibold">{formatMoney(paid)}</td>
+                            <td className={balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600 font-semibold'}>{formatMoney(balance)}</td>
+                            <td><span className={`badge ${status === 'Paid' ? 'badge-success' : status === 'Partial' ? 'badge-warning' : 'badge-danger'}`}>{status}</span></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>

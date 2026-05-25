@@ -13,10 +13,6 @@ import { ConfirmProvider } from './components/ConfirmModal';
 import { isCloudSyncEnabled } from './utils/desktopSyncPreference';
 import './index.css';
 
-if (window.electronAPI) {
-  document.documentElement.classList.add('electron-titlebar');
-}
-
 const queryClient = getQueryClient();
 const isFileProtocol = window.location.protocol === 'file:';
 const AppRouter = isFileProtocol ? HashRouter : BrowserRouter;
@@ -26,8 +22,15 @@ const isAdminPath = isFileProtocol
   ? window.location.hash.startsWith('#/admin')
   : window.location.pathname.startsWith('/admin');
 
-// Register service worker for offline support (main app only)
-if (!isFileProtocol && !isAdminPath && 'serviceWorker' in navigator) {
+// Keep the Vite dev server free from stale service-worker caches.
+if (import.meta.env.DEV && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations()
+    .then(registrations => registrations.forEach(registration => registration.unregister()))
+    .catch(() => {/* ignore */});
+}
+
+// Register service worker for offline support in production only (main app only).
+if (import.meta.env.PROD && !isFileProtocol && !isAdminPath && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(reg => {

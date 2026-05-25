@@ -479,6 +479,7 @@ export default function Attendance() {
           <table>
             <thead>
               <tr>
+                <th>No.</th>
                 <th>Student</th>
                 <th>ID</th>
                 {!selectedClass && <th>Class</th>}
@@ -488,7 +489,7 @@ export default function Attendance() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={selectedClass ? 3 : 4} className="text-center py-12">
+                  <td colSpan={selectedClass ? 4 : 5} className="text-center py-12">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-10 h-10 border-4 border-primary-200 border-t-primary-500 rounded-full animate-spin"></div>
                       <p className="text-slate-500">Loading...</p>
@@ -497,7 +498,7 @@ export default function Attendance() {
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={selectedClass ? 3 : 4} className="text-center py-12">
+                  <td colSpan={selectedClass ? 4 : 5} className="text-center py-12">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
                         <Users size={32} className="text-slate-400" />
@@ -507,8 +508,9 @@ export default function Attendance() {
                     </div>
                   </td>
                 </tr>
-              ) : students.map(s => (
+              ) : students.map((s, index) => (
                 <tr key={s.id}>
+                  <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                   <td>
                     <div className="flex items-center gap-3">
                       <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getAvatarColor(s.firstName)} flex items-center justify-center shadow-md`}>

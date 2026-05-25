@@ -109,7 +109,7 @@ export function RealtimeSyncProvider({ children }: { children: React.ReactNode }
       window.removeEventListener('schofyCloudSyncPreferenceChanged', handleSyncPreference);
       document.removeEventListener('visibilitychange', handleVisible);
       setIsConnected(false);
-      dataService.stopRealtimeSync();
+      dataService.scheduleRealtimeStop();
     };
   }, [sid, user]);
 

@@ -7,6 +7,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { serviceManager } from '../lib/ServiceManager';
 import { isCloudSyncEnabled, isDesktopApp, setCloudSyncEnabled, SCHOFY_SYNC_ENABLED_KEY } from '../utils/desktopSyncPreference';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { store } from '../lib/store';
 
 interface SyncContextType {
   isSyncing: boolean;
@@ -35,10 +36,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [pendingChanges, setPendingChanges] = useState(0);
   const [syncEnabled, setSyncEnabled] = useState(isCloudSyncEnabled());
   const desktopApp = isDesktopApp();
+  const MANUAL_SYNC_WINDOW_MS = 5 * 60 * 1000;
+  const MANUAL_SYNC_LIMIT = 3;
 
   useEffect(() => {
     if (desktopApp && localStorage.getItem(SCHOFY_SYNC_ENABLED_KEY) === null) {
-      setCloudSyncEnabled(true);
+      setCloudSyncEnabled(false);
     }
   }, [desktopApp]);
 
@@ -117,8 +120,27 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         }
         return;
       }
+      if (showNotifications) {
+        const key = `schofy_manual_sync_attempts_${sid}`;
+        const now = Date.now();
+        const attempts = JSON.parse(localStorage.getItem(key) || '[]')
+          .filter((ts: number) => Number.isFinite(ts) && now - ts < MANUAL_SYNC_WINDOW_MS);
+
+        if (attempts.length >= MANUAL_SYNC_LIMIT) {
+          const waitMs = MANUAL_SYNC_WINDOW_MS - (now - attempts[0]);
+          const waitMinutes = Math.max(1, Math.ceil(waitMs / 60000));
+          addToast(`Sync limit reached. Automatic sync runs every 5 minutes; try again in ${waitMinutes} minute${waitMinutes === 1 ? '' : 's'}.`, 'warning');
+          return;
+        }
+
+        attempts.push(now);
+        localStorage.setItem(key, JSON.stringify(attempts));
+      }
       try {
-        const result = await syncService.runFullSyncCycle();
+        const result = await syncService.runFullSyncCycle(showNotifications ? 'manual' : 'automatic');
+        if (showNotifications && result.success) {
+          await store.refreshCurrentPage(sid, true);
+        }
         await loadPendingCount();
         if (result.success) {
           setLastSyncTime(new Date());
@@ -192,7 +214,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      addToast('📦 Backup exported', 'success');
+      addToast('Backup exported', 'success');
     } catch (error) {
       console.error('Backup export failed:', error);
       addToast('Failed to export backup', 'error');
@@ -231,7 +253,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         }
 
         window.dispatchEvent(new Event('schofyDataRefresh'));
-        addToast('📦 Backup imported', 'success');
+        addToast('Backup imported', 'success');
         return true;
       } catch (error) {
         console.error('Backup import failed:', error);
@@ -342,7 +364,7 @@ export function SyncStatusIndicator() {
   };
 
   const getStatusText = () => {
-    if (!isOnline) return 'Offline — local only';
+    if (!isOnline) return 'Offline - local only';
     if (isSyncing) return 'Syncing...';
     if (pendingChanges > 0) return `${pendingChanges} to upload`;
     return 'All data up to date';

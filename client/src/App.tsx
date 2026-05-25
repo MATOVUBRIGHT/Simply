@@ -196,7 +196,7 @@ function LocalMergePrompt() {
   const [cloudRecovered, setCloudRecovered] = useState(localStorage.getItem('schofy_cloud_recovered') === '1');
 
   const localOnlySession = user?.localOnly || localStorage.getItem('schofy_local_only_session') === 'true';
-  const canCheckCloud = !!localOnlySession && isOnline && isSupabaseConfigured && !isSyncEnabled && !dismissed;
+  const canCheckCloud = false && !!localOnlySession && isOnline && isSupabaseConfigured && !isSyncEnabled && !dismissed;
   const shouldShow = canCheckCloud && cloudRecovered;
 
   useEffect(() => {
@@ -245,9 +245,9 @@ function LocalMergePrompt() {
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
           <span className="text-sm font-bold">OK</span>
         </div>
-        <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">Supabase is reachable again</h2>
+        <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">Cloud space is reachable again</h2>
         <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">
-          This desktop is using a local-only backup. If this is the same school account, merge by enabling Supabase sync and uploading your local data.
+          This desktop is using a local-only backup. If this is the same school account, merge by enabling cloud sync and uploading your local data.
         </p>
         <div className="mt-5 flex gap-3">
           <button
@@ -304,7 +304,7 @@ function CloudProblemPrompt() {
   useEffect(() => {
     const onCloudProblem = (event: Event) => {
       const detail = (event as CustomEvent<{ message?: string }>).detail;
-      setMessage(detail?.message || 'Supabase is unavailable. You can keep working locally on this desktop.');
+      setMessage(detail?.message || 'Cloud space is unavailable. You can keep working locally on this desktop.');
     };
     window.addEventListener('schofyCloudProblem', onCloudProblem as EventListener);
     return () => window.removeEventListener('schofyCloudProblem', onCloudProblem as EventListener);
@@ -318,7 +318,7 @@ function CloudProblemPrompt() {
         <h2 className="text-center text-lg font-bold text-slate-900 dark:text-white">Cloud sync problem</h2>
         <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">{message}</p>
         <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-          Local mode stops Supabase calls and keeps storing changes on this device. You can re-enable Supabase sync in Settings later.
+          Local mode stops cloud calls and keeps storing changes on this device. You can re-enable cloud sync in Settings later.
         </div>
         <div className="mt-5 flex gap-3">
           <button

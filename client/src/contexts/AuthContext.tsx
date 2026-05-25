@@ -10,6 +10,12 @@ import { prefetchCriticalTables } from '../lib/store';
 import { store } from '../lib/store';
 import { getSubscriptionAccessState } from '../utils/plans';
 import { isDesktopApp, setCloudSyncEnabled } from '../utils/desktopSyncPreference';
+import { loginLocal, registerLocal } from '../lib/auth/LocalAuth';
+import {
+  clearStorageEncryption,
+  unlockStorageEncryption,
+  unlockStorageEncryptionFromDesktopBackup,
+} from '../lib/database/StorageCrypto';
 
 export interface LocalUser {
   id: string;
@@ -29,7 +35,9 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<AuthResult>;
   register: (email: string, password: string, firstName: string, lastName: string, phone?: string) => Promise<AuthResult & { user?: { id: string }; needsVerification?: boolean }>;
-  continueLocally: (profile: { email: string; firstName?: string; lastName?: string }) => Promise<AuthResult>;
+  loginOffline: (email: string, password: string) => Promise<AuthResult>;
+  registerOffline: (email: string, password: string, firstName: string, lastName: string) => Promise<AuthResult>;
+  continueLocally: (profile: { email: string; password?: string; firstName?: string; lastName?: string; mode?: 'login' | 'register' }) => Promise<AuthResult>;
   sendPasswordReset: (email: string) => Promise<{ success: boolean; error?: string }>;
   resendVerification: (email: string) => Promise<{ success: boolean; error?: string }>;
   activateSecureLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
@@ -44,12 +52,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const SESSION_KEY = 'schofy_session';
 const LOCAL_ONLY_SESSION_KEY = 'schofy_local_only_session';
 const LOCAL_FALLBACK_REASON_KEY = 'schofy_local_fallback_reason';
+const DESKTOP_OFFLINE_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function saveSession(user: LocalUser) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  const now = Date.now();
+  const sessionUser = isDesktopApp()
+    ? { ...user, sessionSavedAt: now, offlineExpiresAt: now + DESKTOP_OFFLINE_SESSION_MS }
+    : user;
+  localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
   localStorage.setItem('schofy_current_user_id', user.id);
   localStorage.setItem('schofy_current_school_id', user.schoolId || user.id);
-  void writeElectronBackup(SESSION_KEY, user);
+  void writeElectronBackup(SESSION_KEY, sessionUser);
 }
 
 function getSession(): LocalUser | null {
@@ -109,12 +122,48 @@ function markLocalUnlimitedAccess(user: LocalUser) {
   localStorage.setItem(`schofy_local_backup_email_${user.schoolId}`, user.email.toLowerCase());
 }
 
+function mapLocalAccount(user: any): LocalUser {
+  return {
+    id: user.id,
+    schoolId: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+    localOnly: true,
+  };
+}
+
+function isDesktopSessionExpired(user: any): boolean {
+  if (!isDesktopApp()) return false;
+  const expiresAt = Number(user?.offlineExpiresAt || 0);
+  return Boolean(expiresAt && Date.now() > expiresAt);
+}
+
+async function getLocalUserByEmail(email: string): Promise<LocalUser | null> {
+  const { userIndexDB } = await import('../lib/database/UserIndexDB');
+  const local = await userIndexDB.getUserByEmail(email.trim().toLowerCase());
+  return local ? mapLocalAccount(local) : null;
+}
+
 async function getBackedUpSession(): Promise<LocalUser | null> {
   const local = getSession();
-  if (local) return local;
+  if (local && isDesktopApp()) {
+    if (isDesktopSessionExpired(local)) {
+      clearSession();
+      return null;
+    }
+    return local;
+  }
 
+  if (!isDesktopApp()) return null;
   const backedUp = await readElectronBackup(SESSION_KEY);
   if (backedUp?.id) {
+    if (isDesktopSessionExpired(backedUp)) {
+      clearSession();
+      return null;
+    }
     localStorage.setItem(SESSION_KEY, JSON.stringify(backedUp));
     return backedUp as LocalUser;
   }
@@ -262,6 +311,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (savedUser) {
+      const desktopRestored = isDesktopApp()
+        ? await unlockStorageEncryptionFromDesktopBackup(savedUser.id, savedUser.schoolId, savedUser.email)
+        : false;
+      if (!desktopRestored) {
+        clearSession();
+        if (!stale()) setLoading(false);
+        return;
+      }
+
       // Background initialization
       void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
       
@@ -274,15 +332,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ]);
       } catch { /* proceed anyway after 2s */ }
 
+      // Desktop is allowed to restore a cached/offline session. Web waits for
+      // authoritative Supabase verification and never accepts stale local state.
       if (!stale()) {
         setUser(savedUser);
         setSchoolId(savedUser.schoolId);
-        setLoading(false); 
+        setLoading(false);
       }
-      
+
       initializeSyncForUser(savedUser);
 
-      // Verify session with server in background (non-blocking)
+      // Verify session with server in background for desktop cached sessions.
       if (online) {
         usersApi.getById(savedUser.id).then(({ data, error }) => {
           if (stale()) return;
@@ -303,6 +363,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (!savedUser && online && !isDesktopApp()) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          const { data } = await usersApi.getById(session.user.id);
+          if (data?.is_active) {
+            const userData: LocalUser = {
+              id: data.id,
+              schoolId: data.school_id || data.id,
+              email: data.email,
+              firstName: data.first_name,
+              lastName: data.last_name,
+              isActive: data.is_active,
+              createdAt: data.created_at,
+            };
+            saveSession(userData);
+            if (!stale()) {
+              setUser(userData);
+              setSchoolId(userData.schoolId);
+            }
+            initializeSyncForUser(userData);
+          } else {
+            clearSession();
+          }
+        }
+      } catch {
+        clearSession();
+      }
+      if (!stale()) setLoading(false);
+      return;
+    }
+
     if (!stale()) setLoading(false);
   }
 
@@ -310,19 +402,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured || !supabase) {
       return {
         success: false,
-        error: isDesktopApp() ? 'Cloud authentication is unavailable. You can continue locally on this desktop.' : 'Supabase not configured. Cannot login.',
+        error: isDesktopApp() ? 'Cloud authentication is unavailable. You can continue locally on this desktop.' : 'Cloud space is not configured. Cannot login.',
         localFallback: isDesktopApp(),
         fallbackMode: 'login',
       };
     }
 
     if (!isOnline) {
-      const savedUser = await getBackedUpSession();
-      if (savedUser && savedUser.email === email) {
-        setUser(savedUser);
-        setSchoolId(savedUser.schoolId);
-        void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
-        return { success: true };
+      if (isDesktopApp()) {
+        const localResult = await loginLocal(email.toLowerCase().trim(), password, { syncToCloud: false });
+        if (localResult.success && localResult.user) {
+          const userData = mapLocalAccount(localResult.user);
+          await unlockStorageEncryption({
+            userId: userData.id,
+            schoolId: userData.schoolId,
+            email: userData.email,
+            password,
+          });
+          setCloudSyncEnabled(false);
+          markLocalUnlimitedAccess(userData);
+          saveSession(userData);
+          setUser(userData);
+          setSchoolId(userData.schoolId);
+          initializeSyncForUser(userData);
+          return { success: true };
+        }
       }
       return {
         success: false,
@@ -341,7 +445,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isDesktopApp() && isRecoverableCloudProblem(authError)) {
           return {
             success: false,
-            error: 'Supabase could not be reached. You can keep working locally on this desktop.',
+            error: 'Cloud space could not be reached. You can keep working locally on this desktop.',
             localFallback: true,
             fallbackMode: 'login',
           };
@@ -371,14 +475,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (savedUser && savedUser.email.toLowerCase() === email.toLowerCase()) {
             setUser(savedUser);
             setSchoolId(savedUser.schoolId);
-            void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+      const cachedLocalUser = savedUser.localOnly
+        ? await getLocalUserByEmail(savedUser.email).catch(() => null)
+        : null;
+      void userDBManager.openDatabase((cachedLocalUser?.schoolId || savedUser.schoolId)).catch(() => {});
             return { success: true };
           }
           // No cached session — create a minimal offline session so user can access the app
           // They'll see the subscription gate and can navigate to Plans
           return {
             success: false,
-            error: 'Supabase quota is currently blocked. You can continue locally on this desktop.',
+            error: 'Cloud space is currently unavailable. You can continue locally on this desktop.',
             localFallback: isDesktopApp(),
             fallbackMode: 'login',
           };
@@ -453,6 +560,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         createdAt: account.created_at,
       };
 
+      await unlockStorageEncryption({
+        userId: userData.id,
+        schoolId: userData.schoolId,
+        email: userData.email,
+        password,
+      });
       setUser(userData);
       setSchoolId(userData.schoolId);
       saveSession(userData);
@@ -492,7 +605,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isDesktopApp() && isRecoverableCloudProblem(error)) {
         return {
           success: false,
-          error: 'Supabase could not be reached. You can continue locally on this desktop.',
+          error: 'Cloud space could not be reached. You can continue locally on this desktop.',
           localFallback: true,
           fallbackMode: 'login',
         };
@@ -511,7 +624,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured || !supabase) {
       return {
         success: false,
-        error: isDesktopApp() ? 'Cloud registration is unavailable. You can create a local desktop account.' : 'Supabase not configured. Cannot register.',
+        error: isDesktopApp() ? 'Cloud registration is unavailable. You can create a local desktop account.' : 'Cloud space is not configured. Cannot register.',
         localFallback: isDesktopApp(),
         fallbackMode: 'register',
       };
@@ -542,7 +655,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isDesktopApp() && isRecoverableCloudProblem(authError)) {
           return {
             success: false,
-            error: 'Supabase could not create the account right now. You can create it locally on this desktop.',
+            error: 'Cloud space could not create the account right now. You can create it locally on this desktop.',
             localFallback: true,
             fallbackMode: 'register',
           };
@@ -581,7 +694,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isDesktopApp() && isRecoverableCloudProblem(error)) {
           return {
             success: false,
-            error: 'Supabase could not save the account profile right now. You can create it locally on this desktop.',
+            error: 'Cloud space could not save the account profile right now. You can create it locally on this desktop.',
             localFallback: true,
             fallbackMode: 'register',
           };
@@ -608,6 +721,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         createdAt: data.created_at,
       };
 
+      await unlockStorageEncryption({
+        userId: userData.id,
+        schoolId: userData.schoolId,
+        email: userData.email,
+        password,
+      });
       setUser(userData);
       setSchoolId(userData.schoolId);
       saveSession(userData);
@@ -630,7 +749,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isDesktopApp() && isRecoverableCloudProblem(error)) {
         return {
           success: false,
-          error: 'Supabase could not be reached. You can create a local desktop account.',
+          error: 'Cloud space could not be reached. You can create a local desktop account.',
           localFallback: true,
           fallbackMode: 'register',
         };
@@ -639,13 +758,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function continueLocally(profile: { email: string; firstName?: string; lastName?: string }): Promise<AuthResult> {
+  async function continueLocally(profile: { email: string; password?: string; firstName?: string; lastName?: string; mode?: 'login' | 'register' }): Promise<AuthResult> {
     if (!isDesktopApp()) {
       return { success: false, error: 'Local unlimited sessions are available only in the desktop app.' };
     }
 
     const cleanEmail = profile.email.trim().toLowerCase();
     if (!cleanEmail) return { success: false, error: 'Enter an email first.' };
+
+    const cleanPassword = profile.password || '';
+    if (profile.mode === 'login' && !cleanPassword) {
+      return {
+        success: false,
+        error: 'This desktop can only sign in offline with an existing offline account password. Cloud accounts must reconnect to the internet after logout.',
+      };
+    }
+
+    if (cleanPassword) {
+      const loginResult = await loginLocal(cleanEmail, cleanPassword, { syncToCloud: false });
+      if (loginResult.success && loginResult.user) {
+        const userData = mapLocalAccount(loginResult.user);
+        await unlockStorageEncryption({
+          userId: userData.id,
+          schoolId: userData.schoolId,
+          email: userData.email,
+          password: cleanPassword,
+        });
+        setCloudSyncEnabled(false);
+        markLocalUnlimitedAccess(userData);
+        localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'cloud_unavailable');
+        saveSession(userData);
+        setUser(userData);
+        setSchoolId(userData.schoolId);
+        initializeSyncForUser(userData);
+        return { success: true };
+      }
+
+      if (profile.mode === 'register' || loginResult.error === 'Invalid email or password') {
+        const first = profile.firstName?.trim() || cleanEmail.split('@')[0] || 'Local';
+        const last = profile.lastName?.trim() || 'School';
+        const registerResult = await registerLocal(cleanEmail, cleanPassword, first, last, { syncToCloud: false });
+        if (registerResult.success && registerResult.user) {
+          const userData = mapLocalAccount(registerResult.user);
+          await unlockStorageEncryption({
+            userId: userData.id,
+            schoolId: userData.schoolId,
+            email: userData.email,
+            password: cleanPassword,
+          });
+          setCloudSyncEnabled(false);
+          markLocalUnlimitedAccess(userData);
+          localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'cloud_unavailable');
+          saveSession(userData);
+          setUser(userData);
+          setSchoolId(userData.schoolId);
+          initializeSyncForUser(userData);
+          return { success: true };
+        }
+
+        if (profile.mode === 'register') {
+          return { success: false, error: registerResult.error || 'Could not create local desktop account.' };
+        }
+      }
+
+      if (profile.mode === 'login') {
+        return { success: false, error: 'No matching local account exists on this desktop. Choose New local account to create one.' };
+      }
+    }
 
     const cached = await getBackedUpSession();
     const useCached = cached?.email?.toLowerCase() === cleanEmail;
@@ -677,9 +856,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   }
 
+  async function loginOffline(email: string, password: string): Promise<AuthResult> {
+    if (!isDesktopApp()) {
+      return { success: false, error: 'Offline desktop login is available only in the desktop app.' };
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !password) {
+      return { success: false, error: 'Enter your email and password.' };
+    }
+
+    const result = await loginLocal(cleanEmail, password, { syncToCloud: false });
+    if (!result.success || !result.user) {
+      return { success: false, error: result.error || 'Invalid local email or password' };
+    }
+
+    const userData = mapLocalAccount(result.user);
+    await unlockStorageEncryption({
+      userId: userData.id,
+      schoolId: userData.schoolId,
+      email: userData.email,
+      password,
+    });
+    setCloudSyncEnabled(false);
+    markLocalUnlimitedAccess(userData);
+    localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'desktop_offline_auth');
+    saveSession(userData);
+    setUser(userData);
+    setSchoolId(userData.schoolId);
+    initializeSyncForUser(userData);
+    return { success: true };
+  }
+
+  async function registerOffline(email: string, password: string, firstName: string, lastName: string): Promise<AuthResult> {
+    if (!isDesktopApp()) {
+      return { success: false, error: 'Offline desktop registration is available only in the desktop app.' };
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !password || !firstName.trim() || !lastName.trim()) {
+      return { success: false, error: 'Complete all required account fields.' };
+    }
+
+    const result = await registerLocal(cleanEmail, password, firstName.trim(), lastName.trim(), { syncToCloud: false });
+    if (!result.success || !result.user) {
+      return { success: false, error: result.error || 'Could not create local account' };
+    }
+
+    const userData = mapLocalAccount(result.user);
+    await unlockStorageEncryption({
+      userId: userData.id,
+      schoolId: userData.schoolId,
+      email: userData.email,
+      password,
+    });
+    setCloudSyncEnabled(false);
+    markLocalUnlimitedAccess(userData);
+    localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'desktop_offline_auth');
+    saveSession(userData);
+    setUser(userData);
+    setSchoolId(userData.schoolId);
+    initializeSyncForUser(userData);
+    return { success: true };
+  }
+
   async function sendPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured || !supabase) {
-      return { success: false, error: 'Supabase not configured. Cannot send reset email.' };
+      return { success: false, error: 'Cloud space is not configured. Cannot send reset email.' };
     }
 
     if (!isOnline) {
@@ -694,7 +937,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function resendVerification(email: string): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured || !supabase) {
-      return { success: false, error: 'Supabase not configured. Cannot resend verification.' };
+      return { success: false, error: 'Cloud space is not configured. Cannot resend verification.' };
     }
 
     if (!isOnline) {
@@ -712,7 +955,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function activateSecureLogin(email: string, password: string): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured || !supabase) {
-      return { success: false, error: 'Supabase not configured. Cannot activate secure login.' };
+      return { success: false, error: 'Cloud space is not configured. Cannot activate secure login.' };
     }
 
     if (!isOnline) {
@@ -733,6 +976,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
+    clearStorageEncryption();
     clearSession();
     setUser(null);
     setSchoolId(null);
@@ -749,14 +993,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <h2 className="text-xl font-semibold">Initializing workspace...</h2>
-          <p className="text-gray-400 mt-2">Connecting to Supabase and restoring session</p>
+          <p className="text-gray-400 mt-2">Connecting to cloud space and restoring session</p>
         </div>
       </div>
     );
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, continueLocally, sendPasswordReset, resendVerification, activateSecureLogin, logout, isOnline, schoolId, isSupabaseAvailable: isSupabaseConfigured && !!supabase }}>
+    <AuthContext.Provider value={{ user, loading, login, register, loginOffline, registerOffline, continueLocally, sendPasswordReset, resendVerification, activateSecureLogin, logout, isOnline, schoolId, isSupabaseAvailable: isSupabaseConfigured && !!supabase }}>
       {children}
     </AuthContext.Provider>
   );

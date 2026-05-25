@@ -20,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { isDesktopApp } from '../utils/desktopSyncPreference';
 
 type PolicyModal = 'terms' | 'privacy' | null;
 
@@ -124,6 +125,8 @@ export default function Login() {
   const [resetOtp, setResetOtp] = useState('');
   const [passwordResetComplete, setPasswordResetComplete] = useState(false);
   const [localFallback, setLocalFallback] = useState<{ mode: 'login' | 'register'; message: string } | null>(null);
+  const [offlineAuthMode, setOfflineAuthMode] = useState(false);
+  const [showOfflinePrompt, setShowOfflinePrompt] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [syncStatus, setSyncStatus] = useState<{
@@ -132,7 +135,7 @@ export default function Login() {
     progress: number;
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
 
-  const { login, register, continueLocally, sendPasswordReset, user, isOnline } = useAuth();
+  const { login, register, loginOffline, registerOffline, continueLocally, sendPasswordReset, user, isOnline } = useAuth();
   const { primaryColor } = useTheme();
   const navigate = useNavigate();
 
@@ -167,6 +170,15 @@ export default function Login() {
     if (user) navigate('/');
   }, [user, navigate]);
 
+  useEffect(() => {
+    if (!user && isDesktopApp() && !isOnline && !offlineAuthMode) {
+      setShowOfflinePrompt(true);
+    }
+    if (isOnline && offlineAuthMode) {
+      setShowOfflinePrompt(false);
+    }
+  }, [user, isOnline, offlineAuthMode]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -175,6 +187,12 @@ export default function Login() {
 
     try {
       if (isRegister) {
+        if (offlineAuthMode && !securityCheckPassed) {
+          setAccessDeniedPopup(true);
+          setLoading(false);
+          return;
+        }
+
         if (!acceptedPolicies) {
           setError('Please accept the Terms of Use and Privacy Policy to create an account.');
           setLoading(false);
@@ -203,7 +221,9 @@ export default function Login() {
           return;
         }
 
-        const result = await register(email.trim(), password, firstName.trim(), lastName.trim(), phone.trim());
+        const result = offlineAuthMode
+          ? await registerOffline(email.trim(), password, firstName.trim(), lastName.trim())
+          : await register(email.trim(), password, firstName.trim(), lastName.trim(), phone.trim());
 
         if (!result.success) {
           if (result.localFallback) {
@@ -215,7 +235,19 @@ export default function Login() {
           return;
         }
 
-        if (result.needsVerification) {
+        if (offlineAuthMode) {
+          setSyncStatus({ step: 'complete', message: 'Local desktop account ready. Sync is off.', progress: 100 });
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          setSecuringAccount(false);
+          setShowSuccess(true);
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          setPassword('');
+          setConfirmPassword('');
+          navigate('/');
+          return;
+        }
+
+        if (!offlineAuthMode && 'needsVerification' in result && result.needsVerification) {
           setSyncStatus({ step: 'complete', message: 'Verification email sent. Check your inbox before signing in.', progress: 100 });
           await new Promise((resolve) => setTimeout(resolve, 900));
           setVerificationSent(true);
@@ -240,7 +272,9 @@ export default function Login() {
         }
         setSecuringAccount(true);
         setSyncStatus({ step: 'syncing', message: 'Checking your secure access...', progress: 45 });
-        const result = await login(email.trim(), password);
+        const result = offlineAuthMode
+          ? await loginOffline(email.trim(), password)
+          : await login(email.trim(), password);
         if (!result.success) {
           if (result.localFallback) {
             setLocalFallback({ mode: result.fallbackMode || 'login', message: result.error || 'Cloud is unavailable. You can continue locally.' });
@@ -259,7 +293,7 @@ export default function Login() {
       await new Promise((resolve) => setTimeout(resolve, isRegister ? 700 : 1200));
       setPassword('');
       setConfirmPassword('');
-      navigate(isRegister ? '/plans' : '/');
+      navigate(isRegister && !offlineAuthMode ? '/plans' : '/');
     } catch (err: any) {
       setError(err.message || (isRegister ? 'Registration failed' : 'Login failed'));
       setSecuringAccount(false);
@@ -333,8 +367,10 @@ export default function Login() {
     try {
       const result = await continueLocally({
         email,
+        password,
         firstName,
         lastName,
+        mode: localFallback?.mode || (isRegister ? 'register' : 'login'),
       });
       if (!result.success) {
         setError(result.error || 'Could not start local session');
@@ -353,6 +389,17 @@ export default function Login() {
     setError('');
     setResetSent(false);
     setSecurityCheckPassed(true);
+  };
+
+  const enterOfflineMode = (registerMode = false) => {
+    setOfflineAuthMode(true);
+    setShowOfflinePrompt(false);
+    setIsRegister(registerMode);
+    setResetMode(false);
+    setResetFromLink(false);
+    setLocalFallback(null);
+    setError('');
+    setSecurityCheckPassed(false);
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -452,7 +499,7 @@ export default function Login() {
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
             {syncStatus.step === 'complete' ? 'Access verified' : syncStatus.step === 'syncing' ? 'Checking secure access' : 'Creating account'}
           </h2>
-          <p className="mt-2 font-medium text-emerald-700 dark:text-emerald-300">{syncStatus.message}</p>
+          <p className="mt-2 font-medium" style={{ color: 'var(--solid-emerald)' }}>{syncStatus.message}</p>
           <div className="mt-6 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
             <div className="h-full rounded-full transition-all duration-500" style={{ width: `${syncStatus.progress}%`, backgroundColor: primaryColor }} />
           </div>
@@ -486,7 +533,7 @@ export default function Login() {
               <span className="inline-flex h-10 items-center justify-center rounded-md border border-sky-200 bg-sky-100/90 px-3 text-sky-800 shadow-sm">
                 Realtime sync
               </span>
-              <span className="inline-flex h-10 items-center justify-center rounded-md border border-emerald-200 bg-emerald-100/90 px-3 text-emerald-800 shadow-sm">
+              <span className="inline-flex h-10 items-center justify-center rounded-md border px-3 shadow-sm" style={{ borderColor: 'rgba(45, 163, 45, 0.28)', backgroundColor: 'rgba(45, 163, 45, 0.12)', color: 'var(--solid-emerald)' }}>
                 Secure access
               </span>
             </div>
@@ -500,7 +547,9 @@ export default function Login() {
                 </div>
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{isRegister ? 'Create account' : 'Welcome back'}</h2>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}</p>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    {offlineAuthMode ? 'Desktop offline mode. Sync is off.' : isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}
+                  </p>
                 </div>
               </div>
               <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${isOnline ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
@@ -512,14 +561,14 @@ export default function Login() {
             <div className="mb-6 grid grid-cols-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
               <button
                 type="button"
-                onClick={() => { setIsRegister(false); setResetMode(false); setResetFromLink(false); setError(''); }}
+                onClick={() => { setIsRegister(false); setResetMode(false); setResetFromLink(false); setError(''); setSecurityCheckPassed(false); }}
                 className={`rounded-md px-3 py-2 text-sm font-semibold transition ${!isRegister ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
               >
                 Sign in
               </button>
               <button
                 type="button"
-                onClick={() => { setIsRegister(true); setResetMode(false); setResetFromLink(false); setError(''); }}
+                onClick={() => { setIsRegister(true); setResetMode(false); setResetFromLink(false); setError(''); setSecurityCheckPassed(false); }}
                 className={`inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition ${isRegister ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
               >
                 <UserPlus size={15} />
@@ -634,6 +683,12 @@ export default function Login() {
                 </div>
               )}
 
+              {offlineAuthMode && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
+                  Offline mode only account. Accounts and school data stay on this computer, cloud sync is off, and you can use the app fully without internet.
+                </div>
+              )}
+
               {isRegister && (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
@@ -728,9 +783,9 @@ export default function Login() {
                 </>
               )}
 
-              {!isRegister && (
+              {(!isRegister || offlineAuthMode) && (
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-2">
+                  {!isRegister && <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={handleSaveEmail}
@@ -745,8 +800,8 @@ export default function Login() {
                     >
                       Clear
                     </button>
-                  </div>
-                  <button
+                  </div>}
+                  {!offlineAuthMode && <button
                     type="button"
                     onClick={handleForgotPassword}
                     disabled={resetLoading}
@@ -754,7 +809,7 @@ export default function Login() {
                   >
                     {resetLoading ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
                     Forgot password?
-                  </button>
+                  </button>}
                   <button
                     type="button"
                     onClick={handleSecurityCheck}
@@ -788,7 +843,7 @@ export default function Login() {
 
             <div className="mt-6 flex items-center justify-center gap-2 border-t border-slate-200 pt-5 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <Cloud size={16} className={isOnline ? 'text-emerald-500' : 'text-amber-500'} />
-              <span>{isOnline ? 'Connected to cloud' : 'Offline mode available after sign in'}</span>
+              <span>{offlineAuthMode ? 'Desktop offline mode - no cloud sync' : isOnline ? 'Connected to cloud' : 'Offline mode available on desktop'}</span>
             </div>
           </section>
         </div>
@@ -818,6 +873,46 @@ export default function Login() {
         </div>
       )}
 
+      {showOfflinePrompt && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-amber-200 bg-white p-5 shadow-2xl dark:border-amber-800 dark:bg-slate-900">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+              <WifiOff size={22} />
+            </div>
+            <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">You're offline</h2>
+            <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">
+              Sign in to an existing offline mode only account or create a new local account on this desktop. Cloud accounts need internet after logout.
+            </p>
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              Offline accounts keep their own local database on this computer. You can use all app features locally, and cloud sync stays paused.
+            </div>
+            <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => setShowOfflinePrompt(false)}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                Not now
+              </button>
+              <button
+                type="button"
+                onClick={() => enterOfflineMode(false)}
+                className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
+              >
+                Offline login
+              </button>
+              <button
+                type="button"
+                onClick={() => enterOfflineMode(true)}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                New local account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {localFallback && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-lg border border-blue-200 bg-white p-5 shadow-2xl dark:border-blue-800 dark:bg-slate-900">
@@ -827,7 +922,7 @@ export default function Login() {
             <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">Use Schofy locally</h2>
             <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">{localFallback.message}</p>
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              Your data will be stored on this desktop with Supabase sync paused. When Supabase is available again, you can turn sync back on in Settings and push your local data.
+              Offline mode only accounts store data on this desktop with cloud sync paused. Existing cloud accounts must reconnect to internet after logout.
             </div>
             <div className="mt-5 flex gap-3">
               <button
@@ -853,7 +948,7 @@ export default function Login() {
       {showSuccess && (
         <SuccessPopup
           message={passwordResetComplete ? 'Password updated' : isRegister ? 'Account created' : 'Welcome back'}
-          subMessage={passwordResetComplete ? 'Password updated. Sign in again with your new password.' : 'Taking you to your dashboard...'}
+          subMessage={passwordResetComplete ? 'Password updated. Sign in again with your new password.' : offlineAuthMode ? 'Offline workspace is ready.' : 'Taking you to your dashboard...'}
         />
       )}
     </div>

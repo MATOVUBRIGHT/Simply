@@ -1,487 +1,472 @@
-﻿import { useState, useRef, useEffect } from 'react';
-import { Download, Users, DollarSign, Calendar, UserCheck, BookOpen, ChevronDown, FileText } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Users, DollarSign, Calendar, UserCheck, BookOpen, ChevronDown, FileText, Printer, Layers, Receipt, Award, Percent, Search } from 'lucide-react';
 import { useCurrency } from '../hooks/useCurrency';
 import { useToast } from '../contexts/ToastContext';
-import { exportToCSV, exportToExcel } from '../utils/export';
-import { useActiveStudents } from '../contexts/StudentsContext';
+import { exportToCSV, exportToExcel, exportToPDF } from '../utils/export';
 import { useAuth } from '../contexts/AuthContext';
-import { dataService } from '../lib/database/SupabaseDataService';
+import { useTableData } from '../lib/store';
+import { sortClassesBySectionThenLevel } from '../utils/classroom';
+import { openPrintPreview } from '../utils/printPreview';
 
-type ReportType = 'students' | 'fees' | 'attendance' | 'staff' | 'classes';
+type ReportType = 'terms' | 'students' | 'fees' | 'payments' | 'attendance' | 'staff' | 'classes' | 'academic' | 'bursaries' | 'discounts' | 'invoices';
+type ReportRow = Record<string, string | number>;
+
+const reportTypes: Array<{ id: ReportType; label: string; icon: any; description: string }> = [
+  { id: 'terms', label: 'Track Terms', icon: Layers, description: 'Term and year records across the school' },
+  { id: 'students', label: 'Student Records', icon: Users, description: 'All active and completed student records' },
+  { id: 'fees', label: 'Fees', icon: DollarSign, description: 'Invoices, balances, and fee items' },
+  { id: 'payments', label: 'Payments', icon: Receipt, description: 'Payment records by student and term' },
+  { id: 'attendance', label: 'Attendance', icon: Calendar, description: 'Attendance summary report' },
+  { id: 'academic', label: 'Academic Documents', icon: FileText, description: 'Reports grouped by separate exam' },
+  { id: 'bursaries', label: 'Bursaries', icon: Award, description: 'Full and partial bursary records' },
+  { id: 'discounts', label: 'Discounts', icon: Percent, description: 'Discount records by student or class' },
+  { id: 'classes', label: 'Class Summary', icon: BookOpen, description: 'Classes and enrollment report' },
+  { id: 'staff', label: 'Staff Directory', icon: UserCheck, description: 'Export all staff members' },
+  { id: 'invoices', label: 'Invoice Records', icon: FileText, description: 'Invoice documents and status' },
+];
+
+const columnLabels: Record<string, string> = {
+  no: 'No.',
+  term: 'Term',
+  year: 'Year',
+  className: 'Class',
+  idNumber: 'Student ID',
+  studentName: 'Student',
+  status: 'Status',
+  gender: 'Gender',
+  guardian: 'Guardian',
+  phone: 'Phone',
+  email: 'Email',
+  description: 'Description',
+  amount: 'Amount',
+  paid: 'Paid',
+  balance: 'Balance',
+  method: 'Method',
+  date: 'Date',
+  present: 'Present',
+  absent: 'Absent',
+  late: 'Late',
+  staffName: 'Staff',
+  role: 'Role',
+  examName: 'Exam',
+  results: 'Results',
+  subjects: 'Subjects',
+  students: 'Students',
+  fees: 'Fees',
+  payments: 'Payments',
+  bursaries: 'Bursaries',
+  discounts: 'Discounts',
+  invoices: 'Invoices',
+  createdAt: 'Created',
+  dueDate: 'Due Date',
+  type: 'Type',
+};
+
+function normalize(value: unknown) {
+  return String(value ?? '').trim();
+}
+
+function dateInRange(value: unknown, from: string, to: string) {
+  if (!from && !to) return true;
+  if (!value) return false;
+  const time = new Date(String(value)).getTime();
+  if (Number.isNaN(time)) return false;
+  if (from && time < new Date(from).getTime()) return false;
+  if (to) {
+    const end = new Date(to);
+    end.setHours(23, 59, 59, 999);
+    if (time > end.getTime()) return false;
+  }
+  return true;
+}
+
+function termRank(term: string) {
+  const n = Number(String(term).replace(/[^0-9]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function getSettingsMap(rows: any[]) {
+  return rows.reduce((acc: Record<string, any>, row: any) => {
+    acc[row.key] = row.value;
+    return acc;
+  }, {});
+}
 
 export default function Reports() {
   const { user, schoolId } = useAuth();
-  const [selectedReport, setSelectedReport] = useState<ReportType>('students');
+  const sid = schoolId || user?.id || '';
+  const [selectedReport, setSelectedReport] = useState<ReportType>('terms');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [selectedTerm, setSelectedTerm] = useState('all');
+  const [selectedYear, setSelectedYear] = useState('all');
+  const [selectedClass, setSelectedClass] = useState('all');
+  const [search, setSearch] = useState('');
   const { formatMoney } = useCurrency();
   const { addToast } = useToast();
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
-  const students = useActiveStudents();
+  const { data: studentsData } = useTableData(sid, 'students');
+  const { data: staffData } = useTableData(sid, 'staff');
+  const { data: classesData } = useTableData(sid, 'classes');
+  const { data: feesData } = useTableData(sid, 'fees');
+  const { data: paymentsData } = useTableData(sid, 'payments');
+  const { data: attendanceData } = useTableData(sid, 'attendance');
+  const { data: examsData } = useTableData(sid, 'exams');
+  const { data: examResultsData } = useTableData(sid, 'examResults');
+  const { data: subjectsData } = useTableData(sid, 'subjects');
+  const { data: bursariesData } = useTableData(sid, 'bursaries');
+  const { data: discountsData } = useTableData(sid, 'discounts');
+  const { data: invoicesData } = useTableData(sid, 'invoices');
+  const { data: settingsData } = useTableData(sid, 'settings');
+
+  const settings = useMemo(() => getSettingsMap(settingsData as any[]), [settingsData]);
+  const students = studentsData as any[];
+  const staff = staffData as any[];
+  const classes = useMemo(() => sortClassesBySectionThenLevel(classesData as any[]), [classesData]);
+  const fees = feesData as any[];
+  const payments = paymentsData as any[];
+  const attendance = attendanceData as any[];
+  const exams = examsData as any[];
+  const examResults = examResultsData as any[];
+  const subjects = subjectsData as any[];
+  const bursaries = bursariesData as any[];
+  const discounts = discountsData as any[];
+  const invoices = invoicesData as any[];
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
-        setShowExportMenu(false);
-      }
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) setShowExportMenu(false);
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const reportTypes = [
-    { id: 'students', label: 'Student List', icon: Users, description: 'Export all registered students' },
-    { id: 'staff', label: 'Staff Directory', icon: UserCheck, description: 'Export all staff members' },
-    { id: 'fees', label: 'Fee Collection', icon: DollarSign, description: 'Financial collection report' },
-    { id: 'attendance', label: 'Attendance', icon: Calendar, description: 'Attendance summary report' },
-    { id: 'classes', label: 'Class Summary', icon: BookOpen, description: 'Classes and enrollment report' },
-  ];
+  const className = (classId?: string) => classes.find((c: any) => c.id === classId)?.name || classId || '-';
+  const studentName = (student?: any) => student ? `${student.firstName || ''} ${student.lastName || ''}`.trim() : 'N/A';
+  const getStudent = (studentId?: string) => students.find((s: any) => s.id === studentId);
+  const getFee = (feeId?: string) => fees.find((f: any) => f.id === feeId);
 
-  async function handleExport() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    const { jsPDF } = await import('jspdf');
-    const doc = new jsPDF();
+  const termOptions = useMemo(() => {
+    const values = [settings.currentTerm || '1'];
+    [...fees, ...exams, ...bursaries, ...discounts, ...invoices].forEach((row: any) => row?.term && values.push(row.term));
+    return Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)))
+      .sort((a, b) => termRank(a) - termRank(b) || a.localeCompare(b));
+  }, [fees, exams, bursaries, discounts, invoices, settings.currentTerm]);
 
-    doc.setFontSize(20);
-    doc.text('Schofy School Management', 105, 20, { align: 'center' });
-    doc.setFontSize(14);
-    doc.text(`${reportTypes.find(r => r.id === selectedReport)?.label || selectedReport} Report`, 105, 30, { align: 'center' });
-    doc.setFontSize(10);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 105, 40, { align: 'center' });
-    if (dateFrom || dateTo) {
-      doc.text(`Date Range: ${dateFrom || 'All'} to ${dateTo || 'All'}`, 105, 48, { align: 'center' });
-    }
+  const yearOptions = useMemo(() => {
+    const values = [settings.academicYear || String(new Date().getFullYear())];
+    [...fees, ...exams, ...bursaries, ...discounts, ...invoices].forEach((row: any) => row?.year && values.push(row.year));
+    students.forEach((row: any) => row?.completedYear && values.push(row.completedYear));
+    return Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)))
+      .sort((a, b) => Number(b) - Number(a) || b.localeCompare(a));
+  }, [fees, exams, bursaries, discounts, invoices, students, settings.academicYear]);
+
+  function matchesTermYear(row: any) {
+    if (selectedTerm !== 'all' && String(row.term || row.completedTerm || '') !== selectedTerm) return false;
+    if (selectedYear !== 'all' && String(row.year || row.completedYear || '') !== selectedYear) return false;
+    return true;
+  }
+
+  function matchesClass(row: any) {
+    if (selectedClass === 'all') return true;
+    const student = getStudent(row.studentId || row.entityId);
+    return row.classId === selectedClass || student?.classId === selectedClass;
+  }
+
+  function makeRows(): ReportRow[] {
+    const q = search.trim().toLowerCase();
+    const searchMatch = (row: ReportRow) => !q || Object.values(row).some(value => String(value).toLowerCase().includes(q));
+    let rows: ReportRow[] = [];
 
     if (selectedReport === 'students') {
-      const studentList = students;
-      
-      doc.setFontSize(12);
-      doc.text('Student List', 14, 55);
-      
-      let y = 65;
-      doc.setFontSize(10);
-      doc.text('ID', 14, y);
-      doc.text('Name', 55, y);
-      doc.text('Class', 110, y);
-      doc.text('Gender', 145, y);
-      doc.text('Status', 170, y);
-      
-      y += 8;
-      studentList.slice(0, 30).forEach(s => {
-        doc.text(s.admissionNo, 14, y);
-        doc.text(`${s.firstName} ${s.lastName}`, 55, y);
-        doc.text(s.classId, 110, y);
-        doc.text(s.gender, 145, y);
-        doc.text(s.status, 170, y);
-        y += 7;
-        if (y > 270) return;
+      rows = students
+        .filter((s: any) => selectedClass === 'all' || s.classId === selectedClass)
+        .filter((s: any) => selectedYear === 'all' || String(s.completedYear || settings.academicYear || '') === selectedYear || s.status !== 'completed')
+        .map((s: any) => ({
+          idNumber: s.studentId || s.admissionNo || s.id,
+          studentName: studentName(s),
+          className: className(s.classId),
+          gender: s.gender || '-',
+          status: s.status || 'active',
+          term: s.status === 'completed' ? s.completedTerm || 'Final' : settings.currentTerm || '-',
+          year: s.status === 'completed' ? s.completedYear || '-' : settings.academicYear || '-',
+          guardian: s.guardianName || '-',
+          phone: s.guardianPhone || '-',
+        }));
+    } else if (selectedReport === 'fees') {
+      rows = fees.filter(matchesTermYear).filter(matchesClass).map((fee: any) => {
+        const student = getStudent(fee.studentId);
+        const paid = payments.filter((p: any) => p.feeId === fee.id).reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+        return {
+          term: fee.term || '-',
+          year: fee.year || '-',
+          idNumber: student?.studentId || student?.admissionNo || fee.studentId || '-',
+          studentName: studentName(student),
+          className: className(fee.classId || student?.classId),
+          description: fee.description || 'Fee',
+          amount: formatMoney(Number(fee.amount || 0)),
+          paid: formatMoney(paid),
+          balance: formatMoney(Math.max(0, Number(fee.amount || 0) - paid)),
+          dueDate: fee.dueDate || '-',
+        };
       });
-      
-      doc.text(`Total Students: ${studentList.length}`, 14, y + 10);
+    } else if (selectedReport === 'payments') {
+      rows = payments
+        .filter((payment: any) => dateInRange(payment.date || payment.createdAt, dateFrom, dateTo))
+        .filter((payment: any) => {
+          const fee = getFee(payment.feeId);
+          return matchesTermYear(fee || {}) && matchesClass({ ...payment, classId: fee?.classId });
+        })
+        .map((payment: any) => {
+          const fee = getFee(payment.feeId);
+          const student = getStudent(payment.studentId);
+          return {
+            date: payment.date || payment.createdAt || '-',
+            term: fee?.term || '-',
+            year: fee?.year || '-',
+            idNumber: student?.studentId || student?.admissionNo || payment.studentId || '-',
+            studentName: studentName(student),
+            className: className(fee?.classId || student?.classId),
+            description: fee?.description || payment.paymentType || 'Payment',
+            amount: formatMoney(Number(payment.amount || 0)),
+            method: payment.method || '-',
+          };
+        });
+    } else if (selectedReport === 'attendance') {
+      rows = attendance
+        .filter((record: any) => dateInRange(record.date || record.createdAt, dateFrom, dateTo))
+        .filter(matchesClass)
+        .map((record: any) => {
+          const student = getStudent(record.entityId);
+          return {
+            date: record.date || '-',
+            idNumber: student?.studentId || student?.admissionNo || record.entityId || '-',
+            studentName: studentName(student),
+            className: className(student?.classId),
+            status: record.status || '-',
+          };
+        });
+    } else if (selectedReport === 'academic') {
+      rows = exams.filter(matchesTermYear).filter(matchesClass).map((exam: any) => {
+        const examRows = examResults.filter((r: any) => r.examId === exam.id);
+        return {
+          term: exam.term || '-',
+          year: exam.year || '-',
+          examName: exam.name || 'Exam',
+          className: className(exam.classId),
+          results: examRows.length,
+          subjects: new Set(examRows.map((r: any) => r.subjectId)).size || subjects.filter((s: any) => s.classId === exam.classId).length,
+          date: exam.startDate || exam.createdAt || '-',
+        };
+      });
+    } else if (selectedReport === 'bursaries') {
+      rows = bursaries.filter(matchesTermYear).filter(matchesClass).map((b: any) => {
+        const student = getStudent(b.studentId);
+        return {
+          term: b.term || '-',
+          year: b.year || '-',
+          idNumber: student?.studentId || student?.admissionNo || b.studentId || '-',
+          studentName: b.studentName || studentName(student),
+          className: className(student?.classId),
+          type: b.isFull ? 'Full bursary' : 'Bursary',
+          amount: b.isFull ? 'Full' : formatMoney(Number(b.amount || 0)),
+          description: b.reason || '-',
+        };
+      });
+    } else if (selectedReport === 'discounts') {
+      rows = discounts.filter(matchesTermYear).filter(matchesClass).map((d: any) => {
+        const student = getStudent(d.studentId);
+        return {
+          term: d.term || '-',
+          year: d.year || '-',
+          idNumber: student?.studentId || student?.admissionNo || d.studentId || '-',
+          studentName: d.studentName || studentName(student),
+          className: className(d.classId || student?.classId),
+          type: d.type || 'amount',
+          amount: d.type === 'percentage' ? `${Number(d.amount || 0)}%` : formatMoney(Number(d.amount || 0)),
+          description: d.reason || '-',
+        };
+      });
+    } else if (selectedReport === 'classes') {
+      rows = classes.filter((c: any) => selectedClass === 'all' || c.id === selectedClass).map((c: any) => {
+        const classStudents = students.filter((s: any) => s.classId === c.id && s.status !== 'completed');
+        const classFees = fees.filter((f: any) => (selectedTerm === 'all' || String(f.term) === selectedTerm) && (selectedYear === 'all' || String(f.year) === selectedYear) && (f.classId === c.id || getStudent(f.studentId)?.classId === c.id));
+        const classPayments = payments.filter((p: any) => classFees.some((f: any) => f.id === p.feeId));
+        return {
+          className: c.name,
+          students: classStudents.length,
+          fees: formatMoney(classFees.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0)),
+          payments: formatMoney(classPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0)),
+          subjects: subjects.filter((s: any) => s.classId === c.id).length,
+          exams: exams.filter((e: any) => e.classId === c.id && matchesTermYear(e)).length,
+        };
+      });
+    } else if (selectedReport === 'staff') {
+      rows = staff.map((s: any) => ({
+        idNumber: s.employeeId || s.id,
+        staffName: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
+        role: s.role || '-',
+        phone: s.phone || '-',
+        email: s.email || '-',
+        status: s.status || 'active',
+      }));
+    } else if (selectedReport === 'invoices') {
+      rows = invoices.filter(matchesTermYear).filter(matchesClass).map((invoice: any) => {
+        const student = getStudent(invoice.studentId);
+        return {
+          term: invoice.term || '-',
+          year: invoice.year || '-',
+          idNumber: student?.studentId || student?.admissionNo || invoice.studentId || '-',
+          studentName: studentName(student),
+          className: className(invoice.classId || student?.classId),
+          amount: formatMoney(Number(invoice.totalAmount || invoice.amount || 0)),
+          status: invoice.status || '-',
+          date: invoice.issuedAt || invoice.createdAt || '-',
+        };
+      });
+    } else {
+      const keys = new Set<string>();
+      [...fees, ...exams, ...bursaries, ...discounts, ...invoices].forEach((row: any) => {
+        if (row?.term && row?.year) keys.add(`${row.year}|${row.term}|${row.classId || 'all'}`);
+      });
+      keys.add(`${settings.academicYear || new Date().getFullYear()}|${settings.currentTerm || '1'}|all`);
+      rows = Array.from(keys).map(key => {
+        const [year, term, classId] = key.split('|');
+        const termFees = fees.filter((f: any) => String(f.term) === term && String(f.year) === year && (classId === 'all' || f.classId === classId));
+        const feeIds = new Set(termFees.map((f: any) => f.id));
+        const termPayments = payments.filter((p: any) => feeIds.has(p.feeId));
+        const termExams = exams.filter((e: any) => String(e.term) === term && String(e.year) === year && (classId === 'all' || e.classId === classId));
+        const examIds = new Set(termExams.map((e: any) => e.id));
+        return {
+          term,
+          year,
+          className: classId === 'all' ? 'All classes' : className(classId),
+          students: classId === 'all' ? students.filter((s: any) => s.status !== 'completed').length : students.filter((s: any) => s.classId === classId && s.status !== 'completed').length,
+          fees: formatMoney(termFees.reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0)),
+          payments: formatMoney(termPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0)),
+          bursaries: bursaries.filter((b: any) => String(b.term) === term && String(b.year) === year).length,
+          discounts: discounts.filter((d: any) => String(d.term) === term && String(d.year) === year).length,
+          invoices: invoices.filter((i: any) => String(i.term) === term && String(i.year) === year).length,
+          exams: termExams.length,
+          results: examResults.filter((r: any) => examIds.has(r.examId)).length,
+        };
+      }).filter(matchesTermYear).filter((row: any) => selectedClass === 'all' || row.className === className(selectedClass));
     }
 
-    if (selectedReport === 'staff') {
-      const staff = await dataService.getAll(id, 'staff');
-      
-      doc.setFontSize(12);
-      doc.text('Staff Directory', 14, 55);
-      
-      let y = 65;
-      doc.setFontSize(10);
-      doc.text('Employee ID', 14, y);
-      doc.text('Name', 55, y);
-      doc.text('Role', 110, y);
-      doc.text('Phone', 145, y);
-      doc.text('Status', 175, y);
-      
-      y += 8;
-      staff.slice(0, 30).forEach(s => {
-        doc.text(s.employeeId, 14, y);
-        doc.text(`${s.firstName} ${s.lastName}`, 55, y);
-        doc.text(s.role, 110, y);
-        doc.text(s.phone, 145, y);
-        doc.text(s.status, 175, y);
-        y += 7;
-        if (y > 270) return;
-      });
-      
-      doc.text(`Total Staff: ${staff.length}`, 14, y + 10);
-    }
+    return rows.filter(searchMatch).map((row, index) => ({ no: index + 1, ...row }));
+  }
 
-    if (selectedReport === 'fees') {
-      const [payments, fees] = await Promise.all([dataService.getAll(id, 'payments'), dataService.getAll(id, 'fees')]);
-      const studentList = students;
-      const totalCollected = payments.reduce((sum, p) => sum + p.amount, 0);
-      const totalInvoiced = fees.reduce((sum, f) => sum + f.amount, 0);
-      const totalPending = totalInvoiced - totalCollected;
-      
-      doc.setFontSize(12);
-      doc.text('Fee Collection Summary', 14, 55);
-      doc.setFontSize(10);
-      doc.text(`Total Collected: ${formatMoney(totalCollected)}`, 14, 70);
-      doc.text(`Total Invoiced: ${formatMoney(totalInvoiced)}`, 14, 78);
-      doc.text(`Total Pending: ${formatMoney(totalPending)}`, 14, 86);
-      doc.text(`Number of Transactions: ${payments.length}`, 14, 96);
-      
-      let y = 110;
-      doc.text('Recent Payments', 14, y);
-      y += 10;
-      
-      doc.text('Date', 14, y);
-      doc.text('Student', 55, y);
-      doc.text('Amount', 140, y);
-      y += 8;
-      
-      payments.slice(0, 20).forEach(p => {
-        const student = studentList.find(s => s.id === p.studentId);
-        doc.text(new Date(p.date).toLocaleDateString(), 14, y);
-        doc.text(student ? `${student.firstName} ${student.lastName}` : 'N/A', 55, y);
-        doc.text(formatMoney(p.amount), 140, y);
-        y += 7;
-        if (y > 270) return;
-      });
-    }
+  const rows = useMemo(makeRows, [selectedReport, selectedTerm, selectedYear, selectedClass, search, dateFrom, dateTo, students, staff, classes, fees, payments, attendance, exams, examResults, subjects, bursaries, discounts, invoices, settings]);
+  const columns = useMemo(() => {
+    const keys = Array.from(rows.reduce((set, row) => {
+      Object.keys(row).forEach(key => set.add(key));
+      return set;
+    }, new Set<string>()));
+    return keys.map(key => ({ key, label: columnLabels[key] || key }));
+  }, [rows]);
+  const reportLabel = reportTypes.find(r => r.id === selectedReport)?.label || 'Report';
 
-    if (selectedReport === 'attendance') {
-      const attendance = await dataService.getAll(id, 'attendance');
-      const studentList = students;
-      
-      doc.setFontSize(12);
-      doc.text('Attendance Summary', 14, 55);
-      doc.setFontSize(10);
-      doc.text(`Total Records: ${attendance.length}`, 14, 70);
-      
-      const present = attendance.filter(a => a.status === 'present').length;
-      const absent = attendance.filter(a => a.status === 'absent').length;
-      const late = attendance.filter(a => a.status === 'late').length;
-      
-      doc.text(`Present: ${present}`, 14, 80);
-      doc.text(`Absent: ${absent}`, 60, 80);
-      doc.text(`Late: ${late}`, 100, 80);
-      
-      let y = 95;
-      doc.text('Recent Attendance Records', 14, y);
-      y += 10;
-      
-      doc.text('Date', 14, y);
-      doc.text('Student', 55, y);
-      doc.text('Status', 140, y);
-      y += 8;
-      
-      attendance.slice(0, 25).forEach(a => {
-        const student = studentList.find(s => s.id === a.entityId);
-        doc.text(a.date, 14, y);
-        doc.text(student ? `${student.firstName} ${student.lastName}` : 'N/A', 55, y);
-        doc.text(a.status, 140, y);
-        y += 7;
-        if (y > 270) return;
-      });
+  function exportRows(kind: 'pdf' | 'csv' | 'excel') {
+    if (rows.length === 0) {
+      addToast('No report rows to export', 'warning');
+      return;
     }
-
-    if (selectedReport === 'classes') {
-      const [classes, studentList] = await Promise.all([dataService.getAll(id, 'classes'), Promise.resolve(students)]);
-      
-      doc.setFontSize(12);
-      doc.text('Class Summary Report', 14, 55);
-      
-      let y = 65;
-      doc.setFontSize(10);
-      doc.text('Class', 14, y);
-      doc.text('Level', 70, y);
-      doc.text('Stream', 100, y);
-      doc.text('Capacity', 140, y);
-      doc.text('Enrolled', 170, y);
-      
-      y += 8;
-      classes.forEach(c => {
-        const enrolled = studentList.filter(s => s.classId === c.id).length;
-        doc.text(c.name, 14, y);
-        doc.text(String(c.level), 70, y);
-        doc.text(c.stream || '-', 100, y);
-        doc.text(String(c.capacity), 140, y);
-        doc.text(String(enrolled), 170, y);
-        y += 7;
-        if (y > 270) return;
-      });
-      
-      doc.text(`Total Classes: ${classes.length}`, 14, y + 10);
-      doc.text(`Total Students: ${studentList.length}`, 14, y + 18);
-    }
-
-    doc.save(`${selectedReport}-report-${new Date().toISOString().split('T')[0]}.pdf`);
-    addToast('Report exported to PDF', 'success');
+    const filename = `${selectedReport}-report-${selectedTerm === 'all' ? 'all-terms' : `term-${selectedTerm}`}-${selectedYear === 'all' ? 'all-years' : selectedYear}`;
+    if (kind === 'pdf') exportToPDF(reportLabel, rows, columns, filename);
+    if (kind === 'csv') exportToCSV(rows, filename, columns as any);
+    if (kind === 'excel') exportToExcel(rows, filename, columns as any);
+    addToast(`Report exported to ${kind.toUpperCase()}`, 'success');
     setShowExportMenu(false);
   }
 
-  async function handleExportCSV() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    const { format } = await import('date-fns');
-
-    if (selectedReport === 'students') {
-      const data = students.map(s => ({
-        admissionNo: s.admissionNo,
-        firstName: s.firstName,
-        lastName: s.lastName,
-        class: s.classId,
-        gender: s.gender,
-        status: s.status,
-      }));
-      exportToCSV(data, `${selectedReport}-report`, [
-        { key: 'admissionNo', label: 'ID' },
-        { key: 'firstName', label: 'First Name' },
-        { key: 'lastName', label: 'Last Name' },
-        { key: 'class', label: 'Class' },
-        { key: 'gender', label: 'Gender' },
-        { key: 'status', label: 'Status' },
-      ]);
-    } else if (selectedReport === 'staff') {
-      const staff = await dataService.getAll(id, 'staff');
-      const data = staff.map(s => ({
-        employeeId: s.employeeId,
-        firstName: s.firstName,
-        lastName: s.lastName,
-        role: s.role,
-        phone: s.phone,
-        status: s.status,
-      }));
-      exportToCSV(data, `${selectedReport}-report`, [
-        { key: 'employeeId', label: 'Employee ID' },
-        { key: 'firstName', label: 'First Name' },
-        { key: 'lastName', label: 'Last Name' },
-        { key: 'role', label: 'Role' },
-        { key: 'phone', label: 'Phone' },
-        { key: 'status', label: 'Status' },
-      ]);
-    } else if (selectedReport === 'fees') {
-      const payments = await dataService.getAll(id, 'payments');
-      const data = payments.map(p => {
-        const student = students.find(s => s.id === p.studentId);
-        return {
-          date: format(new Date(p.date), 'yyyy-MM-dd'),
-          studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A',
-          amount: p.amount,
-          method: p.method,
-        };
-      });
-      exportToCSV(data, `${selectedReport}-report`, [
-        { key: 'date', label: 'Date' },
-        { key: 'studentName', label: 'Student' },
-        { key: 'amount', label: 'Amount' },
-        { key: 'method', label: 'Method' },
-      ]);
-    } else if (selectedReport === 'attendance') {
-      const attendance = await dataService.getAll(id, 'attendance');
-      const data = attendance.map(a => {
-        const student = students.find(s => s.id === a.entityId);
-        return {
-          date: a.date,
-          studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A',
-          status: a.status,
-        };
-      });
-      exportToCSV(data, `${selectedReport}-report`, [
-        { key: 'date', label: 'Date' },
-        { key: 'studentName', label: 'Student' },
-        { key: 'status', label: 'Status' },
-      ]);
-    } else if (selectedReport === 'classes') {
-      const classes = await dataService.getAll(id, 'classes');
-      const data = classes.map(c => ({
-        name: c.name,
-        level: c.level,
-        stream: c.stream || '-',
-        capacity: c.capacity,
-        enrolled: students.filter(s => s.classId === c.id).length,
-      }));
-      exportToCSV(data, `${selectedReport}-report`, [
-        { key: 'name', label: 'Class' },
-        { key: 'level', label: 'Level' },
-        { key: 'stream', label: 'Stream' },
-        { key: 'capacity', label: 'Capacity' },
-        { key: 'enrolled', label: 'Enrolled' },
-      ]);
-    }
-    addToast('Report exported to CSV', 'success');
+  function printReport() {
     setShowExportMenu(false);
-  }
-
-  async function handleExportExcel() {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    const { format } = await import('date-fns');
-
-    if (selectedReport === 'students') {
-      const data = students.map(s => ({
-        admissionNo: s.admissionNo,
-        firstName: s.firstName,
-        lastName: s.lastName,
-        class: s.classId,
-        gender: s.gender,
-        status: s.status,
-      }));
-      exportToExcel(data, `${selectedReport}-report`, [
-        { key: 'admissionNo', label: 'ID' },
-        { key: 'firstName', label: 'First Name' },
-        { key: 'lastName', label: 'Last Name' },
-        { key: 'class', label: 'Class' },
-        { key: 'gender', label: 'Gender' },
-        { key: 'status', label: 'Status' },
-      ]);
-    } else if (selectedReport === 'staff') {
-      const staff = await dataService.getAll(id, 'staff');
-      const data = staff.map(s => ({
-        employeeId: s.employeeId,
-        firstName: s.firstName,
-        lastName: s.lastName,
-        role: s.role,
-        phone: s.phone,
-        status: s.status,
-      }));
-      exportToExcel(data, `${selectedReport}-report`, [
-        { key: 'employeeId', label: 'Employee ID' },
-        { key: 'firstName', label: 'First Name' },
-        { key: 'lastName', label: 'Last Name' },
-        { key: 'role', label: 'Role' },
-        { key: 'phone', label: 'Phone' },
-        { key: 'status', label: 'Status' },
-      ]);
-    } else if (selectedReport === 'fees') {
-      const payments = await dataService.getAll(id, 'payments');
-      const data = payments.map(p => {
-        const student = students.find(s => s.id === p.studentId);
-        return {
-          date: format(new Date(p.date), 'yyyy-MM-dd'),
-          studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A',
-          amount: p.amount,
-          method: p.method,
-        };
-      });
-      exportToExcel(data, `${selectedReport}-report`, [
-        { key: 'date', label: 'Date' },
-        { key: 'studentName', label: 'Student' },
-        { key: 'amount', label: 'Amount' },
-        { key: 'method', label: 'Method' },
-      ]);
-    } else if (selectedReport === 'attendance') {
-      const attendance = await dataService.getAll(id, 'attendance');
-      const data = attendance.map(a => {
-        const student = students.find(s => s.id === a.entityId);
-        return {
-          date: a.date,
-          studentName: student ? `${student.firstName} ${student.lastName}` : 'N/A',
-          status: a.status,
-        };
-      });
-      exportToExcel(data, `${selectedReport}-report`, [
-        { key: 'date', label: 'Date' },
-        { key: 'studentName', label: 'Student' },
-        { key: 'status', label: 'Status' },
-      ]);
-    } else if (selectedReport === 'classes') {
-      const classes = await dataService.getAll(id, 'classes');
-      const data = classes.map(c => ({
-        name: c.name,
-        level: c.level,
-        stream: c.stream || '-',
-        capacity: c.capacity,
-        enrolled: students.filter(s => s.classId === c.id).length,
-      }));
-      exportToExcel(data, `${selectedReport}-report`, [
-        { key: 'name', label: 'Class' },
-        { key: 'level', label: 'Level' },
-        { key: 'stream', label: 'Stream' },
-        { key: 'capacity', label: 'Capacity' },
-        { key: 'enrolled', label: 'Enrolled' },
-      ]);
-    }
-    addToast('Report exported to Excel', 'success');
-    setShowExportMenu(false);
+    window.setTimeout(() => openPrintPreview(reportLabel), 50);
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-white">
-          Reports
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Generate and export school reports</p>
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Reports</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Track terms, years, classes, fees, academic records, and school history</p>
+        </div>
+        <div className="relative" ref={exportMenuRef}>
+          <button onClick={() => setShowExportMenu(!showExportMenu)} className="btn btn-primary">
+            <Download size={18} /> Export / Print <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
+          </button>
+          {showExportMenu && (
+            <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-[99999] overflow-hidden animate-dropdown-in">
+              <button onClick={() => exportRows('pdf')} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} /> Export PDF</button>
+              <button onClick={() => exportRows('csv')} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Download size={14} /> Export CSV</button>
+              <button onClick={() => exportRows('excel')} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><FileText size={14} /> Export Excel</button>
+              <button onClick={printReport} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"><Printer size={14} /> Print</button>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {reportTypes.map((report, index) => {
-          const cardColors = ['card-solid-indigo', 'card-solid-emerald', 'card-solid-violet', 'card-solid-rose', 'card-solid-cyan'];
+          const cardColors = ['card-solid-indigo', 'card-solid-emerald', 'card-solid-violet', 'card-solid-rose', 'card-solid-cyan', 'card-solid-amber'];
           return (
-            <button
-              key={report.id}
-              onClick={() => setSelectedReport(report.id as ReportType)}
-              className={`${cardColors[index]} p-5 text-left transition-all ${
-                selectedReport === report.id ? 'ring-2 ring-white/50 ring-offset-2 ring-offset-transparent' : ''
-              }`}
-            >
-              <report.icon size={28} className="mb-3 text-white" />
+            <button key={report.id} onClick={() => setSelectedReport(report.id)} className={`${cardColors[index % cardColors.length]} p-5 text-left transition-all ${selectedReport === report.id ? 'ring-2 ring-white/70 ring-offset-2 ring-offset-transparent' : ''}`}>
+              <report.icon size={26} className="mb-3 text-white" />
               <h3 className="font-semibold text-white">{report.label}</h3>
-              <p className="text-xs text-white/80 mt-1">{report.description}</p>
+              <p className="text-xs text-white/80 mt-1 whitespace-normal">{report.description}</p>
             </button>
           );
         })}
       </div>
 
-      <div className="card">
-        <div className="card-header">Report Options</div>
-        <div className="card-body">
-          <div className="flex flex-col sm:flex-row gap-4 mb-6">
-            <div className="flex-1">
-              <label className="form-label">From Date</label>
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="form-input" />
+      <div className="card print-area">
+        <div className="card-header flex flex-wrap items-center justify-between gap-3">
+          <span>{reportLabel}</span>
+          <span className="badge badge-info">{rows.length} rows</span>
+        </div>
+        <div className="card-body space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3 print:hidden">
+            <div className="input-icon-wrapper xl:col-span-2">
+              <Search size={16} className="input-icon" />
+              <input value={search} onChange={e => setSearch(e.target.value)} className="form-input form-input-with-icon" placeholder="Search report..." />
             </div>
-            <div className="flex-1">
-              <label className="form-label">To Date</label>
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="form-input" />
+            <select value={selectedTerm} onChange={e => setSelectedTerm(e.target.value)} className="form-input">
+              <option value="all">All terms</option>
+              {termOptions.map(term => <option key={term} value={term}>Term {term}</option>)}
+            </select>
+            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="form-input">
+              <option value="all">All years</option>
+              {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
+            </select>
+            <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="form-input">
+              <option value="all">All classes</option>
+              {classes.map((cls: any) => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="form-input" title="From date" />
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="form-input" title="To date" />
             </div>
           </div>
-          <div className="relative" ref={exportMenuRef}>
-            <button 
-              onClick={() => setShowExportMenu(!showExportMenu)} 
-              className="btn btn-primary"
-            >
-              <Download size={18} />
-              Export Report
-              <ChevronDown size={14} className={`transition-transform ml-1 ${showExportMenu ? 'rotate-180' : ''}`} />
-            </button>
-            {showExportMenu && (
-              <div className="absolute left-0 mt-2 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-[9999] overflow-hidden">
-                <button
-                  onClick={handleExport}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <FileText size={14} />
-                  Export PDF
-                </button>
-                <button
-                  onClick={handleExportCSV}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <Download size={14} />
-                  Export CSV
-                </button>
-                <button
-                  onClick={handleExportExcel}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <FileText size={14} />
-                  Export Excel
-                </button>
-              </div>
-            )}
+
+          <div className="table-container print:shadow-none print:border-0">
+            <table>
+              <thead>
+                <tr>{columns.map(column => <th key={column.key}>{column.label}</th>)}</tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr><td colSpan={Math.max(columns.length, 1)} className="text-center py-12 text-slate-400">No records match this report.</td></tr>
+                ) : rows.slice(0, 300).map((row, index) => (
+                  <tr key={index}>{columns.map(column => <td key={column.key}>{row[column.key] ?? '-'}</td>)}</tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+          {rows.length > 300 && <p className="text-xs text-slate-400">Showing first 300 rows. Export to get the full report.</p>}
         </div>
       </div>
     </div>
   );
 }
-
-

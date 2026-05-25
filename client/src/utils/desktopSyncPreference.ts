@@ -6,7 +6,7 @@ export function isDesktopApp(): boolean {
 
 export function isCloudSyncEnabled(): boolean {
   if (!isDesktopApp()) return true;
-  return localStorage.getItem(SCHOFY_SYNC_ENABLED_KEY) !== 'false';
+  return localStorage.getItem(SCHOFY_SYNC_ENABLED_KEY) === 'true';
 }
 
 export function setCloudSyncEnabled(enabled: boolean): void {
