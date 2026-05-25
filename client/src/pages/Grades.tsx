@@ -14,6 +14,7 @@ import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
+import { matchesTextSearch } from '../utils/searchMatch';
 
 interface StudentGrade extends ExamResult {
   studentName: string;
@@ -660,8 +661,7 @@ export default function Grades() {
       if (student?.classId !== filterClass) return false;
     }
     if (searchTerm) {
-      const search = searchTerm.toLowerCase();
-      return g.studentName.toLowerCase().includes(search) || g.subjectName.toLowerCase().includes(search);
+      return matchesTextSearch([g.studentName, g.subjectName], searchTerm);
     }
     return true;
   });

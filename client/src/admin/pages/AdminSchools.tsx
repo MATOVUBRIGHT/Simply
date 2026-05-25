@@ -4,6 +4,7 @@ import { Search, CheckCircle, XCircle, Clock, ChevronRight, RefreshCw, School } 
 import { supabase } from '../../lib/supabase';
 import { PLAN_DEFINITIONS } from '../../utils/plans';
 import { useAdminTheme } from '../AdminThemeContext';
+import { matchesTextSearch } from '../../utils/searchMatch';
 
 interface SchoolRow {
   schoolId: string;
@@ -105,8 +106,7 @@ export default function AdminSchools() {
   }
 
   const filtered = schools.filter(s => {
-    const q = search.toLowerCase();
-    const matchSearch = s.schoolName.toLowerCase().includes(q) || s.email.toLowerCase().includes(q) || s.schoolId.toLowerCase().includes(q);
+    const matchSearch = matchesTextSearch([s.schoolName, s.email, s.schoolId], search);
     return matchSearch && (filter === 'all' || s.status === filter);
   });
 

@@ -10,15 +10,22 @@
  * - Cache is versioned — old caches are deleted on activate
  */
 
-const CACHE_VERSION = 'schofy-v8';
-const ASSET_CACHE = 'schofy-assets-v8';
+const CACHE_VERSION = 'schofy-v9';
+const ASSET_CACHE = 'schofy-assets-v9';
 
 // Core files to pre-cache on install
 const PRECACHE_URLS = [
   '/',
   '/index.html',
   '/manifest.json',
+  '/favicon.png',
   '/favicon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/cover.jpg',
+  '/schofy.logo.png',
+  '/sound/success.mp3',
+  '/sound/error.wav',
 ];
 
 // ── Install: pre-cache shell ──────────────────────────────────────────────────
@@ -187,13 +194,64 @@ self.addEventListener('message', event => {
     self.skipWaiting();
   }
   if (event.data?.type === 'CACHE_URLS') {
-    const urls = event.data.urls || [];
+    const urls = Array.isArray(event.data.urls) ? event.data.urls : [];
     caches.open(ASSET_CACHE).then(cache => {
-      urls.forEach(url => {
-        fetch(url).then(res => {
-          if (res.ok && res.status === 200) cache.put(url, res);
-        }).catch(() => {});
+      urls.forEach(rawUrl => {
+        try {
+          const url = new URL(rawUrl, self.location.origin);
+          if (url.origin !== self.location.origin) return;
+          fetch(url.toString(), { credentials: 'same-origin' }).then(res => {
+            if (res.ok && res.status === 200) cache.put(url.toString(), res);
+          }).catch(() => {});
+        } catch {
+          // Ignore malformed cache requests.
+        }
       });
     });
   }
+  if (event.data?.type === 'CACHE_APP_SHELL') {
+    const urls = Array.isArray(event.data.urls) ? event.data.urls : [];
+    const shellUrls = [
+      '/',
+      '/index.html',
+      '/manifest.json',
+      '/favicon.png',
+      '/icon-192.png',
+      '/icon-512.png',
+      '/cover.jpg',
+      '/schofy.logo.png',
+      '/sound/success.mp3',
+      '/sound/error.wav',
+      ...urls,
+    ];
+
+    event.waitUntil(
+      caches.open(ASSET_CACHE).then(cache =>
+        Promise.allSettled(shellUrls.map(rawUrl => {
+          try {
+            const url = new URL(rawUrl, self.location.origin);
+            if (url.origin !== self.location.origin) return Promise.resolve();
+            return fetch(url.toString(), { credentials: 'same-origin' }).then(res => {
+              if (res.ok && res.status === 200) return cache.put(url.toString(), res);
+            }).catch(() => {});
+          } catch {
+            return Promise.resolve();
+          }
+        }))
+      )
+    );
+  }
+});
+
+self.addEventListener('periodicsync', event => {
+  if (event.tag !== 'schofy-refresh-shell') return;
+  event.waitUntil(
+    caches.open(ASSET_CACHE).then(cache =>
+      Promise.allSettled(PRECACHE_URLS.map(url =>
+        fetch(url, { credentials: 'same-origin' }).then(res => {
+          if (res.ok && res.status === 200) return cache.put(url, res);
+        }).catch(() => {})
+      ))
+    )
+  );
 });

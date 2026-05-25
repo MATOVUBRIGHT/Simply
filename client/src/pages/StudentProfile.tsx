@@ -33,9 +33,8 @@ export default function StudentProfile() {
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [showClassDropdown, setShowClassDropdown] = useState(false);
   const [updatingClass, setUpdatingClass] = useState(false);
-  const [activeTab, setActiveTab] = useState<'info' | 'fees' | 'reports'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'fees' | 'reports' | 'ledger'>('info');
   const [expandedFee, setExpandedFee] = useState<string | null>(null);
-  const [showLedgerModal, setShowLedgerModal] = useState(false);
 
   // Pay modal state
   const [showPayModal, setShowPayModal] = useState<{ feeId: string; remaining: number; desc: string } | null>(null);
@@ -249,20 +248,20 @@ export default function StudentProfile() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => setActiveTab('fees')} className="btn btn-secondary"><Receipt size={18} /> Invoice</button>
-          <button type="button" onClick={() => setShowLedgerModal(true)} className="btn btn-secondary"><FileText size={18} /> Ledger</button>
+          <button type="button" onClick={() => setActiveTab('ledger')} className="btn btn-secondary"><FileText size={18} /> Ledger</button>
           <Link to={`/students/${student.id}/edit`} className="btn btn-primary"><Edit size={18} />Edit</Link>
         </div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700">
-        {(['info', 'fees', 'reports'] as const).map(tab => (
+        {(['info', 'fees', 'reports', 'ledger'] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
               activeTab === tab ? 'border-primary-500 text-primary-600 dark:text-primary-400'
               : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
             }`}>
-            {tab === 'fees' ? 'Fees & Payments' : tab === 'reports' ? 'Academic Documents' : 'Profile'}
+            {tab === 'fees' ? 'Fees & Payments' : tab === 'reports' ? 'Academic Documents' : tab === 'ledger' ? 'Ledger' : 'Profile'}
           </button>
         ))}
       </div>
@@ -551,6 +550,89 @@ export default function StudentProfile() {
         </div>
       )}
 
+      {activeTab === 'ledger' && (
+        <div className="space-y-5">
+          <div className="card overflow-hidden">
+            <div className="card-header flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-slate-800 dark:text-white">{student.firstName} {student.lastName} Ledger</h3>
+                <p className="text-sm text-slate-500">Current Term {currentTerm}, {currentYear}</p>
+              </div>
+              <button type="button" onClick={() => setActiveTab('info')} className="btn btn-secondary">
+                <ArrowLeft size={16} /> Back to Profile
+              </button>
+            </div>
+            <div className="card-body space-y-5">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {[
+                  { label: 'Opening Balance', value: openingBalance, color: openingBalance > 0 ? 'text-pink-600 dark:text-pink-300' : 'text-slate-700 dark:text-slate-200' },
+                  { label: `Current Term ${currentTerm}`, value: currentTermTotal, color: 'text-indigo-600 dark:text-indigo-300' },
+                  { label: 'Current Paid', value: currentTermPaid, color: 'text-emerald-600 dark:text-emerald-300' },
+                  { label: 'All Paid', value: totalPaid, color: 'text-emerald-600 dark:text-emerald-300' },
+                  { label: 'Balance', value: totalBalance, color: totalBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300' },
+                ].map(item => (
+                  <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+                    <p className="text-[11px] font-semibold uppercase text-slate-400">{item.label}</p>
+                    <p className={`mt-1 text-lg font-bold ${item.color}`}>{formatMoney(item.value)}</p>
+                  </div>
+                ))}
+              </div>
+
+              {openingBalance > 0 && (
+                <div className="rounded-xl border border-pink-200 bg-pink-50 p-3 text-sm text-pink-700 dark:border-pink-900/50 dark:bg-pink-900/20 dark:text-pink-300">
+                  Opening balance top-up of <strong>{formatMoney(openingBalance)}</strong> is carried into Current Term {currentTerm}.
+                </div>
+              )}
+
+              <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
+                <div className="bg-slate-50 px-4 py-3 dark:bg-slate-800/70">
+                  <p className="text-sm font-bold text-slate-800 dark:text-white">Ledger Items</p>
+                </div>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr><th>No.</th><th>Description</th><th>Term</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                      {openingBalance > 0 && (
+                        <tr className="bg-pink-50/80 dark:bg-pink-900/10">
+                          <td>1</td>
+                          <td className="font-medium">Opening balance top-up</td>
+                          <td><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">Current Term {currentTerm}</span></td>
+                          <td>{formatMoney(openingBalance)}</td>
+                          <td>{formatMoney(0)}</td>
+                          <td className="font-semibold text-pink-600 dark:text-pink-300">{formatMoney(openingBalance)}</td>
+                          <td><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">top-up</span></td>
+                        </tr>
+                      )}
+                      {currentTermFees.length === 0 && openingBalance <= 0 ? (
+                        <tr><td colSpan={7} className="text-center py-8 text-slate-400">No current term ledger items.</td></tr>
+                      ) : currentTermFees.map((fee: any, index: number) => {
+                        const feePayments = paymentsData.filter((payment: any) => payment.feeId === fee.id);
+                        const paid = feePayments.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
+                        const balance = Math.max(0, Number(fee.amount || 0) - paid);
+                        const status = balance <= 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending';
+                        return (
+                          <tr key={fee.id}>
+                            <td>{index + 1 + (openingBalance > 0 ? 1 : 0)}</td>
+                            <td className="font-medium">{fee.description}</td>
+                            <td><span className="badge badge-info">Current Term {fee.term}</span></td>
+                            <td>{formatMoney(fee.amount || 0)}</td>
+                            <td className="text-emerald-600 font-semibold">{formatMoney(paid)}</td>
+                            <td className={balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600 font-semibold'}>{formatMoney(balance)}</td>
+                            <td><span className={`badge ${status === 'Paid' ? 'badge-success' : status === 'Partial' ? 'badge-warning' : 'badge-danger'}`}>{status}</span></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Pay Modal — full page blur, centered ────────────────────────────── */}
       {showPayModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowPayModal(null)}>
@@ -599,92 +681,6 @@ export default function StudentProfile() {
                 <button onClick={handleRecordPayment} disabled={paying} className="btn btn-primary">
                   {paying ? 'Saving...' : 'Record Payment'}
                 </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      , document.body)}
-
-      {showLedgerModal && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowLedgerModal(false)}>
-          <div className="modal-card w-full max-w-4xl max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
-              <div className="flex items-center gap-2">
-                <FileText size={18} className="text-white" />
-                <div>
-                  <h3 className="font-bold text-white">{student.firstName} {student.lastName} Ledger</h3>
-                  <p className="text-xs text-white/75">Current Term {currentTerm}, {currentYear}</p>
-                </div>
-              </div>
-              <button onClick={() => setShowLedgerModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
-                <X size={18} className="text-white" />
-              </button>
-            </div>
-            <div className="overflow-y-auto p-5 space-y-5">
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {[
-                  { label: 'Opening Balance', value: openingBalance, color: openingBalance > 0 ? 'text-pink-600 dark:text-pink-300' : 'text-slate-700 dark:text-slate-200' },
-                  { label: `Current Term ${currentTerm}`, value: currentTermTotal, color: 'text-indigo-600 dark:text-indigo-300' },
-                  { label: 'Current Paid', value: currentTermPaid, color: 'text-emerald-600 dark:text-emerald-300' },
-                  { label: 'All Paid', value: totalPaid, color: 'text-emerald-600 dark:text-emerald-300' },
-                  { label: 'Balance', value: totalBalance, color: totalBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300' },
-                ].map(item => (
-                  <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
-                    <p className="text-[11px] font-semibold uppercase text-slate-400">{item.label}</p>
-                    <p className={`mt-1 text-lg font-bold ${item.color}`}>{formatMoney(item.value)}</p>
-                  </div>
-                ))}
-              </div>
-
-              {openingBalance > 0 && (
-                <div className="rounded-xl border border-pink-200 bg-pink-50 p-3 text-sm text-pink-700 dark:border-pink-900/50 dark:bg-pink-900/20 dark:text-pink-300">
-                  Opening balance top-up of <strong>{formatMoney(openingBalance)}</strong> is carried into Current Term {currentTerm}.
-                </div>
-              )}
-
-              <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
-                <div className="bg-slate-50 px-4 py-3 dark:bg-slate-800/70">
-                  <p className="text-sm font-bold text-slate-800 dark:text-white">Ledger Items</p>
-                </div>
-                <div className="table-container max-h-[46vh]">
-                  <table>
-                    <thead>
-                      <tr><th>No.</th><th>Description</th><th>Term</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Status</th></tr>
-                    </thead>
-                    <tbody>
-                      {openingBalance > 0 && (
-                        <tr className="bg-pink-50/80 dark:bg-pink-900/10">
-                          <td>1</td>
-                          <td className="font-medium">Opening balance top-up</td>
-                          <td><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">Current Term {currentTerm}</span></td>
-                          <td>{formatMoney(openingBalance)}</td>
-                          <td>{formatMoney(0)}</td>
-                          <td className="font-semibold text-pink-600 dark:text-pink-300">{formatMoney(openingBalance)}</td>
-                          <td><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">top-up</span></td>
-                        </tr>
-                      )}
-                      {currentTermFees.length === 0 && openingBalance <= 0 ? (
-                        <tr><td colSpan={7} className="text-center py-8 text-slate-400">No current term ledger items.</td></tr>
-                      ) : currentTermFees.map((fee: any, index: number) => {
-                        const feePayments = paymentsData.filter((payment: any) => payment.feeId === fee.id);
-                        const paid = feePayments.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
-                        const balance = Math.max(0, Number(fee.amount || 0) - paid);
-                        const status = balance <= 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending';
-                        return (
-                          <tr key={fee.id}>
-                            <td>{index + 1 + (openingBalance > 0 ? 1 : 0)}</td>
-                            <td className="font-medium">{fee.description}</td>
-                            <td><span className="badge badge-info">Current Term {fee.term}</span></td>
-                            <td>{formatMoney(fee.amount || 0)}</td>
-                            <td className="text-emerald-600 font-semibold">{formatMoney(paid)}</td>
-                            <td className={balance > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600 font-semibold'}>{formatMoney(balance)}</td>
-                            <td><span className={`badge ${status === 'Paid' ? 'badge-success' : status === 'Partial' ? 'badge-warning' : 'badge-danger'}`}>{status}</span></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
               </div>
             </div>
           </div>

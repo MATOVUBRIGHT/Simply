@@ -18,15 +18,24 @@ interface ToastContextType {
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 const TOAST_SOUND_PATHS: Partial<Record<ToastType, string>> = {
-  success: '/sound/success.mp3',
-  error: '/sound/error.wav',
+  success: 'sound/success.mp3',
+  error: 'sound/error.wav',
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timeoutRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const soundRefs = useRef<Partial<Record<ToastType, HTMLAudioElement>>>({});
+  const soundsUnlockedRef = useRef(false);
   const lastSoundTimeRef = useRef(0);
+
+  const resolveSoundPath = useCallback((path: string) => {
+    if (typeof window === 'undefined') return path;
+    if (window.location.protocol === 'file:') {
+      return new URL(path.replace(/^\//, ''), document.baseURI).toString();
+    }
+    return `/${path.replace(/^\//, '')}`;
+  }, []);
 
   const getSound = useCallback((type: ToastType) => {
     const path = TOAST_SOUND_PATHS[type];
@@ -35,12 +44,35 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const existing = soundRefs.current[type];
     if (existing) return existing;
 
-    const audio = new Audio(path);
+    const audio = new Audio(resolveSoundPath(path));
     audio.preload = 'auto';
     audio.volume = 0.65;
     soundRefs.current[type] = audio;
     return audio;
-  }, []);
+  }, [resolveSoundPath]);
+
+  const unlockSounds = useCallback(() => {
+    if (soundsUnlockedRef.current) return;
+    soundsUnlockedRef.current = true;
+
+    (['success', 'error'] as ToastType[]).forEach((type) => {
+      const audio = getSound(type);
+      if (!audio) return;
+
+      const previousVolume = audio.volume;
+      audio.volume = 0.001;
+      audio.currentTime = 0;
+      void audio.play()
+        .then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+          audio.volume = previousVolume;
+        })
+        .catch(() => {
+          audio.volume = previousVolume;
+        });
+    });
+  }, [getSound]);
 
   const playToastSound = useCallback((type: ToastType) => {
     if (type !== 'success' && type !== 'error') return;
@@ -56,6 +88,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     audio.currentTime = 0;
     void audio.play().catch(() => {});
   }, [getSound]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const options: AddEventListenerOptions = { passive: true, once: true };
+    window.addEventListener('pointerdown', unlockSounds, options);
+    window.addEventListener('keydown', unlockSounds, { once: true });
+    window.addEventListener('touchstart', unlockSounds, options);
+    return () => {
+      window.removeEventListener('pointerdown', unlockSounds);
+      window.removeEventListener('keydown', unlockSounds);
+      window.removeEventListener('touchstart', unlockSounds);
+    };
+  }, [unlockSounds]);
 
   const removeToast = useCallback((id: string) => {
     const timeout = timeoutRefs.current.get(id);

@@ -1,3 +1,5 @@
+import { matchesTextSearch } from '../../utils/searchMatch';
+
 const DB_NAME_PREFIX = 'schofy_user_db_';
 const DB_VERSION = 6;
 
@@ -631,7 +633,9 @@ class UserDatabaseManager {
     fields: string[]
   ): Promise<any[]> {
     await this.ensureDatabaseOpen(userId);
-    const lowercaseQuery = query.toLowerCase();
+    const searchFields = [...fields];
+    if (storeName === 'students') searchFields.push('firstName', 'lastName', 'studentId', 'admissionNo', 'id');
+    if (storeName === 'staff') searchFields.push('firstName', 'lastName', 'employeeId', 'id');
     const results: any[] = [];
 
     return new Promise((resolve, reject) => {
@@ -642,10 +646,7 @@ class UserDatabaseManager {
         const cursor = event.target.result;
         if (cursor) {
           const item = cursor.value;
-          const matches = fields.some(field => {
-            const value = item[field];
-            return value && String(value).toLowerCase().includes(lowercaseQuery);
-          });
+          const matches = matchesTextSearch(searchFields.map(field => item[field]), query);
 
           if (matches) {
             results.push(item);

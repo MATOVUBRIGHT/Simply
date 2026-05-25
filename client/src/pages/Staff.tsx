@@ -16,6 +16,7 @@ import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
+import { matchesTextSearch } from '../utils/searchMatch';
 
 const avatarColors = [
   'bg-violet-500',
@@ -316,9 +317,7 @@ export default function StaffPage() {
   }
 
   const filteredStaff = staff.filter((s) =>
-    s.firstName.toLowerCase().includes(search.toLowerCase()) ||
-    s.lastName.toLowerCase().includes(search.toLowerCase()) ||
-    s.employeeId.toLowerCase().includes(search.toLowerCase())
+    matchesTextSearch([s.firstName, s.lastName, `${s.firstName} ${s.lastName}`, `${s.lastName} ${s.firstName}`, s.employeeId, s.email, s.phone], search)
   );
 
   async function handleDelete(id: string) {

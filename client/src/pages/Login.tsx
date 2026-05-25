@@ -858,7 +858,6 @@ export default function Login() {
               <LockKeyhole size={22} />
             </div>
             <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">Access denied</h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Try again.</p>
             <button
               type="button"
               onClick={() => {

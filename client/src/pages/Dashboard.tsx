@@ -43,8 +43,9 @@ export default function Dashboard() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
   const { formatMoney } = useCurrency();
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
-  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+  const calendarToday = useMemo(() => new Date(), []);
+  const [selectedYear, setSelectedYear] = useState<number>(calendarToday.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(calendarToday.getMonth());
   const [selectedDay, setSelectedDay] = useState<{ day: number; events: { label: string; type: string }[] } | null>(null);
   const [termSettings, setTermSettings] = useState<Record<string, string>>({});
 
@@ -231,7 +232,10 @@ export default function Dashboard() {
     : 0;
 
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const years = [2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030];
+  const years = useMemo(() => {
+    const currentYear = calendarToday.getFullYear();
+    return Array.from({ length: 8 }, (_item, index) => currentYear - 2 + index);
+  }, [calendarToday]);
 
   function getEventsForMonth(month: number, year: number) {
     const evts = allCalendarEvents.filter(e => e.date.getMonth() === month && e.date.getFullYear() === year);
@@ -628,11 +632,21 @@ export default function Dashboard() {
                       <button 
                         onClick={() => setSelectedMonth(null)}
                         className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="View year"
                       >
                         <ChevronLeft size={18} className="text-slate-600" />
                       </button>
                       <h3 className="font-semibold text-slate-700">{months[selectedMonth]} {selectedYear}</h3>
                     </div>
+                    <button 
+                      onClick={() => {
+                        setSelectedYear(calendarToday.getFullYear());
+                        setSelectedMonth(calendarToday.getMonth());
+                      }}
+                      className="text-xs text-emerald-600 hover:text-emerald-700 font-medium"
+                    >
+                      Current month
+                    </button>
                     <button 
                       onClick={() => setSelectedMonth(null)}
                       className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"

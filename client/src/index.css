@@ -62,8 +62,8 @@ html {
 
 /* Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 3px;
+  height: 3px;
 }
 
 ::-webkit-scrollbar-track {
@@ -72,7 +72,7 @@ html {
 
 ::-webkit-scrollbar-thumb {
   background: var(--text-secondary);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -463,8 +463,8 @@ html {
   background: var(--bg-primary);
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  /* Ensure scroll works on all devices */
-  overscroll-behavior-x: contain;
+  /* Let nested scroll areas pass wheel movement to the page at their edges. */
+  overscroll-behavior: auto;
 }
 
 /* List/table cards should use the visible page area instead of collapsing to content. */
@@ -494,11 +494,30 @@ html {
 .card:has(> .card-body .table-container) .table-container,
 .list-card .table-container {
   overflow: auto !important;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
 }
 
 .table-container {
   min-height: min(260px, 45dvh);
+}
+
+.table-container::-webkit-scrollbar,
+.list-card::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar,
+.app-page-scroll::-webkit-scrollbar,
+.overflow-y-auto::-webkit-scrollbar,
+.overflow-x-auto::-webkit-scrollbar {
+  width: 2px;
+  height: 2px;
+}
+
+.table-container::-webkit-scrollbar-thumb,
+.list-card::-webkit-scrollbar-thumb,
+.custom-scrollbar::-webkit-scrollbar-thumb,
+.app-page-scroll::-webkit-scrollbar-thumb,
+.overflow-y-auto::-webkit-scrollbar-thumb,
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  border-radius: 1px;
 }
 
 /* Ensure tables inside cards also scroll */
@@ -1336,8 +1355,14 @@ textarea.form-input {
   border-radius: 20px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.07);
   border: 1px solid rgba(0,0,0,0.05);
+  border-top-color: transparent;
   overflow: hidden;
   animation: modalIn 280ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.modal,
+.animate-modal-in {
+  border-top-color: transparent !important;
 }
 
 .dark .modal-card {

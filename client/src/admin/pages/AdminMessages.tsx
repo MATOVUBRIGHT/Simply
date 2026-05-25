@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAdminTheme } from '../AdminThemeContext';
 import { buildAdminMessageLink, normalizeExternalUrl } from '../../utils/adminMessageLinks';
 import { downloadAttachment, openExternalLink } from '../../utils/externalActions';
+import { matchesTextSearch } from '../../utils/searchMatch';
 
 interface SchoolOption { schoolId: string; schoolName: string; email: string; }
 interface SentMessage {
@@ -128,7 +129,7 @@ export default function AdminMessages() {
           attachmentName: m.attachment_name || 'attachment',
           attachmentType: m.attachment_type || '',
           attachmentSize: Number(m.attachment_size || 0),
-        })).filter((m: SentMessage) => m.title && (m.targetSchools.length > 0 || m.sentBy === 'Super Admin')));
+        })).filter((m: SentMessage) => m.title && (m.targetSchools.length > 0 || m.sentBy === 'Schofy assistant' || m.sentBy === 'Super Admin')));
       }
     } catch { /* table may not exist yet */ }
   }
@@ -248,7 +249,7 @@ export default function AdminMessages() {
           body,
           target_schools: targets,
           sent_at: now,
-          sent_by: 'Super Admin',
+          sent_by: 'Schofy assistant',
           direction: 'broadcast',
           allow_reply: allowReplies,
           action_url: normalizedActionUrl || null,
@@ -274,7 +275,7 @@ export default function AdminMessages() {
 
   async function clearChat() {
     if (!supabase) return;
-    if (!confirm('Clear all broadcast messages and school replies from the super admin chat?')) return;
+    if (!confirm('Clear all broadcast messages and school replies from the Schofy assistant chat?')) return;
     setClearing(true);
     try {
       await supabase.from('admin_messages').delete().neq('id', '__never__');
@@ -287,10 +288,7 @@ export default function AdminMessages() {
     }
   }
 
-  const filteredSchools = schools.filter(s =>
-    s.schoolName.toLowerCase().includes(schoolSearch.toLowerCase()) ||
-    s.email.toLowerCase().includes(schoolSearch.toLowerCase())
-  );
+  const filteredSchools = schools.filter(s => matchesTextSearch([s.schoolName, s.email, s.schoolId], schoolSearch));
   const repliesBySchool = replies.reduce<Record<string, MessageReply[]>>((acc, reply) => {
     const key = reply.schoolId || reply.schoolName || 'unknown';
     acc[key] = acc[key] || [];

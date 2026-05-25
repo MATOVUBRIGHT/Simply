@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { openPrintPreview } from '../utils/printPreview';
+import { matchesTextSearch } from '../utils/searchMatch';
 
 type ReportType = 'terms' | 'students' | 'fees' | 'payments' | 'attendance' | 'staff' | 'classes' | 'academic' | 'bursaries' | 'discounts' | 'invoices';
 type ReportRow = Record<string, string | number>;
@@ -134,6 +135,19 @@ export default function Reports() {
   const bursaries = bursariesData as any[];
   const discounts = discountsData as any[];
   const invoices = invoicesData as any[];
+  const bankAccounts = useMemo(() => {
+    const accounts = [];
+    for (const suffix of ['', '2', '3']) {
+      const accountName = settings[`bankAccountName${suffix}`];
+      const accountNumber = settings[`bankAccountNumber${suffix}`];
+      const bankName = settings[`bankName${suffix}`];
+      const paymentMethod = settings[`paymentMethod${suffix}`];
+      if (accountName || accountNumber || bankName || paymentMethod) {
+        accounts.push({ accountName, accountNumber, bankName, paymentMethod });
+      }
+    }
+    return accounts;
+  }, [settings]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -176,8 +190,7 @@ export default function Reports() {
   }
 
   function makeRows(): ReportRow[] {
-    const q = search.trim().toLowerCase();
-    const searchMatch = (row: ReportRow) => !q || Object.values(row).some(value => String(value).toLowerCase().includes(q));
+    const searchMatch = (row: ReportRow) => matchesTextSearch(Object.values(row), search);
     let rows: ReportRow[] = [];
 
     if (selectedReport === 'students') {
@@ -449,6 +462,21 @@ export default function Reports() {
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="form-input" title="To date" />
             </div>
           </div>
+          {(selectedReport === 'invoices' || selectedReport === 'payments' || selectedReport === 'fees') && bankAccounts.length > 0 && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">Payment Details</p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                {bankAccounts.map((account, index) => (
+                  <div key={index} className="rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900">
+                    <p className="font-bold text-slate-800 dark:text-white">{account.bankName || account.paymentMethod || `Account ${index + 1}`}</p>
+                    {account.accountName && <p className="mt-1 text-slate-500">{account.accountName}</p>}
+                    {account.accountNumber && <p className="mt-1 font-mono font-bold text-indigo-600 dark:text-indigo-300">{account.accountNumber}</p>}
+                    {account.paymentMethod && <p className="mt-1 text-xs uppercase tracking-wide text-slate-400">{account.paymentMethod}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="table-container print:shadow-none print:border-0">
             <table>

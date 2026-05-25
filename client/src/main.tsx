@@ -37,7 +37,8 @@ if (import.meta.env.PROD && !isFileProtocol && !isAdminPath && 'serviceWorker' i
         // Check for updates every 30 minutes
         setInterval(() => reg.update(), 30 * 60 * 1000);
 
-        // After SW is active, tell it to cache all app routes
+        // After SW is active, tell it to cache the app shell, public assets,
+        // built chunks, and main routes so the web app opens offline.
         navigator.serviceWorker.ready.then(sw => {
           const appRoutes = [
             '/', '/students', '/admission', '/staff', '/classes',
@@ -46,7 +47,34 @@ if (import.meta.env.PROD && !isFileProtocol && !isAdminPath && 'serviceWorker' i
             '/notifications', '/settings', '/reports', '/plans',
             '/recycle-bin', '/about',
           ];
-          sw.active?.postMessage({ type: 'CACHE_URLS', urls: appRoutes });
+          const documentAssets = Array.from(document.querySelectorAll<HTMLLinkElement | HTMLScriptElement | HTMLImageElement>(
+            'link[href], script[src], img[src]'
+          ))
+            .map(el => ('href' in el ? el.href : el.src))
+            .filter(Boolean);
+          const loadedAssets = performance.getEntriesByType('resource')
+            .map(entry => entry.name)
+            .filter(name => {
+              try {
+                return new URL(name).origin === window.location.origin;
+              } catch {
+                return false;
+              }
+            });
+          const publicAssets = [
+            '/manifest.json',
+            '/favicon.png',
+            '/icon-192.png',
+            '/icon-512.png',
+            '/cover.jpg',
+            '/schofy.logo.png',
+            '/sound/success.mp3',
+            '/sound/error.wav',
+          ];
+          sw.active?.postMessage({
+            type: 'CACHE_APP_SHELL',
+            urls: Array.from(new Set([...appRoutes, ...publicAssets, ...documentAssets, ...loadedAssets])),
+          });
         });
       })
       .catch(() => {/* SW not supported or blocked */});
@@ -60,6 +88,56 @@ window.addEventListener('online', () => {
     void (dataService as any).flushOfflineQueue?.();
   });
 });
+
+// Smoothly hand wheel scrolling from focused/nested panels to the next
+// scrollable parent so long lists never trap the page at their edges.
+function isScrollableVertically(el: HTMLElement) {
+  const style = window.getComputedStyle(el);
+  return /(auto|scroll|overlay)/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 1;
+}
+
+function findScrollableFrom(start: Element | null) {
+  let el = start instanceof HTMLElement ? start : start?.parentElement || null;
+  while (el && el !== document.body && el !== document.documentElement) {
+    if (isScrollableVertically(el)) return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+window.addEventListener('wheel', (event) => {
+  if (event.defaultPrevented || event.ctrlKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+
+  const target = event.target as Element | null;
+  const active = document.activeElement instanceof Element ? document.activeElement : null;
+  const start = active && active !== document.body && active !== document.documentElement
+    && (active.contains(target) || target?.contains(active))
+    ? active
+    : target;
+
+  let remainingDelta = event.deltaY;
+  let scrollTarget = findScrollableFrom(start);
+  let didScroll = false;
+
+  while (scrollTarget && Math.abs(remainingDelta) > 0.5) {
+    const maxTop = scrollTarget.scrollHeight - scrollTarget.clientHeight;
+    const available = remainingDelta > 0 ? maxTop - scrollTarget.scrollTop : scrollTarget.scrollTop;
+    if (available > 0) {
+      const step = Math.sign(remainingDelta) * Math.min(Math.abs(remainingDelta), available);
+      scrollTarget.scrollTop += step;
+      remainingDelta -= step;
+      didScroll = true;
+    }
+    if (Math.abs(remainingDelta) <= 0.5) break;
+    scrollTarget = findScrollableFrom(scrollTarget.parentElement);
+  }
+
+  if (Math.abs(remainingDelta) > 0.5) {
+    window.scrollBy({ top: remainingDelta, behavior: 'auto' });
+    didScroll = true;
+  }
+  if (didScroll) event.preventDefault();
+}, { passive: false });
 
 // Bootstrap cache into store BEFORE React renders (main app only)
 if (!isAdminPath) {

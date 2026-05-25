@@ -45,6 +45,7 @@ import { useStaffAuth } from '../contexts/StaffAuthContext';
 import { getSubscriptionAccessState, SubscriptionAccessState } from '../utils/plans';
 import { getRecycleBin } from '../utils/recycleBin';
 import RealtimeStatus from './RealtimeStatus';
+import SchofyAssistant from './SchofyAssistant';
 import { store, useTableData } from '../lib/store';
 import { supabase } from '../lib/supabase';
 import { parseAdminMessageLink } from '../utils/adminMessageLinks';
@@ -418,7 +419,7 @@ function Layout({ children }: LayoutProps) {
             <div className="px-5 py-4 text-white" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-white/70">Super Admin Broadcast</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-white/70">Schofy assistant broadcast</p>
                   <h2 className="mt-1 text-lg font-bold">{broadcastPopup.title}</h2>
                 </div>
                 <button onClick={() => void closeBroadcastPopup(false)} className="rounded-lg p-1 hover:bg-white/15">
@@ -460,7 +461,7 @@ function Layout({ children }: LayoutProps) {
                   onChange={e => setBroadcastReply(e.target.value)}
                   rows={3}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  placeholder="Reply to super admin..."
+                  placeholder="Reply to Schofy assistant..."
                 />
               )}
               <div className="flex gap-2">
@@ -782,6 +783,7 @@ function Layout({ children }: LayoutProps) {
       )}
 
       <InstallPWA />
+      <SchofyAssistant />
     </div>
   );
 }

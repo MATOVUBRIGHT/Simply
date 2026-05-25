@@ -12,6 +12,7 @@
  */
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { generateUUID } from '../../utils/uuid';
+import { matchesTextSearch } from '../../utils/searchMatch';
 import { addToRecycleBin } from '../../utils/recycleBin';
 import { isCloudSyncEnabled, isDesktopApp } from '../../utils/desktopSyncPreference';
 import {
@@ -303,7 +304,31 @@ function toRemote(data: any, remoteTable: string, contextSchoolId?: string): any
   return out;
 }
 
-const NO_SCHOOL_FILTER = new Set(['schools']);
+const NO_SCHOOL_FILTER = new Set(['schools', 'plans']);
+
+// Optional/local-only modules that are not present in the current Supabase
+// schema. Keep them available in local cache, but never spend cloud calls on
+// tables that would only return 404/schema-cache errors.
+const LOCAL_ONLY_REMOTE_TABLES = new Set([
+  'homework',
+  'parent_messages',
+  'behavior_logs',
+  'staff_attendance',
+  'lesson_plans',
+  'student_resources',
+  'student_attendance',
+  'certificates',
+  'visitor_logs',
+  'exam_timetable',
+  'plans',
+  'hostel_rooms',
+  'hostel_assignments',
+  'events',
+]);
+
+function canUseRemoteTable(tableName: string): boolean {
+  return !LOCAL_ONLY_REMOTE_TABLES.has(getSupabaseTable(tableName));
+}
 
 function applyScope(query: any, table: string, sid: string): any {
   if (table === 'schools') return query.eq('id', sid);
@@ -736,6 +761,7 @@ const REALTIME_REMOTE_TABLES = Array.from(new Set(
   ALL_SYNC_TABLES
     .map(getSupabaseTable)
     .filter(table => TABLE_COLUMNS[table])
+    .filter(table => !LOCAL_ONLY_REMOTE_TABLES.has(table))
 ));
 
 function getRealtimeFilter(table: string, sid: string): string | undefined {
@@ -913,8 +939,9 @@ class SupabaseDataService {
   /**
    * Fetch a table from Supabase and merge into local cache.
    * Used on bootstrap — seeds data for first-time use, doesn't override pending local changes.
-   */
+  */
   private async _seedFromSupabase(sid: string, tableName: string): Promise<void> {
+    if (!canUseRemoteTable(tableName)) return;
     if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return;
 
     // Use Supabase Auth session when available, but allow anon-table auth too.
@@ -1120,6 +1147,7 @@ class SupabaseDataService {
 
   /** Public: merge a single table from Supabase into local cache (conflict-safe) */
   async syncTable(sid: string, tableName: string): Promise<void> {
+    if (!canUseRemoteTable(tableName)) return;
     return this._seedFromSupabase(sid, tableName);
   }
 
@@ -1154,6 +1182,9 @@ class SupabaseDataService {
 
   /** Internal helper for cloud-first fetching with delta sync and conflict resolution */
   private async _fetchAndMerge(sid: string, tableName: string): Promise<any[]> {
+    if (!canUseRemoteTable(tableName)) {
+      return cacheGet(sid, tableName) || [];
+    }
     const key = cacheKey(sid, tableName);
     const existingInflight = inflight.get(key);
     if (existingInflight) return existingInflight;
@@ -1252,6 +1283,7 @@ class SupabaseDataService {
       if (found) return found;
     }
     if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return null;
+    if (!canUseRemoteTable(tableName)) return null;
     const rt = getSupabaseTable(tableName);
     try {
       let q = this.db.from(rt).select('*').eq('id', id);
@@ -1278,15 +1310,17 @@ class SupabaseDataService {
   async search(userId: string, tableName: string, query: string, fields: string[]) {
     if (!query) return [];
     const all = await this.getAll(userId, tableName);
-    const q = query.toLowerCase();
-    return all.filter(item => fields.some(f => String(item[f] ?? '').toLowerCase().includes(q)));
+    const searchFields = [...fields];
+    if (tableName === 'students') searchFields.push('firstName', 'lastName', 'studentId', 'admissionNo', 'id');
+    if (tableName === 'staff') searchFields.push('firstName', 'lastName', 'employeeId', 'id');
+    return all.filter(item => matchesTextSearch(searchFields.map(f => item[f]), query));
   }
 
   async where(userId: string, tableName: string, fieldName: string, value: any) {
     const sid = this.sid(userId);
     // Always check cache first — works offline and is instant
     const cached = cacheGet(sid, tableName) || [];
-    if (cached.length > 0 || !isCloudSyncEnabled() || !isOnline() || !this.ok) {
+    if (cached.length > 0 || !canUseRemoteTable(tableName) || !isCloudSyncEnabled() || !isOnline() || !this.ok) {
       return cached.filter((item: any) => item[fieldName] === value || item[camelToSnake(fieldName)] === value);
     }
     const rt = getSupabaseTable(tableName);
@@ -1345,6 +1379,10 @@ class SupabaseDataService {
       return { success: true, syncedRemotely: false, savedLocally: true, record };
     }
 
+    if (!canUseRemoteTable(tableName)) {
+      return { success: true, syncedRemotely: false, savedLocally: true, record };
+    }
+
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'create', userId, tableName, data: record });
       return { success: true, syncedRemotely: false, savedLocally: true, record };
@@ -1396,6 +1434,10 @@ class SupabaseDataService {
     notifyUI(tableName);
 
     if (!isCloudSyncEnabled()) {
+      return { success: true, syncedRemotely: false, savedLocally: true, record };
+    }
+
+    if (!canUseRemoteTable(tableName)) {
       return { success: true, syncedRemotely: false, savedLocally: true, record };
     }
 
@@ -1466,6 +1508,10 @@ class SupabaseDataService {
       return { success: true, syncedRemotely: false, savedLocally: true };
     }
 
+    if (!canUseRemoteTable(tableName)) {
+      return { success: true, syncedRemotely: false, savedLocally: true };
+    }
+
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'delete', userId, tableName, recordId: id });
       return { success: true, syncedRemotely: false, savedLocally: true };
@@ -1510,6 +1556,10 @@ class SupabaseDataService {
     notifyUI(tableName);
 
     if (!isCloudSyncEnabled()) {
+      return { success: true, syncedRemotely: false, savedLocally: true };
+    }
+
+    if (!canUseRemoteTable(tableName)) {
       return { success: true, syncedRemotely: false, savedLocally: true };
     }
 
@@ -1669,6 +1719,7 @@ class SupabaseDataService {
       let failedCount = 0;
 
       for (const tableName of ALL_SYNC_TABLES) {
+        if (!canUseRemoteTable(tableName)) continue;
         const allLocalRecords: any[] = [];
         for (const [key, entry] of memCache.entries()) {
           const [_, table] = key.split(':');
@@ -1720,6 +1771,7 @@ class SupabaseDataService {
     let pulled = 0;
     
     await Promise.allSettled(ALL_SYNC_TABLES.map(async (t) => {
+      if (!canUseRemoteTable(t)) return;
       await this._fetchAndMerge(schoolId, t);
       pulled++;
     }));
@@ -1818,6 +1870,11 @@ class SupabaseDataService {
       const dedupedQueue = this._deduplicateQueue(queue);
 
       for (const item of dedupedQueue) {
+        if (!canUseRemoteTable(item.tableName)) {
+          dequeue(item.id);
+          continue;
+        }
+
         let succeeded = false;
         let unrecoverable = false;
 

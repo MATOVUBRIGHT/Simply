@@ -94,8 +94,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <Shield size={20} className="text-white" />
           </div>
           <div>
-            <p className={`text-sm font-bold ${t.text}`}>Schofy Admin</p>
-            <p className={`text-xs ${t.muted}`}>Super Admin Portal</p>
+            <p className={`text-sm font-bold ${t.text}`}>Schofy assistant</p>
+            <p className={`text-xs ${t.muted}`}>Assistant Portal</p>
           </div>
           <button onClick={() => setSidebarOpen(false)} className={`ml-auto lg:hidden p-1.5 rounded-lg ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}>
             <X size={16} />
@@ -212,7 +212,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           </div>
 
           <div className={`text-xs px-3 py-1.5 rounded-full font-medium ${isDark ? 'text-indigo-300 bg-indigo-900/40 border border-indigo-800' : 'text-indigo-700 bg-indigo-50 border border-indigo-200'}`}>
-            Super Admin
+            Schofy assistant
           </div>
         </header>
 

@@ -17,12 +17,22 @@ const OFFLINE_PLAN_KEY     = 'schofy_sub_plan';
 const OFFLINE_PENDING_KEY  = 'schofy_sub_pending'; // payment submitted but not yet approved
 
 export function cacheSubscriptionLocally(state: SubscriptionAccessState, pending = false) {
-  if (state.expiryDate) localStorage.setItem(OFFLINE_EXPIRY_KEY, state.expiryDate);
-  if (state.status) localStorage.setItem(OFFLINE_STATUS_KEY, state.status);
-  if (state.selectedPlanId) localStorage.setItem(OFFLINE_PLAN_KEY, state.selectedPlanId);
-  localStorage.setItem(OFFLINE_PENDING_KEY, pending ? '1' : '0');
+  const hasActiveCurrentPlan = state.status === 'active' || state.status === 'expiring';
+  if (!pending) {
+    if (state.expiryDate) localStorage.setItem(OFFLINE_EXPIRY_KEY, state.expiryDate);
+    if (state.status) localStorage.setItem(OFFLINE_STATUS_KEY, state.status);
+    if (state.selectedPlanId) localStorage.setItem(OFFLINE_PLAN_KEY, state.selectedPlanId);
+    localStorage.setItem(OFFLINE_PENDING_KEY, '0');
+  } else {
+    if (hasActiveCurrentPlan) {
+      if (state.expiryDate) localStorage.setItem(OFFLINE_EXPIRY_KEY, state.expiryDate);
+      if (state.status) localStorage.setItem(OFFLINE_STATUS_KEY, state.status);
+      if (state.selectedPlanId) localStorage.setItem(OFFLINE_PLAN_KEY, state.selectedPlanId);
+    }
+    localStorage.setItem(OFFLINE_PENDING_KEY, '1');
+  }
   const tenantId = localStorage.getItem('schofy_current_school_id') || localStorage.getItem('schofy_current_user_id') || '';
-  if (tenantId) cachePlanStateLocally(tenantId, state, pending);
+  if (tenantId && !(pending && hasActiveCurrentPlan)) cachePlanStateLocally(tenantId, state, pending);
 }
 
 function getOfflineStatus(): { blocked: boolean; reason: BlockReason; planId: string | null; pending: boolean } {
@@ -111,8 +121,9 @@ export default function SubscriptionGate({ children }: Props) {
     let state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
 
     const applyLocalState = (pendingFlag = localStorage.getItem(OFFLINE_PENDING_KEY) === '1') => {
-      const pending = pendingFlag && (state.status === 'incomplete' || !state.plan);
-      cacheSubscriptionLocally(state, pending);
+      const hasActiveCurrentPlan = state.status === 'active' || state.status === 'expiring';
+      const pending = pendingFlag && !hasActiveCurrentPlan;
+      cacheSubscriptionLocally(state, pendingFlag);
       setPlanName(state.plan?.name || null);
       setExpiryDate(state.expiryDate);
       setPendingTid(null);
@@ -194,6 +205,7 @@ export default function SubscriptionGate({ children }: Props) {
 
       // Cache for offline
       setCheckProgress(90);
+      const hasActiveCurrentPlan = state.status === 'active' || state.status === 'expiring';
       cacheSubscriptionLocally(state, isPending);
       if (tid) localStorage.setItem('schofy_sub_tid', tid);
 
@@ -203,10 +215,11 @@ export default function SubscriptionGate({ children }: Props) {
         setExpiryDate(state.expiryDate);
         setPendingTid(null);
       } else if (isPending) {
-        setBlocked(true); setBlockReason('pending');
+        setBlocked(!hasActiveCurrentPlan);
+        setBlockReason(hasActiveCurrentPlan ? 'incomplete' : 'pending');
         setPlanName(state.plan?.name || PLAN_DEFINITIONS.find(p => p.id === localStorage.getItem(OFFLINE_PLAN_KEY))?.name || null);
-        setPendingTid(tid || localStorage.getItem('schofy_sub_tid'));
-        setExpiryDate(null);
+        setPendingTid(hasActiveCurrentPlan ? null : tid || localStorage.getItem('schofy_sub_tid'));
+        setExpiryDate(state.expiryDate);
       } else if (state.status === 'expired' || state.status === 'incomplete') {
         setBlocked(true);
         setBlockReason(state.status as BlockReason);
@@ -248,7 +261,7 @@ export default function SubscriptionGate({ children }: Props) {
     const plan = planName || 'Unknown';
     const tid  = pendingTid || 'N/A';
     const school = user?.email || 'Unknown school';
-    const msg = `Hello Schofy Admin,\n\nPayment submitted for verification:\nSchool: ${school}\nPlan: ${plan}\nTransaction ID: ${tid}\n\nPayment via Airtel Money (0750034304) or MTN MoMo (0775011029).\n\nPlease verify and activate my subscription.\n\nThank you.`;
+    const msg = `Hello Schofy assistant,\n\nPayment submitted for verification:\nSchool: ${school}\nPlan: ${plan}\nTransaction ID: ${tid}\n\nPayment via Airtel Money (0750034304) or MTN MoMo (0775011029).\n\nPlease verify and activate my subscription.\n\nThank you.`;
     return `https://wa.me/256750034304?text=${encodeURIComponent(msg)}`;
   };
 

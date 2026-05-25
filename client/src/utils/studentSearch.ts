@@ -1,3 +1,5 @@
+import { matchesTextSearch, normalizeSearchValue } from './searchMatch';
+
 export function studentSearchText(student: any, extra: string[] = []): string {
   const first = String(student?.firstName || '').trim();
   const last = String(student?.lastName || '').trim();
@@ -14,12 +16,11 @@ export function studentSearchText(student: any, extra: string[] = []): string {
     ...extra,
   ]
     .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+    .join(' ');
 }
 
 export function matchesStudentSearch(student: any, query: string, extra: string[] = []): boolean {
-  const q = query.trim().toLowerCase();
+  const q = normalizeSearchValue(query);
   if (!q) return true;
-  return studentSearchText(student, extra).includes(q);
+  return matchesTextSearch(studentSearchText(student, extra), q);
 }

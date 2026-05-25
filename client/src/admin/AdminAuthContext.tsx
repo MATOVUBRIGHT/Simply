@@ -65,7 +65,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     if (configuredMatch || localTestMatch) {
       const adminUser: AdminUser = {
         email: normalizedEmail,
-        name: 'Super Admin',
+        name: 'Schofy assistant',
         loginAt: new Date().toISOString(),
       };
       setAdmin(adminUser);

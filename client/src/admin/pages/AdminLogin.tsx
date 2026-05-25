@@ -42,8 +42,8 @@ export default function AdminLogin() {
           <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-500/30">
             <Shield size={32} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Schofy Admin</h1>
-          <p className="text-slate-400 text-sm mt-1">Super Admin Portal</p>
+          <h1 className="text-2xl font-bold text-white">Schofy assistant</h1>
+          <p className="text-slate-400 text-sm mt-1">Assistant Portal</p>
         </div>
 
         {/* Card */}
@@ -134,7 +134,7 @@ export default function AdminLogin() {
         </div>
 
         <p className="text-center text-xs text-slate-600 mt-4">
-          Schofy Super Admin Portal — Restricted Access
+          Schofy assistant Portal — Restricted Access
         </p>
       </div>
 
@@ -145,7 +145,6 @@ export default function AdminLogin() {
               <AlertCircle size={22} />
             </div>
             <h2 className="mt-4 text-lg font-bold text-white">Access denied</h2>
-            <p className="mt-2 text-sm text-slate-400">Try again.</p>
             <button
               type="button"
               onClick={() => {

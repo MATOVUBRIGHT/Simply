@@ -12,6 +12,7 @@ import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
+import { matchesTextSearch } from '../utils/searchMatch';
 
 const priorityConfig: Record<string, { 
   bg: string; 
@@ -266,9 +267,7 @@ export default function Announcements() {
   const urgentCount = announcements.filter(a => a.priority === Priority.URGENT || a.priority === Priority.HIGH).length;
 
   const filteredAnnouncements = announcements.filter(a => {
-    if (!searchTerm) return true;
-    const search = searchTerm.toLowerCase();
-    return a.title.toLowerCase().includes(search) || a.content.toLowerCase().includes(search);
+    return matchesTextSearch([a.title, a.content, a.priority, a.createdBy], searchTerm);
   });
 
   const announcementCSVColumns = [

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus } from 'lucide-react';
+import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, CreditCard } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, Fee, FeeStructure, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,6 +13,7 @@ import { useTableData } from '../lib/store';
 import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCategoryLabel, getCategoryColor, generateInvoicesFromStructure, uniqueFeeStructures } from '../utils/feeStructures';
 import { ClassOption } from '../utils/classroom';
 import { matchesStudentSearch } from '../utils/studentSearch';
+import { matchesTextSearch } from '../utils/searchMatch';
 
 interface Invoice {
   id: string;
@@ -123,6 +124,13 @@ export default function Invoices() {
   const [showPromotionBanner, setShowPromotionBanner] = useState(false);
   const [expiredTerm, setExpiredTerm] = useState('');
   const [recordingPaymentId, setRecordingPaymentId] = useState<string | null>(null);
+  const [showAccountsModal, setShowAccountsModal] = useState(false);
+  const [accountDrafts, setAccountDrafts] = useState([
+    { accountName: '', accountNumber: '', bankName: '', paymentMethod: 'BANK TRANSFER' },
+    { accountName: '', accountNumber: '', bankName: '', paymentMethod: '' },
+    { accountName: '', accountNumber: '', bankName: '', paymentMethod: '' },
+  ]);
+  const [savingAccounts, setSavingAccounts] = useState(false);
 
   const students = useActiveStudents();
   const { students: allStudents } = useStudents();
@@ -189,6 +197,39 @@ export default function Invoices() {
     return obj;
   }, [settingsData]);
 
+  useEffect(() => {
+    const next = ['', '2', '3'].map((suffix, index) => ({
+      accountName: schoolSettings[`bankAccountName${suffix}`] || '',
+      accountNumber: schoolSettings[`bankAccountNumber${suffix}`] || '',
+      bankName: schoolSettings[`bankName${suffix}`] || '',
+      paymentMethod: schoolSettings[`paymentMethod${suffix}`] || (index === 0 ? 'BANK TRANSFER' : ''),
+    }));
+    setAccountDrafts(next);
+  }, [schoolSettings]);
+
+  async function savePaymentAccounts() {
+    const authId = schoolId || user?.id;
+    if (!authId) return;
+    setSavingAccounts(true);
+    try {
+      const payload: Record<string, string> = {};
+      ['', '2', '3'].forEach((suffix, index) => {
+        const account = accountDrafts[index] || { accountName: '', accountNumber: '', bankName: '', paymentMethod: '' };
+        payload[`bankAccountName${suffix}`] = account.accountName.trim();
+        payload[`bankAccountNumber${suffix}`] = account.accountNumber.trim();
+        payload[`bankName${suffix}`] = account.bankName.trim();
+        payload[`paymentMethod${suffix}`] = account.paymentMethod.trim();
+      });
+      await dataService.saveSettings(authId, payload);
+      addToast('Payment accounts saved', 'success');
+      setShowAccountsModal(false);
+    } catch {
+      addToast('Failed to save payment accounts', 'error');
+    } finally {
+      setSavingAccounts(false);
+    }
+  }
+
   function refreshInvoices() {
     refreshFees();
     refreshPayments();
@@ -247,8 +288,7 @@ export default function Invoices() {
   }, [studentInvoiceSummary]);
 
   const filteredStudentSummary = studentInvoiceSummary.filter(s => {
-    const search = searchTerm.toLowerCase();
-    if (search && !s.studentName.toLowerCase().includes(search) && !String(s.admissionNo || '').toLowerCase().includes(search)) return false;
+    if (!matchesTextSearch([s.studentName, s.admissionNo], searchTerm)) return false;
     if (filterStatus === 'invoiced' && !s.isInvoiced) return false;
     if (filterStatus === 'not_invoiced' && s.isInvoiced) return false;
     if (filterStatus === 'paid' && s.status !== 'paid') return false;
@@ -1051,9 +1091,7 @@ export default function Invoices() {
     if (filterStatus !== 'all' && inv.status !== filterStatus) return false;
     if (filterTerm !== 'all' && inv.term !== filterTerm) return false;
     if (searchTerm) {
-      const search = searchTerm.toLowerCase();
-      if (!inv.studentName.toLowerCase().includes(search) && 
-          !inv.description.toLowerCase().includes(search)) {
+      if (!matchesTextSearch([inv.studentName, inv.description, inv.status, inv.term, inv.year], searchTerm)) {
         return false;
       }
     }
@@ -1169,6 +1207,10 @@ export default function Invoices() {
               <button onClick={() => { setManagementPage('discount'); setShowDiscountModal(false); }} className="btn btn-secondary">
                 <Percent size={16} />
                 <span className="hidden sm:inline">Discount</span>
+              </button>
+              <button onClick={() => setShowAccountsModal(true)} className="btn btn-secondary">
+                <CreditCard size={16} />
+                <span className="hidden sm:inline">Payment Accounts</span>
               </button>
               <button
                 onClick={handleBulkInvoiceAllClasses}
@@ -2914,6 +2956,76 @@ export default function Invoices() {
               >
                 <Plus size={14} /> Add Invoice
               </button>
+            </div>
+          </div>
+        </div>
+      , document.body)}
+
+      {showAccountsModal && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto bg-black/50 backdrop-blur-sm" onClick={() => setShowAccountsModal(false)}>
+          <div className="modal-card w-full max-w-3xl" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <CreditCard size={18} className="text-white" />
+                <div>
+                  <h3 className="font-bold text-white">Payment Details</h3>
+                  <p className="text-xs text-white/75">These accounts appear on invoices and finance reports.</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAccountsModal(false)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {accountDrafts.map((account, index) => (
+                <div key={index} className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+                  <p className="mb-3 text-sm font-bold text-slate-800 dark:text-white">Account {index + 1}</p>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="form-label">Payment Method</label>
+                      <input
+                        value={account.paymentMethod}
+                        onChange={e => setAccountDrafts(prev => prev.map((item, i) => i === index ? { ...item, paymentMethod: e.target.value } : item))}
+                        className="form-input"
+                        placeholder="BANK TRANSFER / CASH / MOBILE MONEY"
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Bank / Provider</label>
+                      <input
+                        value={account.bankName}
+                        onChange={e => setAccountDrafts(prev => prev.map((item, i) => i === index ? { ...item, bankName: e.target.value } : item))}
+                        className="form-input"
+                        placeholder="Bank, Airtel, MTN..."
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Account Name</label>
+                      <input
+                        value={account.accountName}
+                        onChange={e => setAccountDrafts(prev => prev.map((item, i) => i === index ? { ...item, accountName: e.target.value } : item))}
+                        className="form-input"
+                        placeholder="School account name"
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Account / Phone Number</label>
+                      <input
+                        value={account.accountNumber}
+                        onChange={e => setAccountDrafts(prev => prev.map((item, i) => i === index ? { ...item, accountNumber: e.target.value } : item))}
+                        className="form-input"
+                        placeholder="Account number or mobile money number"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setShowAccountsModal(false)} className="btn btn-secondary">Cancel</button>
+                <button onClick={savePaymentAccounts} disabled={savingAccounts} className="btn btn-primary">
+                  {savingAccounts ? 'Saving...' : 'Save Payment Details'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

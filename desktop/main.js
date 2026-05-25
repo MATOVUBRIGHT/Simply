@@ -8,6 +8,8 @@ let mainWindow;
 let tray;
 let zoomFactor = 1;
 
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 const ZOOM_FILE = 'schofy-zoom.json';
 const ZOOM_STEP = 0.1;
 const MIN_ZOOM = 0.5;

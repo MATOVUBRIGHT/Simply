@@ -182,6 +182,45 @@ export default function Students() {
   const classFilterButtonRef = useRef<HTMLButtonElement>(null);
   const [statusDropdownPos, setStatusDropdownPos] = useState({ top: 0, left: 0 });
   const [classDropdownPos, setClassDropdownPos] = useState({ top: 0, left: 0 });
+
+  const getImportStatus = () => {
+    switch (viewFilter) {
+      case 'active': return 'active';
+      case 'deactivated': return 'inactive';
+      case 'completed': return 'completed';
+      default: return 'active';
+    }
+  };
+
+  const countsAsNewEnrolledImport = (
+    index: number,
+    flags: Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }> = flaggedItems,
+  ) => {
+    const flagged = flags[index];
+    if (flagged?.action === 'skip' || flagged?.action === 'replace') return false;
+    return getImportStatus() !== 'completed';
+  };
+
+  const countNewEnrolledImports = (
+    rows: Partial<Student>[] = importPreview,
+    flags: Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }> = flaggedItems,
+  ) => rows.filter((_row, index) => countsAsNewEnrolledImport(index, flags)).length;
+
+  const allowedNewImportCount = importRemaining === null
+    ? countNewEnrolledImports()
+    : Math.min(countNewEnrolledImports(), Math.max(0, importRemaining));
+  const newEnrolledImportCount = countNewEnrolledImports();
+  const hasImportOverflow = importRemaining !== null && newEnrolledImportCount > importRemaining;
+
+  useEffect(() => {
+    if (importStep !== 'preview' || importRemaining === null) return;
+    if (newEnrolledImportCount > importRemaining) {
+      const available = Math.max(0, importRemaining);
+      setPlanLimitMessage(`Only ${available} student${available === 1 ? '' : 's'} remaining. This file has ${newEnrolledImportCount} new enrolled student${newEnrolledImportCount === 1 ? '' : 's'}. Use Import Available to add the first ${available} allowed student${available === 1 ? '' : 's'}, or upgrade your plan.`);
+    } else {
+      setPlanLimitMessage(null);
+    }
+  }, [flaggedItems, importPreview, importRemaining, importStep, newEnrolledImportCount]);
   const isReloadingRef = useRef(false);
 
   const currentYear = new Date().getFullYear();
@@ -1011,16 +1050,17 @@ export default function Students() {
     if (id) {
       void getSubscriptionAccessState(id, undefined, { authUserId: user?.id }).then(access => {
         setImportRemaining(access.remaining);
-        const importable = mappedData.filter((_data, index) => !newFlaggedItems[index] || newFlaggedItems[index].action === 'duplicate').length;
+        const importable = countNewEnrolledImports(mappedData, newFlaggedItems);
         if (access.plan && importable > access.remaining) {
-          setPlanLimitMessage(`Only ${access.remaining} student${access.remaining === 1 ? '' : 's'} remaining on ${access.plan.name}. This file has ${importable} importable student${importable === 1 ? '' : 's'}.`);
+          const available = Math.max(0, access.remaining);
+          setPlanLimitMessage(`Only ${available} student${available === 1 ? '' : 's'} remaining on ${access.plan.name}. This file has ${importable} new enrolled student${importable === 1 ? '' : 's'}. Use Import Available to add the first ${available} allowed student${available === 1 ? '' : 's'}, or upgrade your plan.`);
         }
       }).catch(() => setImportRemaining(null));
     }
     setImportStep('preview');
   }
 
-  async function executeImport() {
+  async function executeImport(importAvailableOnly = false) {
     const id = schoolId || user?.id;
     if (importPreview.length === 0 || !id) {
       addToast('No valid students to import', 'error');
@@ -1037,21 +1077,8 @@ export default function Students() {
       let skippedCount = 0;
       let replacedCount = 0;
 
-      const getImportStatus = () => {
-        switch (viewFilter) {
-          case 'active': return 'active';
-          case 'deactivated': return 'inactive';
-          case 'completed': return 'completed';
-          default: return 'active';
-        }
-      };
-
       const importStatus = getImportStatus();
-      const newEnrolledCount = importPreview.filter((_data, index) => {
-        const flagged = flaggedItems[index];
-        if (flagged?.action === 'skip' || flagged?.action === 'replace') return false;
-        return importStatus !== 'completed';
-      }).length;
+      const newEnrolledCount = countNewEnrolledImports();
 
       const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
       if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
@@ -1062,32 +1089,48 @@ export default function Students() {
         return;
       }
       if (newEnrolledCount > access.remaining) {
-        const message = `Plan limit reached. You can add ${access.remaining} more enrolled student${access.remaining === 1 ? '' : 's'} on ${access.plan.name}, but this import adds ${newEnrolledCount}.`;
-        setPlanLimitMessage(message);
-        addToast(message, 'error');
-        setIsImporting(false);
-        return;
+        const available = Math.max(0, access.remaining);
+        if (!importAvailableOnly || available <= 0) {
+          const message = `Plan limit reached. You can add ${available} more enrolled student${available === 1 ? '' : 's'} on ${access.plan.name}, but this import adds ${newEnrolledCount}. Use Import Available or upgrade your plan.`;
+          setPlanLimitMessage(message);
+          addToast(message, 'error');
+          setIsImporting(false);
+          return;
+        }
+        setPlanLimitMessage(`Importing ${available} available student${available === 1 ? '' : 's'} now. ${newEnrolledCount - available} extra student${newEnrolledCount - available === 1 ? '' : 's'} will be skipped until you upgrade.`);
       }
+
+      type ImportResult = 'imported' | 'replaced' | 'skipped';
+      const importTasks: Array<{ index: number; run: () => Promise<ImportResult> }> = [];
+      let newEnrolledReserved = 0;
+      const reservedIds = new Set(students.map(s => s.id));
 
       for (let i = 0; i < importPreview.length; i++) {
         const data = importPreview[i];
         const studentId = (data as any).id;
         const flagged = flaggedItems[i];
+        const countsAsNewEnrolled = countsAsNewEnrolledImport(i);
+
+        if (importAvailableOnly && countsAsNewEnrolled && newEnrolledReserved >= Math.max(0, access.remaining)) {
+          importTasks.push({ index: i, run: async () => 'skipped' });
+          continue;
+        }
+        if (countsAsNewEnrolled) newEnrolledReserved++;
 
         if (flagged) {
           if (flagged.action === 'skip') {
-            skippedCount++;
-            setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
+            importTasks.push({ index: i, run: async () => 'skipped' });
             continue;
           } else if (flagged.action === 'duplicate') {
             let newId = studentId;
             let counter = 1;
-            while (students.find(s => s.id === newId)) {
+            while (reservedIds.has(newId)) {
               const fn = ((data as any).firstName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
               const ln = ((data as any).lastName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
               newId = `${fn}${ln}${100 + counter}`;
               counter++;
             }
+            reservedIds.add(newId);
             
             const genderValue = ((data as any).gender as string)?.toLowerCase();
             const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
@@ -1113,35 +1156,47 @@ export default function Students() {
               updatedAt: now,
             };
             
-            await dataService.create(id, 'students', student);
-            successCount++;
+            importTasks.push({
+              index: i,
+              run: async () => {
+                await dataService.create(id, 'students', student);
+                return 'imported';
+              },
+            });
           } else if (flagged.action === 'replace' && flagged.existingId) {
             const genderValue = ((data as any).gender as string)?.toLowerCase();
             const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
             
-            await dataService.update(id, 'students', flagged.existingId, {
-              firstName: ((data as any).firstName as string) || 'Unknown',
-              lastName: ((data as any).lastName as string) || 'Unknown',
-              dob: ((data as any).dob as string) || '2000-01-01',
-              gender: validGender,
-              classId: ((data as any).classId as string) || 'primary-1',
-              address: ((data as any).address as string) || '',
-              guardianName: ((data as any).guardianName as string) || '',
-              guardianPhone: ((data as any).guardianPhone as string) || '',
-              guardianEmail: (data as any).guardianEmail as string | undefined,
-              status: importStatus as any,
-              completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
-              completedTerm: importStatus === 'completed' ? 'Final' : undefined,
-              updatedAt: now,
-            } as any);
-            replacedCount++;
+            importTasks.push({
+              index: i,
+              run: async () => {
+                await dataService.update(id, 'students', flagged.existingId!, {
+                  firstName: ((data as any).firstName as string) || 'Unknown',
+                  lastName: ((data as any).lastName as string) || 'Unknown',
+                  dob: ((data as any).dob as string) || '2000-01-01',
+                  gender: validGender,
+                  classId: ((data as any).classId as string) || 'primary-1',
+                  address: ((data as any).address as string) || '',
+                  guardianName: ((data as any).guardianName as string) || '',
+                  guardianPhone: ((data as any).guardianPhone as string) || '',
+                  guardianEmail: (data as any).guardianEmail as string | undefined,
+                  status: importStatus as any,
+                  completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
+                  completedTerm: importStatus === 'completed' ? 'Final' : undefined,
+                  updatedAt: now,
+                } as any);
+                return 'replaced';
+              },
+            });
           }
         } else {
           // Regular new student
           const genderValue = ((data as any).gender as string)?.toLowerCase();
           const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
 
-          const studentIdLocal = (data as any).id || generateUUID();
+          let studentIdLocal = (data as any).id || generateUUID();
+          while (reservedIds.has(studentIdLocal)) studentIdLocal = generateUUID();
+          reservedIds.add(studentIdLocal);
 
           const student: Student = {
             id: studentIdLocal,
@@ -1164,10 +1219,28 @@ export default function Students() {
             updatedAt: now,
           };
           
-          await dataService.create(id, 'students', student as any);
-          successCount++;
+          importTasks.push({
+            index: i,
+            run: async () => {
+              await dataService.create(id, 'students', student as any);
+              return 'imported';
+            },
+          });
         }
-        setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
+      }
+
+      const batchSize = Math.max(1, Math.ceil(importTasks.length * 0.3));
+      let processedCount = 0;
+      for (let start = 0; start < importTasks.length; start += batchSize) {
+        const batch = importTasks.slice(start, start + batchSize);
+        const results = await Promise.all(batch.map(task => task.run()));
+        results.forEach(result => {
+          if (result === 'imported') successCount++;
+          else if (result === 'replaced') replacedCount++;
+          else skippedCount++;
+        });
+        processedCount += batch.length;
+        setImportProgress(Math.round((processedCount / Math.max(1, importTasks.length)) * 100));
       }
 
       const parts: string[] = [];
@@ -2052,7 +2125,7 @@ export default function Students() {
             if (event.target === event.currentTarget && !isImporting) closeImportModal();
           }}
         >
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-[min(92vw,60rem)] max-h-[86vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
@@ -2065,7 +2138,7 @@ export default function Students() {
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
+            <div className="p-5 overflow-y-auto max-h-[calc(86vh-56px)]">
               {importStep === 'upload' && (
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-4">
@@ -2135,7 +2208,7 @@ export default function Students() {
 
                   <div className="flex justify-end gap-2 pt-2">
                     <button onClick={closeImportModal} disabled={isImporting} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
-                    <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
+                    <button onClick={processMapping} className="py-1.5 px-3 rounded-lg bg-sky-600 text-white hover:bg-sky-700 text-sm font-medium flex items-center gap-1 transition-colors">
                       Preview <ArrowRight size={14} />
                     </button>
                   </div>
@@ -2143,7 +2216,7 @@ export default function Students() {
               )}
 
               {importStep === 'preview' && (
-                <div className="flex flex-col h-[calc(85vh-56px)] -m-5">
+                <div className="flex flex-col h-[calc(86vh-56px)] -m-5">
                   <div className="flex items-center gap-4 px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
                     <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                       <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
@@ -2155,9 +2228,16 @@ export default function Students() {
                     <div className="flex gap-3 ml-auto">
                       <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-3 py-1">
                         <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                          <strong>{importPreview.filter((_student, index) => !flaggedItems[index] || flaggedItems[index].action === 'duplicate').length}</strong> import available
+                          <strong>{hasImportOverflow ? allowedNewImportCount : newEnrolledImportCount}</strong> import available
                         </p>
                       </div>
+                      {hasImportOverflow && (
+                        <div className="bg-rose-50 dark:bg-rose-900/20 rounded-lg px-3 py-1">
+                          <p className="text-sm text-rose-700 dark:text-rose-300">
+                            <strong>{newEnrolledImportCount - allowedNewImportCount}</strong> need upgrade
+                          </p>
+                        </div>
+                      )}
                       {Object.keys(flaggedItems).length > 0 && (
                         <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-1">
                           <p className="text-sm text-amber-700 dark:text-amber-300">
@@ -2182,7 +2262,16 @@ export default function Students() {
 
                   {planLimitMessage && (
                     <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-2.5 mx-5 mt-3">
-                      <p className="text-sm text-red-700 dark:text-red-300">{planLimitMessage}</p>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm text-red-700 dark:text-red-300">{planLimitMessage}</p>
+                        <button
+                          type="button"
+                          onClick={() => navigate('/plans')}
+                          className="py-1.5 px-3 rounded-lg bg-rose-600 text-white hover:bg-rose-700 text-xs font-semibold whitespace-nowrap transition-colors"
+                        >
+                          Upgrade now
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -2256,7 +2345,7 @@ export default function Students() {
                     </table>
                   </div>
 
-                  <div className="flex justify-between px-5 py-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
                     <div className="flex-1 max-w-xs">
                       {isImporting && (
                         <>
@@ -2267,8 +2356,18 @@ export default function Students() {
                         </>
                       )}
                     </div>
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-2 px-4" disabled={isImporting}>Back to Mapping</button>
-                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-2 px-4 flex items-center gap-2 disabled:opacity-70">
+                    <button onClick={() => setImportStep('map')} className="py-2 px-4 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 font-medium transition-colors disabled:opacity-70" disabled={isImporting}>Back to Mapping</button>
+                    {hasImportOverflow && allowedNewImportCount > 0 && (
+                      <button
+                        onClick={() => executeImport(true)}
+                        disabled={isImporting}
+                        className="py-2 px-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check size={16} />}
+                        {isImporting ? 'Importing...' : `Import Available (${allowedNewImportCount})`}
+                      </button>
+                    )}
+                    <button onClick={() => executeImport(false)} disabled={isImporting} className="py-2 px-4 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors">
                       {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check size={16} />}
                       {isImporting ? 'Importing...' : 'Import Selected'}
                     </button>

@@ -113,7 +113,7 @@ export default function Notifications() {
   async function clearChat() {
     const id = schoolId || user?.id;
     if (!id) return;
-    const ok = await confirm({ title: 'Clear Super Admin Chat', description: 'Delete broadcast message notifications from this device? This will not delete messages already received by super admin.', confirmLabel: 'Clear Chat', variant: 'danger' });
+    const ok = await confirm({ title: 'Clear Schofy assistant Chat', description: 'Delete broadcast message notifications from this device? This will not delete messages already received by Schofy assistant.', confirmLabel: 'Clear Chat', variant: 'danger' });
     if (!ok) return;
     try {
       const all = await dataService.getAll(id, 'notifications');
@@ -283,7 +283,7 @@ export default function Notifications() {
                     <button
                       onClick={() => { setReplyTarget(notif); setReplyBody(''); }}
                       className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                      title="Reply to super admin"
+                      title="Reply to Schofy assistant"
                     >
                       <MessageSquare size={18} />
                     </button>
@@ -315,7 +315,7 @@ export default function Notifications() {
           <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-200 bg-indigo-600 px-5 py-4 text-white">
               <div>
-                <h2 className="font-bold">Reply to Super Admin</h2>
+                <h2 className="font-bold">Reply to Schofy assistant</h2>
                 <p className="text-xs text-indigo-100">{replyTarget.title}</p>
               </div>
               <button onClick={() => setReplyTarget(null)} className="rounded-lg p-1 hover:bg-white/15"><X size={18} /></button>

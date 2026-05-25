@@ -4,6 +4,7 @@ import { Search, RefreshCw, CheckCircle, XCircle, School, ChevronRight, Clock } 
 import { supabase } from '../../lib/supabase';
 import { useAdminTheme } from '../AdminThemeContext';
 import { PLAN_DEFINITIONS } from '../../utils/plans';
+import { matchesTextSearch } from '../../utils/searchMatch';
 
 interface UserRow {
   id: string;
@@ -86,8 +87,7 @@ export default function AdminUsers() {
   }
 
   const filtered = users.filter(u => {
-    const q = search.toLowerCase();
-    const matchSearch = u.email.toLowerCase().includes(q) || u.schoolName.toLowerCase().includes(q) || `${u.firstName} ${u.lastName}`.toLowerCase().includes(q);
+    const matchSearch = matchesTextSearch([u.email, u.schoolName, u.firstName, u.lastName, `${u.firstName} ${u.lastName}`, `${u.lastName} ${u.firstName}`], search);
     return matchSearch && (filter === 'all' || u.planStatus === filter);
   });
 

@@ -149,8 +149,8 @@ async function getLocalUserByEmail(email: string): Promise<LocalUser | null> {
 
 async function getBackedUpSession(): Promise<LocalUser | null> {
   const local = getSession();
-  if (local && isDesktopApp()) {
-    if (isDesktopSessionExpired(local)) {
+  if (local) {
+    if (isDesktopApp() && isDesktopSessionExpired(local)) {
       clearSession();
       return null;
     }
@@ -311,13 +311,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (savedUser) {
-      const desktopRestored = isDesktopApp()
-        ? await unlockStorageEncryptionFromDesktopBackup(savedUser.id, savedUser.schoolId, savedUser.email)
-        : false;
-      if (!desktopRestored) {
-        clearSession();
-        if (!stale()) setLoading(false);
-        return;
+      if (isDesktopApp()) {
+        const desktopRestored = await unlockStorageEncryptionFromDesktopBackup(savedUser.id, savedUser.schoolId, savedUser.email);
+        if (!desktopRestored) {
+          clearSession();
+          if (!stale()) setLoading(false);
+          return;
+        }
+      } else if (online) {
+        try {
+          const { data, error } = await usersApi.getById(savedUser.id);
+          if (stale()) return;
+          if (!data || error || data.is_active === false) {
+            clearSession();
+            setUser(null);
+            setSchoolId(null);
+            setLoading(false);
+            return;
+          }
+
+          const userData: LocalUser = {
+            id: data.id,
+            schoolId: data.school_id || data.id,
+            email: data.email,
+            firstName: data.first_name,
+            lastName: data.last_name,
+            isActive: data.is_active,
+            createdAt: data.created_at,
+          };
+          saveSession(userData);
+          setUser(userData);
+          setSchoolId(userData.schoolId);
+          initializeSyncForUser(userData);
+          setLoading(false);
+          return;
+        } catch {
+          // If the browser still has a cached session but the network check fails,
+          // keep the app usable from IndexedDB and let sync retry when online.
+        }
       }
 
       // Background initialization

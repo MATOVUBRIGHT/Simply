@@ -38,6 +38,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const desktopApp = isDesktopApp();
   const MANUAL_SYNC_WINDOW_MS = 5 * 60 * 1000;
   const MANUAL_SYNC_LIMIT = 3;
+  const cloudPullStartedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (desktopApp && localStorage.getItem(SCHOFY_SYNC_ENABLED_KEY) === null) {
@@ -85,10 +86,6 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       syncService.setUserId(user.id);
     }
     syncService.setSchoolId(sid);
-
-    if (syncEnabled && isOnline) {
-      syncService.startBackgroundSync();
-    }
   }, [schoolId, user?.id, syncEnabled, isOnline]);
 
   const loadPendingCount = useCallback(async () => {
@@ -159,13 +156,73 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     [isOnline, syncEnabled, schoolId, user?.id, addToast, loadPendingCount]
   );
 
+  const pullCloudData = useCallback(
+    async (sid: string, showNotifications = false) => {
+      if (!isOnline || !isCloudSyncEnabled() || !isSupabaseConfigured || !supabase) {
+        return false;
+      }
+
+      setIsSyncing(true);
+      try {
+        const result = await dataService.forcePull(sid);
+        if (result.success) {
+          await store.refreshCurrentPage(sid, true).catch(() => undefined);
+          window.dispatchEvent(new Event('schofyDataRefresh'));
+          await loadPendingCount();
+          const syncedAt = new Date();
+          setLastSyncTime(syncedAt);
+          localStorage.setItem('schofy_last_sync', syncedAt.toISOString());
+          if (showNotifications) {
+            addToast('Cloud data pulled to this device', 'success');
+          }
+          return true;
+        }
+
+        if (showNotifications) {
+          addToast(result.error || 'Cloud data will pull when online', 'warning');
+        }
+        return false;
+      } catch (error) {
+        if (showNotifications) {
+          addToast('Cloud data will pull when online', 'warning');
+        }
+        return false;
+      } finally {
+        setIsSyncing(false);
+      }
+    },
+    [addToast, isOnline, loadPendingCount]
+  );
+
+  useEffect(() => {
+    const sid = schoolId || user?.id;
+    if (!sid || !user?.id || !syncEnabled || !isOnline || !isSupabaseConfigured || !supabase) return;
+
+    const pullKey = `${user.id}:${sid}`;
+    if (cloudPullStartedRef.current.has(pullKey)) return;
+    cloudPullStartedRef.current.add(pullKey);
+
+    syncService.configure({ supabaseClient: supabase });
+    syncService.setUserId(user.id);
+    syncService.setSchoolId(sid);
+    void (async () => {
+      await pullCloudData(sid, false);
+      syncService.enableSync();
+    })();
+  }, [schoolId, user?.id, syncEnabled, isOnline, pullCloudData]);
+
   const wasOnlineRef = useRef(isOnline);
   useEffect(() => {
-    if (isOnline && !wasOnlineRef.current && syncEnabled && (schoolId || user?.id)) {
-      void syncNow(false);
+    const sid = schoolId || user?.id;
+    if (isOnline && !wasOnlineRef.current && syncEnabled && sid) {
+      void (async () => {
+        await pullCloudData(sid, false);
+        syncService.enableSync();
+        await syncNow(false);
+      })();
     }
     wasOnlineRef.current = isOnline;
-  }, [isOnline, schoolId, user?.id, syncEnabled, syncNow]);
+  }, [isOnline, schoolId, user?.id, syncEnabled, pullCloudData, syncNow]);
 
   const exportBackup = useCallback(async () => {
     const sid = schoolId || user?.id;
@@ -282,18 +339,17 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       syncService.configure({ supabaseClient: supabase });
       syncService.setUserId(user.id);
       syncService.setSchoolId(sid);
-      syncService.enableSync();
       void dataService.bootstrapSession(user.id, sid, { wait: false });
-      syncService.startBackgroundSync();
 
+      await pullCloudData(sid, true);
       await dataService.forcePush(sid);
-      await syncNow(false);
+      syncService.enableSync();
       addToast('Cloud sync enabled', 'success');
     } catch (error) {
       console.error('Enable sync error:', error);
       addToast('Failed to enable cloud sync', 'error');
     }
-  }, [addToast, user, schoolId, syncNow]);
+  }, [addToast, user, schoolId, pullCloudData]);
 
   const disableSync = useCallback(() => {
     setCloudSyncEnabled(false);

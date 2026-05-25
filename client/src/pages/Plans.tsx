@@ -11,7 +11,7 @@ import { isDesktopApp } from '../utils/desktopSyncPreference';
 
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
-  { q: 'Can I switch plans?', a: 'Yes, upgrades are immediate, downgrades should only be used when your enrolled students fit the lower limit.' },
+  { q: 'Can I switch plans?', a: 'Yes. Your current plan stays active while the new plan waits for admin approval.' },
   { q: 'Payment methods?', a: 'Airtel Money only. Activation within 24 hours.' },
   { q: 'Refunds?', a: 'No, all payments are non-refundable.' },
 ];
@@ -106,23 +106,38 @@ export default function Plans() {
         const isFreeTier = meta.accessType === 'free_trial' || meta.requestType === 'trial' || sub?.plan === 'trial';
         const plan = PLAN_DEFINITIONS.find(p => p.id === sub?.plan) || (isFreeTier || meta.grantedByAdmin || meta.approvedByAdmin ? PLAN_DEFINITIONS[0] : null);
         if (sub && pending) {
+          const hasActiveCurrentPlan = usage.status === 'active' || usage.status === 'expiring';
           localStorage.setItem('schofy_sub_pending', '1');
-          setAccessNotice({
-            type: 'pending',
-            message: 'Your request is still waiting for admin approval. Access will unlock automatically after approval.',
-          });
-          effectiveUsage = {
-            ...usage,
-            plan: plan || usage.plan,
-            selectedPlanId: plan?.id || usage.selectedPlanId,
-            status: 'incomplete',
-            requiresPlanAction: true,
-          };
+          if (plan) {
+            localStorage.setItem('schofy_pending_plan', plan.id);
+            localStorage.setItem('schofy_pending_plan_name', plan.name);
+          }
+          if (hasActiveCurrentPlan) {
+            if (showLoader) {
+              setAccessNotice({
+                type: 'info',
+                message: `${usage.plan?.name || 'Your current plan'} remains active. The new plan will apply only after admin approval.`,
+              });
+            }
+            effectiveUsage = usage;
+          } else {
+            setAccessNotice({
+              type: 'pending',
+              message: 'Your request is still waiting for admin approval. Access will unlock automatically after approval.',
+            });
+            effectiveUsage = {
+              ...usage,
+              plan: plan || usage.plan,
+              selectedPlanId: plan?.id || usage.selectedPlanId,
+              status: 'incomplete',
+              requiresPlanAction: true,
+            };
+          }
         } else if (sub && paused) {
           localStorage.setItem('schofy_sub_pending', '0');
           setAccessNotice({
             type: 'paused',
-            message: 'Your access is paused by admin. Contact Schofy support or your super admin to restore it.',
+            message: 'Your access is paused. Contact Schofy assistant to restore it.',
           });
           effectiveUsage = {
             ...usage,
@@ -172,7 +187,11 @@ export default function Plans() {
       setCurrentPlanId(effectiveUsage.selectedPlanId);
       setStudentCount(effectiveUsage.used);
       setAccessState(effectiveUsage);
-      cachePlanStateLocally(authId, effectiveUsage, localStorage.getItem('schofy_sub_pending') === '1');
+      const pendingChange = localStorage.getItem('schofy_sub_pending') === '1';
+      const hasActiveCurrentPlan = effectiveUsage.status === 'active' || effectiveUsage.status === 'expiring';
+      if (!(pendingChange && hasActiveCurrentPlan)) {
+        cachePlanStateLocally(authId, effectiveUsage, pendingChange);
+      }
       setLatestReceipt(receipt);
       if (showLoader) {
         setAccessProgress(100);
@@ -680,15 +699,6 @@ Powered by Schofy`;
                         // Mark subscription as pending in Supabase so admin can verify
                         if (supabase) {
                           const now = new Date().toISOString();
-                          // Find existing sub row
-                          const { data: existing } = await supabase
-                            .from('subscriptions')
-                            .select('id')
-                            .eq('school_id', authId)
-                            .order('updated_at', { ascending: false })
-                            .limit(1)
-                            .single();
-
                           const pendingMeta = {
                             source: 'client',
                             transactionId: transactionId.trim(),
@@ -698,36 +708,45 @@ Powered by Schofy`;
                             amount: billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice,
                           };
 
-                          if (existing?.id) {
-                            await supabase.from('subscriptions').update({
-                              status: 'pending',
-                              plan: selectedPlan.id,
-                              updated_at: now,
-                              metadata: pendingMeta,
-                            }).eq('id', existing.id);
-                          } else {
-                            await supabase.from('subscriptions').insert({
-                              id: crypto.randomUUID(),
-                              school_id: authId,
-                              user_id: user?.id || authId,
-                              plan: selectedPlan.id,
-                              status: 'pending',
-                              starts_at: now,
-                              ends_at: now, // will be set by admin on approval
-                              created_at: now,
-                              updated_at: now,
-                              metadata: pendingMeta,
-                            });
-                          }
+                          await supabase.from('subscriptions').insert({
+                            id: crypto.randomUUID(),
+                            school_id: authId,
+                            user_id: user?.id || authId,
+                            plan: selectedPlan.id,
+                            status: 'pending',
+                            starts_at: now,
+                            ends_at: now, // will be set by admin on approval
+                            created_at: now,
+                            updated_at: now,
+                            metadata: pendingMeta,
+                          });
                         }
 
-                        // Cache pending state locally so gate blocks immediately
+                        // Cache pending request separately. The active/current plan must
+                        // remain unchanged until Schofy assistant approval.
                         localStorage.setItem('schofy_sub_pending', '1');
                         localStorage.setItem('schofy_sub_tid', transactionId.trim());
-                        localStorage.setItem('schofy_sub_plan', selectedPlan.id);
+                        localStorage.setItem('schofy_pending_plan', selectedPlan.id);
+                        localStorage.setItem('schofy_pending_plan_name', selectedPlan.name);
+                        cachePlanStateLocally(authId, {
+                          plan: selectedPlan,
+                          selectedPlanId: selectedPlan.id,
+                          used: accessState?.used || studentCount,
+                          remaining: 0,
+                          eligible: false,
+                          expiryDate: null,
+                          status: 'incomplete',
+                          daysRemaining: null,
+                          requiresPlanAction: true,
+                        }, true);
 
-                        setCurrentPlanId(selectedPlan.id);
-                        setAccessState(prev => prev ? { ...prev, selectedPlanId: selectedPlan.id, plan: selectedPlan, status: 'incomplete', requiresPlanAction: true } : prev);
+                        const hasCurrentAccess = accessState?.status === 'active' || accessState?.status === 'expiring';
+                        setAccessNotice({
+                          type: hasCurrentAccess ? 'info' : 'pending',
+                          message: hasCurrentAccess
+                            ? `Request sent. Your current plan remains active until admin approval.`
+                            : `${selectedPlan.name} is waiting for admin approval.`,
+                        });
                         setLatestReceipt(await getLatestReceipt(authId));
                         setPaymentSubmitted(true);
                       } catch (error) {
@@ -756,7 +775,9 @@ Powered by Schofy`;
 
                 {/* Pending notice */}
                 <div className="mb-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 text-left">
-                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">Access blocked until admin approves</p>
+                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+                    {canProceedToApp ? 'Current plan remains active until admin approves' : 'Access unlocks after admin approval'}
+                  </p>
                   <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
                     Plan: <strong>{selectedPlan.name}</strong> · Amount: <strong>${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}</strong>
                   </p>
@@ -766,7 +787,7 @@ Powered by Schofy`;
                 <div className="space-y-2">
                   {/* WhatsApp with pre-filled message */}
                   <a
-                    href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Admin,\n\nPayment submitted:\nSchool: ${user?.email}\nPlan: ${selectedPlan.name}\nBilling: ${billingCycle}\nAmount: $${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}\nTransaction ID: ${transactionId}\n\nPlease verify and activate. Thank you.`)}`}
+                    href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nPayment submitted:\nSchool: ${user?.email}\nPlan: ${selectedPlan.name}\nBilling: ${billingCycle}\nAmount: $${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}\nTransaction ID: ${transactionId}\n\nPlease verify and activate. Thank you.`)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl text-xs font-medium flex items-center justify-center gap-2"
@@ -849,7 +870,7 @@ Powered by Schofy`;
               </div>
 
               <a
-                href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Admin,\n\nI would like to request a free trial for my school.\n\nSchool email: ${user?.email}\nSchool ID: ${schoolId || user?.id}\n\nPlease activate the 7-day free trial. Thank you.`)}`}
+                href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nI would like to request a free trial for my school.\n\nSchool email: ${user?.email}\nSchool ID: ${schoolId || user?.id}\n\nPlease activate the 7-day free trial. Thank you.`)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => { setTrialRequested(true); void requestTrialApproval(); }}
@@ -949,7 +970,7 @@ Powered by Schofy`;
                   <CreditCard size={18} /> Pay & Submit TID
                 </button>
                 <a
-                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Admin,\n\nI want to renew my ${renewPlan.name} plan.\nSchool: ${user?.email}\nBilling: ${billingCycle}\nAmount: $${billingCycle === 'monthly' ? renewPlan.monthlyPrice : renewPlan.termPrice}\n\nPlease assist. Thank you.`)}`}
+                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nI want to renew my ${renewPlan.name} plan.\nSchool: ${user?.email}\nBilling: ${billingCycle}\nAmount: $${billingCycle === 'monthly' ? renewPlan.monthlyPrice : renewPlan.termPrice}\n\nPlease assist. Thank you.`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 text-sm"

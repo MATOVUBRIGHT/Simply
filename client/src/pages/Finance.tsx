@@ -14,6 +14,7 @@ import { useTableData } from '../lib/store';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { matchesStudentSearch } from '../utils/studentSearch';
 import { openPrintPreview } from '../utils/printPreview';
+import { matchesTextSearch } from '../utils/searchMatch';
 
 function termRank(term: string) {
   const n = Number(String(term).replace(/[^0-9]/g, ''));
@@ -89,6 +90,12 @@ export default function Finance() {
     (settingsData as any[]).forEach((s: any) => { obj[s.key] = s.value; });
     return obj;
   }, [settingsData]);
+  const schoolPrintInfo = useMemo(() => ({
+    name: String(settingsMap.schoolName || 'School').trim(),
+    address: String(settingsMap.schoolAddress || '').trim(),
+    phone: String(settingsMap.schoolPhone || '').trim(),
+    email: String(settingsMap.schoolEmail || '').trim(),
+  }), [settingsMap]);
 
   // Derive payment accounts from settings
   const bankAccounts = useMemo(() => {
@@ -105,11 +112,8 @@ export default function Finance() {
     return accounts;
   }, [settingsMap]);
   const filteredBankAccounts = useMemo(() => {
-    const q = searchTerm.trim().toLowerCase();
-    if (!q) return bankAccounts;
     return bankAccounts.filter(acc =>
-      [acc.accountName, acc.accountNumber, acc.bankName, acc.paymentMethod]
-        .some(value => String(value || '').toLowerCase().includes(q))
+      matchesTextSearch([acc.accountName, acc.accountNumber, acc.bankName, acc.paymentMethod], searchTerm)
     );
   }, [bankAccounts, searchTerm]);
 
@@ -511,10 +515,9 @@ export default function Finance() {
 
   // Group fees by student for Invoices tab
   const invoicesByStudent = students.map(student => {
-    const q = searchTerm.toLowerCase();
     const breakdown = getStudentTermBreakdown(student.id);
-    const sf = breakdown.currentFees.filter(f => !q || matchesStudentSearch(student, q) || f.description.toLowerCase().includes(q));
-    const matchStudent = !q || matchesStudentSearch(student, q);
+    const sf = breakdown.currentFees.filter(f => matchesStudentSearch(student, searchTerm) || matchesTextSearch([f.description, f.term, f.year], searchTerm));
+    const matchStudent = matchesStudentSearch(student, searchTerm);
     if (sf.length === 0 && !breakdown.openingBalance && !matchStudent) return null;
     if (sf.length === 0 && breakdown.openingBalance <= 0) return null;
     return {
@@ -537,8 +540,7 @@ export default function Finance() {
   // Group payments by student for Payments tab
   const paymentsByStudent = students.map(student => {
     const sp = payments.filter(p => {
-      const q = searchTerm.toLowerCase();
-      const matchSearch = !q || matchesStudentSearch(student, q) || p.method.toLowerCase().includes(q);
+      const matchSearch = matchesStudentSearch(student, searchTerm) || matchesTextSearch([p.method, p.reference, p.notes, p.date], searchTerm);
       return p.studentId === student.id && matchSearch;
     });
     if (sp.length === 0) return null;
@@ -631,6 +633,25 @@ export default function Finance() {
     { id: 'payments', label: 'Payments', icon: Receipt },
     { id: 'accounts', label: 'Accounts', icon: Building2 },
   ];
+
+  const renderSchoolPrintHeader = (documentTitle: string) => (
+    <div className="mb-5 border-b border-slate-300 pb-4 text-slate-900 print:block">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-black uppercase tracking-tight">{schoolPrintInfo.name}</h2>
+          {schoolPrintInfo.address && <p className="text-sm text-slate-600">{schoolPrintInfo.address}</p>}
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+            {schoolPrintInfo.phone && <span>Tel: {schoolPrintInfo.phone}</span>}
+            {schoolPrintInfo.email && <span>Email: {schoolPrintInfo.email}</span>}
+          </div>
+        </div>
+        <div className="text-left text-sm sm:text-right">
+          <p className="font-bold uppercase tracking-wide">{documentTitle}</p>
+          <p className="text-slate-500">Printed {new Date().toLocaleDateString()}</p>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -827,6 +848,7 @@ export default function Finance() {
           <div className="space-y-3 print-area">
             {selectedLedgerRow ? (
               <div className="mx-auto max-w-5xl rounded-sm border border-slate-200 bg-white p-6 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 print:border-0 print:bg-white print:p-0 print:text-black print:shadow-none">
+                {renderSchoolPrintHeader('Student Ledger Statement')}
                 <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between dark:border-slate-700">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-400">Student Ledger Statement</p>
@@ -834,7 +856,7 @@ export default function Finance() {
                     <p className="text-sm text-slate-500 dark:text-slate-400">ID: {selectedLedgerRow.admissionNo || '-'} | Term {ledgerTerm}, {ledgerYear}</p>
                   </div>
                   <div className="text-left text-sm sm:text-right">
-                    <p className="font-semibold">Schofy Finance</p>
+                    <p className="font-semibold">{schoolPrintInfo.name}</p>
                     <p className="text-slate-500 dark:text-slate-400">Printed {new Date().toLocaleDateString()}</p>
                   </div>
                 </div>
@@ -940,6 +962,9 @@ export default function Finance() {
               </div>
             ) : (
               <>
+            <div className="hidden print:block">
+              {renderSchoolPrintHeader(`Fee Ledger - Term ${ledgerTerm} ${ledgerYear}`)}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
               <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Opening Balance</p>

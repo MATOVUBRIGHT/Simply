@@ -104,6 +104,7 @@ const LOCAL_UNLIMITED_PLAN: PlanDefinition = {
 
 const DEFAULT_BILLING_CYCLE: BillingCycle = 'term';
 const PLAN_CACHE_PREFIX = 'schofy_plan_cache_';
+const PENDING_PLAN_CACHE_PREFIX = 'schofy_pending_plan_';
 const SETTINGS_KEYS = {
   currentPlanId: 'subscriptionPlanId',
   currentPlanEligible: 'subscriptionPlanEligible',
@@ -230,6 +231,10 @@ function planCacheKey(tenantId: string) {
   return `${PLAN_CACHE_PREFIX}${tenantId}`;
 }
 
+function pendingPlanCacheKey(tenantId: string) {
+  return `${PENDING_PLAN_CACHE_PREFIX}${tenantId}`;
+}
+
 export function cachePlanStateLocally(tenantId: string, state: SubscriptionAccessState, pending = false) {
   if (!tenantId || !state.selectedPlanId || state.selectedPlanId === LOCAL_UNLIMITED_PLAN.id) return;
   const plan = getPlanById(state.selectedPlanId);
@@ -243,10 +248,20 @@ export function cachePlanStateLocally(tenantId: string, state: SubscriptionAcces
     pending,
     cachedAt: new Date().toISOString(),
   };
+  if (pending) {
+    localStorage.setItem(pendingPlanCacheKey(tenantId), JSON.stringify(payload));
+    localStorage.setItem('schofy_pending_plan', state.selectedPlanId);
+    localStorage.setItem('schofy_pending_plan_name', plan.name);
+    localStorage.setItem('schofy_sub_pending', '1');
+    return;
+  }
   localStorage.setItem(planCacheKey(tenantId), JSON.stringify(payload));
   localStorage.setItem('schofy_sub_plan', state.selectedPlanId);
   localStorage.setItem('schofy_sub_status', state.status);
-  localStorage.setItem('schofy_sub_pending', pending ? '1' : '0');
+  localStorage.setItem('schofy_sub_pending', '0');
+  localStorage.removeItem('schofy_pending_plan');
+  localStorage.removeItem('schofy_pending_plan_name');
+  localStorage.removeItem(pendingPlanCacheKey(tenantId));
   if (state.expiryDate) localStorage.setItem('schofy_sub_expiry', state.expiryDate);
 }
 
@@ -317,11 +332,23 @@ export async function getSubscriptionAccessState(
   const subStatus = subRow?.status != null ? String(subRow.status) : '';
   if (subRow && (subStatus === 'pending' || !hasAdminApproval(subRow))) {
     const used = await getPlanStudentCount(tenantId);
-    const offline = typeof navigator !== 'undefined' && !navigator.onLine;
-    const cached = offline ? getCachedPlanState(tenantId, used) : null;
-    if (cached && cached.status !== 'incomplete' && cached.status !== 'expired') return cached;
     const requestedPlan = subRow.plan != null ? String(subRow.plan) : planId;
     const pendingPlan = getPlanById(requestedPlan || '') || null;
+    const cached = getCachedPlanState(tenantId, used);
+    if (cached && cached.status !== 'incomplete' && cached.status !== 'expired') {
+      localStorage.setItem('schofy_sub_pending', '1');
+      if (pendingPlan) {
+        localStorage.setItem(pendingPlanCacheKey(tenantId), JSON.stringify({
+          selectedPlanId: pendingPlan.id,
+          status: 'incomplete',
+          pending: true,
+          cachedAt: new Date().toISOString(),
+        }));
+        localStorage.setItem('schofy_pending_plan', pendingPlan.id);
+        localStorage.setItem('schofy_pending_plan_name', pendingPlan.name);
+      }
+      return cached;
+    }
     const pendingState: SubscriptionAccessState = {
       plan: pendingPlan,
       selectedPlanId: pendingPlan?.id || requestedPlan || null,
@@ -414,53 +441,39 @@ export async function saveCurrentPlan(
 
   const nextExpiry = addMonths(baseDate, cycleDurationMonths(billingCycle));
 
-  await putSetting(tenantId, SETTINGS_KEYS.currentPlanId, planId);
-  await putSetting(tenantId, SETTINGS_KEYS.billingCycle, billingCycle);
-  await putSetting(tenantId, SETTINGS_KEYS.expiryDate, nextExpiry.toISOString());
-  await putSetting(tenantId, SETTINGS_KEYS.receipt, {
-    planId,
-    planName: selectedPlan.name,
-    billingCycle,
-    amount: billingCycle === 'monthly' ? selectedPlan.monthlyPrice : billingCycle === 'yearly' ? selectedPlan.yearlyPrice : selectedPlan.termPrice,
-    paidAt: now.toISOString(),
-    expiresAt: nextExpiry.toISOString(),
-  });
-
   const startsAt =
     (subRow?.startsAt as string) ||
     (subRow?.starts_at as string) ||
     now.toISOString();
-  const existingId = (subRow?.id as string) || undefined;
   const meta = {
     billingCycle,
     receiptAt: now.toISOString(),
     source: 'client',
   };
 
-  if (existingId && typeof existingId === 'string') {
-    await dataService.update(tenantId, 'subscriptions', existingId, {
-      id: existingId,
-      schoolId: tenantId,
-      userId: authUserId,
-      plan: planId,
-      status: 'pending',
-      startsAt,
-      endsAt: startsAt,
-      metadata: { ...meta, requestedEndsAt: nextExpiry.toISOString() },
-    } as any);
-  } else {
-    await dataService.create(tenantId, 'subscriptions', {
-      schoolId: tenantId,
-      userId: authUserId,
-      plan: planId,
-      status: 'pending',
-      startsAt,
-      endsAt: startsAt,
-      metadata: { ...meta, requestedEndsAt: nextExpiry.toISOString() },
-    } as any);
-  }
+  await dataService.create(tenantId, 'subscriptions', {
+    schoolId: tenantId,
+    userId: authUserId,
+    plan: planId,
+    status: 'pending',
+    startsAt,
+    endsAt: startsAt,
+    metadata: { ...meta, requestedEndsAt: nextExpiry.toISOString() },
+  } as any);
 
-  return getSubscriptionAccessState(tenantId, planId, opts);
+  const pendingState: SubscriptionAccessState = {
+    plan: selectedPlan,
+    selectedPlanId: selectedPlan.id,
+    used: await getPlanStudentCount(tenantId),
+    remaining: 0,
+    eligible: false,
+    expiryDate: null,
+    status: 'incomplete',
+    daysRemaining: null,
+    requiresPlanAction: true,
+  };
+  cachePlanStateLocally(tenantId, pendingState, true);
+  return getSubscriptionAccessState(tenantId, undefined, opts);
 }
 
 export async function getLatestReceipt(userId: string) {
