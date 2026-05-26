@@ -10,8 +10,8 @@
  * - Cache is versioned — old caches are deleted on activate
  */
 
-const CACHE_VERSION = 'schofy-v9';
-const ASSET_CACHE = 'schofy-assets-v9';
+const CACHE_VERSION = 'schofy-v10';
+const ASSET_CACHE = 'schofy-assets-v10';
 
 // Core files to pre-cache on install
 const PRECACHE_URLS = [
@@ -24,6 +24,7 @@ const PRECACHE_URLS = [
   '/icon-512.png',
   '/cover.jpg',
   '/schofy.logo.png',
+  '/schofy-assistant-icon.png',
   '/sound/success.mp3',
   '/sound/error.wav',
 ];

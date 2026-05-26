@@ -38,6 +38,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const desktopApp = isDesktopApp();
   const MANUAL_SYNC_WINDOW_MS = 5 * 60 * 1000;
   const MANUAL_SYNC_LIMIT = 3;
+  const CLOUD_PULL_MIN_MS = 5 * 60 * 1000;
   const cloudPullStartedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -157,8 +158,19 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   );
 
   const pullCloudData = useCallback(
-    async (sid: string, showNotifications = false) => {
+    async (sid: string, showNotifications = false, force = false) => {
       if (!isOnline || !isCloudSyncEnabled() || !isSupabaseConfigured || !supabase) {
+        return false;
+      }
+
+      const pullKey = `schofy_last_cloud_pull_${sid}`;
+      const lastPull = Number(localStorage.getItem(pullKey) || 0);
+      const waitMs = CLOUD_PULL_MIN_MS - (Date.now() - lastPull);
+      if (!force && lastPull > 0 && waitMs > 0) {
+        if (showNotifications) {
+          const waitMinutes = Math.max(1, Math.ceil(waitMs / 60000));
+          addToast(`Cloud pull was just checked. Try again in ${waitMinutes} minute${waitMinutes === 1 ? '' : 's'}.`, 'info');
+        }
         return false;
       }
 
@@ -166,7 +178,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       try {
         const result = await dataService.forcePull(sid);
         if (result.success) {
-          await store.refreshCurrentPage(sid, true).catch(() => undefined);
+          localStorage.setItem(pullKey, Date.now().toString());
+          await store.refreshCurrentPage(sid, false).catch(() => undefined);
           window.dispatchEvent(new Event('schofyDataRefresh'));
           await loadPendingCount();
           const syncedAt = new Date();
@@ -342,14 +355,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       void dataService.bootstrapSession(user.id, sid, { wait: false });
 
       await pullCloudData(sid, true);
-      await dataService.forcePush(sid);
+      await syncNow(false);
       syncService.enableSync();
       addToast('Cloud sync enabled', 'success');
     } catch (error) {
       console.error('Enable sync error:', error);
       addToast('Failed to enable cloud sync', 'error');
     }
-  }, [addToast, user, schoolId, pullCloudData]);
+  }, [addToast, user, schoolId, pullCloudData, syncNow]);
 
   const disableSync = useCallback(() => {
     setCloudSyncEnabled(false);

@@ -752,8 +752,8 @@ export default function Dashboard() {
 
         {/* Day event popup */}
         {selectedDay && createPortal(
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setSelectedDay(null)}>
-            <div className="modal-card w-full max-w-sm" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 sm:p-6" onClick={() => setSelectedDay(null)}>
+            <div className="modal-card popup-card-centered" onClick={e => e.stopPropagation()}>
               <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
                 <div className="flex items-center gap-2">
                   <CalendarIcon size={16} className="text-white" />

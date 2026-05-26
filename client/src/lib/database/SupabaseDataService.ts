@@ -444,7 +444,7 @@ async function loadPersistedCache() {
       }
       if (parsed) {
         for (const [k, v] of Object.entries(parsed)) {
-          memCache.set(k, v as CacheEntry);
+          memCache.set(k, { ...(v as CacheEntry), data: removeSmokeRecords((v as CacheEntry).data) });
         }
       }
       
@@ -456,7 +456,7 @@ async function loadPersistedCache() {
       const native = await decryptJson<Record<string, CacheEntry>>(await readElectronBackup(PERSIST_KEY));
       if (native) {
         for (const [k, v] of Object.entries(native)) {
-          memCache.set(k, v as CacheEntry);
+          memCache.set(k, { ...(v as CacheEntry), data: removeSmokeRecords((v as CacheEntry).data) });
         }
       }
       await _loadCriticalFallbacks();
@@ -466,7 +466,7 @@ async function loadPersistedCache() {
     const native = await decryptJson<Record<string, CacheEntry>>(await readElectronBackup(PERSIST_KEY));
     if (native) {
       for (const [k, v] of Object.entries(native)) {
-        memCache.set(k, v as CacheEntry);
+        memCache.set(k, { ...(v as CacheEntry), data: removeSmokeRecords((v as CacheEntry).data) });
       }
     }
     await _loadCriticalFallbacks();
@@ -489,7 +489,7 @@ async function _loadCriticalFallbacks() {
           const k = cacheKey(sid, table);
           // Only overwrite if not already in memCache or if memCache is older
           if (!memCache.has(k)) {
-            memCache.set(k, { data, ts: Date.now() });
+            memCache.set(k, { data: removeSmokeRecords(data), ts: Date.now() });
           }
         } catch {}
       }
@@ -511,7 +511,7 @@ function persistCache() {
 function _flushCache() {
   try {
     const obj: Record<string, CacheEntry> = {};
-    for (const [k, v] of memCache) obj[k] = v;
+    for (const [k, v] of memCache) obj[k] = { ...v, data: removeSmokeRecords(v.data) };
     
     getCacheDB().then(db => {
       void encryptJson(obj).then(encrypted => {
@@ -635,7 +635,8 @@ function recordBelongsToSchool(record: any, schoolId: string, tableName: string)
 
 function cacheGet(sid: string, table: string): any[] | null {
   const e = memCache.get(cacheKey(sid, table));
-  return e ? e.data : null;
+  if (!e) return null;
+  return removeSmokeRecords(e.data);
 }
 
 function cacheGetAny(sid: string, table: string): any[] | null {
@@ -643,9 +644,10 @@ function cacheGetAny(sid: string, table: string): any[] | null {
 }
 
 function cacheSet(sid: string, table: string, data: any[]) {
-  memCache.set(cacheKey(sid, table), { data, ts: Date.now() });
+  const cleanData = removeSmokeRecords(data);
+  memCache.set(cacheKey(sid, table), { data: cleanData, ts: Date.now() });
   persistCache();
-  void mirrorTableToDesktopDB(sid, table, data);
+  void mirrorTableToDesktopDB(sid, table, cleanData);
   
   // Critical tables: Save to localStorage immediately (no debounce, sync)
   // This ensures that even if the page is refreshed or crashed, 
@@ -653,17 +655,46 @@ function cacheSet(sid: string, table: string, data: any[]) {
   if (table === 'settings' || table === 'schools' || table === 'users') {
     try {
       const key = `schofy_critical_${sid}_${table}`;
-      void encryptJson(data).then(encrypted => {
+      void encryptJson(cleanData).then(encrypted => {
         try { localStorage.setItem(key, JSON.stringify(encrypted)); } catch {}
       });
     } catch {}
   }
 }
 
+function isSmokeRecord(record: any): boolean {
+  if (!record || typeof record !== 'object') return false;
+  const fields = [
+    record.name,
+    record.title,
+    record.subjectName,
+    record.subject_name,
+    record.description,
+    record.code,
+    record.id,
+  ];
+  return fields.some(value => typeof value === 'string' && /\bsmoke\b/i.test(value));
+}
+
+function removeSmokeRecords(data: any[]): any[] {
+  if (!Array.isArray(data)) return [];
+  return data.filter(record => !isSmokeRecord(record));
+}
+
 async function mirrorTableToDesktopDB(sid: string, table: string, data: any[]): Promise<void> {
   if (!isDesktopApp() || !sid || !table) return;
   try {
     await userDBManager.ensureDatabaseOpen(sid);
+    try {
+      const existing = await userDBManager.getAll(sid, table);
+      await Promise.all(
+        existing
+          .filter(isSmokeRecord)
+          .map(record => record?.id ? userDBManager.delete(sid, table, record.id) : Promise.resolve())
+      );
+    } catch {
+      // Store not present for this table.
+    }
     for (const record of data) {
       if (record?.id) {
         await userDBManager.put(sid, table, record);
@@ -695,8 +726,12 @@ async function hydrateCacheFromDesktopDB(sid: string): Promise<void> {
     if (memCache.has(cacheKey(sid, table))) continue;
     try {
       const rows = await userDBManager.getAll(sid, table);
-      if (rows.length > 0) {
-        memCache.set(cacheKey(sid, table), { data: rows, ts: Date.now() });
+      const cleanRows = removeSmokeRecords(rows);
+      if (cleanRows.length !== rows.length) {
+        await Promise.all(rows.filter(isSmokeRecord).map(row => row?.id ? userDBManager.delete(sid, table, row.id) : Promise.resolve()));
+      }
+      if (cleanRows.length > 0) {
+        memCache.set(cacheKey(sid, table), { data: cleanRows, ts: Date.now() });
       }
     } catch {
       // Store not present for this table in the local desktop DB.
@@ -773,6 +808,7 @@ function getRealtimeFilter(table: string, sid: string): string | undefined {
 
 const BOOTSTRAP_PULL_TABLES = ['settings', 'schools', 'users', 'subscriptions'];
 const REMOTE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const FORCED_REMOTE_FETCH_MIN_MS = 5 * 60 * 1000;
 
 class SupabaseDataService {
   private static instance: SupabaseDataService;
@@ -1163,12 +1199,14 @@ class SupabaseDataService {
     // cached data can live for hours without repeatedly spending API quota.
     if (isCloudSyncEnabled() && isOnline() && this.ok) {
       const entry = memCache.get(cacheKey(sid, tableName));
+      const hasCacheEntry = Boolean(entry);
       const isStale = !entry || (Date.now() - entry.ts > REMOTE_CACHE_TTL_MS);
+      const shouldFetch = forceRefresh || !hasCacheEntry || isStale;
 
-      if (forceRefresh || !cached || cached.length === 0 || isStale) {
+      if (shouldFetch) {
         // Trigger background fetch immediately
-        // For cloud-first, if we have NO cache, we must wait for the fetch
-        if (!cached || cached.length === 0 || forceRefresh) {
+        // For cloud-first, if we have never checked this table, wait for the fetch.
+        if (!hasCacheEntry) {
           return await this._fetchAndMerge(sid, tableName);
         } else {
           // If we have cache, return it but kick off a background refresh
@@ -1220,7 +1258,10 @@ class SupabaseDataService {
         const { data, error } = await q;
         if (error) throw error;
 
-        if (!data || data.length === 0) return local;
+        if (!data || data.length === 0) {
+          cacheSet(sid, tableName, local);
+          return local;
+        }
 
         const remoteRecords = filterDeleted(sid, tableName, data.map(mapToLocal));
         

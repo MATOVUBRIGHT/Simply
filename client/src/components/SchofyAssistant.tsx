@@ -19,6 +19,8 @@ type ChatAction = {
 
 const CHAT_STORAGE_KEY = 'schofy_assistant_chat';
 const CHAT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const assetBase = import.meta.env.BASE_URL || './';
+const ASSISTANT_ICON = `${assetBase}schofy-assistant-icon.png`;
 
 const quickPrompts = [
   'How do I import students?',
@@ -283,9 +285,9 @@ export default function SchofyAssistant() {
   return createPortal(
     <>
       {!open && !launcherHidden && showDailyHint && (
-        <div className="fixed bottom-[34px] right-[100px] z-[9998] max-w-[220px] animate-dropdown-in rounded-[10px] border border-emerald-100 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+        <div className="fixed bottom-[34px] right-[100px] z-[9998] max-w-[230px] animate-dropdown-in rounded-[10px] border border-emerald-200 bg-gradient-to-br from-white via-emerald-50 to-indigo-50 px-3.5 py-2.5 text-sm font-semibold text-slate-800 shadow-xl ring-1 ring-white/70 backdrop-blur dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-emerald-950 dark:text-slate-100 dark:ring-slate-700/60">
           {dailyLauncherText}
-          <span className="absolute -right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 border-r border-t border-emerald-100 bg-white dark:border-slate-700 dark:bg-slate-900" />
+          <span className="absolute -right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 border-r border-t border-emerald-200 bg-emerald-50 dark:border-slate-700 dark:bg-slate-900" />
         </div>
       )}
       <button
@@ -294,7 +296,7 @@ export default function SchofyAssistant() {
         className={`fixed bottom-5 right-5 z-[9998] flex h-[70px] w-[70px] items-center justify-center rounded-[18px] bg-white text-white shadow-2xl transition-all hover:-translate-y-0.5 hover:shadow-[0_20px_45px_rgba(79,70,229,0.35)] ${open || launcherHidden ? 'scale-90 opacity-0 pointer-events-none' : 'scale-100 opacity-100'}`}
         aria-label="Open Schofy assistant"
       >
-        <img src="/schofy-assistant-icon.png" alt="" className="h-full w-full rounded-[18px] object-cover" draggable={false} />
+        <img src={ASSISTANT_ICON} alt="" className="h-full w-full rounded-[18px] object-cover" draggable={false} />
       </button>
       {!open && !launcherHidden && (
         <button

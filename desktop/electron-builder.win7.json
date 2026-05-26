@@ -30,7 +30,7 @@
         ]
       }
     ],
-    "icon": "../client/public/icon-512.png",
+    "icon": "../client/public/schofy.logo.png",
     "artifactName": "${productName}-Setup-${version}-win7-${arch}.${ext}",
     "signAndEditExecutable": false
   },

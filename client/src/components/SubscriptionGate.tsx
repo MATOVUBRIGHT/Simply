@@ -193,13 +193,16 @@ export default function SubscriptionGate({ children }: Props) {
             }
           }
         } else {
-          state = {
-            ...state,
-            status: 'incomplete',
-            eligible: false,
-            remaining: 0,
-            requiresPlanAction: true,
-          };
+          const hasActiveCachedPlan = state.status === 'active' || state.status === 'expiring';
+          if (!hasActiveCachedPlan) {
+            state = {
+              ...state,
+              status: 'incomplete',
+              eligible: false,
+              remaining: 0,
+              requiresPlanAction: true,
+            };
+          }
         }
       }
 

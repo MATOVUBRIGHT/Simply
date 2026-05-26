@@ -68,6 +68,7 @@ if (import.meta.env.PROD && !isFileProtocol && !isAdminPath && 'serviceWorker' i
             '/icon-512.png',
             '/cover.jpg',
             '/schofy.logo.png',
+            '/schofy-assistant-icon.png',
             '/sound/success.mp3',
             '/sound/error.wav',
           ];

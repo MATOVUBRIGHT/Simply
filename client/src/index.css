@@ -1365,6 +1365,20 @@ textarea.form-input {
   border-top-color: transparent !important;
 }
 
+.popup-card-centered {
+  width: min(24rem, calc(100vw - 2rem)) !important;
+  max-width: 24rem !important;
+  max-height: calc(100vh - 2rem);
+  margin: auto;
+  overflow: hidden;
+}
+
+.popup-card-centered .modal-body,
+.popup-card-centered > div:last-child {
+  max-height: calc(100vh - 9rem);
+  overflow-y: auto;
+}
+
 .dark .modal-card {
   background: #1e293b;
   border-color: rgba(255,255,255,0.08);

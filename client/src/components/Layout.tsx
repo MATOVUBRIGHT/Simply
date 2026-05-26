@@ -51,6 +51,10 @@ import { supabase } from '../lib/supabase';
 import { parseAdminMessageLink } from '../utils/adminMessageLinks';
 import { downloadAttachment, openExternalLink } from '../utils/externalActions';
 
+const assetBase = import.meta.env.BASE_URL || './';
+const DEFAULT_PROFILE_IMAGE =
+  "data:image/svg+xml,%3Csvg width='96' height='96' viewBox='0 0 96 96' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='96' height='96' rx='48' fill='%23E0F2FE'/%3E%3Ccircle cx='48' cy='36' r='16' fill='%230F4C81'/%3E%3Cpath d='M22 82c4.8-17.5 15.1-26 26-26s21.2 8.5 26 26' fill='%232DA32D'/%3E%3C/svg%3E";
+
 interface LayoutProps {
   children: React.ReactNode;
 }
@@ -82,7 +86,7 @@ function Layout({ children }: LayoutProps) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationType[]>([]);
-  const [profileImage, setProfileImage] = useState<string>('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=64&h=64&fit=crop');
+  const [profileImage, setProfileImage] = useState<string>(DEFAULT_PROFILE_IMAGE);
   const [deletedItemsCount, setDeletedItemsCount] = useState(0);
   const [showRenewPopup, setShowRenewPopup] = useState(false);
   const [subscriptionState, setSubscriptionState] = useState<SubscriptionAccessState | null>(null);
@@ -240,7 +244,12 @@ function Layout({ children }: LayoutProps) {
 
   useEffect(() => {
     const savedImage = localStorage.getItem('profileImage');
-    if (savedImage) setProfileImage(savedImage);
+    if (savedImage && !/^https?:\/\//i.test(savedImage)) {
+      setProfileImage(savedImage);
+    } else if (savedImage) {
+      localStorage.removeItem('profileImage');
+      setProfileImage(DEFAULT_PROFILE_IMAGE);
+    }
   }, []);
 
   async function loadNotifications() {

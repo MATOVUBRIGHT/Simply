@@ -4,12 +4,13 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://raw.githubusercontent.com http://localhost:* ws://localhost:*; worker-src 'self' blob:"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; script-src-elem 'self' https://vercel.live; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://raw.githubusercontent.com http://localhost:* ws://localhost:*; worker-src 'self' blob:"
     />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png" />
+    <link rel="icon" type="image/png" href="%BASE_URL%favicon.png" />
+    <link rel="apple-touch-icon" href="%BASE_URL%icon-192.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="%BASE_URL%icon-192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="%BASE_URL%icon-512.png" />
+    <link rel="preload" as="image" href="%BASE_URL%schofy.logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#4F46E5" />
     <meta name="description" content="Offline-first school management system for managing students, attendance, grades, and more." />
@@ -17,7 +18,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Schofy" />
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="%BASE_URL%manifest.json" />
     <title>Schofy - School Management System</title>
   </head>
   <body>

@@ -195,7 +195,7 @@ function createWindow() {
       backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js'),
     },
-    icon: getClientAssetPath('icon-512.png'),
+    icon: getClientAssetPath('schofy.logo.png'),
     show: false,
   });
   mainWindow.setMenuBarVisibility(false);
@@ -325,7 +325,7 @@ function createMenu() {
 }
 
 function createTray() {
-  const iconPath = getClientAssetPath('icon-512.png');
+  const iconPath = getClientAssetPath('schofy.logo.png');
   const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
 
   tray = new Tray(icon);

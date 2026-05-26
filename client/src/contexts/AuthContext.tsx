@@ -53,6 +53,56 @@ const SESSION_KEY = 'schofy_session';
 const LOCAL_ONLY_SESSION_KEY = 'schofy_local_only_session';
 const LOCAL_FALLBACK_REASON_KEY = 'schofy_local_fallback_reason';
 const DESKTOP_OFFLINE_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
+const SUBSCRIPTION_SESSION_KEYS = [
+  'schofy_sub_expiry',
+  'schofy_sub_status',
+  'schofy_sub_plan',
+  'schofy_sub_pending',
+  'schofy_sub_tid',
+];
+
+function verifiedPlanBackupKey(tenantId: string) {
+  return `schofy_verified_plan_backup_${tenantId}`;
+}
+
+function backupVerifiedPlan(tenantId: string | null | undefined) {
+  if (!tenantId) return;
+  const status = localStorage.getItem('schofy_sub_status');
+  const pending = localStorage.getItem('schofy_sub_pending') === '1';
+  const plan = localStorage.getItem('schofy_sub_plan');
+  const expiryIso = localStorage.getItem('schofy_sub_expiry');
+  const expiry = expiryIso ? new Date(expiryIso) : null;
+  const active = status === 'active' || status === 'expiring';
+  const notExpired = expiry && !Number.isNaN(expiry.getTime()) && expiry.getTime() > Date.now();
+  if (!active || pending || !plan || !notExpired) return;
+
+  const payload: Record<string, string> = {};
+  for (const key of SUBSCRIPTION_SESSION_KEYS) {
+    const value = localStorage.getItem(key);
+    if (value != null) payload[key] = value;
+  }
+  localStorage.setItem(verifiedPlanBackupKey(tenantId), JSON.stringify({
+    savedAt: Date.now(),
+    values: payload,
+  }));
+}
+
+function restoreVerifiedPlan(tenantId: string | null | undefined) {
+  if (!tenantId) return;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(verifiedPlanBackupKey(tenantId)) || 'null') as { values?: Record<string, string> } | null;
+    const values = parsed?.values || {};
+    const expiry = values.schofy_sub_expiry ? new Date(values.schofy_sub_expiry) : null;
+    const active = values.schofy_sub_status === 'active' || values.schofy_sub_status === 'expiring';
+    const notExpired = expiry && !Number.isNaN(expiry.getTime()) && expiry.getTime() > Date.now();
+    if (!active || !notExpired) return;
+    for (const [key, value] of Object.entries(values)) {
+      localStorage.setItem(key, value);
+    }
+  } catch {
+    localStorage.removeItem(verifiedPlanBackupKey(tenantId));
+  }
+}
 
 function saveSession(user: LocalUser) {
   const now = Date.now();
@@ -62,6 +112,7 @@ function saveSession(user: LocalUser) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
   localStorage.setItem('schofy_current_user_id', user.id);
   localStorage.setItem('schofy_current_school_id', user.schoolId || user.id);
+  restoreVerifiedPlan(user.schoolId || user.id);
   void writeElectronBackup(SESSION_KEY, sessionUser);
 }
 
@@ -78,14 +129,12 @@ function getSession(): LocalUser | null {
 }
 
 function clearSession() {
+  const tenantId = localStorage.getItem('schofy_current_school_id') || localStorage.getItem('schofy_current_user_id');
+  backupVerifiedPlan(tenantId);
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem('schofy_current_user_id');
   localStorage.removeItem('schofy_current_school_id');
-  localStorage.removeItem('schofy_sub_expiry');
-  localStorage.removeItem('schofy_sub_status');
-  localStorage.removeItem('schofy_sub_plan');
-  localStorage.removeItem('schofy_sub_pending');
-  localStorage.removeItem('schofy_sub_tid');
+  SUBSCRIPTION_SESSION_KEYS.forEach(key => localStorage.removeItem(key));
   localStorage.removeItem(LOCAL_ONLY_SESSION_KEY);
   localStorage.removeItem(LOCAL_FALLBACK_REASON_KEY);
   sessionStorage.removeItem('lastRoute');

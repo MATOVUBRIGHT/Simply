@@ -21,8 +21,8 @@ interface TableState {
 }
 
 const STALE_MS = 4 * 60 * 60_000; // 4 hours — data loaded once stays loaded; realtime + manual refresh keeps it fresh
-const FALLBACK_REFRESH_MS = 10 * 60_000; // Safety net only; realtime handles normal updates
-const ACTIVE_CATCHUP_MS = 2 * 60_000; // Avoid repeated focus/online refresh bursts
+const FALLBACK_REFRESH_MS = 15 * 60_000; // Safety net only; realtime handles normal updates
+const ACTIVE_CATCHUP_MS = 5 * 60_000; // Keep focus/online refreshes within the low-call sync protocol
 
 class DataStore {
   private state = new Map<string, TableState>();

@@ -1,6 +1,6 @@
 {
   "name": "@schofy/desktop",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Schofy desktop app",
   "author": "Schofy",
   "main": "main.js",
@@ -40,7 +40,7 @@
           ]
         }
       ],
-      "icon": "../client/public/icon-512.png"
+      "icon": "../client/public/schofy.logo.png"
     },
     "nsis": {
       "oneClick": false,

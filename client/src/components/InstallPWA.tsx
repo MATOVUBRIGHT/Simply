@@ -7,6 +7,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function InstallPWA() {
+  const iconSrc = `${import.meta.env.BASE_URL || './'}icon-192.png`;
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -69,7 +70,7 @@ export default function InstallPWA() {
     <div className="fixed bottom-4 left-4 right-4 z-[9990] animate-slide-up sm:left-auto sm:right-4 sm:w-96">
       <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-2xl shadow-2xl p-4 flex items-center gap-3">
         <div className="w-12 h-12 rounded-xl bg-white flex items-center justify-center flex-shrink-0 shadow-lg">
-          <img src="/icon-192.png" alt="Schofy" className="w-10 h-10 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display='none'; }} />
+          <img src={iconSrc} alt="Schofy" className="w-10 h-10 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display='none'; }} />
           <Smartphone size={24} className="text-indigo-600 hidden" />
         </div>
         <div className="flex-1 min-w-0">
