@@ -52,6 +52,7 @@ import { parseAdminMessageLink } from '../utils/adminMessageLinks';
 import { downloadAttachment, openExternalLink } from '../utils/externalActions';
 
 const assetBase = import.meta.env.BASE_URL || './';
+const APP_VERSION = '2.4.0';
 const DEFAULT_PROFILE_IMAGE =
   "data:image/svg+xml,%3Csvg width='96' height='96' viewBox='0 0 96 96' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='96' height='96' rx='48' fill='%23E0F2FE'/%3E%3Ccircle cx='48' cy='36' r='16' fill='%230F4C81'/%3E%3Cpath d='M22 82c4.8-17.5 15.1-26 26-26s21.2 8.5 26 26' fill='%232DA32D'/%3E%3C/svg%3E";
 
@@ -138,6 +139,27 @@ function Layout({ children }: LayoutProps) {
     checkSubscriptionStatus();
     loadDeletedItemsCount();
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || !isOnline) return;
+    const tid = schoolId || user.id;
+    let cancelled = false;
+    const syncNotifications = async () => {
+      try {
+        dataService.startRealtimeSync(tid);
+        await dataService.refreshNotifications(tid);
+        if (!cancelled) await loadNotifications();
+      } catch (error) {
+        console.error('Failed to refresh online notifications:', error);
+      }
+    };
+    void syncNotifications();
+    window.addEventListener('online', syncNotifications);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('online', syncNotifications);
+    };
+  }, [user?.id, schoolId, isOnline, isSyncEnabled]);
 
   useEffect(() => {
     const refreshNotifications = (event: Event) => {
@@ -565,7 +587,7 @@ function Layout({ children }: LayoutProps) {
           {/* Sidebar Footer: Minimize Button & Powered By on same line */}
           <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0">
             <div className={`transition-all duration-300 ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Powered by <span className="font-medium">Schofy</span></p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Powered by <span className="font-medium">Schofy</span> · v{APP_VERSION}</p>
             </div>
             
             <button

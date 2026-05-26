@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, RefreshCcw } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, RefreshCcw, Plus, X } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Staff, StaffRole, Subject } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -10,7 +10,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { SuccessPopup } from '../components/SuccessPopup';
 
-const initialFormData: Partial<Staff> = {
+interface CustomField { id: string; label: string; value: string; }
+
+const initialFormData: Partial<Staff> & { customFields?: CustomField[] } = {
   firstName: '',
   lastName: '',
   role: StaffRole.TEACHER,
@@ -22,6 +24,7 @@ const initialFormData: Partial<Staff> = {
   salary: 0,
   status: 'active',
   subjects: [],
+  customFields: [],
   photoUrl: undefined,
 };
 
@@ -33,9 +36,10 @@ export default function StaffForm() {
   const [loading, setLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [loadingData, setLoadingData] = useState(!!id);
-  const [formData, setFormData] = useState<Partial<Staff>>(initialFormData);
+  const [formData, setFormData] = useState<Partial<Staff> & { customFields?: CustomField[] }>(initialFormData);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [employeeId, setEmployeeId] = useState('');
+  const [newCustomField, setNewCustomField] = useState({ label: '', value: '' });
   const isEditing = !!id;
 
   useEffect(() => {
@@ -50,7 +54,7 @@ export default function StaffForm() {
     try {
       const staff = await dataService.get(authId, 'staff', id!);
       if (staff) {
-        setFormData(staff);
+        setFormData({ ...staff, customFields: Array.isArray(staff.customFields) ? staff.customFields : [] });
         setEmployeeId(staff.employeeId);
       }
     } catch (error) {
@@ -107,6 +111,25 @@ export default function StaffForm() {
       ? current.filter(s => s !== subjectId)
       : [...current, subjectId];
     setFormData(prev => ({ ...prev, subjects: updated }));
+  }
+
+  function addCustomField() {
+    if (!newCustomField.label.trim()) return;
+    setFormData(prev => ({
+      ...prev,
+      customFields: [
+        ...(prev.customFields || []),
+        { id: uuidv4(), label: newCustomField.label.trim(), value: newCustomField.value.trim() },
+      ],
+    }));
+    setNewCustomField({ label: '', value: '' });
+  }
+
+  function removeCustomField(fieldId: string) {
+    setFormData(prev => ({
+      ...prev,
+      customFields: (prev.customFields || []).filter(field => field.id !== fieldId),
+    }));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -244,6 +267,67 @@ export default function StaffForm() {
           <div>
             <label className="form-label">Address</label>
             <textarea name="address" value={formData.address} onChange={handleChange} className="form-input" rows={2} />
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="font-semibold text-slate-800 dark:text-white">Custom Fields</h3>
+                <p className="text-xs text-slate-500">Add extra teacher or staff details shown with this profile.</p>
+              </div>
+            </div>
+            <div className="space-y-2 mb-3">
+              {(formData.customFields || []).map(field => (
+                <div key={field.id} className="grid grid-cols-1 sm:grid-cols-[minmax(9rem,14rem)_1fr_auto] gap-2 items-center">
+                  <input
+                    type="text"
+                    value={field.label}
+                    onChange={e => setFormData(prev => ({
+                      ...prev,
+                      customFields: (prev.customFields || []).map(item => item.id === field.id ? { ...item, label: e.target.value } : item),
+                    }))}
+                    className="form-input text-sm"
+                    placeholder="Field name"
+                  />
+                  <input
+                    type="text"
+                    value={field.value}
+                    onChange={e => setFormData(prev => ({
+                      ...prev,
+                      customFields: (prev.customFields || []).map(item => item.id === field.id ? { ...item, value: e.target.value } : item),
+                    }))}
+                    className="form-input text-sm"
+                    placeholder="Value"
+                  />
+                  <button type="button" onClick={() => removeCustomField(field.id)} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg">
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+              {(formData.customFields || []).length === 0 && (
+                <p className="text-sm text-slate-400">No custom fields yet.</p>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(9rem,14rem)_1fr_auto] gap-2">
+              <input
+                type="text"
+                value={newCustomField.label}
+                onChange={e => setNewCustomField(prev => ({ ...prev, label: e.target.value }))}
+                className="form-input text-sm"
+                placeholder="Field name"
+              />
+              <input
+                type="text"
+                value={newCustomField.value}
+                onChange={e => setNewCustomField(prev => ({ ...prev, value: e.target.value }))}
+                className="form-input text-sm"
+                placeholder="Value"
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomField(); } }}
+              />
+              <button type="button" onClick={addCustomField} className="btn btn-secondary">
+                <Plus size={16} /> Add
+              </button>
+            </div>
           </div>
         </div>
         <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">

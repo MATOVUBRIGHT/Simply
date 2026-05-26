@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS staff (
   photo_url TEXT,
   salary DECIMAL(12,2),
   status VARCHAR(20) DEFAULT 'active',
+  custom_fields JSONB DEFAULT '[]',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   deleted_at TIMESTAMPTZ

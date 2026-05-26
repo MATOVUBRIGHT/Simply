@@ -8,6 +8,7 @@
     "start": "electron .",
     "dev": "cross-env NODE_ENV=development electron .",
     "build": "electron-builder",
+    "build:lite": "electron-builder --config electron-builder.lite.json",
     "build:win7": "electron-builder --config electron-builder.win7.json"
   },
   "build": {
@@ -40,7 +41,7 @@
           ]
         }
       ],
-      "icon": "../client/public/schofy.logo.png"
+      "icon": "../client/public/schofy.logo.ico"
     },
     "nsis": {
       "oneClick": false,

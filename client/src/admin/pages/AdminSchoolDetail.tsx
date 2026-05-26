@@ -346,7 +346,11 @@ export default function AdminSchoolDetail() {
                 <select value={grantPlan} onChange={e => setGrantPlan(e.target.value)}
                   className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${t.input}`}
                 >
-                  {PLAN_DEFINITIONS.map(p => <option key={p.id} value={p.id}>{p.name} — up to {p.studentLimit} students</option>)}
+                  {PLAN_DEFINITIONS.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} - {p.limitLabel || `up to ${p.studentLimit} students`}
+                    </option>
+                  ))}
                 </select>
               </div>
 

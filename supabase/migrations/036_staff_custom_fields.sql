@@ -1,0 +1,1 @@
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS custom_fields JSONB DEFAULT '[]';

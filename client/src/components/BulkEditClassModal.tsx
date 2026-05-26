@@ -125,25 +125,33 @@ export function BulkEditClassModal({
                     {label}
                   </div>
                   <div className="space-y-1">
-                    {sectionClasses.map((cls) => (
+                    {sectionClasses.map((cls) => {
+                      const isSelected = selectedClass === cls.id;
+                      return (
                       <button
                         key={cls.id}
                         onClick={() => setSelectedClass(cls.id)}
-                          className="w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all"
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'border-indigo-300 bg-indigo-50 text-indigo-800 shadow-sm ring-2 ring-indigo-500/15 dark:border-indigo-500/50 dark:bg-indigo-950/40 dark:text-indigo-100'
+                            : 'border-transparent hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-700 dark:hover:bg-slate-700/40'
+                        }`}
+                        aria-pressed={isSelected}
                       >
                         <div className="flex items-center gap-3">
-                            <div className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600" />
-                            <span className="font-medium text-slate-700 dark:text-slate-200">
+                            <div className={`w-2.5 h-2.5 rounded-full ${isSelected ? 'bg-indigo-600 dark:bg-indigo-300' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                            <span className={`font-semibold ${isSelected ? 'text-indigo-800 dark:text-indigo-100' : 'text-slate-700 dark:text-slate-200'}`}>
                             {getClassDisplayName(cls.id, classes)}
                           </span>
                         </div>
                         {(cls as any).capacity && (
-                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                          <span className={`text-xs ${isSelected ? 'text-indigo-600 dark:text-indigo-200' : 'text-slate-500 dark:text-slate-400'}`}>
                             Capacity: {(cls as any).capacity}
                           </span>
                         )}
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}

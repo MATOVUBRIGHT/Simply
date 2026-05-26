@@ -12,9 +12,13 @@ import { isDesktopApp } from '../utils/desktopSyncPreference';
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
   { q: 'Can I switch plans?', a: 'Yes. Your current plan stays active while the new plan waits for admin approval.' },
+  { q: 'How do I buy Unlimited?', a: 'Contact Schofy assistant to arrange the one-time desktop version. It gives unlimited student access after approval.' },
   { q: 'Payment methods?', a: 'Airtel Money only. Activation within 24 hours.' },
   { q: 'Refunds?', a: 'No, all payments are non-refundable.' },
 ];
+
+const UGX_RATE = 3800;
+type PlanCurrency = 'USD' | 'UGX';
 
 export default function Plans() {
   const { user, schoolId } = useAuth();
@@ -43,6 +47,7 @@ export default function Plans() {
   const [showRenewModal, setShowRenewModal] = useState(false);
   const [renewPlan, setRenewPlan] = useState<typeof PLAN_DEFINITIONS[0] | null>(null);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
+  const [planCurrency, setPlanCurrency] = useState<PlanCurrency>(() => (localStorage.getItem('schofy_plan_currency') === 'UGX' ? 'UGX' : 'USD'));
 
   useEffect(() => {
     if (user?.id || schoolId) void loadPlanState();
@@ -57,6 +62,10 @@ export default function Plans() {
       window.removeEventListener('offline', updateOnline);
     };
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('schofy_plan_currency', planCurrency);
+  }, [planCurrency]);
 
   async function loadPlanState(showLoader = false) {
     const authId = schoolId || user?.id;
@@ -265,13 +274,25 @@ export default function Plans() {
     localStorage.setItem('schofy_sub_pending', '1');
   }
 
+  function getPlanAmount(plan: PlanDefinition) {
+    if (billingCycle === 'monthly') return plan.monthlyPrice;
+    if (billingCycle === 'yearly') return plan.yearlyPrice;
+    return plan.termPrice;
+  }
+
+  function formatAmount(amount: number) {
+    if (planCurrency === 'UGX') return `UGX ${Math.round(amount * UGX_RATE).toLocaleString()}`;
+    return `$${amount}`;
+  }
+
   const handleDownloadInvoice = () => {
+    const receiptAmount = latestReceipt ? formatAmount(Number(latestReceipt.amount || 0)) : 'N/A';
     const invoice = `SCHOFY RECEIPT
 ================
 Receipt: RCP-${Date.now()}
 Date: ${new Date().toLocaleDateString()}
 Plan: ${(latestReceipt?.planName || 'NO PLAN SELECTED').toUpperCase()}
-Amount: ${latestReceipt ? `$${latestReceipt.amount}` : 'N/A'}
+Amount: ${receiptAmount}
 Billing: ${latestReceipt?.billingCycle || 'N/A'}
 Expires: ${latestReceipt ? new Date(latestReceipt.expiresAt).toLocaleDateString() : 'N/A'}
 ================
@@ -287,9 +308,8 @@ Powered by Schofy`;
   };
 
   const getPrice = (plan: PlanDefinition) => {
-    if (billingCycle === 'monthly') return `$${plan.monthlyPrice}`;
-    if (billingCycle === 'term') return `$${plan.termPrice}`;
-    return `$${plan.yearlyPrice}`;
+    if (plan.priceLabel) return plan.priceLabel;
+    return formatAmount(getPlanAmount(plan));
   };
 
   const checkPlanLimit = (planId: string) => studentCount <= (PLAN_DEFINITIONS.find(p => p.id === planId)?.studentLimit || 0);
@@ -304,6 +324,7 @@ Powered by Schofy`;
   const currentPlanLimit = cachedRealPlan?.studentLimit || 0;
   const currentPlanLimitLabel = currentPlanLimit >= Number.MAX_SAFE_INTEGER ? 'Unlimited' : currentPlanLimit || 'N/A';
   const showBackToApp = Boolean(user && isDesktopApp());
+  const contactMessage = (plan: PlanDefinition) => encodeURIComponent(`Hello Schofy assistant,\n\nI want to buy the ${plan.name} plan.\nSchool: ${user?.email || ''}\nSchool ID: ${schoolId || user?.id || ''}\n\nPlease help me activate the one-time desktop version with unlimited students.`);
 
   return (
     <div className="relative mx-auto min-h-screen w-full max-w-7xl space-y-5 px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-10">
@@ -383,6 +404,22 @@ Powered by Schofy`;
                 }`}
               >
                 {cycle === 'yearly' ? 'Yearly' : cycle === 'term' ? 'Per Term' : 'Monthly'}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-700 dark:bg-slate-800/90">
+            {(['USD', 'UGX'] as const).map((currency) => (
+              <button
+                key={currency}
+                type="button"
+                onClick={() => setPlanCurrency(currency)}
+                className={`px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  planCurrency === currency
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                {currency}
               </button>
             ))}
           </div>
@@ -483,10 +520,11 @@ Powered by Schofy`;
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
         {PLAN_DEFINITIONS.map((plan) => {
           const isAtLimit = !checkPlanLimit(plan.id);
-          const isCurrentPlan = plan.id === displayPlanId && billingCycle === currentCycle;
+          const isCurrentPlan = plan.id === displayPlanId && (plan.contactOnly || billingCycle === currentCycle);
+          const limitLabel = plan.limitLabel || `Up to ${plan.studentLimit} students`;
           return (
             <div
               key={plan.id}
@@ -521,9 +559,15 @@ Powered by Schofy`;
 
               <div className="p-5 flex flex-col flex-grow">
                 <div className="flex items-center gap-2 mb-3">
+                  {plan.id === 'unlimited' && <Crown className="text-emerald-500" size={20} />}
                   {plan.id === 'enterprise' && <Crown className="text-amber-500" size={20} />}
                   {plan.id === 'professional' && <Star className="text-violet-500" size={20} />}
                   <h3 className="text-lg font-bold text-slate-900 dark:text-white">{plan.name}</h3>
+                  {plan.contactOnly && (
+                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                      One-time
+                    </span>
+                  )}
                   {plan.id === 'professional' && (
                     <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
                       Most Common
@@ -532,10 +576,10 @@ Powered by Schofy`;
                 </div>
 
                 <div className="mb-2">
-                  <span className="text-3xl font-bold text-slate-900 dark:text-white">{getPrice(plan)}</span>
-                  <span className="text-sm text-slate-500 dark:text-slate-400">/{billingCycle === 'monthly' ? 'mo' : billingCycle === 'yearly' ? 'yr' : 'term'}</span>
+                  <span className={plan.contactOnly ? 'text-xl font-bold text-slate-900 dark:text-white' : 'text-3xl font-bold text-slate-900 dark:text-white'}>{getPrice(plan)}</span>
+                  {!plan.contactOnly && <span className="text-sm text-slate-500 dark:text-slate-400">/{billingCycle === 'monthly' ? 'mo' : billingCycle === 'yearly' ? 'yr' : 'term'}</span>}
                 </div>
-                <p className="text-sm text-indigo-600 dark:text-indigo-400 font-medium mb-4">Up to {plan.studentLimit} students</p>
+                <p className="text-sm text-indigo-600 dark:text-indigo-400 font-medium mb-4">{limitLabel}</p>
 
                 <div className="space-y-2 flex-grow">
                   {plan.features.map((f, i) => (
@@ -559,6 +603,15 @@ Powered by Schofy`;
                     >
                       <Check size={16} /> Current Plan
                     </button>
+                  ) : plan.contactOnly ? (
+                    <a
+                      href={`https://wa.me/256750034304?text=${contactMessage(plan)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-3 rounded-xl text-sm font-medium bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center gap-2"
+                    >
+                      <MessageCircle size={16} /> Contact to Buy
+                    </a>
                   ) : isAtLimit ? (
                     <button
                       onClick={() => { setUpgradeToPlan(plan); setShowUpgradeModal(true); }}
@@ -608,9 +661,7 @@ Powered by Schofy`;
             <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg text-center">
               <p className="text-[10px] text-slate-500 dark:text-slate-400">Amount</p>
               <p className="text-sm font-bold text-slate-900 dark:text-white">
-                ${billingCycle === 'monthly'
-                  ? cachedRealPlan?.monthlyPrice ?? 0
-                  : cachedRealPlan?.termPrice ?? 0}
+                {cachedRealPlan ? formatAmount(getPlanAmount(cachedRealPlan)) : formatAmount(0)}
               </p>
             </div>
           </div>
@@ -626,7 +677,7 @@ Powered by Schofy`;
             <div className="mt-4 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-3">
               <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">Last paid receipt</p>
               <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">Plan: {latestReceipt.planName}</p>
-              <p className="text-xs text-emerald-700 dark:text-emerald-300">Amount: ${latestReceipt.amount}</p>
+              <p className="text-xs text-emerald-700 dark:text-emerald-300">Amount: {formatAmount(Number(latestReceipt.amount || 0))}</p>
               <p className="text-xs text-emerald-700 dark:text-emerald-300">Paid: {new Date(latestReceipt.paidAt).toLocaleString()}</p>
               <p className="text-xs text-emerald-700 dark:text-emerald-300">Expires: {new Date(latestReceipt.expiresAt).toLocaleDateString()}</p>
             </div>
@@ -634,8 +685,8 @@ Powered by Schofy`;
         </div>
 
         <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-500 to-orange-500 p-4 text-white dark:border-amber-700 dark:from-slate-800 dark:via-slate-800 dark:to-amber-900">
-          <h3 className="mb-1 text-sm font-bold">Need more than 500 students?</h3>
-          <p className="mb-3 text-xs text-amber-100 dark:text-amber-200">Custom enterprise pricing available</p>
+          <h3 className="mb-1 text-sm font-bold">Need unlimited students?</h3>
+          <p className="mb-3 text-xs text-amber-100 dark:text-amber-200">Contact Schofy assistant to buy the one-time desktop version.</p>
           <div className="flex gap-2 flex-wrap">
             <a href="https://wa.me/256750034304" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-600 hover:bg-amber-50 dark:bg-slate-100 dark:text-amber-700 dark:hover:bg-white">
               <MessageCircle size={12} /> WhatsApp
@@ -662,7 +713,7 @@ Powered by Schofy`;
               <div className="p-4 space-y-4">
                 <div className="rounded-lg bg-indigo-50 p-3 dark:bg-indigo-900/20">
                   <div className="flex justify-between text-sm"><span className="text-slate-600 dark:text-slate-300">Plan</span><span className="font-bold text-slate-900 dark:text-white">{selectedPlan.name}</span></div>
-                  <div className="mt-1 flex justify-between text-sm"><span className="text-slate-600 dark:text-slate-300">Amount</span><span className="text-xl font-bold text-indigo-600 dark:text-indigo-300">${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}</span></div>
+                  <div className="mt-1 flex justify-between text-sm"><span className="text-slate-600 dark:text-slate-300">Amount</span><span className="text-xl font-bold text-indigo-600 dark:text-indigo-300">{formatAmount(getPlanAmount(selectedPlan))}</span></div>
                 </div>
 
                 <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 border border-amber-200 dark:border-amber-800">
@@ -705,7 +756,9 @@ Powered by Schofy`;
                             billingCycle,
                             submittedAt: now,
                             planId: selectedPlan.id,
-                            amount: billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice,
+                            amount: getPlanAmount(selectedPlan),
+                            displayCurrency: planCurrency,
+                            displayAmount: formatAmount(getPlanAmount(selectedPlan)),
                           };
 
                           await supabase.from('subscriptions').insert({
@@ -779,7 +832,7 @@ Powered by Schofy`;
                     {canProceedToApp ? 'Current plan remains active until admin approves' : 'Access unlocks after admin approval'}
                   </p>
                   <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                    Plan: <strong>{selectedPlan.name}</strong> · Amount: <strong>${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}</strong>
+                    Plan: <strong>{selectedPlan.name}</strong> · Amount: <strong>{formatAmount(getPlanAmount(selectedPlan))}</strong>
                   </p>
                   <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">Activation within 24 hours after verification.</p>
                 </div>
@@ -787,7 +840,7 @@ Powered by Schofy`;
                 <div className="space-y-2">
                   {/* WhatsApp with pre-filled message */}
                   <a
-                    href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nPayment submitted:\nSchool: ${user?.email}\nPlan: ${selectedPlan.name}\nBilling: ${billingCycle}\nAmount: $${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}\nTransaction ID: ${transactionId}\n\nPlease verify and activate. Thank you.`)}`}
+                    href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nPayment submitted:\nSchool: ${user?.email}\nPlan: ${selectedPlan.name}\nBilling: ${billingCycle}\nAmount: ${formatAmount(getPlanAmount(selectedPlan))}\nTransaction ID: ${transactionId}\n\nPlease verify and activate. Thank you.`)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl text-xs font-medium flex items-center justify-center gap-2"
@@ -841,11 +894,11 @@ Powered by Schofy`;
             </div>
             <div className="p-4 space-y-3">
               <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 text-xs text-red-700 dark:text-red-300">
-                <p>Students: <strong>{studentCount}</strong> / {PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.studentLimit || 0}</p>
+                <p>Students: <strong>{studentCount}</strong> / {PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.limitLabel || PLAN_DEFINITIONS.find(p => p.id === currentPlanId)?.studentLimit || 0}</p>
               </div>
-              <p className="text-sm text-slate-600 dark:text-slate-300">Upgrade to <strong>{upgradeToPlan.name}</strong> ({upgradeToPlan.studentLimit} students)</p>
+              <p className="text-sm text-slate-600 dark:text-slate-300">Upgrade to <strong>{upgradeToPlan.name}</strong> ({upgradeToPlan.limitLabel || `${upgradeToPlan.studentLimit} students`})</p>
               <div className="flex gap-2">
-                <button onClick={() => { setShowUpgradeModal(false); handleSubscribe(upgradeToPlan.id); }} className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-medium">Upgrade ${billingCycle === 'monthly' ? upgradeToPlan.monthlyPrice : upgradeToPlan.termPrice}</button>
+                <button onClick={() => { setShowUpgradeModal(false); handleSubscribe(upgradeToPlan.id); }} className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-medium">Upgrade {formatAmount(getPlanAmount(upgradeToPlan))}</button>
                 <a href="https://wa.me/256750034304" target="_blank" rel="noopener noreferrer" className="flex-1 py-2 bg-green-500 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1"><MessageCircle size={12} /> Contact</a>
               </div>
             </div>
@@ -927,7 +980,7 @@ Powered by Schofy`;
                 <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Renewal Steps</p>
 
                 {[
-                  { step: '1', icon: '💰', title: 'Send Payment', desc: `Send $${billingCycle === 'monthly' ? renewPlan.monthlyPrice : renewPlan.termPrice} via Airtel Money to 0750034304` },
+                  { step: '1', icon: '💰', title: 'Send Payment', desc: `Send ${formatAmount(getPlanAmount(renewPlan))} via Airtel Money to 0750034304` },
                   { step: '2', icon: '📋', title: 'Note Your TID', desc: 'Save the Transaction ID (TID) from your Airtel Money confirmation SMS' },
                   { step: '3', icon: '📝', title: 'Submit Below', desc: 'Click "Pay & Submit" and enter your TID — admin will verify within 24 hours' },
                 ].map(({ step, icon, title, desc }) => (
@@ -950,7 +1003,7 @@ Powered by Schofy`;
                 <div className="flex justify-between text-sm mt-1">
                   <span className="text-indigo-700 dark:text-indigo-300">Amount ({billingCycle})</span>
                   <span className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-300">
-                    ${billingCycle === 'monthly' ? renewPlan.monthlyPrice : renewPlan.termPrice}
+                    {formatAmount(getPlanAmount(renewPlan))}
                   </span>
                 </div>
                 <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">Send to Airtel Money: <strong>0750034304</strong></p>
@@ -970,7 +1023,7 @@ Powered by Schofy`;
                   <CreditCard size={18} /> Pay & Submit TID
                 </button>
                 <a
-                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nI want to renew my ${renewPlan.name} plan.\nSchool: ${user?.email}\nBilling: ${billingCycle}\nAmount: $${billingCycle === 'monthly' ? renewPlan.monthlyPrice : renewPlan.termPrice}\n\nPlease assist. Thank you.`)}`}
+                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nI want to renew my ${renewPlan.name} plan.\nSchool: ${user?.email}\nBilling: ${billingCycle}\nAmount: ${formatAmount(getPlanAmount(renewPlan))}\n\nPlease assist. Thank you.`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 text-sm"

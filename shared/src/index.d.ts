@@ -158,6 +158,11 @@ export interface Staff {
     qualification?: string;
     status: 'active' | 'inactive';
     subjects?: string[];
+    customFields?: {
+        id: string;
+        label: string;
+        value: string;
+    }[];
     createdAt: string;
     updatedAt: string;
     syncedAt?: string;

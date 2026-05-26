@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS staff (
   photo_url TEXT,
   salary DECIMAL(12,2),
   status VARCHAR(20) DEFAULT 'active',
+  custom_fields JSONB DEFAULT '[]',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   deleted_at TIMESTAMPTZ
@@ -628,6 +629,7 @@ ALTER TABLE students ADD COLUMN IF NOT EXISTS tuition_fee DECIMAL(12,2);
 ALTER TABLE students ADD COLUMN IF NOT EXISTS boarding_fee DECIMAL(12,2);
 ALTER TABLE students ADD COLUMN IF NOT EXISTS requirements JSONB DEFAULT '[]';
 ALTER TABLE students ADD COLUMN IF NOT EXISTS custom_fields JSONB DEFAULT '[]';
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS custom_fields JSONB DEFAULT '[]';
 ALTER TABLE students ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]';
 ALTER TABLE students ADD COLUMN IF NOT EXISTS completed_term VARCHAR(20);
 ALTER TABLE students ADD COLUMN IF NOT EXISTS completed_year INTEGER;

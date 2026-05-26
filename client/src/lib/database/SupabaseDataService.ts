@@ -90,7 +90,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   staff: [
     'id','school_id','employee_id','first_name','last_name','role','department',
     'dob','gender','address','phone','email','photo_url','salary','status','subjects',
-    'created_at','updated_at',
+    'custom_fields','created_at','updated_at',
   ],
   classes: [
     'id','school_id','name','level','stream','capacity','created_at','updated_at',
@@ -1185,6 +1185,12 @@ class SupabaseDataService {
   async syncTable(sid: string, tableName: string): Promise<void> {
     if (!canUseRemoteTable(tableName)) return;
     return this._seedFromSupabase(sid, tableName);
+  }
+
+  async refreshNotifications(userOrSchoolId: string): Promise<any[]> {
+    const sid = this.sid(userOrSchoolId);
+    if (!this.ok || !isOnline()) return cacheGet(sid, 'notifications') || [];
+    return this._fetchAndMerge(sid, 'notifications');
   }
 
   // ── reads ─────────────────────────────────────────────────────────────────

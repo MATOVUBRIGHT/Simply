@@ -33,7 +33,7 @@ export default function StudentProfile() {
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [showClassDropdown, setShowClassDropdown] = useState(false);
   const [updatingClass, setUpdatingClass] = useState(false);
-  const [activeTab, setActiveTab] = useState<'info' | 'fees' | 'reports' | 'ledger'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'fees' | 'reports' | 'ledger' | 'more'>('info');
   const [expandedFee, setExpandedFee] = useState<string | null>(null);
 
   // Pay modal state
@@ -218,6 +218,9 @@ export default function StudentProfile() {
   };
   const StatusIcon = statusIcon[overallStatus] || Receipt;
   const statusLabel: Record<string, string> = { paid: 'Paid', partial: 'Partial', pending: 'Pending', none: 'No Invoice' };
+  const profileCustomFields = useMemo(() => Array.isArray((student as any)?.customFields) ? (student as any).customFields.filter((field: any) => field?.label) : [], [student]);
+  const registeredRequirements = useMemo(() => Array.isArray((student as any)?.requirements) ? (student as any).requirements.filter(Boolean) : [], [student]);
+  const registeredAttachments = useMemo(() => Array.isArray((student as any)?.attachments) ? (student as any).attachments.filter((item: any) => item?.name || item?.file) : [], [student]);
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -255,13 +258,13 @@ export default function StudentProfile() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700">
-        {(['info', 'fees', 'reports', 'ledger'] as const).map(tab => (
+        {(['info', 'fees', 'reports', 'ledger', 'more'] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
               activeTab === tab ? 'border-primary-500 text-primary-600 dark:text-primary-400'
               : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
             }`}>
-            {tab === 'fees' ? 'Fees & Payments' : tab === 'reports' ? 'Academic Documents' : tab === 'ledger' ? 'Ledger' : 'Profile'}
+            {tab === 'fees' ? 'Fees & Payments' : tab === 'reports' ? 'Academic Documents' : tab === 'ledger' ? 'Ledger' : tab === 'more' ? 'More' : 'Profile'}
           </button>
         ))}
       </div>
@@ -352,6 +355,82 @@ export default function StudentProfile() {
                 ))}
               </div>
             </DropdownModal>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'more' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div className="card">
+            <div className="card-header flex items-center gap-2">
+              <FileText size={18} className="text-indigo-500" />
+              <h3 className="font-semibold">Registered Documents</h3>
+            </div>
+            <div className="card-body space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Admission requirements</p>
+                {registeredRequirements.length === 0 ? (
+                  <p className="text-sm text-slate-400">No admission requirements registered.</p>
+                ) : (
+                  <ol className="space-y-2">
+                    {registeredRequirements.map((requirement: string, index: number) => (
+                      <li key={`${requirement}-${index}`} className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm dark:border-slate-700 dark:bg-slate-800/50">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-100 text-[11px] font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">{index + 1}</span>
+                        <span className="text-slate-700 dark:text-slate-200">{requirement}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Attached files</p>
+                {registeredAttachments.length === 0 ? (
+                  <p className="text-sm text-slate-400">No attached documents registered.</p>
+                ) : (
+                  <ol className="space-y-2">
+                    {registeredAttachments.map((attachment: any, index: number) => (
+                      <li key={attachment.id || `${attachment.name}-${index}`} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5 text-sm dark:border-slate-700 dark:bg-slate-800">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">{index + 1}</span>
+                        <FileText size={15} className="text-slate-400" />
+                        {attachment.file ? (
+                          <a href={attachment.file} download={attachment.name || 'student-document'} className="font-medium text-primary-600 hover:underline dark:text-primary-300">
+                            {attachment.name || `Document ${index + 1}`}
+                          </a>
+                        ) : (
+                          <span className="font-medium text-slate-700 dark:text-slate-200">{attachment.name || `Document ${index + 1}`}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header flex items-center gap-2">
+              <User size={18} className="text-violet-500" />
+              <h3 className="font-semibold">Custom Fields</h3>
+            </div>
+            <div className="card-body">
+              {profileCustomFields.length === 0 ? (
+                <p className="text-sm text-slate-400">No custom profile fields registered.</p>
+              ) : (
+                <ol className="grid grid-cols-1 gap-3">
+                  {profileCustomFields.map((field: any, index: number) => (
+                    <li key={field.id || `${field.label}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+                      <div className="flex items-start gap-2">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[11px] font-bold text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{index + 1}</span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{field.label}</p>
+                          <p className="mt-1 break-words text-sm font-medium text-slate-800 dark:text-slate-100">{field.value || 'N/A'}</p>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
           </div>
         </div>
       )}

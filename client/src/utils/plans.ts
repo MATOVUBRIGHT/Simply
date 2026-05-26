@@ -12,6 +12,9 @@ export interface PlanDefinition {
   notIncluded: string[];
   popular: boolean;
   studentLimit: number;
+  contactOnly?: boolean;
+  priceLabel?: string;
+  limitLabel?: string;
 }
 
 export type BillingCycle = 'monthly' | 'term' | 'yearly';
@@ -86,6 +89,28 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     notIncluded: [],
     popular: false,
     studentLimit: 500,
+  },
+  {
+    id: 'unlimited',
+    name: 'Unlimited',
+    monthlyPrice: 0,
+    termPrice: 0,
+    yearlyPrice: 0,
+    period: 'one-time desktop',
+    features: [
+      'Unlimited students',
+      'Full desktop access',
+      'Full attendance, finance, reports, and records',
+      'Offline-first local database',
+      'Online notifications and broadcasts when connected',
+      'One-time desktop purchase option',
+    ],
+    notIncluded: [],
+    popular: false,
+    studentLimit: Number.MAX_SAFE_INTEGER,
+    contactOnly: true,
+    priceLabel: 'Contact Schofy assistant',
+    limitLabel: 'Unlimited students',
   },
 ];
 

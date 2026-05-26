@@ -1,9 +1,13 @@
 {
-  "appId": "com.schofy.desktop",
-  "productName": "Schofy",
-  "electronVersion": "22.3.27",
+  "appId": "com.schofy.desktop.lite",
+  "productName": "Schofy Lite",
+  "compression": "maximum",
+  "asar": true,
+  "electronLanguages": [
+    "en-US"
+  ],
   "directories": {
-    "output": "../dist/desktop-win7"
+    "output": "../dist/desktop-lite"
   },
   "files": [
     "main.js",
@@ -16,7 +20,9 @@
       "from": "../client/dist",
       "to": "client-dist",
       "filter": [
-        "**/*"
+        "**/*",
+        "!**/*.map",
+        "!**/node_modules/**"
       ]
     }
   ],
@@ -25,13 +31,12 @@
       {
         "target": "nsis",
         "arch": [
-          "x64",
-          "ia32"
+          "x64"
         ]
       }
     ],
     "icon": "../client/public/schofy.logo.ico",
-    "artifactName": "${productName}-Setup-${version}-win7-${arch}.${ext}",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "signAndEditExecutable": false
   },
   "nsis": {
@@ -40,7 +45,7 @@
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "Schofy",
+    "shortcutName": "Schofy Lite",
     "include": "installer.nsh"
   }
 }

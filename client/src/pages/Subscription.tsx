@@ -59,8 +59,9 @@ export default function Subscription() {
   const handleSubscribe = (planId: string) => {
     const plan = PLAN_DEFINITIONS.find(p => p.id === planId);
     if (!plan) return;
-    if (billingCycle === 'yearly') {
-      window.open('https://wa.me/256750034304', '_blank');
+    if (billingCycle === 'yearly' || plan.contactOnly) {
+      const message = encodeURIComponent(`Hello Schofy assistant,\n\nI want to buy the ${plan.name} plan for my school.`);
+      window.open(`https://wa.me/256750034304?text=${message}`, '_blank');
       return;
     }
     setSelectedPlan(plan);
@@ -73,7 +74,7 @@ export default function Subscription() {
     setTransactionId('');
   };
 
-  const getPrice = (plan: PlanDefinition) => billingCycle === 'yearly' ? 'Contact' : `$${billingCycle === 'monthly' ? plan.monthlyPrice : plan.termPrice}`;
+  const getPrice = (plan: PlanDefinition) => plan.priceLabel || (billingCycle === 'yearly' ? 'Contact' : `$${billingCycle === 'monthly' ? plan.monthlyPrice : plan.termPrice}`);
 
   if (loading) {
     return (
@@ -165,7 +166,7 @@ export default function Subscription() {
                     <span className="text-4xl font-extrabold text-slate-900">{getPrice(plan)}</span>
                     {billingCycle !== 'yearly' && <span className="text-slate-500 ml-1">/{billingCycle === 'monthly' ? 'mo' : 'term'}</span>}
                   </div>
-                  <p className="text-indigo-600 font-semibold mb-6">Up to {plan.studentLimit} students</p>
+                  <p className="text-indigo-600 font-semibold mb-6">{plan.limitLabel || `Up to ${plan.studentLimit} students`}</p>
 
                   <div className="space-y-3 flex-grow">
                     {plan.features.map((f, i) => (
@@ -193,12 +194,12 @@ export default function Subscription() {
                       <button
                         onClick={() => handleSubscribe(plan.id)}
                         className={`w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
-                          billingCycle === 'yearly' ? 'bg-amber-500 hover:bg-amber-600 text-white' :
+                          billingCycle === 'yearly' || plan.contactOnly ? 'bg-amber-500 hover:bg-amber-600 text-white' :
                           plan.popular ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/30' :
                           'bg-slate-900 hover:bg-slate-800 text-white'
                         }`}
                       >
-                        {billingCycle === 'yearly' ? <><MessageCircle size={18} /> Contact Us</> : <><CreditCard size={18} /> Subscribe</>}
+                        {billingCycle === 'yearly' || plan.contactOnly ? <><MessageCircle size={18} /> Contact Us</> : <><CreditCard size={18} /> Subscribe</>}
                       </button>
                     )}
                     {isCurrentPlan && (

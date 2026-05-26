@@ -15,11 +15,36 @@ const ZOOM_STEP = 0.1;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
 
+function desktopLog(message, error) {
+  const line = `[${new Date().toISOString()}] ${message}${error ? ` ${error.stack || error.message || error}` : ''}\n`;
+  try {
+    const logPath = path.join(app.getPath('userData'), 'schofy-desktop.log');
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, line, 'utf8');
+  } catch {
+    try {
+      fs.appendFileSync(path.join(app.getPath('temp'), 'schofy-desktop.log'), line, 'utf8');
+    } catch {
+      // Logging must never block app startup.
+    }
+  }
+}
+
+process.on('uncaughtException', (error) => {
+  desktopLog('[fatal] Uncaught exception', error);
+});
+
+process.on('unhandledRejection', (error) => {
+  desktopLog('[fatal] Unhandled rejection', error);
+});
+
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!gotSingleInstanceLock) {
+  desktopLog('[startup] Another Schofy instance already owns the desktop lock');
   app.quit();
 } else {
+  desktopLog('[startup] Single instance lock acquired');
   app.on('second-instance', () => {
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -176,6 +201,7 @@ function resetZoom() {
 }
 
 function createWindow() {
+  desktopLog('[startup] Creating main window');
   loadZoomFactor();
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -238,7 +264,9 @@ function createWindow() {
   });
 
   if (isDev) {
+    desktopLog('[startup] Loading dev URL');
     mainWindow.loadURL('http://localhost:4201').catch(err => {
+      desktopLog('[startup] Failed to load dev URL', err);
       console.error('Failed to load dev URL:', err);
       mainWindow.show(); // Show anyway to reveal error/devTools
     });
@@ -248,13 +276,16 @@ function createWindow() {
       ? path.join(process.resourcesPath, 'client-dist', 'index.html')
       : path.join(__dirname, '../client/dist/index.html');
 
+    desktopLog(`[startup] Loading production file ${indexPath}`);
     mainWindow.loadURL(pathToFileURL(indexPath).toString()).catch(err => {
+      desktopLog('[startup] Failed to load production file', err);
       console.error('Failed to load production file:', err);
       mainWindow.show();
     });
   }
 
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    desktopLog(`[startup] Page failed to load: ${errorCode} - ${errorDescription}`);
     console.error(`Page failed to load: ${errorCode} - ${errorDescription}`);
     if (isDev) {
       mainWindow.webContents.executeJavaScript(`
@@ -265,8 +296,18 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
+    desktopLog('[startup] Main window ready to show');
     applyZoom({ rebuildMenu: false });
     mainWindow.show();
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    desktopLog(`[fatal] Renderer process gone: ${JSON.stringify(details)}`);
+  });
+
+  mainWindow.on('closed', () => {
+    desktopLog('[startup] Main window closed');
+    mainWindow = null;
   });
 
   mainWindow.on('close', (event) => {
@@ -345,15 +386,19 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  desktopLog('[startup] App ready');
   app.setAppUserModelId('com.schofy.desktop');
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);
   });
   createWindow();
   createTray();
+}).catch((error) => {
+  desktopLog('[fatal] App ready handler failed', error);
 });
 
 app.on('window-all-closed', () => {
+  desktopLog('[startup] All windows closed');
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -366,6 +411,7 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+  desktopLog('[startup] Before quit');
   app.isQuitting = true;
 });
 
