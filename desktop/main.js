@@ -132,6 +132,19 @@ function getClientAssetPath(fileName) {
     : path.join(__dirname, '../client/public', fileName);
 }
 
+function getDesktopIcon() {
+  const icoPath = getClientAssetPath('schofy.logo.ico');
+  const pngPath = getClientAssetPath('schofy.logo.png');
+  const icon = nativeImage.createFromPath(icoPath);
+  return icon.isEmpty() ? nativeImage.createFromPath(pngPath) : icon;
+}
+
+function getAppUserModelId() {
+  return app.getName().toLowerCase().includes('lite')
+    ? 'com.schofy.desktop.lite'
+    : 'com.schofy.desktop';
+}
+
 function getZoomFilePath() {
   return path.join(app.getPath('userData'), ZOOM_FILE);
 }
@@ -221,7 +234,7 @@ function createWindow() {
       backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js'),
     },
-    icon: getClientAssetPath('schofy.logo.png'),
+    icon: getDesktopIcon(),
     show: false,
   });
   mainWindow.setMenuBarVisibility(false);
@@ -366,8 +379,7 @@ function createMenu() {
 }
 
 function createTray() {
-  const iconPath = getClientAssetPath('schofy.logo.png');
-  const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+  const icon = getDesktopIcon().resize({ width: 16, height: 16 });
 
   tray = new Tray(icon);
 
@@ -387,7 +399,7 @@ function createTray() {
 
 app.whenReady().then(() => {
   desktopLog('[startup] App ready');
-  app.setAppUserModelId('com.schofy.desktop');
+  app.setAppUserModelId(getAppUserModelId());
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);
   });
