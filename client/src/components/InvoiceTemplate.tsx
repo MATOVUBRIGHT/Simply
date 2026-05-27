@@ -16,6 +16,7 @@ export interface InvoiceLabels {
   qtyLabel: string;
   totalLabel: string;
   paymentDataLabel: string;
+  branchLabel: string;
   accountNoLabel: string;
   accountNameLabel: string;
   methodLabel: string;
@@ -31,6 +32,11 @@ export interface InvoiceLabels {
   phoneLabel: string;
   emailLabel: string;
   addressLabel: string;
+  textColor: string;
+  mutedTextColor: string;
+  accentColor: string;
+  tableHeaderBg: string;
+  tableHeaderTextColor: string;
 }
 
 export const DEFAULT_INVOICE_LABELS: InvoiceLabels = {
@@ -40,11 +46,12 @@ export const DEFAULT_INVOICE_LABELS: InvoiceLabels = {
   dateLabel: 'Date:',
   dueDateLabel: 'Due Date:',
   termLabel: 'Term:',
-  productLabel: 'Product / Description',
+  productLabel: 'Fee Description',
   priceLabel: 'Price',
   qtyLabel: 'Qty',
   totalLabel: 'Total',
   paymentDataLabel: 'Payment Data:',
+  branchLabel: 'Branch:',
   accountNoLabel: 'Account#:',
   accountNameLabel: 'Name:',
   methodLabel: 'Payment Method:',
@@ -56,10 +63,15 @@ export const DEFAULT_INVOICE_LABELS: InvoiceLabels = {
   taxLabel: 'Tax',
   grandTotalLabel: 'Total',
   termsTitle: 'Terms and Conditions',
-  termsText: 'Please make payments before the due date to avoid service interruption. All payments are non-refundable and subject to school policies. For any queries regarding this invoice, please contact the school administration. Thank you for your continued support in providing quality education.',
+  termsText: 'Please make school fee payments before the due date. For any questions about this invoice, contact the school accounts office. Thank you for supporting the learner and the school.',
   phoneLabel: 'Phone',
   emailLabel: 'Email',
   addressLabel: 'Address',
+  textColor: '#0f172a',
+  mutedTextColor: '#64748b',
+  accentColor: '#6366f1',
+  tableHeaderBg: '#0f172a',
+  tableHeaderTextColor: '#ffffff',
 };
 
 interface InvoiceTemplateProps {
@@ -101,6 +113,7 @@ interface InvoiceTemplateProps {
     accountName: string;
     accountNumber: string;
     bankName: string;
+    bankBranch?: string;
     paymentMethod: string;
   };
   labels?: InvoiceLabels;
@@ -110,6 +123,7 @@ interface InvoiceTemplateProps {
   onRedo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  onToggleLiveEdit?: () => void;
   onClose?: () => void;
 }
 
@@ -125,12 +139,53 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
   onRedo,
   canUndo = false,
   canRedo = false,
+  onToggleLiveEdit,
   onClose
 }) => {
   const { formatMoney } = useCurrency();
   const updateLabel = (key: keyof InvoiceLabels, value: string) => {
     onUpdateLabels?.({ [key]: value });
   };
+  const templateStudent = isLiveEditing
+    ? {
+        name: 'Student Name',
+        id: 'Student ID',
+        class: 'Class Name',
+        guardian: '',
+        address: 'Student Address',
+        phone: 'Student Phone',
+        email: 'Student Email',
+      }
+    : student;
+  const templateInvoice = isLiveEditing
+    ? {
+        ...invoice,
+        number: 'INV-0000-TERM-YEAR',
+        date: 'Invoice Date',
+        dueDate: 'Due Date',
+        term: 'Term',
+        year: 'Year',
+        items: [
+          { description: 'Tuition Fee', amount: 1000, qty: 1 },
+          { description: 'Boarding Fee', amount: 500, qty: 1 },
+        ],
+        subtotal: 1500,
+        openingBalance: 0,
+        termCharges: 1500,
+        tax: 0,
+        total: 1500,
+        paid: 0,
+        balance: 1500,
+        closingBalance: 1500,
+      }
+    : invoice;
+  const validItems = templateInvoice.items.filter(item => {
+    const description = String(item.description || '').trim();
+    return description && description.toLowerCase() !== 'item name / description';
+  });
+  const isCashPayment = String(bankInfo?.paymentMethod || '').toLowerCase().includes('cash');
+  const textStyle = { color: labels.textColor };
+  const mutedStyle = { color: labels.mutedTextColor };
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-y-auto max-w-4xl w-full mx-auto my-4 animate-modal-in flex flex-col" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
@@ -147,7 +202,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
           {/* Live Edit Controls */}
           <div className="flex items-center gap-2 border-l pl-4 dark:border-slate-700">
             <button 
-              onClick={() => onUpdateLabels?.({})} // Trigger toggle if needed or managed externally
+              onClick={onToggleLiveEdit || (() => onUpdateLabels?.({}))}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isLiveEditing ? 'bg-yellow-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}
               id="toggle-live-edit"
             >
@@ -174,6 +229,27 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
               </div>
             )}
           </div>
+          {isLiveEditing && (
+            <div className="button-scroll flex items-center gap-2 border-l pl-4 dark:border-slate-700">
+              {[
+                ['textColor', 'Text'],
+                ['mutedTextColor', 'Muted'],
+                ['accentColor', 'Accent'],
+                ['tableHeaderBg', 'Table'],
+                ['tableHeaderTextColor', 'Header Text'],
+              ].map(([key, label]) => (
+                <label key={key} className="flex items-center gap-1 text-[11px] font-bold text-slate-500 dark:text-slate-300">
+                  {label}
+                  <input
+                    type="color"
+                    value={(labels[key as keyof InvoiceLabels] as string) || '#000000'}
+                    onChange={(event) => updateLabel(key as keyof InvoiceLabels, event.target.value)}
+                    className="h-7 w-8 cursor-pointer rounded border border-slate-200 bg-transparent p-0 dark:border-slate-700"
+                  />
+                </label>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button 
@@ -195,11 +271,11 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
       </div>
 
       {/* Invoice Content */}
-      <div id="invoice-print" className="p-8 sm:p-12 bg-white text-slate-800 print:p-0 print:text-black" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div id="invoice-print" className="p-8 sm:p-12 bg-white print:p-0" style={{ fontFamily: 'Inter, system-ui, sans-serif', color: labels.textColor }}>
         {/* Top Section */}
         <div className="flex justify-between items-start mb-12">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-xl shadow-indigo-500/20 shrink-0">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-500/20 shrink-0" style={{ backgroundColor: labels.accentColor }}>
               {school.logo ? (
                 <img src={school.logo} alt="School Logo" className="w-full h-full object-contain p-2" />
               ) : (
@@ -207,12 +283,12 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
               )}
             </div>
             <div>
-              <h1 className="text-xl font-black uppercase tracking-tight text-slate-900">{school.name}</h1>
-              <p className="text-sm text-slate-500 font-medium">{school.motto || 'Education for the Future'}</p>
+              <h1 className="text-xl font-black uppercase tracking-tight" style={textStyle}>{school.name}</h1>
+              <p className="text-sm font-medium" style={mutedStyle}>{school.motto || 'Education for the Future'}</p>
             </div>
           </div>
           <div className="text-right">
-            <h2 className="text-5xl font-black text-indigo-500 uppercase italic tracking-tighter mb-2">
+            <h2 className="text-5xl font-black uppercase italic tracking-tighter mb-2" style={{ color: labels.accentColor }}>
               <LiveEditable value={labels.invoiceTitle} onSave={v => updateLabel('invoiceTitle', v)} isLiveEditing={isLiveEditing} />
             </h2>
           </div>
@@ -221,37 +297,39 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
         {/* Bill To & Invoice Info */}
         <div className="flex justify-between mb-12">
           <div className="max-w-[50%]">
-            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+            <h4 className="text-[10px] font-black uppercase tracking-widest mb-1" style={mutedStyle}>
               <LiveEditable value={labels.billToLabel} onSave={v => updateLabel('billToLabel', v)} isLiveEditing={isLiveEditing} />
             </h4>
-            <h3 className="text-2xl font-black text-slate-900 mb-1">{student.name}</h3>
-            <p className="text-slate-500 font-bold mb-3">{student.guardian || 'Parent/Guardian'}</p>
-            <div className="space-y-1 text-sm text-slate-500 font-medium">
-              <p>{student.address || 'Address not provided'}</p>
-              <p>{student.email}</p>
-              <p>{student.phone}</p>
+            <h3 className="text-2xl font-black mb-1" style={textStyle}>{templateStudent.name}</h3>
+            <p className="font-bold mb-3" style={mutedStyle}>
+              {[templateStudent.id ? `ID: ${templateStudent.id}` : '', templateStudent.class ? `Class: ${templateStudent.class}` : ''].filter(Boolean).join(' | ')}
+            </p>
+            <div className="space-y-1 text-sm font-medium" style={mutedStyle}>
+              <p>{templateStudent.address || 'Address not provided'}</p>
+              <p>{templateStudent.email}</p>
+              <p>{templateStudent.phone}</p>
             </div>
           </div>
           <div className="text-right">
             <p className="text-slate-400 font-black uppercase text-xs mb-1">
               <LiveEditable value={labels.invoiceNoLabel} onSave={v => updateLabel('invoiceNoLabel', v)} isLiveEditing={isLiveEditing} />
             </p>
-            <p className="text-xl font-bold text-slate-800">{invoice.number}</p>
+            <p className="text-xl font-bold" style={textStyle}>{templateInvoice.number}</p>
             <div className="mt-4 space-y-1">
               <p className="text-sm">
                 <span className="text-slate-400 font-bold uppercase text-[10px] mr-2">
                   <LiveEditable value={labels.dateLabel} onSave={v => updateLabel('dateLabel', v)} isLiveEditing={isLiveEditing} />
-                </span> {invoice.date}
+                </span> {templateInvoice.date}
               </p>
               <p className="text-sm">
                 <span className="text-slate-400 font-bold uppercase text-[10px] mr-2">
                   <LiveEditable value={labels.dueDateLabel} onSave={v => updateLabel('dueDateLabel', v)} isLiveEditing={isLiveEditing} />
-                </span> {invoice.dueDate}
+                </span> {templateInvoice.dueDate}
               </p>
               <p className="text-sm">
                 <span className="text-slate-400 font-bold uppercase text-[10px] mr-2">
                   <LiveEditable value={labels.termLabel} onSave={v => updateLabel('termLabel', v)} isLiveEditing={isLiveEditing} />
-                </span> {invoice.term} {invoice.year}
+                </span> {templateInvoice.term} {templateInvoice.year}
               </p>
             </div>
           </div>
@@ -261,7 +339,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
         <div className="mb-12">
           <table className="w-full">
             <thead>
-              <tr className="bg-slate-900 text-white">
+              <tr style={{ backgroundColor: labels.tableHeaderBg, color: labels.tableHeaderTextColor }}>
                 <th className="px-6 py-3 text-left text-xs font-black uppercase tracking-widest rounded-l-lg">
                   <LiveEditable value={labels.productLabel} onSave={v => updateLabel('productLabel', v)} isLiveEditing={isLiveEditing} />
                 </th>
@@ -277,21 +355,12 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {invoice.items.map((item, index) => (
+              {validItems.map((item, index) => (
                 <tr key={index}>
-                  <td className="px-6 py-5 text-sm font-medium text-slate-600">{item.description}</td>
-                  <td className="px-6 py-5 text-right text-sm font-bold text-slate-800">{formatMoney(item.amount)}</td>
-                  <td className="px-6 py-5 text-center text-sm font-medium text-slate-500">{item.qty}</td>
-                  <td className="px-6 py-5 text-right text-sm font-black text-slate-900">{formatMoney(item.amount * item.qty)}</td>
-                </tr>
-              ))}
-              {/* Fill empty rows to match design if needed */}
-              {[...Array(Math.max(0, 5 - invoice.items.length))].map((_, i) => (
-                <tr key={`empty-${i}`}>
-                  <td className="px-6 py-5 text-sm text-slate-300">Item Name / Description</td>
-                  <td className="px-6 py-5 text-right text-sm text-slate-300">$0</td>
-                  <td className="px-6 py-5 text-center text-sm text-slate-300">0</td>
-                  <td className="px-6 py-5 text-right text-sm text-slate-300">$0</td>
+                  <td className="px-6 py-5 text-sm font-medium" style={mutedStyle}>{item.description}</td>
+                  <td className="px-6 py-5 text-right text-sm font-bold" style={textStyle}>{formatMoney(item.amount)}</td>
+                  <td className="px-6 py-5 text-center text-sm font-medium" style={mutedStyle}>{item.qty}</td>
+                  <td className="px-6 py-5 text-right text-sm font-black" style={textStyle}>{formatMoney(item.amount * item.qty)}</td>
                 </tr>
               ))}
             </tbody>
@@ -301,20 +370,48 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
         {/* Payment Info & Totals */}
         <div className="flex justify-between items-start mb-12">
           <div className="max-w-[50%]">
-            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">
+            <h4 className="text-[10px] font-black uppercase tracking-widest mb-3" style={mutedStyle}>
               <LiveEditable value={labels.paymentDataLabel} onSave={v => updateLabel('paymentDataLabel', v)} isLiveEditing={isLiveEditing} />
             </h4>
-            <div className="space-y-1.5 text-xs font-bold text-slate-600">
-              <p>
-                <span className="text-slate-400 uppercase tracking-tighter mr-2">
-                  <LiveEditable value={labels.accountNoLabel} onSave={v => updateLabel('accountNoLabel', v)} isLiveEditing={isLiveEditing} />
-                </span> {bankInfo?.accountNumber || '12356587965497'}
-              </p>
-              <p>
-                <span className="text-slate-400 uppercase tracking-tighter mr-2">
-                  <LiveEditable value={labels.accountNameLabel} onSave={v => updateLabel('accountNameLabel', v)} isLiveEditing={isLiveEditing} />
-                </span> {bankInfo?.accountName || school.name}
-              </p>
+            <div className="space-y-1.5 text-xs font-bold" style={mutedStyle}>
+              {isCashPayment ? (
+                <>
+                  <p>
+                    <span className="text-slate-400 uppercase tracking-tighter mr-2">Accepted By:</span>
+                    {bankInfo?.accountName || 'Accounts office'}
+                  </p>
+                  <p>
+                    <span className="text-slate-400 uppercase tracking-tighter mr-2">Collection Point:</span>
+                    {bankInfo?.bankName || 'School office'}
+                  </p>
+                </>
+              ) : (
+                <>
+                  {bankInfo?.bankName && (
+                    <p>
+                      <span className="text-slate-400 uppercase tracking-tighter mr-2">Bank:</span>
+                      {bankInfo.bankName}
+                    </p>
+                  )}
+                  {bankInfo?.bankBranch && (
+                    <p>
+                      <span className="text-slate-400 uppercase tracking-tighter mr-2">
+                        <LiveEditable value={labels.branchLabel} onSave={v => updateLabel('branchLabel', v)} isLiveEditing={isLiveEditing} />
+                      </span> {bankInfo.bankBranch}
+                    </p>
+                  )}
+                  <p>
+                    <span className="text-slate-400 uppercase tracking-tighter mr-2">
+                      <LiveEditable value={labels.accountNoLabel} onSave={v => updateLabel('accountNoLabel', v)} isLiveEditing={isLiveEditing} />
+                    </span> {bankInfo?.accountNumber || '-'}
+                  </p>
+                  <p>
+                    <span className="text-slate-400 uppercase tracking-tighter mr-2">
+                      <LiveEditable value={labels.accountNameLabel} onSave={v => updateLabel('accountNameLabel', v)} isLiveEditing={isLiveEditing} />
+                    </span> {bankInfo?.accountName || school.name}
+                  </p>
+                </>
+              )}
               <p>
                 <span className="text-slate-400 uppercase tracking-tighter mr-2">
                   <LiveEditable value={labels.methodLabel} onSave={v => updateLabel('methodLabel', v)} isLiveEditing={isLiveEditing} />
@@ -327,47 +424,47 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
               <span className="font-black uppercase tracking-widest text-slate-400">
                 <LiveEditable value={labels.subtotalLabel} onSave={v => updateLabel('subtotalLabel', v)} isLiveEditing={isLiveEditing} />
               </span>
-              <span className="font-bold text-slate-800">{formatMoney(invoice.subtotal)}</span>
+              <span className="font-bold" style={textStyle}>{formatMoney(templateInvoice.subtotal)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="font-black uppercase tracking-widest text-slate-400">
                 <LiveEditable value={labels.openingBalanceLabel} onSave={v => updateLabel('openingBalanceLabel', v)} isLiveEditing={isLiveEditing} />
               </span>
-              <span className="font-bold text-slate-800">{formatMoney(invoice.openingBalance || 0)}</span>
+              <span className="font-bold" style={textStyle}>{formatMoney(templateInvoice.openingBalance || 0)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="font-black uppercase tracking-widest text-slate-400">
                 <LiveEditable value={labels.termChargesLabel} onSave={v => updateLabel('termChargesLabel', v)} isLiveEditing={isLiveEditing} />
               </span>
-              <span className="font-bold text-slate-800">{formatMoney(invoice.termCharges ?? invoice.subtotal)}</span>
+              <span className="font-bold" style={textStyle}>{formatMoney(templateInvoice.termCharges ?? templateInvoice.subtotal)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="font-black uppercase tracking-widest text-slate-400">
                 <LiveEditable value={labels.paidLabel} onSave={v => updateLabel('paidLabel', v)} isLiveEditing={isLiveEditing} />
               </span>
-              <span className="font-bold text-emerald-600">{formatMoney(invoice.paid || 0)}</span>
+              <span className="font-bold text-emerald-600">{formatMoney(templateInvoice.paid || 0)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="font-black uppercase tracking-widest text-slate-400">
                 <LiveEditable value={labels.taxLabel} onSave={v => updateLabel('taxLabel', v)} isLiveEditing={isLiveEditing} />
               </span>
-              <span className="font-bold text-slate-800">{formatMoney(invoice.tax)}</span>
+              <span className="font-bold" style={textStyle}>{formatMoney(templateInvoice.tax)}</span>
             </div>
             <div className="flex justify-between items-center pt-3 border-t-2 border-slate-900">
-              <span className="text-lg font-black uppercase tracking-widest text-slate-900">
+              <span className="text-lg font-black uppercase tracking-widest" style={textStyle}>
                 <LiveEditable value={labels.closingBalanceLabel || labels.grandTotalLabel} onSave={v => updateLabel('closingBalanceLabel', v)} isLiveEditing={isLiveEditing} />
               </span>
-              <span className="text-2xl font-black text-slate-900">{formatMoney(invoice.closingBalance ?? invoice.balance ?? invoice.total)}</span>
+              <span className="text-2xl font-black" style={{ color: labels.accentColor }}>{formatMoney(templateInvoice.closingBalance ?? templateInvoice.balance ?? templateInvoice.total)}</span>
             </div>
           </div>
         </div>
 
         {/* Terms */}
         <div className="mb-12 pt-8 border-t border-slate-100">
-          <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-900 mb-3">
+          <h4 className="text-[10px] font-black uppercase tracking-widest mb-3" style={textStyle}>
             <LiveEditable value={labels.termsTitle} onSave={v => updateLabel('termsTitle', v)} isLiveEditing={isLiveEditing} />
           </h4>
-          <p className="text-[10px] leading-relaxed text-slate-500 font-medium">
+          <p className="text-[10px] leading-relaxed font-medium" style={mutedStyle}>
             <LiveEditable value={labels.termsText} onSave={v => updateLabel('termsText', v)} isLiveEditing={isLiveEditing} />
           </p>
         </div>
@@ -382,7 +479,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
               <p className="text-[10px] font-black uppercase text-slate-400">
                 <LiveEditable value={labels.phoneLabel} onSave={v => updateLabel('phoneLabel', v)} isLiveEditing={isLiveEditing} />
               </p>
-              <p className="text-xs font-bold text-slate-700">{school.phone}</p>
+              <p className="text-xs font-bold" style={textStyle}>{school.phone}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -393,7 +490,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
               <p className="text-[10px] font-black uppercase text-slate-400">
                 <LiveEditable value={labels.emailLabel} onSave={v => updateLabel('emailLabel', v)} isLiveEditing={isLiveEditing} />
               </p>
-              <p className="text-xs font-bold text-slate-700">{school.email}</p>
+              <p className="text-xs font-bold" style={textStyle}>{school.email}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -404,15 +501,15 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
               <p className="text-[10px] font-black uppercase text-slate-400">
                 <LiveEditable value={labels.addressLabel} onSave={v => updateLabel('addressLabel', v)} isLiveEditing={isLiveEditing} />
               </p>
-              <p className="text-xs font-bold text-slate-700">{school.address}</p>
+              <p className="text-xs font-bold" style={textStyle}>{school.address}</p>
             </div>
           </div>
         </div>
       </div>
 
       {/* Blue Design Element at Bottom */}
-      <div className="h-6 bg-slate-900 relative mt-auto">
-        <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-indigo-500" style={{ clipPath: 'polygon(20% 0, 100% 0, 100% 100%, 0% 100%)' }}></div>
+      <div className="h-6 relative mt-auto" style={{ backgroundColor: labels.tableHeaderBg }}>
+        <div className="absolute right-0 top-0 bottom-0 w-1/3" style={{ backgroundColor: labels.accentColor, clipPath: 'polygon(20% 0, 100% 0, 100% 100%, 0% 100%)' }}></div>
       </div>
     </div>
   );

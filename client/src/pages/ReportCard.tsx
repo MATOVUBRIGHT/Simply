@@ -10,6 +10,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { useToast } from '../contexts/ToastContext';
 import LiveEditable from '../components/LiveEditable';
 import { openPrintPreview } from '../utils/printPreview';
+import { getSubjectDisplayCode, normalizeSubjectCode } from '../utils/subjects';
 
 // ΓöÇΓöÇ Grade helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function ordinal(n: number): string {
@@ -18,21 +19,32 @@ function ordinal(n: number): string {
   return s[(v - 20) % 10] || s[v] || s[0];
 }
 
-function normalizeSubjectKey(value: string | undefined | null) {
-  return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function normalizeSubjectKey(value: unknown) {
+  return normalizeSubjectCode(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 function getSubjectIdentity(subject: any, fallbackName?: string, fallbackId?: string) {
   const nameKey = normalizeSubjectKey(subject?.name || fallbackName);
-  const codeKey = normalizeSubjectKey(subject?.code);
+  const codeKey = normalizeSubjectKey(getSubjectDisplayCode(subject));
   return nameKey || codeKey || fallbackId || '';
 }
 
 // ΓöÇΓöÇ Template ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 const TEMPLATE_KEY = 'schofy_report_template';
 
+type ReportTemplateType =
+  | 'modern'
+  | 'classic'
+  | 'high-school'
+  | 'signed'
+  | 'nursery'
+  | 'primary'
+  | 'o-level'
+  | 'a-level-new-curriculum'
+  | 'secondary-default-subjects';
+
 interface ReportTemplate {
-  type: 'modern' | 'classic' | 'high-school';
+  type: ReportTemplateType;
   // School info
   schoolName: string;
   schoolAddress: string;
@@ -71,6 +83,18 @@ interface ReportTemplate {
   // Behavior items
   behaviorItems: string[];
 }
+
+const TEMPLATE_OPTIONS: { type: ReportTemplateType; label: string; icon: typeof Layout }[] = [
+  { type: 'modern', label: 'Modern', icon: Layout },
+  { type: 'classic', label: 'Classic (Silvers)', icon: FileTextIcon },
+  { type: 'high-school', label: 'High School', icon: GraduationCap },
+  { type: 'signed', label: 'Head & Class Signatures', icon: Check },
+  { type: 'nursery', label: 'Nursery Template Report Card', icon: Palette },
+  { type: 'primary', label: 'Primary Template Report Card', icon: Building },
+  { type: 'o-level', label: 'O-level Template Report Card', icon: GraduationCap },
+  { type: 'a-level-new-curriculum', label: 'A-level New Curriculum Template Report Card', icon: FileTextIcon },
+  { type: 'secondary-default-subjects', label: 'Secondary O-level and A-Level Default Subjects', icon: Layout },
+];
 
 const DEFAULT_TEMPLATE: ReportTemplate = {
   type: 'modern',
@@ -204,6 +228,7 @@ export default function ReportCard() {
   const displayAddress = template.schoolAddress || settingsMap.schoolAddress || '';
   const displayPhone = template.schoolPhone || settingsMap.schoolPhone || '';
   const displayEmail = template.schoolEmail || settingsMap.schoolEmail || '';
+  const displayLogo = template.schoolLogo && template.schoolLogo !== 'S' ? template.schoolLogo : settingsMap.schoolLogo || template.schoolLogo || 'S';
   const academicYear = settingsMap.academicYear || new Date().getFullYear().toString();
 
   const subjectById = useMemo(() => new Map((subjects as any[]).map((subject) => [subject.id, subject])), [subjects]);
@@ -265,7 +290,7 @@ export default function ReportCard() {
       const maxScore = result ? Number(result.maxScore || 100) : 100;
       const pct = (score !== null && !isNaN(score) && maxScore > 0) ? Math.round((score / maxScore) * 100) : null;
       const grade = pct !== null ? getGradeFromScale(pct) : '-';
-      rows.push({ subject: (sub as any).name, code: (sub as any).code || '', score, maxScore, pct, grade, remark: pct !== null ? getRemarkFromScale(grade) : '-', remarks: result?.remarks || '' });
+      rows.push({ subject: (sub as any).name, code: getSubjectDisplayCode(sub), score, maxScore, pct, grade, remark: pct !== null ? getRemarkFromScale(grade) : '-', remarks: result?.remarks || '' });
       if (result) usedKeys.add(subjectKey);
     }
 
@@ -277,7 +302,7 @@ export default function ReportCard() {
       const maxScore = Number(result.maxScore || 100);
       const pct = (maxScore > 0) ? Math.round((score / maxScore) * 100) : 0;
       const grade = getGradeFromScale(pct);
-      rows.push({ subject: subjectName, code: sub?.code || '', score, maxScore, pct, grade, remark: getRemarkFromScale(grade), remarks: result.remarks || '' });
+      rows.push({ subject: subjectName, code: getSubjectDisplayCode(sub), score, maxScore, pct, grade, remark: getRemarkFromScale(grade), remarks: result.remarks || '' });
     }
 
     return rows;
@@ -449,7 +474,174 @@ export default function ReportCard() {
   const overallGrade = getGradeFromScale(overallPct);
   const overallRemark = getRemarkFromScale(overallGrade);
 
-  
+  const isImageLogo = displayLogo && (displayLogo.startsWith('http') || displayLogo.startsWith('data:'));
+  const namedTemplateTypes: ReportTemplateType[] = ['signed', 'nursery', 'primary', 'o-level', 'a-level-new-curriculum', 'secondary-default-subjects'];
+  const isNamedTemplate = namedTemplateTypes.includes(template.type);
+
+  function renderLogoMark(className = 'h-16 w-16') {
+    if (isImageLogo) return <img src={displayLogo} alt="School logo" className={`${className} object-contain`} />;
+    return <div className={`${className} flex items-center justify-center rounded-full border-2 border-current text-2xl font-black`}>{displayLogo || 'S'}</div>;
+  }
+
+  function renderWatermark() {
+    if (!displayLogo) return null;
+    return (
+      <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center opacity-[0.07]">
+        {isImageLogo ? (
+          <img src={displayLogo} alt="" className="h-72 w-72 object-contain" />
+        ) : (
+          <div className="flex h-72 w-72 items-center justify-center rounded-full border-[10px] border-slate-900 text-[9rem] font-black text-slate-900">
+            {displayLogo || 'S'}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function getNamedTemplateStyle() {
+    switch (template.type) {
+      case 'nursery':
+        return { title: 'NURSERY TEMPLATE REPORT CARD', header: '#0f766e', accent: '#f59e0b', soft: '#fff7ed', table: 'Learning Area', score: 'Progress' };
+      case 'primary':
+        return { title: 'PRIMARY TEMPLATE REPORT CARD', header: '#1d4ed8', accent: '#22c55e', soft: '#eff6ff', table: 'Subject', score: 'Score' };
+      case 'o-level':
+        return { title: 'O-LEVEL TEMPLATE REPORT CARD', header: '#064e3b', accent: '#0ea5e9', soft: '#ecfdf5', table: 'Subject', score: 'Score' };
+      case 'a-level-new-curriculum':
+        return { title: 'A-LEVEL NEW CURRICULUM TEMPLATE REPORT CARD', header: '#7f1d1d', accent: '#d97706', soft: '#fff7ed', table: 'Subject / Paper', score: 'Score' };
+      case 'secondary-default-subjects':
+        return { title: 'SECONDARY O-LEVEL AND A-LEVEL DEFAULT SUBJECTS', header: '#312e81', accent: '#14b8a6', soft: '#eef2ff', table: 'Default Subject', score: 'Status' };
+      default:
+        return { title: 'REPORT CARD WITH HEADTEACHER AND CLASS TEACHER SIGNATURES', header: '#1e3a5f', accent: '#16a34a', soft: '#f8fafc', table: 'Subject', score: 'Score' };
+    }
+  }
+
+  function renderNamedTemplate() {
+    const style = getNamedTemplateStyle();
+    const rows = studentResults.length > 0 ? studentResults : classSubjects.map((subject: any) => ({
+      subject: subject.name,
+      code: getSubjectDisplayCode(subject),
+      score: null,
+      maxScore: 100,
+      pct: null,
+      grade: '-',
+      remark: '-',
+      remarks: '',
+    }));
+    const showCompetence = template.type === 'nursery' || template.type === 'a-level-new-curriculum';
+    const showSubjectsOnly = template.type === 'secondary-default-subjects';
+
+    return (
+      <div className="relative overflow-hidden p-7 text-slate-900" style={{ minHeight: '1050px' }}>
+        {renderWatermark()}
+        <div className="relative z-10">
+          <div className="mb-4 flex items-center justify-between gap-4 border-b-4 pb-3" style={{ borderColor: style.header }}>
+            <div className="flex items-center gap-3">
+              <div className="text-slate-900">{renderLogoMark('h-16 w-16')}</div>
+              <div>
+                <h1 className="text-xl font-black uppercase leading-tight">
+                  <LiveEditable value={displaySchoolName} onSave={v => updateTemplate({ schoolName: v })} isLiveEditing={isLiveEditing} />
+                </h1>
+                <p className="text-[11px] font-semibold text-slate-600">
+                  <LiveEditable value={displayAddress || 'School address'} onSave={v => updateTemplate({ schoolAddress: v })} isLiveEditing={isLiveEditing} />
+                </p>
+                <p className="text-[10px] font-bold text-slate-500">{displayPhone || 'Phone'} {displayEmail ? ` | ${displayEmail}` : ''}</p>
+              </div>
+            </div>
+            <div className="rounded-lg px-4 py-3 text-right text-white" style={{ backgroundColor: style.header }}>
+              <p className="text-[10px] font-black uppercase tracking-wide">Term {exam?.term || '-'} / {exam?.year || academicYear}</p>
+              <p className="text-lg font-black uppercase leading-tight">{style.title}</p>
+            </div>
+          </div>
+
+          <div className="mb-4 grid grid-cols-2 gap-2 rounded-lg border p-3 text-xs" style={{ backgroundColor: style.soft, borderColor: `${style.header}40` }}>
+            {[
+              ['Student Name', `${student?.firstName || ''} ${student?.lastName || ''}`.trim() || '-'],
+              ['Student ID', student?.studentId || student?.admissionNo || '-'],
+              ['Class', className || '-'],
+              ['Exam', exam?.name || '-'],
+              ['Academic Year', academicYear],
+              ['Position', classPosition ? `${classPosition.position}${ordinal(classPosition.position)} of ${classPosition.outOf}` : '-'],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center gap-2">
+                <span className="w-24 shrink-0 font-black uppercase text-slate-600">{label}:</span>
+                <span className="flex-1 border-b border-slate-400 font-bold">{value}</span>
+              </div>
+            ))}
+          </div>
+
+          <table className="mb-4 w-full border-collapse text-xs">
+            <thead>
+              <tr className="text-white" style={{ backgroundColor: style.header }}>
+                <th className="border border-white/30 px-2 py-2 text-left font-black uppercase">{style.table}</th>
+                <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">Code</th>
+                {!showSubjectsOnly && <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">{style.score}</th>}
+                {!showSubjectsOnly && <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">Max</th>}
+                {!showSubjectsOnly && <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">Grade</th>}
+                {showCompetence && <th className="border border-white/30 px-2 py-2 text-left font-black uppercase">Competency / Comment</th>}
+                {!showCompetence && <th className="border border-white/30 px-2 py-2 text-left font-black uppercase">Remarks</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row: any, index: number) => (
+                <tr key={`${row.subject}-${index}`} style={{ backgroundColor: index % 2 === 0 ? style.soft : '#ffffff' }}>
+                  <td className="border border-slate-300 px-2 py-1.5 font-bold">{row.subject}</td>
+                  <td className="border border-slate-300 px-2 py-1.5 text-center font-semibold">{row.code || '-'}</td>
+                  {!showSubjectsOnly && <td className="border border-slate-300 px-2 py-1.5 text-center">{row.score ?? '-'}</td>}
+                  {!showSubjectsOnly && <td className="border border-slate-300 px-2 py-1.5 text-center">{row.maxScore ?? '-'}</td>}
+                  {!showSubjectsOnly && <td className="border border-slate-300 px-2 py-1.5 text-center font-black">{row.grade || '-'}</td>}
+                  <td className="border border-slate-300 px-2 py-1.5">{showSubjectsOnly ? 'Default subject' : row.remarks || row.remark || '-'}</td>
+                </tr>
+              ))}
+              {!showSubjectsOnly && (
+                <tr className="font-black text-white" style={{ backgroundColor: style.header }}>
+                  <td className="border border-white/30 px-2 py-2 uppercase">Overall</td>
+                  <td className="border border-white/30 px-2 py-2 text-center">-</td>
+                  <td className="border border-white/30 px-2 py-2 text-center">{totalScore}</td>
+                  <td className="border border-white/30 px-2 py-2 text-center">{totalMax}</td>
+                  <td className="border border-white/30 px-2 py-2 text-center">{overallGrade}</td>
+                  <td className="border border-white/30 px-2 py-2">{overallRemark}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          <div className="mb-5 grid grid-cols-2 gap-4 text-xs">
+            <div className="rounded-lg border p-3" style={{ borderColor: `${style.header}55` }}>
+              <p className="mb-2 font-black uppercase" style={{ color: style.header }}>{template.teacherCommentLabel}</p>
+              <div className="min-h-16 border-b border-slate-300">
+                <LiveEditable value={template.overallPerformanceTemplate} onSave={v => updateTemplate({ overallPerformanceTemplate: v })} isLiveEditing={isLiveEditing} />
+              </div>
+            </div>
+            <div className="rounded-lg border p-3" style={{ borderColor: `${style.header}55` }}>
+              <p className="mb-2 font-black uppercase" style={{ color: style.header }}>Grading Summary</p>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                {template.gradingScale.slice(0, 8).map(scale => (
+                  <p key={scale.grade}><span className="font-black">{scale.grade}</span> {scale.min}-{scale.max}: {scale.remark}</p>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-6 pt-8 text-center text-xs">
+            {[
+              template.showClassTeacher ? template.classTeacherLabel : "Teacher's Signature:",
+              template.principalSignatureLabel,
+              template.parentSignatureLabel,
+            ].map(label => (
+              <div key={label}>
+                <div className="mb-2 h-10 border-b-2" style={{ borderColor: style.header }} />
+                <p className="font-black uppercase">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-8 rounded-md px-3 py-2 text-center text-[10px] font-bold uppercase text-white" style={{ backgroundColor: style.header }}>
+            {template.footerText || 'This report card is generated from Schofy school records.'}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   function openEditor() {
     setDraft({ ...template });
@@ -554,7 +746,9 @@ export default function ReportCard() {
 
       {/* ΓöÇΓöÇ Report Card ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */}
       <div id="report-card-print" className="bg-white mx-auto max-w-2xl shadow-xl print:shadow-none print:max-w-full overflow-hidden" style={{ fontFamily: 'Arial, sans-serif' }}>
-        {template.type === 'modern' ? (
+        {isNamedTemplate ? (
+          renderNamedTemplate()
+        ) : template.type === 'modern' ? (
           <>
             {/* Modern Template Header */}
             <div className="p-5" style={{ backgroundColor: hdr }}>
@@ -590,12 +784,12 @@ export default function ReportCard() {
                   </h2>
                 </div>
                 <div className="w-16 h-16 rounded-xl bg-white shadow-lg flex items-center justify-center overflow-hidden shrink-0">
-                  {template.schoolLogo && (template.schoolLogo.startsWith('http') || template.schoolLogo.startsWith('data:')) ? (
-                    <img src={template.schoolLogo} alt="Logo" className="w-full h-full object-contain" />
+                  {displayLogo && (displayLogo.startsWith('http') || displayLogo.startsWith('data:')) ? (
+                    <img src={displayLogo} alt="Logo" className="w-full h-full object-contain" />
                   ) : (
                     <span className="text-3xl font-black text-indigo-600">
                       <LiveEditable 
-                        value={template.schoolLogo || 'S'} 
+                        value={displayLogo || 'S'} 
                         onSave={v => updateTemplate({ schoolLogo: v })} 
                         isLiveEditing={isLiveEditing} 
                       />
@@ -902,11 +1096,11 @@ export default function ReportCard() {
               {/* Logo & Header */}
               <div className="flex flex-col items-center text-center space-y-1 mb-6">
                 <div className="w-20 h-20 rounded-full border-2 border-[#1e3a5f] p-1 mb-2 overflow-hidden flex items-center justify-center">
-                  {template.schoolLogo && (template.schoolLogo.startsWith('http') || template.schoolLogo.startsWith('data:')) ? (
-                    <img src={template.schoolLogo} alt="Logo" className="w-full h-full object-contain" />
+                  {displayLogo && (displayLogo.startsWith('http') || displayLogo.startsWith('data:')) ? (
+                    <img src={displayLogo} alt="Logo" className="w-full h-full object-contain" />
                   ) : (
                     <span className="text-4xl font-black text-indigo-600">
-                      <LiveEditable value={template.schoolLogo || 'S'} onSave={v => updateTemplate({ schoolLogo: v })} isLiveEditing={isLiveEditing} />
+                      <LiveEditable value={displayLogo || 'S'} onSave={v => updateTemplate({ schoolLogo: v })} isLiveEditing={isLiveEditing} />
                     </span>
                   )}
                 </div>
@@ -1130,28 +1324,17 @@ export default function ReportCard() {
                 <>
                   <div>
                     <label className="form-label">Template Style</label>
-                    <div className="grid grid-cols-2 gap-3 mt-1.5">
-                      <button 
-                        onClick={() => setDraft(p => ({ ...p, type: 'modern' }))}
-                        className={`flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all ${draft.type === 'modern' ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-slate-100 dark:border-slate-700 hover:border-slate-200'}`}
-                      >
-                        <Layout size={24} className={draft.type === 'modern' ? 'text-primary-600' : 'text-slate-400'} />
-                        <span className={`text-xs font-bold ${draft.type === 'modern' ? 'text-primary-700' : 'text-slate-600'}`}>Modern</span>
-                      </button>
-                      <button 
-                        onClick={() => setDraft(p => ({ ...p, type: 'classic' }))}
-                        className={`flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all ${draft.type === 'classic' ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-slate-100 dark:border-slate-700 hover:border-slate-200'}`}
-                      >
-                        <FileTextIcon size={24} className={draft.type === 'classic' ? 'text-primary-600' : 'text-slate-400'} />
-                        <span className={`text-xs font-bold ${draft.type === 'classic' ? 'text-primary-700' : 'text-slate-600'}`}>Classic (Silvers)</span>
-                      </button>
-                      <button 
-                        onClick={() => setDraft(p => ({ ...p, type: 'high-school' }))}
-                        className={`flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all ${draft.type === 'high-school' ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-slate-100 dark:border-slate-700 hover:border-slate-200'}`}
-                      >
-                        <GraduationCap size={24} className={draft.type === 'high-school' ? 'text-primary-600' : 'text-slate-400'} />
-                        <span className={`text-xs font-bold ${draft.type === 'high-school' ? 'text-primary-700' : 'text-slate-600'}`}>High School</span>
-                      </button>
+                    <div className="grid grid-cols-1 gap-3 mt-1.5 sm:grid-cols-2">
+                      {TEMPLATE_OPTIONS.map(({ type, label, icon: Icon }) => (
+                        <button
+                          key={type}
+                          onClick={() => setDraft(p => ({ ...p, type }))}
+                          className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${draft.type === type ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-slate-100 dark:border-slate-700 hover:border-slate-200'}`}
+                        >
+                          <Icon size={22} className={draft.type === type ? 'text-primary-600' : 'text-slate-400'} />
+                          <span className={`text-xs font-bold ${draft.type === type ? 'text-primary-700' : 'text-slate-600 dark:text-slate-300'}`}>{label}</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">

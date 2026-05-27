@@ -15,6 +15,7 @@ import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, ge
 import { getSubscriptionAccessState } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { BoardingStatus, getBoardingStatus, withBoardingStatus } from '../utils/studentBoarding';
+import { useBackOrFallback } from '../utils/navigation';
 
 interface CustomField { id: string; label: string; value: string; }
 interface Attachment { id: string; name: string; file: string; type: string; }
@@ -38,6 +39,7 @@ export default function StudentForm() {
   const { user, schoolId } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
+  const goBack = useBackOrFallback('/students');
   const { id } = useParams<{ id?: string }>();
   const [loadingData, setLoadingData] = useState(true);
   const [formData, setFormData] = useState<Partial<Student> & { customFields?: CustomField[]; attachments?: Attachment[] }>(initialFormData);
@@ -178,11 +180,11 @@ export default function StudentForm() {
       const finalId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', []);
       if (isEditing) {
         const cap = formData.classId ? await getClassCapacityState(idAuth, formData.classId, id) : null;
-        if (cap?.isFull) { addToast(`${cap.name} is full. Choose another class.`, 'error'); setLoading(false); return; }
+        if (cap?.isFull) addToast(`${cap.name} is at capacity. Increase capacity or continue; this student will still be counted.`, 'warning');
         await dataService.update(idAuth, 'students', id!, withBoardingStatus({ ...formData, admissionNo: finalId, studentId: finalId, updatedAt: now } as any, (formData as any).boardingStatus || 'day'));
       } else {
         const cap = formData.classId ? await getClassCapacityState(idAuth, formData.classId) : null;
-        if (cap?.isFull) { addToast(`${cap.name} is full. Choose another class.`, 'error'); setLoading(false); return; }
+        if (cap?.isFull) addToast(`${cap.name} is at capacity. Increase capacity or continue; this student will still be counted.`, 'warning');
         const newStudent: Student = withBoardingStatus({
           id: tempId, userId: user!.id, schoolId: idAuth,
           admissionNo: finalId, studentId: finalId,
@@ -225,7 +227,7 @@ export default function StudentForm() {
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate('/students')} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
+        <button onClick={goBack} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
           <ArrowLeft size={20} />
         </button>
         <div>
@@ -250,7 +252,7 @@ export default function StudentForm() {
                 label="Student Photo"
                 value={formData.photoUrl}
                 onChange={(base64) => setFormData(prev => ({ ...prev, photoUrl: base64 as any }))}
-                className="w-32 shrink-0"
+                className="w-36 shrink-0"
               />
               <div className="flex-1 space-y-3">
                 <div>
@@ -306,8 +308,8 @@ export default function StudentForm() {
                 <select name="classId" value={formData.classId} onChange={handleChange} className="form-input" required>
                   <option value="">Select Class</option>
                   {classes.map(c => (
-                    <option key={c.id} value={c.id} disabled={c.isFull && c.id !== formData.classId}>
-                      {c.name} ({c.enrolled}/{c.capacity}){c.isFull && c.id !== formData.classId ? ' — Full' : ''}
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.enrolled}/{c.capacity}){c.isFull && c.id !== formData.classId ? ' - increase capacity or ignore' : ''}
                     </option>
                   ))}
                 </select>
@@ -449,7 +451,7 @@ export default function StudentForm() {
 
           {/* Submit */}
           <div className="border-t border-slate-200 dark:border-slate-700 px-5 py-4 flex items-center justify-end gap-3 bg-slate-50 dark:bg-slate-800/50 rounded-b-xl">
-            <button type="button" onClick={() => navigate('/students')} className="btn btn-secondary">Cancel</button>
+            <button type="button" onClick={goBack} className="btn btn-secondary">Cancel</button>
             <button type="submit" disabled={loading} className="btn btn-primary px-8 disabled:opacity-60">
               {loading ? <><Loader2 size={16} className="animate-spin" /> Saving...</> : <><Save size={16} /> {isEditing ? 'Save Changes' : 'Add Student'}</>}
             </button>

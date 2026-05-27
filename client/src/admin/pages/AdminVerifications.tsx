@@ -2,11 +2,22 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ClipboardCheck, CheckCircle, XCircle, Clock, RefreshCw,
-  ShieldCheck, ShieldOff, Eye, AlertTriangle,
+  ShieldCheck, ShieldOff, Eye, AlertTriangle, Ban, KeyRound,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { PLAN_DEFINITIONS } from '../../utils/plans';
+import {
+  VERIFICATION_CONTROL_TENANT,
+  VERIFICATION_TERMINATED_SETTING,
+  getLocalTerminatedVerificationCodeHashes,
+  getVerificationCodeCatalog,
+  loadTerminatedVerificationCodeHashes,
+  setLocalTerminatedVerificationCodeHashes,
+} from '../../utils/paymentVerification';
 import { useAdminTheme } from '../AdminThemeContext';
+
+const UNLIMITED_PLAN_ID = 'unlimited';
+const UNLIMITED_EXPIRY_YEAR = 2099;
 
 interface PendingVerification {
   id: string;
@@ -16,10 +27,24 @@ interface PendingVerification {
   plan: string;
   billingCycle: string;
   amount: string | number;
+  currency?: string;
+  displayAmount?: string;
   transactionId?: string;
   submittedAt: string;
   status: 'pending' | 'approved' | 'rejected';
   endsAt: string | null;
+}
+
+interface VerificationCodeRow {
+  label: string;
+  codeHash: string;
+  tokenHash: string;
+  planId: string;
+  planName: string;
+  billingCycle: string;
+  amount: number;
+  used: boolean;
+  terminated: boolean;
 }
 
 export default function AdminVerifications() {
@@ -33,6 +58,8 @@ export default function AdminVerifications() {
   const [grantMonths, setGrantMonths] = useState(3);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [codeRows, setCodeRows] = useState<VerificationCodeRow[]>([]);
+  const [codeSearch, setCodeSearch] = useState('');
 
   useEffect(() => { load(); }, []);
 
@@ -83,7 +110,9 @@ export default function AdminVerifications() {
           email: schoolEmails[sub.school_id] || '—',
           plan: sub.plan || receipt.planId || 'unknown',
           billingCycle: meta.billingCycle || receipt.billingCycle || '—',
-          amount: receipt.amount || '—',
+          amount: meta.amount ?? receipt.amount ?? '—',
+          currency: meta.displayCurrency || receipt.displayCurrency || receipt.currency || undefined,
+          displayAmount: meta.displayAmount || receipt.displayAmount || undefined,
           transactionId: meta.transactionId || receipt.transactionId || undefined,
           submittedAt: sub.created_at || sub.updated_at,
           status,
@@ -92,6 +121,17 @@ export default function AdminVerifications() {
       });
 
       setItems(rows);
+      const usedCodeHashes = new Set(
+        subs
+          .map((sub: any) => sub?.metadata?.verificationCodeHash)
+          .filter((hash: unknown): hash is string => typeof hash === 'string' && Boolean(hash))
+      );
+      const terminatedHashes = new Set(await loadTerminatedVerificationCodeHashes());
+      setCodeRows(getVerificationCodeCatalog().map((code) => ({
+        ...code,
+        used: usedCodeHashes.has(code.codeHash),
+        terminated: terminatedHashes.has(code.codeHash),
+      })));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -106,22 +146,45 @@ export default function AdminVerifications() {
       const now = new Date();
       const base = item.endsAt && new Date(item.endsAt) > now ? new Date(item.endsAt) : now;
       const newEndsAt = new Date(base);
-      newEndsAt.setMonth(newEndsAt.getMonth() + grantMonths);
+      const selectedPlan = PLAN_DEFINITIONS.find(p => p.id === item.plan) || PLAN_DEFINITIONS[0];
+      const isUnlimitedApproval = item.plan === UNLIMITED_PLAN_ID;
+      if (isUnlimitedApproval) {
+        newEndsAt.setFullYear(UNLIMITED_EXPIRY_YEAR, 11, 31);
+        newEndsAt.setHours(23, 59, 59, 999);
+      } else {
+        newEndsAt.setMonth(newEndsAt.getMonth() + grantMonths);
+      }
 
       await supabase.from('subscriptions').update({
         status: 'active',
         ends_at: newEndsAt.toISOString(),
         updated_at: now.toISOString(),
-        metadata: { approvedByAdmin: true, approvedAt: now.toISOString(), billingCycle: item.billingCycle },
+        metadata: {
+          approvedByAdmin: true,
+          approvedAt: now.toISOString(),
+          billingCycle: item.billingCycle,
+          accessType: isUnlimitedApproval ? 'one_time_desktop' : 'paid',
+          planName: selectedPlan.name,
+          planLimit: selectedPlan.studentLimit,
+          unlimited: isUnlimitedApproval,
+        },
       }).eq('id', item.id);
 
       await supabase.from('settings').upsert([
         { school_id: item.schoolId, key: 'subscriptionPlanId', value: item.plan, updated_at: now.toISOString() },
         { school_id: item.schoolId, key: 'subscriptionExpiryDate', value: newEndsAt.toISOString(), updated_at: now.toISOString() },
         { school_id: item.schoolId, key: 'subscriptionPlanEligible', value: true, updated_at: now.toISOString() },
+        { school_id: item.schoolId, key: 'subscriptionPlanLimit', value: selectedPlan.studentLimit, updated_at: now.toISOString() },
+        { school_id: item.schoolId, key: 'subscriptionPlanName', value: selectedPlan.name, updated_at: now.toISOString() },
       ], { onConflict: 'school_id,key' });
 
-      setSuccess(`Approved: ${item.schoolName} — access granted for ${grantMonths} months`);
+      await supabase.from('schools').update({
+        plan: item.plan,
+        max_students: selectedPlan.studentLimit,
+        updated_at: now.toISOString(),
+      }).eq('id', item.schoolId);
+
+      setSuccess(`Approved: ${item.schoolName} - ${isUnlimitedApproval ? 'unlimited one-time desktop access' : `access granted for ${grantMonths} months`}`);
       setSelected(null);
       await load();
     } catch (err: any) {
@@ -159,8 +222,70 @@ export default function AdminVerifications() {
     }
   }
 
+  async function terminateCode(row: VerificationCodeRow) {
+    setSaving(true); setError('');
+    try {
+      const now = new Date().toISOString();
+      const terminated = Array.from(new Set([...getLocalTerminatedVerificationCodeHashes(), row.codeHash]));
+      setLocalTerminatedVerificationCodeHashes(terminated);
+      if (supabase) {
+        const client = supabase;
+        await client.from('settings').upsert([{
+          school_id: VERIFICATION_CONTROL_TENANT,
+          key: VERIFICATION_TERMINATED_SETTING,
+          value: terminated,
+          updated_at: now,
+          created_at: now,
+        }], { onConflict: 'school_id,key' });
+
+        const { data } = await client
+          .from('subscriptions')
+          .select('id, metadata')
+          .contains('metadata', { verificationCodeHash: row.codeHash });
+        await Promise.all((data || []).map((sub: any) => client
+          .from('subscriptions')
+          .update({
+            status: 'rejected',
+            updated_at: now,
+            metadata: {
+              ...(sub.metadata || {}),
+              terminatedByAdmin: true,
+              terminatedAt: now,
+            },
+          })
+          .eq('id', sub.id)
+        ));
+      }
+      setSuccess(`Terminated ${row.label}.`);
+      await load();
+    } catch (err: any) {
+      setError(err.message || 'Could not terminate code.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const filtered = items.filter(i => filter === 'all' || i.status === filter);
   const pendingCount = items.filter(i => i.status === 'pending').length;
+  const filteredCodes = codeRows.filter((row) => {
+    const q = codeSearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${row.label} ${row.planName} ${row.billingCycle} ${row.codeHash} ${row.tokenHash}`.toLowerCase().includes(q);
+  });
+
+  function formatSubmittedAmount(item: PendingVerification) {
+    if (item.displayAmount) return item.displayAmount;
+    if (item.amount === '—' || item.amount === undefined || item.amount === null) return '—';
+    const numeric = typeof item.amount === 'number' ? item.amount : Number(String(item.amount).replace(/,/g, ''));
+    const currency = (item.currency || '').toUpperCase();
+    if (currency === 'UGX') {
+      return Number.isFinite(numeric)
+        ? `UGX ${Math.round(numeric).toLocaleString()}`
+        : `UGX ${item.amount}`;
+    }
+    if (currency) return Number.isFinite(numeric) ? `${currency} ${numeric.toLocaleString()}` : `${currency} ${item.amount}`;
+    return Number.isFinite(numeric) ? `$${numeric.toLocaleString()}` : String(item.amount);
+  }
 
   // Theme
   const card = isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
@@ -234,7 +359,7 @@ export default function AdminVerifications() {
                     <td className={`px-5 py-3 text-sm ${textPrimary} capitalize`}>
                       {PLAN_DEFINITIONS.find(p => p.id === item.plan)?.name || item.plan}
                     </td>
-                    <td className={`px-5 py-3 text-sm ${textPrimary}`}>${item.amount}</td>
+                    <td className={`px-5 py-3 text-sm ${textPrimary}`}>{formatSubmittedAmount(item)}</td>
                     <td className={`px-5 py-3 text-xs font-mono ${textMuted}`}>{item.transactionId || '—'}</td>
                     <td className={`px-5 py-3 text-xs ${textMuted}`}>{new Date(item.submittedAt).toLocaleString()}</td>
                     <td className="px-5 py-3">
@@ -258,6 +383,77 @@ export default function AdminVerifications() {
         )}
       </div>
 
+      <div className={`${card} border rounded-xl overflow-hidden`}>
+        <div className={`flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+          <div>
+            <h2 className={`flex items-center gap-2 text-base font-bold ${textPrimary}`}>
+              <KeyRound size={18} className="text-emerald-500" />
+              Verification Codes
+            </h2>
+            <p className={`text-xs ${textMuted}`}>
+              Hash-only deployed code list. Used: {codeRows.filter((row) => row.used).length} / {codeRows.length}
+            </p>
+          </div>
+          <input
+            type="text"
+            value={codeSearch}
+            onChange={(e) => setCodeSearch(e.target.value)}
+            placeholder="Search code label, plan, token hash..."
+            className={`w-full rounded-xl border px-3 py-2 text-sm sm:max-w-sm ${isDark ? 'border-slate-700 bg-slate-800 text-white' : 'border-slate-200 bg-white text-slate-900'}`}
+          />
+        </div>
+        <div className="max-h-[520px] overflow-auto">
+          <table className="w-full text-sm">
+            <thead className={isDark ? 'bg-slate-900' : 'bg-slate-50'}>
+              <tr className={`border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <th className={thClass}>Label</th>
+                <th className={thClass}>Plan</th>
+                <th className={thClass}>Amount</th>
+                <th className={thClass}>Token</th>
+                <th className={thClass}>Status</th>
+                <th className={thClass}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCodes.slice(0, 250).map((row) => (
+                <tr key={row.codeHash} className={`border-b ${isDark ? 'border-slate-800/50' : 'border-slate-100'} ${rowHover}`}>
+                  <td className={`px-5 py-3 font-mono text-xs ${textPrimary}`}>{row.label}</td>
+                  <td className={`px-5 py-3 text-sm ${textPrimary}`}>{row.planName} <span className={textMuted}>({row.billingCycle})</span></td>
+                  <td className={`px-5 py-3 text-sm ${textPrimary}`}>${row.amount}</td>
+                  <td className={`max-w-[220px] truncate px-5 py-3 font-mono text-xs ${textMuted}`} title={row.tokenHash}>{row.tokenHash}</td>
+                  <td className="px-5 py-3">
+                    {row.terminated ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-900/40 px-2 py-0.5 text-xs font-medium text-red-400"><Ban size={10} />Terminated</span>
+                    ) : row.used ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-green-900/40 px-2 py-0.5 text-xs font-medium text-green-400"><CheckCircle size={10} />Used</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-700/40 px-2 py-0.5 text-xs font-medium text-slate-300"><Clock size={10} />Unused</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => terminateCode(row)}
+                      disabled={saving || row.terminated}
+                      className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                      <Ban size={12} />
+                      Terminate
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!filteredCodes.length && (
+                <tr><td colSpan={6} className={`px-5 py-12 text-center text-sm ${textMuted}`}>No verification codes match your search</td></tr>
+              )}
+            </tbody>
+          </table>
+          {filteredCodes.length > 250 && (
+            <p className={`px-5 py-3 text-xs ${textMuted}`}>Showing first 250 matching codes. Search to narrow the list.</p>
+          )}
+        </div>
+      </div>
+
       {/* Detail modal */}
       {selected && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
@@ -273,7 +469,7 @@ export default function AdminVerifications() {
                 ['Email', selected.email],
                 ['Plan', PLAN_DEFINITIONS.find(p => p.id === selected.plan)?.name || selected.plan],
                 ['Billing', selected.billingCycle],
-                ['Amount', `$${selected.amount}`],
+                ['Amount', formatSubmittedAmount(selected)],
                 ['Transaction ID', selected.transactionId || 'Not provided'],
                 ['Submitted', new Date(selected.submittedAt).toLocaleString()],
               ].map(([k, v]) => (
@@ -283,7 +479,7 @@ export default function AdminVerifications() {
                 </div>
               ))}
 
-              {selected.status === 'pending' && (
+              {selected.status === 'pending' && selected.plan !== UNLIMITED_PLAN_ID && (
                 <div className="pt-2">
                   <label className={`block text-xs font-medium ${textMuted} mb-1.5`}>Grant access for (months)</label>
                   <select value={grantMonths} onChange={e => setGrantMonths(Number(e.target.value))}
@@ -291,6 +487,11 @@ export default function AdminVerifications() {
                   >
                     {[1, 3, 6, 12].map(m => <option key={m} value={m}>{m} month{m > 1 ? 's' : ''}</option>)}
                   </select>
+                </div>
+              )}
+              {selected.status === 'pending' && selected.plan === UNLIMITED_PLAN_ID && (
+                <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800 text-emerald-300' : 'bg-emerald-50 border border-emerald-200 text-emerald-700'}`}>
+                  Approving this request grants Unlimited one-time desktop access and stores the unlimited student limit for the school.
                 </div>
               )}
 

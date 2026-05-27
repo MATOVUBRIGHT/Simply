@@ -1,8 +1,8 @@
-import { useState, useRef, useMemo, useEffect } from 'react';
+import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen, Pencil } from 'lucide-react';
+import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen, Pencil, SlidersHorizontal } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
@@ -15,6 +15,9 @@ import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { matchesTextSearch } from '../utils/searchMatch';
+import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
+import { getSubjectDisplayCode, normalizeSubjectCode } from '../utils/subjects';
+import { getGradeFromScale, getSavedGradingScale } from '../utils/grading';
 
 interface StudentGrade extends ExamResult {
   studentName: string;
@@ -25,30 +28,13 @@ interface StudentGrade extends ExamResult {
   examType: string;
 }
 
-const ugandaGrades = [
-  { grade: 'D1', min: 90, max: 100, points: 1, remark: 'Distinction' },
-  { grade: 'D2', min: 85, max: 89, points: 2, remark: 'Distinction' },
-  { grade: 'C3', min: 80, max: 84, points: 3, remark: 'Credit' },
-  { grade: 'C4', min: 75, max: 79, points: 4, remark: 'Credit' },
-  { grade: 'C5', min: 70, max: 74, points: 5, remark: 'Credit' },
-  { grade: 'C6', min: 65, max: 69, points: 6, remark: 'Credit' },
-  { grade: 'P7', min: 60, max: 64, points: 7, remark: 'Pass' },
-  { grade: 'P8', min: 50, max: 59, points: 8, remark: 'Pass' },
-  { grade: 'F9', min: 0, max: 49, points: 9, remark: 'Fail' },
-];
-
-function getGrade(score: number): { grade: string; remark: string; points: number } {
-  const entry = ugandaGrades.find(g => score >= g.min && score <= g.max);
-  return entry || { grade: 'F9', remark: 'Fail', points: 9 };
-}
-
-function normalizeSubjectKey(value: string | undefined | null) {
-  return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function normalizeSubjectKey(value: unknown) {
+  return normalizeSubjectCode(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 function getSubjectIdentity(subject: any, fallbackName?: string, fallbackId?: string) {
   const nameKey = normalizeSubjectKey(subject?.name || fallbackName);
-  const codeKey = normalizeSubjectKey(subject?.code);
+  const codeKey = normalizeSubjectKey(getSubjectDisplayCode(subject));
   return nameKey || codeKey || fallbackId || '';
 }
 
@@ -92,6 +78,7 @@ export default function Grades() {
   const { data: subjects } = useTableData(sid, 'subjects');
   const { data: examsData } = useTableData(sid, 'exams');
   const { data: allClassesData } = useTableData(sid, 'classes');
+  const { data: settingsData } = useTableData(sid, 'settings');
 
   const activeStudents = useActiveStudents();
   const { students: allStudents } = useStudents();
@@ -99,6 +86,8 @@ export default function Grades() {
   // All active students across all classes
   const students = activeStudents;
   const subjectById = useMemo(() => new Map((subjects as any[]).map((subject) => [subject.id, subject])), [subjects]);
+  const gradingScale = useMemo(() => getSavedGradingScale(settingsData as any[]), [settingsData]);
+  const getGrade = useCallback((score: number) => getGradeFromScale(score, gradingScale), [gradingScale]);
 
   const grades = useMemo(() => {
     const deduped = new Map<string, StudentGrade>();
@@ -421,7 +410,7 @@ export default function Grades() {
     if (classSubjects.length === 0) { addToast('No subjects found for selected class. Add subjects first.', 'error'); return; }
 
     import('xlsx').then((XLSX) => {
-      const subjectHeaders = classSubjects.map((s: any) => `${s.name}${s.code ? ` (${s.code})` : ''}`);
+      const subjectHeaders = classSubjects.map((s: any) => `${s.name} (${getSubjectDisplayCode(s)})`);
       const headers = ['Student Name', 'Student ID', ...subjectHeaders];
       const rows = classStudents.map(s => [
         `${s.firstName} ${s.lastName}`,
@@ -605,8 +594,7 @@ export default function Grades() {
         examId = res.record?.id || newExam.id;
       }
 
-      let successCount = 0;
-      for (const data of importPreview) {
+      const tasks = importPreview.map((data) => async () => {
         const student = allStudents.find(s => s.id === (data as any).studentId);
         const subject = subjectById.get((data as any).subjectId);
         const subjectKey = getSubjectIdentity(subject, subject?.name, (data as any).subjectId);
@@ -643,8 +631,8 @@ export default function Grades() {
             createdAt: now,
           } as any);
         }
-        successCount++;
-      }
+      });
+      await runTasksInThirtyPercentBatches(tasks);
       setIsImportingGrades(false);
       closeImportModal();
       setShowImportSuccess(true);
@@ -717,12 +705,12 @@ export default function Grades() {
 
       const uniqueSubjects = [...new Map(classGrades.map(g => [
         g.subjectKey,
-        { key: g.subjectKey, id: g.subjectId, name: g.subjectName, code: subjectById.get(g.subjectId)?.code || '' }
+        { key: g.subjectKey, id: g.subjectId, name: g.subjectName, code: getSubjectDisplayCode(subjectById.get(g.subjectId)) }
       ])).values()];
 
       return { cls, studentList, uniqueSubjects, totalGrades: classGrades.length };
     }).filter(Boolean) as { cls: any; studentList: any[]; uniqueSubjects: any[]; totalGrades: number }[];
-  }, [classesSorted, filteredGrades, allStudents, subjectById]);
+  }, [classesSorted, filteredGrades, allStudents, subjectById, getGrade]);
 
   return (
     <div className="space-y-6">
@@ -798,6 +786,9 @@ export default function Grades() {
           <button onClick={() => navigate('/exam-marks')} className="btn btn-secondary flex items-center gap-2">
             <BarChart3 size={16} /> Exam Marks
           </button>
+          <button onClick={() => navigate('/grades/custom-grading')} className="btn btn-secondary flex items-center gap-2">
+            <SlidersHorizontal size={16} /> Custom Grading
+          </button>
           <button onClick={() => setShowForm(true)} className="btn btn-primary shadow-lg shadow-primary-500/25">
             <Plus size={16} /> Add Grade
           </button>
@@ -872,19 +863,19 @@ export default function Grades() {
                 className="search-input"
               />
             </div>
-            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
               {/* Class Filter Dropdown */}
-              <div className="relative" ref={classFilterRef}>
+              <div className="relative w-[132px] sm:w-[148px]" ref={classFilterRef}>
                 <button
                   onClick={() => { setShowClassFilter(!showClassFilter); setShowTermFilter(false); }}
-                  className={`btn btn-secondary flex items-center gap-2 ${filterClass !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
+                  className={`btn btn-secondary flex w-full items-center gap-2 px-3 ${filterClass !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
                 >
-                  <Filter size={16} />
-                  <span className="hidden sm:inline">
+                  <Filter size={16} className="shrink-0" />
+                  <span className="hidden min-w-0 flex-1 truncate text-left sm:inline">
                     {filterClass === 'all' ? 'All Classes' : (allClassesData.find((c: any) => c.id === filterClass) as any)?.name || filterClass}
                   </span>
-                  <span className="sm:hidden">Class</span>
-                  <ChevronDown size={14} className={`transition-transform duration-300 ${showClassFilter ? 'rotate-180' : ''}`} />
+                  <span className="min-w-0 flex-1 truncate text-left sm:hidden">Class</span>
+                  <ChevronDown size={14} className={`shrink-0 transition-transform duration-300 ${showClassFilter ? 'rotate-180' : ''}`} />
                 </button>
                 {showClassFilter && (
                   <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden animate-dropdown-in max-h-64 overflow-y-auto">
@@ -911,16 +902,16 @@ export default function Grades() {
               </div>
 
               {/* Term Filter Dropdown */}
-              <div className="relative" ref={termFilterRef}>
+              <div className="relative w-[112px] sm:w-[120px]" ref={termFilterRef}>
                 <button
                   onClick={() => { setShowTermFilter(!showTermFilter); setShowClassFilter(false); }}
-                  className={`btn btn-secondary flex items-center gap-2 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
+                  className={`btn btn-secondary flex w-full items-center gap-2 px-3 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
                 >
-                  <span className="hidden sm:inline">
+                  <span className="hidden min-w-0 flex-1 truncate text-left sm:inline">
                     {filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}
                   </span>
-                  <span className="sm:hidden">Terms</span>
-                  <ChevronDown size={14} className={`transition-transform duration-300 ${showTermFilter ? 'rotate-180' : ''}`} />
+                  <span className="min-w-0 flex-1 truncate text-left sm:hidden">Terms</span>
+                  <ChevronDown size={14} className={`shrink-0 transition-transform duration-300 ${showTermFilter ? 'rotate-180' : ''}`} />
                 </button>
                 {showTermFilter && (
                   <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden animate-dropdown-in">
@@ -1029,7 +1020,7 @@ export default function Grades() {
                           {uniqueSubjects.map(sub => (
                             <th key={sub.key || sub.id || sub.name} className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap text-xs">
                               {sub.name}
-                              {sub.code && <div className="font-normal text-[10px] text-slate-400">{sub.code}</div>}
+                              <div className="font-normal text-[10px] text-slate-400">{sub.code}</div>
                             </th>
                           ))}
                           <th className="px-3 py-2.5 text-center font-semibold text-slate-600 dark:text-slate-300">Avg%</th>
@@ -1193,7 +1184,7 @@ export default function Grades() {
                         return (
                           <tr key={sub.id} className={i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'}>
                             <td className="px-4 py-2 font-medium text-slate-800 dark:text-white">{sub.name}</td>
-                            <td className="px-3 py-2 text-center font-mono text-xs text-slate-500">{sub.code || '-'}</td>
+                            <td className="px-3 py-2 text-center font-mono text-xs text-slate-500">{getSubjectDisplayCode(sub) || '-'}</td>
                             <td className="px-3 py-2 text-center">
                               <input
                                 type="number"
@@ -1352,7 +1343,7 @@ export default function Grades() {
 
       {showImportModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />

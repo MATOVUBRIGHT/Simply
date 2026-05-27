@@ -15,6 +15,7 @@ import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { sortClassesBySectionThenLevel, groupClassesBySection } from '../utils/classroom';
 import { PortalDropdown } from '../components/PortalDropdown';
+import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 
 const classColors = [
   { card: 'card-coral-light', gradient: 'from-orange-100 to-amber-100', text: 'text-orange-600' },
@@ -96,7 +97,9 @@ const ClassRow = memo(({
 }) => {
   const navigate = useNavigate();
   const pct = c.capacity > 0 ? Math.round((enrolled / c.capacity) * 100) : 0;
-  const full = enrolled >= c.capacity;
+  const overCapacity = c.capacity > 0 && enrolled > c.capacity;
+  const full = c.capacity > 0 && enrolled >= c.capacity;
+  const capacityHint = overCapacity ? 'Increase capacity or ignore' : full ? 'At capacity' : `${Math.max(0, c.capacity - enrolled)} left`;
   
   return (
     <div
@@ -135,15 +138,15 @@ const ClassRow = memo(({
         <span className="text-xs text-slate-500">{enrolled}/{c.capacity} students</span>
         <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all ${full ? 'bg-red-500' : 'bg-emerald-500'}`}
+            className={`h-full rounded-full transition-all ${overCapacity ? 'bg-amber-500' : full ? 'bg-red-500' : 'bg-emerald-500'}`}
             style={{ width: `${Math.min(100, pct)}%` }}
           />
         </div>
       </div>
 
       {/* Slots */}
-      <span className={`hidden md:block text-xs font-medium w-20 text-right shrink-0 ${full ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
-        {full ? 'Full' : `${c.capacity - enrolled} left`}
+      <span className={`hidden md:block text-xs font-medium w-36 text-right shrink-0 ${overCapacity ? 'text-amber-600 dark:text-amber-300' : full ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
+        {capacityHint}
       </span>
 
       {/* Actions */}
@@ -164,6 +167,7 @@ const ClassRow = memo(({
 export default function Classes() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
+  const navigate = useNavigate();
   const confirm = useConfirm();
   const { data: classesData, loading } = useTableData(sid, 'classes');
   const { data: allStudentsData } = useTableData(sid, 'students');
@@ -270,6 +274,10 @@ export default function Classes() {
     addToast('Period removed', 'success');
   }
 
+  function openTimetablePage(classId?: string) {
+    navigate(classId ? `/classes/timetable?classId=${classId}` : '/classes/timetable');
+  }
+
   const classExpectedFields = [
     { key: 'name', label: 'Class Name', required: true },
     { key: 'level', label: 'Level', required: true },
@@ -329,24 +337,24 @@ export default function Classes() {
     try {
       const now = new Date().toISOString();
       const idsToDelete = Array.from(selectedClasses);
-      
-      for (const classId of idsToDelete) {
-        const classItem = classes.find(c => c.id === classId);
-        if (classItem) {
-          await dataService.delete(id, 'classes', classId);
-          addToRecycleBin(id, {
+      const recycleItems = idsToDelete
+        .map(classId => classes.find(c => c.id === classId))
+        .filter(Boolean) as Class[];
+
+      recycleItems.forEach(classItem => {
+        addToRecycleBin(id, {
             id: `class-${Date.now()}-${Math.random()}`,
             type: 'class',
             name: classItem.name,
             data: classItem,
             deletedAt: now
-          });
-        }
-      }
+        });
+      });
+      const deletedCount = await deleteInThirtyPercentBatches(id, 'classes', idsToDelete);
       
       setSelectedClasses(new Set());
       setSelectMode(false);
-      addToast(`${selectedClasses.size} classes moved to recycle bin`, 'success');
+      addToast(`${deletedCount} classes moved to recycle bin`, 'success');
     } catch (error) {
       console.error('Bulk delete error:', error);
       addToast('Failed to delete classes', 'error');
@@ -556,11 +564,8 @@ export default function Classes() {
     setImportProgress(0);
     try {
       const now = new Date().toISOString();
-      let successCount = 0;
       const snap = [...importPreview];
-      
-      for (let i = 0; i < snap.length; i++) {
-        const data = snap[i];
+      const tasks = snap.map((data) => async () => {
         const classItem: Class = {
           id: crypto.randomUUID(),
           schoolId: id,
@@ -571,9 +576,8 @@ export default function Classes() {
           createdAt: now,
         };
         await dataService.create(id, 'classes', classItem);
-        successCount++;
-        setImportProgress(Math.round(((i + 1) / snap.length) * 100));
-      }
+      });
+      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
       setIsImporting(false);
       closeImportModal();
       setShowImportSuccess(true);
@@ -591,11 +595,23 @@ export default function Classes() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
-            Classes
+            Classes & Timetables
           </h1>
-          <p className="text-slate-500">Manage school classes and streams</p>
+          <p className="text-slate-500">Manage school classes, streams, and timetables</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => { setShowForm(true); setEditingClass(null); setFormData({ name: '', level: 1, stream: '', capacity: 40 }); }} className="btn btn-primary shadow-lg shadow-primary-500/25">
+            <Plus size={18} /> Add Class
+          </button>
+          <button onClick={() => openTimetablePage()} className="btn btn-secondary" title="Open timetable">
+            <Calendar size={16} />
+            <span className="hidden sm:inline">Timetable</span>
+          </button>
+          <button onClick={() => setShowImportModal(true)} className="btn btn-secondary" title="Import CSV">
+            <Upload size={16} />
+            <span className="hidden sm:inline">Import</span>
+          </button>
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls" className="hidden" />
           <div className="relative" ref={exportMenuRef}>
             <button onClick={() => setShowExportMenu(!showExportMenu)} className="btn btn-secondary" title="Export">
               <Download size={16} />
@@ -616,14 +632,6 @@ export default function Classes() {
               </div>
             )}
           </div>
-          <button onClick={() => setShowImportModal(true)} className="btn btn-secondary" title="Import CSV">
-            <Upload size={16} />
-            <span className="hidden sm:inline">Import</span>
-          </button>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".xlsx,.xls" className="hidden" />
-          <button onClick={() => { setShowForm(true); setEditingClass(null); setFormData({ name: '', level: 1, stream: '', capacity: 40 }); }} className="btn btn-primary shadow-lg shadow-primary-500/25">
-            <Plus size={18} /> Add Class
-          </button>
         </div>
       </div>
 
@@ -779,7 +787,7 @@ export default function Classes() {
                       selectMode={selectMode}
                       enrolled={classEnrollmentCounts[c.id] || 0}
                       onClick={handleRowClick}
-                      onTimetable={(id: string) => { setTimetableClassId(id); setShowTimetable(true); }}
+                      onTimetable={openTimetablePage}
                       onEdit={handleEdit}
                       onDelete={handleDelete}
                     />
@@ -925,7 +933,7 @@ export default function Classes() {
 
       {showImportModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in">
-          <div className="modal-card w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in">
+          <div className="modal-card w-full max-w-md max-h-[85vh] overflow-hidden animate-modal-in">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />

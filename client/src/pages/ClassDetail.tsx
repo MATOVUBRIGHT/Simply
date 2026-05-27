@@ -7,10 +7,13 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
+import { useBackOrFallback } from '../utils/navigation';
+import { getSubjectDisplayCode } from '../utils/subjects';
 
 export default function ClassDetail() {
   const { id: classId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const goBack = useBackOrFallback('/classes');
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
   const { formatMoney } = useCurrency();
@@ -38,7 +41,7 @@ export default function ClassDetail() {
     [subjectsData, classId]
   );
 
-  // Teachers assigned to this class via subjects
+  // Teachers assigned directly to this class or through subjects
   const teachers = useMemo(() => {
     const teacherIds = new Set(subjects.map((s: any) => s.teacherId).filter(Boolean));
     // Also include staff whose subjects list contains any subject in this class
@@ -46,10 +49,11 @@ export default function ClassDetail() {
       (st.subjects || []).some((sn: string) => subjects.find((s: any) => s.name === sn))
     );
     const byId = (staffData as any[]).filter(st => teacherIds.has(st.id));
+    const byClass = (staffData as any[]).filter(st => Array.isArray(st.assignedClassIds) && st.assignedClassIds.includes(classId));
     const merged = new Map<string, any>();
-    [...byId, ...bySubject].forEach(t => merged.set(t.id, t));
+    [...byId, ...bySubject, ...byClass].forEach(t => merged.set(t.id, t));
     return Array.from(merged.values());
-  }, [staffData, subjects]);
+  }, [staffData, subjects, classId]);
 
   // Finance
   const studentIds = useMemo(() => new Set(students.map((s: any) => s.id)), [students]);
@@ -80,19 +84,20 @@ export default function ClassDetail() {
       <div className="flex flex-col items-center justify-center py-20 gap-4">
         <GraduationCap size={48} className="text-slate-300" />
         <p className="text-slate-500 font-medium">Class not found</p>
-        <button onClick={() => navigate('/classes')} className="btn btn-secondary">Back to Classes</button>
+        <button onClick={goBack} className="btn btn-secondary">Back to Classes</button>
       </div>
     );
   }
 
   const enrolled = students.length;
   const pct = cls.capacity > 0 ? Math.round((enrolled / cls.capacity) * 100) : 0;
+  const overCapacity = cls.capacity > 0 && enrolled > cls.capacity;
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate('/classes')} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
+        <button onClick={goBack} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
           <ArrowLeft size={20} className="text-slate-600 dark:text-slate-400" />
         </button>
         <div className="flex-1 min-w-0">
@@ -133,8 +138,13 @@ export default function ClassDetail() {
           <span className="text-sm text-slate-500">{enrolled}/{cls.capacity} ({pct}%)</span>
         </div>
         <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+          <div className={`h-full rounded-full transition-all ${overCapacity ? 'bg-amber-500' : pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, pct)}%` }} />
         </div>
+        {overCapacity && (
+          <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-300">
+            This class is over capacity. Increase capacity or ignore; all enrolled students are still counted.
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -193,7 +203,7 @@ export default function ClassDetail() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{s.name}</p>
                 </div>
-                {s.code && <span className="font-mono text-xs text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">{s.code}</span>}
+                <span className="font-mono text-xs text-slate-400">{getSubjectDisplayCode(s)}</span>
               </div>
             ))}
           </div>
@@ -299,7 +309,7 @@ export default function ClassDetail() {
               <Clock size={18} className="text-indigo-500" />
               <h2 className="font-bold text-slate-800 dark:text-white">Timetable ({classTimetable.length} periods)</h2>
             </div>
-            <Link to="/classes" className="text-xs text-indigo-500 hover:underline flex items-center gap-1">
+            <Link to={`/classes/timetable?classId=${classId}`} className="text-xs text-indigo-500 hover:underline flex items-center gap-1">
               Edit <ChevronRight size={12} />
             </Link>
           </div>
@@ -314,12 +324,18 @@ export default function ClassDetail() {
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{day}</p>
                   <div className="space-y-1">
                     {periods.map((t: any) => {
-                      const sub = (subjectsData as any[]).find(s => s.id === t.subjectId);
+                      let sub = (subjectsData as any[]).find(s => s.id === t.subjectId);
                       const teacher = (staffData as any[]).find(s => s.id === t.teacherId);
+                      const exam = (examsData as any[]).find(e => e.id === t.examId);
+                      const title = t.entryType === 'free' ? 'Free Time' : t.customName || exam?.name || sub?.name || 'Event';
+                      const kind = t.entryType === 'free' ? 'Free' : t.entryType === 'exam' || t.examId ? 'Exam' : t.entryType === 'event' || t.customName ? 'Event' : 'Class';
+                      if (!sub) sub = { name: title };
                       return (
                         <div key={t.id} className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-700/50 rounded-lg text-xs">
                           <span className="text-slate-400 w-20 shrink-0">{t.startTime}–{t.endTime}</span>
                           <span className="font-medium text-slate-700 dark:text-slate-200 flex-1 truncate">{sub?.name || '—'}</span>
+                          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-500 dark:bg-slate-600 dark:text-slate-300">{kind}</span>
+                          {t.room && <span className="text-slate-400 truncate">Room {t.room}</span>}
                           {teacher && <span className="text-slate-400 truncate">{teacher.firstName} {teacher.lastName}</span>}
                         </div>
                       );

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users } from 'lucide-react';
+import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCurrency } from '../hooks/useCurrency';
@@ -10,6 +10,10 @@ import { supabase } from '../lib/supabase';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useConfirm } from '../components/ConfirmModal';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
+import { deleteInThirtyPercentBatches, processInThirtyPercentBatches } from '../utils/bulkDelete';
+import { compressImageFile } from '../utils/imageCompression';
+
+const APP_VERSION_LABEL = 'Version1';
 
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -25,6 +29,17 @@ const currencies = [
   { code: 'ETB', symbol: 'Br', name: 'Ethiopian Birr' },
   { code: 'ZMW', symbol: 'ZK', name: 'Zambian Kwacha' },
 ];
+
+function normalizeSchoolType(value: unknown) {
+  const allowed = new Set(['nursery', 'primary', 'secondary', 'nursery_primary', 'primary_secondary', 'all']);
+  const text = String(value || '').trim();
+  return allowed.has(text) ? text : 'nursery_primary';
+}
+
+function normalizeSchoolCategory(value: unknown) {
+  const text = String(value || '').trim();
+  return text === 'music_school' || text === 'tailoring' ? text : '';
+}
 
 export default function Settings() {
   const { primaryColor, setPrimaryColor } = useTheme();
@@ -51,6 +66,7 @@ export default function Settings() {
     schoolAddress: '',
     schoolPhone: '',
     schoolEmail: '',
+    schoolLogo: '',
     academicYear: new Date().getFullYear().toString(),
     currentTerm: '1',
     term1Start: '',
@@ -61,6 +77,8 @@ export default function Settings() {
     term3End: '',
     currency: 'USD',
     schoolType: 'nursery_primary',
+    schoolCategory: '',
+    musicInstruments: 'Piano, Guitar, Drums, Violin, Voice',
     bankAccountName: '',
     bankAccountNumber: '',
     bankName: '',
@@ -98,7 +116,7 @@ export default function Settings() {
 
       if (Object.keys(localObj).length > 0) {
         // We have local settings — apply them immediately
-        setSettings(prev => ({ ...prev, ...localObj }));
+        setSettings(prev => ({ ...prev, ...localObj, schoolType: normalizeSchoolType(localObj.schoolType), schoolCategory: normalizeSchoolCategory(localObj.schoolCategory) }));
         if (localObj.currency) {
           localStorage.setItem('schofy_currency', localObj.currency);
           window.dispatchEvent(new Event('currencyChanged'));
@@ -111,8 +129,13 @@ export default function Settings() {
         const remoteObj: Record<string, any> = {};
         stored.forEach((s: any) => { remoteObj[s.key] = s.value; });
 
-        const merged = { ...localObj, ...remoteObj };
-        setSettings(prev => ({ ...prev, ...remoteObj }));
+        const merged = {
+          ...localObj,
+          ...remoteObj,
+          schoolType: normalizeSchoolType(remoteObj.schoolType || localObj.schoolType),
+          schoolCategory: normalizeSchoolCategory(remoteObj.schoolCategory || localObj.schoolCategory),
+        };
+        setSettings(prev => ({ ...prev, ...remoteObj, schoolType: merged.schoolType, schoolCategory: merged.schoolCategory }));
         localStorage.setItem(localKey, JSON.stringify(merged));
         if (remoteObj.currency) {
           localStorage.setItem('schofy_currency', remoteObj.currency);
@@ -127,6 +150,7 @@ export default function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [autoSaved, setAutoSaved] = useState(false);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const schoolLogoInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-save to Supabase 1s after last change
   const autoSave = useCallback(async (newSettings: typeof settings) => {
@@ -159,13 +183,13 @@ export default function Settings() {
 
     setIsSaving(true);
     try {
-      localStorage.setItem('schofy_currency', settings.currency || 'USD');
-      window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
-
-      const classesOk = await autoCreateClasses(sid, settings.schoolType, { confirmStudentClear: true, forceReplace: true });
+      const settingsToSave = { ...settings, schoolType: normalizeSchoolType(settings.schoolType), schoolCategory: normalizeSchoolCategory(settings.schoolCategory) };
+      localStorage.setItem('schofy_currency', settingsToSave.currency || 'USD');
+      window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settingsToSave }));
+      const classesOk = await autoCreateClasses(sid, settingsToSave.schoolType, { confirmStudentClear: true, forceReplace: false });
       if (!classesOk) return;
 
-      const result = await dataService.saveSettings(sid, settings);
+      const result = await dataService.saveSettings(sid, settingsToSave);
       if (!result.success) {
         addToast(result.error || 'Failed to save settings', 'error');
         return;
@@ -187,55 +211,44 @@ export default function Settings() {
     schoolTypeOverride?: string,
     options: { confirmStudentClear?: boolean; forceReplace?: boolean } = {},
   ): Promise<boolean> {
-    const schoolType = schoolTypeOverride || settings.schoolType || 'nursery_primary';
+    const schoolType = normalizeSchoolType(schoolTypeOverride || settings.schoolType);
 
-    // Globally unique levels matching getClassSection() ranges:
-    // Nursery: 1-4, Primary: 5-11, Secondary JSS: 12-15, SS: 18-19
     const CLASS_MAP: Record<string, { name: string; level: number }[]> = {
       nursery: [
-        { name: 'Baby', level: 1 },
-        { name: 'Nursery', level: 2 },
-        { name: 'Middle', level: 3 },
-        { name: 'Top', level: 4 },
+        { name: 'Baby Class', level: 1 },
+        { name: 'Middle Class', level: 2 },
+        { name: 'Top Class', level: 3 },
       ],
       primary: [
-        { name: 'P.1', level: 5 }, { name: 'P.2', level: 6 }, { name: 'P.3', level: 7 },
-        { name: 'P.4', level: 8 }, { name: 'P.5', level: 9 }, { name: 'P.6', level: 10 },
+        { name: 'P.1', level: 5 },
+        { name: 'P.2', level: 6 },
+        { name: 'P.3', level: 7 },
+        { name: 'P.4', level: 8 },
+        { name: 'P.5', level: 9 },
+        { name: 'P.6', level: 10 },
         { name: 'P.7', level: 11 },
       ],
       secondary: [
-        { name: 'S.1', level: 12 }, { name: 'S.2', level: 13 }, { name: 'S.3', level: 14 },
-        { name: 'S.4', level: 15 }, { name: 'S.5', level: 18 }, { name: 'S.6', level: 19 },
+        { name: 'S.1', level: 12 },
+        { name: 'S.2', level: 13 },
+        { name: 'S.3', level: 14 },
+        { name: 'S.4', level: 15 },
+        { name: 'S.5', level: 16 },
+        { name: 'S.6', level: 17 },
       ],
     };
 
     let classesToCreate: { name: string; level: number }[] = [];
-    let allowedSections: number[] = [];
-
-    if (schoolType === 'nursery') {
-      classesToCreate = CLASS_MAP.nursery;
-      allowedSections = [0];
-    } else if (schoolType === 'nursery_primary') {
-      classesToCreate = [...CLASS_MAP.nursery, ...CLASS_MAP.primary];
-      allowedSections = [0, 1];
-    } else if (schoolType === 'primary') {
-      classesToCreate = CLASS_MAP.primary;
-      allowedSections = [1];
-    } else if (schoolType === 'secondary') {
-      classesToCreate = CLASS_MAP.secondary;
-      allowedSections = [2];
-    } else if (schoolType === 'primary_secondary') {
-      classesToCreate = [...CLASS_MAP.primary, ...CLASS_MAP.secondary];
-      allowedSections = [1, 2];
-    } else if (schoolType === 'all') {
-      classesToCreate = [...CLASS_MAP.nursery, ...CLASS_MAP.primary, ...CLASS_MAP.secondary];
-      allowedSections = [0, 1, 2];
-    }
+    if (schoolType === 'nursery') classesToCreate = CLASS_MAP.nursery;
+    if (schoolType === 'primary') classesToCreate = CLASS_MAP.primary;
+    if (schoolType === 'secondary') classesToCreate = CLASS_MAP.secondary;
+    if (schoolType === 'nursery_primary') classesToCreate = [...CLASS_MAP.nursery, ...CLASS_MAP.primary];
+    if (schoolType === 'primary_secondary') classesToCreate = [...CLASS_MAP.primary, ...CLASS_MAP.secondary];
+    if (schoolType === 'all') classesToCreate = [...CLASS_MAP.nursery, ...CLASS_MAP.primary, ...CLASS_MAP.secondary];
 
     const existingClasses = await dataService.getAll(sid, 'classes');
     const existingStudents = await dataService.getAll(sid, 'students');
-    const { getClassSection } = await import('../utils/classroom');
-    const allowedSet = new Set(allowedSections);
+    const allowedNames = new Set(classesToCreate.map(cls => cls.name.toLowerCase().trim()));
 
     // Delete classes that don't belong to this school type
     // Normalize names and dedupe existing classes first (keep first, delete duplicates)
@@ -253,15 +266,14 @@ export default function Settings() {
       }
     }
 
-    // Classes that don't belong to this school type (by section)
+    // Classes that don't belong to this school category.
     const toDelete = existingClasses.filter((c: any) => {
-      const section = getClassSection({ name: c.name, level: c.level });
-      return !allowedSet.has(section);
+      const name = String(c.name || '').toLowerCase().trim();
+      return !allowedNames.has(name);
     });
     const toDeleteIds = new Set(toDelete.map((c: any) => c.id));
     const affectedStudents = existingStudents.filter((student: any) => student.classId && toDeleteIds.has(student.classId));
 
-    // If forceReplace is set, clear student class assignments and delete without prompting.
     const now = new Date().toISOString();
     if (affectedStudents.length > 0) {
       if (options.forceReplace) {
@@ -288,7 +300,7 @@ export default function Settings() {
       }
     }
 
-    // Delete duplicates first, then classes not in allowed sections
+    // Delete duplicates first, then classes not in the selected category.
     for (const cls of duplicatesToDelete) {
       await dataService.delete(sid, 'classes', (cls as any).id);
     }
@@ -296,7 +308,7 @@ export default function Settings() {
       await dataService.delete(sid, 'classes', (cls as any).id);
     }
     if (toDelete.length > 0) {
-      addToast(`${toDelete.length} class${toDelete.length > 1 ? 'es' : ''} removed (not in ${schoolType} type)`, 'info');
+      addToast(`${toDelete.length} class${toDelete.length > 1 ? 'es' : ''} removed (not in ${schoolType.replace(/_/g, ' ')} category)`, 'info');
     }
 
     // Re-fetch existing classes after deletions to avoid race conditions
@@ -311,16 +323,24 @@ export default function Settings() {
     }
 
     if (createdCount > 0) addToast(`${createdCount} classes auto-created`, 'info');
-    else if (toDelete.length === 0 && schoolTypeOverride) addToast('All classes for this school type already exist', 'info');
+    else if (toDelete.length === 0 && schoolTypeOverride) addToast('All classes for this school category already exist', 'info');
     if (affectedStudents.length > 0) window.dispatchEvent(new CustomEvent('studentsUpdated'));
     return true;
   }
 
   async function handleSchoolTypeChange(value: string) {
     const sid = schoolId || user?.id;
-    const newSettings = { ...settings, schoolType: value };
+    if (value === settings.schoolType) return;
+    const okToChange = await confirm({
+      title: 'Change School Type?',
+      description: `Changing to ${value.replace(/_/g, ' ')} will generate that section's class list and remove classes outside that type. Continue?`,
+      confirmLabel: 'Change Type',
+      variant: 'warning',
+    });
+    if (!okToChange) return;
+    const newSettings = { ...settings, schoolType: normalizeSchoolType(value) };
     if (sid) {
-      const ok = await autoCreateClasses(sid, value, { confirmStudentClear: true, forceReplace: true });
+      const ok = await autoCreateClasses(sid, value, { confirmStudentClear: true, forceReplace: false });
       if (!ok) return;
     }
     setSettings(newSettings);
@@ -409,17 +429,15 @@ export default function Settings() {
         })
         .filter(Boolean) as Array<{ id: string; updates: Record<string, any> }>;
 
-      for (let i = 0; i < updates.length; i += 25) {
-        const batch = updates.slice(i, i + 25);
-        const done = Math.min(i + batch.length, updates.length);
+      await processInThirtyPercentBatches(updates, async (batch, startIndex) => {
+        const done = Math.min(startIndex + batch.length, updates.length);
         setPromoteStatus(`Updating ${done} of ${updates.length} students...`);
         const results = await Promise.allSettled(
           batch.map(item => dataService.update(id, 'students', item.id, item.updates as any))
         );
         const failed = results.filter(result => result.status === 'rejected');
         if (failed.length > 0) throw new Error(`${failed.length} student updates failed`);
-        setPromoteProgress(updates.length ? Math.round((done / updates.length) * 90) : 90);
-      }
+      }, progress => setPromoteProgress(Math.round(progress * 0.9)));
 
       setPromoteStatus('Saving term settings...');
       await dataService.saveSettings(id, {
@@ -543,8 +561,8 @@ export default function Settings() {
           }
         }
         
-        for (const id of toRemove) {
-          await dataService.delete(sid, table, id);
+        if (toRemove.length > 0) {
+          await deleteInThirtyPercentBatches(sid, table, toRemove);
         }
         
         if (toRemove.length > 0) {
@@ -562,6 +580,39 @@ export default function Settings() {
     } else {
       addToast('No duplicates found', 'info');
     }
+  }
+
+  async function handleSchoolLogoUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const sid = schoolId || user?.id;
+    if (!sid) return;
+    try {
+      const logo = await compressImageFile(file, 512, 0.82);
+      const newSettings = { ...settings, schoolLogo: logo };
+      setSettings(newSettings);
+      localStorage.setItem(`schofy_settings_${sid}`, JSON.stringify(newSettings));
+      await dataService.saveSettings(sid, { schoolLogo: logo });
+      window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: newSettings }));
+      window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
+      addToast('School logo updated', 'success');
+    } catch (error: any) {
+      addToast(error?.message || 'Failed to upload logo', 'error');
+    } finally {
+      if (event.target) event.target.value = '';
+    }
+  }
+
+  async function removeSchoolLogo() {
+    const sid = schoolId || user?.id;
+    if (!sid) return;
+    const newSettings = { ...settings, schoolLogo: '' };
+    setSettings(newSettings);
+    localStorage.setItem(`schofy_settings_${sid}`, JSON.stringify(newSettings));
+    await dataService.saveSettings(sid, { schoolLogo: '' });
+    window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: newSettings }));
+    window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
+    addToast('School logo removed', 'success');
   }
 
   async function startCloudBackup() {
@@ -602,6 +653,9 @@ export default function Settings() {
           <p className="text-slate-500">Configure your school system</p>
         </div>
         <div className="flex items-center gap-3">
+          <span className="hidden rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300 sm:inline-flex">
+            {APP_VERSION_LABEL}
+          </span>
           {autoSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle size={14} /> Auto-saved</span>}
           {isSaving && <span className="text-sm text-slate-400 flex items-center gap-1"><div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> Saving...</span>}
           <button onClick={handleSave} disabled={isSaving} className="btn btn-primary flex items-center gap-2 disabled:opacity-70">
@@ -629,18 +683,68 @@ export default function Settings() {
             <div>
               <label className="form-label">School Type</label>
               <select name="schoolType" value={settings.schoolType} onChange={handleChange} className="form-input form-select">
-                <option value="nursery">Nursery Only</option>
-                <option value="nursery_primary">Nursery &amp; Primary</option>
-                <option value="primary">Primary Only</option>
-                <option value="secondary">Secondary Only</option>
-                <option value="primary_secondary">Primary &amp; Secondary</option>
-                <option value="all">Nursery, Primary &amp; Secondary</option>
+                <option value="nursery">Nursery</option>
+                <option value="primary">Primary</option>
+                <option value="secondary">Secondary</option>
+                <option value="nursery_primary">Nursery & Primary</option>
+                <option value="primary_secondary">Primary & Secondary</option>
+                <option value="all">All Sections</option>
               </select>
+              <p className="mt-1 text-xs text-slate-500">Changing type generates the matching academic class list.</p>
+            </div>
+            <div>
+              <label className="form-label">School Category <span className="text-slate-400 font-normal">(optional)</span></label>
+              <select name="schoolCategory" value={settings.schoolCategory} onChange={handleChange} className="form-input form-select">
+                <option value="">None</option>
+                <option value="music_school">Music School</option>
+                <option value="tailoring">Tailoring</option>
+              </select>
+              <p className="mt-1 text-xs text-slate-500">Optional category does not replace the academic school type.</p>
+            </div>
+            <div className="md:col-span-2">
+              <label className="form-label">School Logo</label>
+              <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60 sm:flex-row sm:items-center">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+                  {settings.schoolLogo ? (
+                    <img src={settings.schoolLogo} alt="School logo" className="h-full w-full object-contain p-1.5" />
+                  ) : (
+                    <Building size={30} className="text-slate-300" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-800 dark:text-white">Logo used across the app</p>
+                  <p className="mt-1 text-xs text-slate-500">Appears in the sidebar, invoices, reports, ledgers, report cards, and print previews.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => schoolLogoInputRef.current?.click()} className="btn btn-secondary">
+                      <Upload size={15} /> Upload Logo
+                    </button>
+                    {settings.schoolLogo && (
+                      <button type="button" onClick={() => void removeSchoolLogo()} className="btn btn-secondary text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">
+                        <Trash2 size={15} /> Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <input ref={schoolLogoInputRef} type="file" accept="image/*" onChange={handleSchoolLogoUpload} className="hidden" />
+              </div>
             </div>
             <div className="md:col-span-2">
               <label className="form-label">Address</label>
               <textarea name="schoolAddress" value={settings.schoolAddress} onChange={handleChange} className="form-input" rows={2} />
             </div>
+            {settings.schoolCategory === 'music_school' && (
+              <div className="md:col-span-2">
+                <label className="form-label">Instruments to Teach</label>
+                <input
+                  name="musicInstruments"
+                  value={settings.musicInstruments}
+                  onChange={handleChange}
+                  className="form-input"
+                  placeholder="Piano, Guitar, Drums, Violin, Voice"
+                />
+                <p className="mt-1 text-xs text-slate-500">Separate instruments with commas.</p>
+              </div>
+            )}
             <div>
               <label className="form-label">Email</label>
               <input type="email" name="schoolEmail" value={settings.schoolEmail} onChange={handleChange} className="form-input" />
@@ -780,6 +884,29 @@ export default function Settings() {
                 <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: `${primaryColor}20`, color: primaryColor }}>
                   Badge
                 </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header flex items-center gap-2">
+            <Keyboard size={20} />
+            <h2 className="font-semibold">Keyboard Shortcuts</h2>
+          </div>
+          <div className="card-body">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Collapse sidebar</span>
+                <kbd className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">Ctrl + Left</kbd>
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Expand sidebar</span>
+                <kbd className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">Ctrl + Right</kbd>
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Save active popup or form</span>
+                <kbd className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">Enter</kbd>
               </div>
             </div>
           </div>

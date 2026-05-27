@@ -10,6 +10,7 @@
  */
 import { useSyncExternalStore, useCallback } from 'react';
 import { dataService } from './database/SupabaseDataService';
+import { sortClassesBySectionThenLevel } from '../utils/classroom';
 
 type Listener = () => void;
 
@@ -31,6 +32,10 @@ class DataStore {
 
   private key(sid: string, table: string) { return `${sid}:${table}`; }
 
+  private normalize(table: string, data: any[]) {
+    return table === 'classes' ? sortClassesBySectionThenLevel(data) : data;
+  }
+
   private get(sid: string, table: string): TableState {
     const k = this.key(sid, table);
     if (!this.state.has(k)) {
@@ -41,7 +46,8 @@ class DataStore {
 
   private set(sid: string, table: string, patch: Partial<TableState>) {
     const k = this.key(sid, table);
-    const next = { ...this.get(sid, table), ...patch };
+    const nextPatch = patch.data ? { ...patch, data: this.normalize(table, patch.data) } : patch;
+    const next = { ...this.get(sid, table), ...nextPatch };
     this.state.set(k, next);
     this.listeners.get(k)?.forEach(l => l());
   }
@@ -72,7 +78,7 @@ class DataStore {
     const req = (async () => {
       // NEVER show loading spinner — data either comes from cache instantly or loads silently
       try {
-        const data = await dataService.getAll(sid, table);
+        const data = await dataService.getAll(sid, table, force);
         if (data.length > 0 || s.data.length === 0) {
           this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
         } else {

@@ -23,6 +23,8 @@ import {
 } from 'recharts';
 import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, Megaphone, Calendar as CalendarIcon, Clock, X, Star, Play, PartyPopper } from 'lucide-react';
 import { Announcement } from '@schofy/shared';
+import { FitStatValue } from '../components/FitStatValue';
+import { computeProfitSummary, getGrowthPercent, getPreviousTermYear } from '../utils/profit';
 
 // Uganda public holidays (month is 0-indexed)
 const UGANDA_HOLIDAYS: { month: number; day: number; name: string }[] = [
@@ -55,6 +57,8 @@ export default function Dashboard() {
   const { data: staff } = useTableData(sid, 'staff');
   const { data: payments } = useTableData(sid, 'payments');
   const { data: fees } = useTableData(sid, 'fees');
+  const { data: salaryPayments } = useTableData(sid, 'salaryPayments');
+  const { data: expenses } = useTableData(sid, 'expenses');
   const { data: attendance } = useTableData(sid, 'attendance');
   const { data: settingsRows } = useTableData(sid, 'settings');
 
@@ -214,18 +218,38 @@ export default function Dashboard() {
   }, [fees, payments, totalFees, feesCollected, termSettings]);
 
   const growthStatsValue = useMemo(() => {
-    const collectionRate = totalFees > 0 ? Math.round((feesCollected / totalFees) * 100) : 0;
+    const currentTerm = String(termSettings.currentTerm || '1');
+    const currentYear = String(termSettings.academicYear || new Date().getFullYear());
+    const previous = getPreviousTermYear(currentTerm, currentYear);
+    const currentProfit = computeProfitSummary({
+      fees,
+      payments,
+      salaryPayments,
+      expenses,
+      students: activeStudents,
+      term: currentTerm,
+      year: currentYear,
+    });
+    const previousProfit = computeProfitSummary({
+      fees,
+      payments,
+      salaryPayments,
+      expenses,
+      students: activeStudents,
+      term: previous.term,
+      year: previous.year,
+    });
+    const collectionRate = currentProfit.billed > 0 ? Math.round((currentProfit.collected / currentProfit.billed) * 100) : 0;
     const previousYearStudents = Math.max(1, Math.round(students * 0.75));
-    const previousYearRevenue = Math.max(1, Math.round(feesCollected * 0.8));
     const previousYearStaff = Math.max(1, Math.round(activeStaff * 0.8));
 
     return {
       studentsGrowth: Math.round(((students - previousYearStudents) / previousYearStudents) * 100),
-      revenueGrowth: Math.round(((feesCollected - previousYearRevenue) / previousYearRevenue) * 100),
+      revenueGrowth: getGrowthPercent(currentProfit.netProfit, previousProfit.netProfit),
       collectionRate,
       staffGrowth: Math.round(((activeStaff - previousYearStaff) / previousYearStaff) * 100)
     };
-  }, [students, feesCollected, totalFees, activeStaff]);
+  }, [students, activeStaff, fees, payments, salaryPayments, expenses, activeStudents, termSettings]);
 
   const attendanceRate = dashboardStats.attendanceToday
     ? Math.round((dashboardStats.attendanceToday.present / Math.max(dashboardStats.attendanceToday.present + dashboardStats.attendanceToday.absent + dashboardStats.attendanceToday.late, 1)) * 100)
@@ -328,9 +352,9 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <p className="text-white/80 text-sm font-medium">{stat.label}</p>
-                  <p className="text-2xl font-black text-white mt-1">
+                  <FitStatValue className="font-black mt-1">
                     {loading ? <span className="animate-pulse">...</span> : value}
-                  </p>
+                  </FitStatValue>
                   <p className="text-xs text-white/60 font-medium mt-1">{stat.subtext}</p>
                 </div>
               </div>
@@ -898,7 +922,7 @@ export default function Dashboard() {
                   <p className="text-[10px] text-indigo-400 mt-1">vs last year</p>
                 </div>
                 <div className="p-4 bg-green-50 rounded-xl border border-green-100">
-                  <p className="text-xs text-green-600 font-medium">Revenue Growth</p>
+                  <p className="text-xs text-green-600 font-medium">Profit Growth</p>
                   <p className="text-2xl font-black text-green-700 mt-1">{growthStatsValue.revenueGrowth > 0 ? '+' : ''}{growthStatsValue.revenueGrowth}%</p>
                   <p className="text-[10px] text-green-400 mt-1">vs last year</p>
                 </div>

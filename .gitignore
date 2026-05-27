@@ -19,6 +19,7 @@ server/.env.local
 *.p8
 .credentials
 .secrets
+Verification codes.xlsx
 
 # Database files
 *.db

@@ -23,10 +23,12 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import DropdownModal from '../components/DropdownModal';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
+import { useBackOrFallback } from '../utils/navigation';
 
 export default function Payroll() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
+  const goBack = useBackOrFallback('/staff');
   const { formatMoney } = useCurrency();
   const { addToast } = useToast();
   const confirm = useConfirm();
@@ -157,7 +159,7 @@ export default function Payroll() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/staff')}
+            onClick={goBack}
             className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
           >
             <ArrowLeft size={20} className="text-slate-600 dark:text-slate-300" />

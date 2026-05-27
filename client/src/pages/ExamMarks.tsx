@@ -1,26 +1,17 @@
-import { useState, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
-import { FileText, Download, ArrowLeft, GraduationCap, Search, Check, Maximize2, X } from 'lucide-react';
+import { FileText, Download, ArrowLeft, GraduationCap, Search, Check, Maximize2, X, SlidersHorizontal } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useStudents } from '../contexts/StudentsContext';
 import { exportToExcel } from '../utils/export';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { openPrintPreview } from '../utils/printPreview';
-
-function getGrade(score: number): string {
-  if (score >= 90) return 'D1';
-  if (score >= 85) return 'D2';
-  if (score >= 80) return 'C3';
-  if (score >= 75) return 'C4';
-  if (score >= 70) return 'C5';
-  if (score >= 65) return 'C6';
-  if (score >= 60) return 'P7';
-  if (score >= 50) return 'P8';
-  return 'F9';
-}
+import { useBackOrFallback } from '../utils/navigation';
+import { getSubjectDisplayCode } from '../utils/subjects';
+import { getGradeFromScale, getSavedGradingScale } from '../utils/grading';
 
 function gradeColor(grade: string): string {
   if (grade.startsWith('D')) return 'text-emerald-600 font-bold';
@@ -41,12 +32,14 @@ const COMPACT_COL_LIMIT = 8;
 export default function ExamMarks() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
+  const goBack = useBackOrFallback('/grades');
   const sid = schoolId || user?.id || '';
 
   const { data: classes } = useTableData(sid, 'classes');
   const { data: subjects } = useTableData(sid, 'subjects');
   const { data: exams } = useTableData(sid, 'exams');
   const { data: examResults } = useTableData(sid, 'examResults');
+  const { data: settingsData } = useTableData(sid, 'settings');
   const { students: allStudents } = useStudents();
 
   const [filterClass, setFilterClass] = useState('');
@@ -57,6 +50,8 @@ export default function ExamMarks() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [fullViewClassId, setFullViewClassId] = useState<string | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const gradingScale = useMemo(() => getSavedGradingScale(settingsData as any[]), [settingsData]);
+  const getGrade = useCallback((score: number) => getGradeFromScale(score, gradingScale).grade, [gradingScale]);
 
   const sortedClasses = useMemo(() =>
     sortClassesBySectionThenLevel([...classes]),
@@ -212,7 +207,7 @@ export default function ExamMarks() {
       classId: string; className: string;
       classExams: any[]; allSubjects: any[]; matrix: any[]; latestExam: any;
     }[];
-  }, [activeExamIds, examResults, allStudents, subjects, classes, exams, filterClass, searchStudent]);
+  }, [activeExamIds, examResults, allStudents, subjects, classes, exams, filterClass, searchStudent, getGrade]);
 
   const hasResults = classGroups.some(g => g.matrix.length > 0);
 
@@ -307,7 +302,7 @@ export default function ExamMarks() {
                       <th key={`${exam.id}-${sub.id}`}
                         className="px-2 py-1.5 text-center font-medium text-[11px] whitespace-nowrap border-l border-teal-600 min-w-[44px]">
                         {sub.name}
-                        {sub.code && <div className="font-normal text-[9px] opacity-70">{sub.code}</div>}
+                        <div className="font-normal text-[9px] opacity-70">{getSubjectDisplayCode(sub)}</div>
                       </th>
                     ))}
                     <th className="px-2 py-1.5 text-center font-semibold text-xs border-l border-teal-500 bg-teal-600">Tot</th>
@@ -413,13 +408,16 @@ export default function ExamMarks() {
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
       <div className="flex items-center gap-4 print:hidden">
-        <button onClick={() => navigate('/grades')} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
+        <button onClick={goBack} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Exam Marks & Reports</h1>
           <p className="text-sm text-slate-500 mt-1">All exams per class - one row per student</p>
         </div>
+        <button onClick={() => navigate('/grades/custom-grading')} className="btn btn-secondary flex items-center gap-2">
+          <SlidersHorizontal size={16} /> Custom Grading
+        </button>
         {hasResults && (
           <div className="relative" ref={exportMenuRef}>
             <button onClick={() => setShowExportMenu(v => !v)} className="btn btn-primary flex items-center gap-2">
@@ -437,17 +435,17 @@ export default function ExamMarks() {
       </div>
 
       {/* Filters */}
-      <div className="card p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 print:hidden">
+      <div className="card p-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(120px,150px)_minmax(105px,125px)_minmax(180px,1fr)_minmax(200px,1fr)] print:hidden">
         <div>
           <label className="form-label">Class</label>
-          <select value={filterClass} onChange={e => { setFilterClass(e.target.value); setFilterExam(''); }} className="form-input">
+          <select value={filterClass} onChange={e => { setFilterClass(e.target.value); setFilterExam(''); }} className="form-input form-select truncate px-3 pr-7">
             <option value="">All Classes</option>
             {sortedClasses.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <div>
           <label className="form-label">Term</label>
-          <select value={filterTerm} onChange={e => { setFilterTerm(e.target.value); setFilterExam(''); }} className="form-input">
+          <select value={filterTerm} onChange={e => { setFilterTerm(e.target.value); setFilterExam(''); }} className="form-input form-select truncate px-3 pr-7">
             <option value="">All Terms</option>
             <option value="1">Term 1</option>
             <option value="2">Term 2</option>

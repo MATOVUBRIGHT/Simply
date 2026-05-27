@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, StaffRole } from '@schofy/shared';
-import type { Staff, SalaryPayment } from '@schofy/shared';
+import type { Staff, SalaryPayment, Subject } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import ImageModal from '../components/ImageModal';
 import DropdownModal from '../components/DropdownModal';
@@ -17,6 +17,7 @@ import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { matchesTextSearch } from '../utils/searchMatch';
+import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 
 const avatarColors = [
   'bg-violet-500',
@@ -86,12 +87,14 @@ export default function StaffPage() {
   const sid = schoolId || user?.id || '';
   const { data: staffData, loading } = useTableData(sid, 'staff');
   const { data: salaryPaymentsData } = useTableData(sid, 'salaryPayments');
+  const { data: subjectsData } = useTableData(sid, 'subjects');
 
   const staff = useMemo(() =>
     [...staffData].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [staffData]
   ) as Staff[];
   const salaryPayments = salaryPaymentsData as SalaryPayment[];
+  const subjects = subjectsData as Subject[];
 
   const [search, setSearch] = useState('');
   const { addToast } = useToast();
@@ -110,6 +113,7 @@ export default function StaffPage() {
   const [importProgress, setImportProgress] = useState(0);
   const [selectedStaff, setSelectedStaff] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
+  const rowClickTimeoutRef = useRef<number | null>(null);
   const navigate = useNavigate();
 
   const [showPayrollModal, setShowPayrollModal] = useState(false);
@@ -224,24 +228,25 @@ export default function StaffPage() {
   }
 
   function handleRowSingleClick(staffId: string) {
-    if (selectMode) {
-      setSelectedStaff(prev => {
-        const newSet = new Set(prev);
-        if (newSet.has(staffId)) {
-          newSet.delete(staffId);
-        } else {
-          newSet.add(staffId);
-        }
-        return newSet;
-      });
-    } else {
-      setSelectMode(true);
-      setSelectedStaff(new Set([staffId]));
-    }
+    if (rowClickTimeoutRef.current) window.clearTimeout(rowClickTimeoutRef.current);
+    rowClickTimeoutRef.current = window.setTimeout(() => {
+      navigate(`/staff/${staffId}`);
+      rowClickTimeoutRef.current = null;
+    }, 220);
   }
 
   function handleRowDoubleClick(staffId: string) {
-    navigate(`/staff/${staffId}`);
+    if (rowClickTimeoutRef.current) {
+      window.clearTimeout(rowClickTimeoutRef.current);
+      rowClickTimeoutRef.current = null;
+    }
+    setSelectMode(true);
+    setSelectedStaff(prev => {
+      const next = new Set(prev);
+      next.has(staffId) ? next.delete(staffId) : next.add(staffId);
+      if (next.size === 0) setSelectMode(false);
+      return next;
+    });
   }
 
   function handleSelectAll() {
@@ -266,25 +271,26 @@ export default function StaffPage() {
     
     try {
       const now = new Date().toISOString();
-      
-      for (const staffId of selectedStaff) {
-        const staffMember = staff.find(s => s.id === staffId);
-        if (staffMember) {
-          await dataService.delete(id, 'staff', staffId);
-          addToRecycleBin(id, {
+      const idsToDelete = Array.from(selectedStaff);
+      const recycleItems = idsToDelete
+        .map(staffId => staff.find(s => s.id === staffId))
+        .filter(Boolean) as Staff[];
+
+      recycleItems.forEach(staffMember => {
+        addToRecycleBin(id, {
             id: `staff-${Date.now()}-${Math.random()}`,
             type: 'staff',
             name: `${staffMember.firstName} ${staffMember.lastName}`,
             data: staffMember,
             deletedAt: now
-          });
-        }
-      }
+        });
+      });
+      const deletedCount = await deleteInThirtyPercentBatches(id, 'staff', idsToDelete);
       
       
       setSelectedStaff(new Set());
       setSelectMode(false);
-      addToast(`${selectedStaff.size} staff moved to recycle bin`, 'success');    } catch (error) {
+      addToast(`${deletedCount} staff moved to recycle bin`, 'success');    } catch (error) {
       addToast('Failed to delete staff', 'error');
     }
   }
@@ -316,8 +322,36 @@ export default function StaffPage() {
     }
   }
 
+  const getStaffSubjects = useMemo(() => {
+    const byStaffId = new Map<string, Subject[]>();
+    for (const subject of subjects) {
+      const teacherId = (subject as any).teacherId;
+      if (!teacherId) continue;
+      const list = byStaffId.get(teacherId) || [];
+      list.push(subject);
+      byStaffId.set(teacherId, list);
+    }
+
+    return (staffMember: Staff) => {
+      const assignedSubjectIds = new Set((staffMember.subjects || []).map(String));
+      const merged = new Map<string, Subject>();
+      (byStaffId.get(staffMember.id) || []).forEach(subject => merged.set(subject.id, subject));
+      subjects
+        .filter(subject => assignedSubjectIds.has(String(subject.id)))
+        .forEach(subject => merged.set(subject.id, subject));
+      return Array.from(merged.values()).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+    };
+  }, [subjects]);
+
+  function getStaffSubjectSummary(staffMember: Staff) {
+    const names = getStaffSubjects(staffMember).map(subject => subject.name).filter(Boolean);
+    if (names.length === 0) return 'No subjects assigned';
+    if (names.length <= 3) return names.join(', ');
+    return `${names.slice(0, 3).join(', ')} +${names.length - 3} more`;
+  }
+
   const filteredStaff = staff.filter((s) =>
-    matchesTextSearch([s.firstName, s.lastName, `${s.firstName} ${s.lastName}`, `${s.lastName} ${s.firstName}`, s.employeeId, s.email, s.phone], search)
+    matchesTextSearch([s.firstName, s.lastName, `${s.firstName} ${s.lastName}`, `${s.lastName} ${s.firstName}`, s.employeeId, s.email, s.phone, getStaffSubjectSummary(s)], search)
   );
 
   async function handleDelete(id: string) {
@@ -567,12 +601,11 @@ export default function StaffPage() {
       addToast(`Imported ${successCount} staff`, 'success');
       closeImportModal();
       // Fire to Supabase in background
-      for (let i = 0; i < newStaff.length; i++) {
-        const s = newStaff[i];
+      const tasks = newStaff.map((s) => async () => {
         const result = await dataService.create(id, 'staff', s as any);
         if (!result.success) console.error('Import failed for', s.firstName, result.error);
-        setImportProgress(Math.round(((i + 1) / newStaff.length) * 100));
-      }
+      });
+      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
       window.dispatchEvent(new CustomEvent('dataRefresh'));
       window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'staff' } }));
     } catch (error) {
@@ -722,6 +755,7 @@ export default function StaffPage() {
                       <div>
                         <p className="font-medium text-slate-800 dark:text-white text-sm">{teacher.firstName} {teacher.lastName}</p>
                         <p className="text-xs text-slate-500">{teacher.email || teacher.phone || 'No contact'}</p>
+                        <p className="mt-0.5 max-w-[360px] truncate text-xs font-medium text-indigo-600 dark:text-indigo-300">{getStaffSubjectSummary(teacher)}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -803,6 +837,7 @@ export default function StaffPage() {
                 <th>Staff Member</th>
                 <th>Employee ID</th>
                 <th>Role</th>
+                <th>Subjects</th>
                 <th>Contact</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -811,7 +846,7 @@ export default function StaffPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={selectMode ? 8 : 7} className="text-center py-12">
+                  <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
                       <p className="text-sm">Loading...</p>
@@ -820,7 +855,7 @@ export default function StaffPage() {
                 </tr>
               ) : filteredStaff.length === 0 ? (
                 <tr>
-                  <td colSpan={selectMode ? 8 : 7} className="text-center py-12">
+                  <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
                         <Users size={24} className="text-slate-400" />
@@ -860,7 +895,10 @@ export default function StaffPage() {
                       <div className="flex items-center gap-3">
                         {s.photoUrl ? (
                           <button 
-                            onClick={() => setPreviewImage({ src: s.photoUrl!, alt: `${s.firstName} ${s.lastName}` })}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setPreviewImage({ src: s.photoUrl!, alt: `${s.firstName} ${s.lastName}` });
+                            }}
                             className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
                           >
                             <img 
@@ -884,11 +922,16 @@ export default function StaffPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
+                    <td className="font-mono text-xs text-slate-700 dark:text-slate-300">
                       {s.employeeId}
                     </td>
                     <td>
                       <span className="badge badge-violet capitalize">{s.role}</span>
+                    </td>
+                    <td className="max-w-[220px]">
+                      <p className="truncate text-xs font-medium text-slate-600 dark:text-slate-300" title={getStaffSubjects(s).map(subject => subject.name).join(', ')}>
+                        {s.role === StaffRole.TEACHER ? getStaffSubjectSummary(s) : '-'}
+                      </p>
                     </td>
                     <td>
                       <div className="space-y-0.5">
@@ -939,7 +982,7 @@ export default function StaffPage() {
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in p-4"
           onClick={e => { if (e.target === e.currentTarget && !isImporting) closeImportModal(); }}
         >
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-xl max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />

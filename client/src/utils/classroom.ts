@@ -16,6 +16,22 @@ export interface ClassOption {
 // This ensures Baby/Nursery/Middle/Top never mix with P.1-P.7 or S.1-S.6.
 
 const NURSERY_NAMES = new Set(['baby', 'nursery', 'middle', 'top', 'pre-k', 'kg', 'kindergarten', 'reception']);
+const NURSERY_ORDER = ['baby', 'nursery', 'middle', 'top', 'pre-k', 'kg', 'kindergarten', 'reception'];
+
+function classSortValue(cls: { name?: string; level?: number }) {
+  const rawName = (cls.name || '').toLowerCase().trim();
+  const level = Number(cls.level || 0);
+  const nurseryIndex = NURSERY_ORDER.findIndex(name => rawName === name || rawName.startsWith(`${name} `));
+  if (nurseryIndex >= 0) return nurseryIndex + 1;
+
+  const primaryMatch = rawName.match(/(?:^p\.?\s*|primary\s*)(\d+)/);
+  if (primaryMatch) return 100 + Number(primaryMatch[1]);
+
+  const secondaryMatch = rawName.match(/(?:^s\.?\s*|^ss\s*|^jss\s*)(\d+)/);
+  if (secondaryMatch) return 200 + Number(secondaryMatch[1]);
+
+  return level > 0 ? level : 999;
+}
 
 export function getClassSection(cls: { name?: string; level?: number }): number {
   const name = (cls.name || '').toLowerCase().trim();
@@ -55,7 +71,12 @@ export function sortClassesBySectionThenLevel<T extends { name?: string; level?:
     const sa = getClassSection(a);
     const sb = getClassSection(b);
     if (sa !== sb) return sa - sb;
-    return (a.level ?? 0) - (b.level ?? 0);
+    const valueA = classSortValue(a);
+    const valueB = classSortValue(b);
+    if (valueA !== valueB) return valueA - valueB;
+    const nameCompare = String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' });
+    if (nameCompare !== 0) return nameCompare;
+    return String((a as any).stream || '').localeCompare(String((b as any).stream || ''), undefined, { numeric: true, sensitivity: 'base' });
   });
 }
 
@@ -157,15 +178,21 @@ export async function getStudentClassOptions(userId: string, excludeStudentId?: 
         // temp fields for section sort
         _level: (classItem as any).level ?? 0,
         _name: (classItem as any).name ?? '',
+        _stream: (classItem as any).stream ?? '',
       };
     })
     .sort((left, right) => {
       const sa = getClassSection({ name: left._name, level: left._level });
       const sb = getClassSection({ name: right._name, level: right._level });
       if (sa !== sb) return sa - sb;
-      return left._level - right._level;
+      const valueA = classSortValue({ name: left._name, level: left._level });
+      const valueB = classSortValue({ name: right._name, level: right._level });
+      if (valueA !== valueB) return valueA - valueB;
+      const nameCompare = String(left._name || '').localeCompare(String(right._name || ''), undefined, { numeric: true, sensitivity: 'base' });
+      if (nameCompare !== 0) return nameCompare;
+      return String(left._stream || '').localeCompare(String(right._stream || ''), undefined, { numeric: true, sensitivity: 'base' });
     })
-    .map(({ _level, _name, ...rest }) => rest) as ClassOption[];
+    .map(({ _level, _name, _stream, ...rest }) => rest) as ClassOption[];
 }
 
 export async function getClassCapacityState(userId: string, classId: string, excludeStudentId?: string) {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 
 import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight, Building2, Plus, Trash2, Edit, Save, Award, Percent, Printer } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -15,6 +16,8 @@ import { SuccessPopup } from '../components/SuccessPopup';
 import { matchesStudentSearch } from '../utils/studentSearch';
 import { openPrintPreview } from '../utils/printPreview';
 import { matchesTextSearch } from '../utils/searchMatch';
+import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
+import { FitStatValue } from '../components/FitStatValue';
 
 function termRank(term: string) {
   const n = Number(String(term).replace(/[^0-9]/g, ''));
@@ -95,6 +98,7 @@ export default function Finance() {
     address: String(settingsMap.schoolAddress || '').trim(),
     phone: String(settingsMap.schoolPhone || '').trim(),
     email: String(settingsMap.schoolEmail || '').trim(),
+    logo: String(settingsMap.schoolLogo || '').trim(),
   }), [settingsMap]);
 
   // Derive payment accounts from settings
@@ -341,16 +345,16 @@ export default function Finance() {
     }
     setIsImporting(true);
     try {
-      let count = 0;
       const now = new Date().toISOString();
-      for (let i = 0; i < importPreview.length; i++) {
-        if (duplicateImportRows.has(i)) continue;
-        const d = importPreview[i];
+      const tasks = importPreview
+        .map((d, i) => ({ d, i }))
+        .filter(({ i }) => !duplicateImportRows.has(i))
+        .map(({ d }) => async () => {
         const s = students.find(x => matchesStudentSearch(x, d.studentName));
-        if (!s) continue;
+        if (!s) return;
         await dataService.create(id, 'payments', { id: uuidv4(), feeId: '', studentId: s.id, amount: parseFloat(d.amount), method: (d.method as PaymentMethod) || PaymentMethod.CASH, date: d.date || now, createdAt: now } as any);
-        count++;
-      }
+      });
+      await runTasksInThirtyPercentBatches(tasks);
       setIsImporting(false);
       closeImportModal();
       setShowImportSuccess(true);
@@ -637,12 +641,17 @@ export default function Finance() {
   const renderSchoolPrintHeader = (documentTitle: string) => (
     <div className="mb-5 border-b border-slate-300 pb-4 text-slate-900 print:block">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-black uppercase tracking-tight">{schoolPrintInfo.name}</h2>
-          {schoolPrintInfo.address && <p className="text-sm text-slate-600">{schoolPrintInfo.address}</p>}
-          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
-            {schoolPrintInfo.phone && <span>Tel: {schoolPrintInfo.phone}</span>}
-            {schoolPrintInfo.email && <span>Email: {schoolPrintInfo.email}</span>}
+        <div className="flex items-start gap-3">
+          {schoolPrintInfo.logo && (
+            <img src={schoolPrintInfo.logo} alt="School logo" className="h-16 w-16 shrink-0 object-contain" />
+          )}
+          <div>
+            <h2 className="text-2xl font-black uppercase tracking-tight">{schoolPrintInfo.name}</h2>
+            {schoolPrintInfo.address && <p className="text-sm text-slate-600">{schoolPrintInfo.address}</p>}
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+              {schoolPrintInfo.phone && <span>Tel: {schoolPrintInfo.phone}</span>}
+              {schoolPrintInfo.email && <span>Email: {schoolPrintInfo.email}</span>}
+            </div>
           </div>
         </div>
         <div className="text-left text-sm sm:text-right">
@@ -689,7 +698,7 @@ export default function Finance() {
             </div>
           )}
           {!selectedLedgerRow && activeTab === 'payments' && (
-            <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary">
+            <button onClick={() => setShowImportModal(true)} className="btn btn-secondary">
               <Upload size={16} /><span className="hidden sm:inline">Import</span>
             </button>
           )}
@@ -702,37 +711,37 @@ export default function Finance() {
         <div className="card-solid-emerald p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Receipt size={24} className="text-white" /></div>
-            <div><p className="text-sm font-medium text-white/80">Collected</p><p className="text-2xl font-bold text-white">{formatMoney(totalCollected)}</p></div>
+            <div className="min-w-0"><p className="text-sm font-medium text-white/80">Collected</p><FitStatValue>{formatMoney(totalCollected)}</FitStatValue></div>
           </div>
         </div>
         <div className="card-solid-rose p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><DollarSign size={24} className="text-white" /></div>
-            <div><p className="text-sm font-medium text-white/80">Pending</p><p className="text-2xl font-bold text-white">{formatMoney(totalPending)}</p></div>
+            <div className="min-w-0"><p className="text-sm font-medium text-white/80">Pending</p><FitStatValue>{formatMoney(totalPending)}</FitStatValue></div>
           </div>
         </div>
         <div className="card-solid-indigo p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><FileText size={24} className="text-white" /></div>
-            <div><p className="text-sm font-medium text-white/80">Invoiced</p><p className="text-2xl font-bold text-white">{formatMoney(totalInvoiced)}</p></div>
+            <div className="min-w-0"><p className="text-sm font-medium text-white/80">Invoiced</p><FitStatValue>{formatMoney(totalInvoiced)}</FitStatValue></div>
           </div>
         </div>
         <div className="card-solid-violet p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Receipt size={24} className="text-white" /></div>
-            <div><p className="text-sm font-medium text-white/80">Transactions</p><p className="text-2xl font-bold text-white">{payments.length}</p></div>
+            <div className="min-w-0"><p className="text-sm font-medium text-white/80">Transactions</p><FitStatValue>{payments.length}</FitStatValue></div>
           </div>
         </div>
         <div className="card-solid-amber p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Award size={24} className="text-white" /></div>
-            <div><p className="text-sm font-medium text-white/80">On Bursary</p><p className="text-2xl font-bold text-white">{studentsOnBursary}</p></div>
+            <div className="min-w-0"><p className="text-sm font-medium text-white/80">On Bursary</p><FitStatValue>{studentsOnBursary}</FitStatValue></div>
           </div>
         </div>
         <div className="card-solid-cyan p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Percent size={24} className="text-white" /></div>
-            <div><p className="text-sm font-medium text-white/80">With Discount</p><p className="text-2xl font-bold text-white">{studentsWithDiscount}</p></div>
+            <div className="min-w-0"><p className="text-sm font-medium text-white/80">With Discount</p><FitStatValue>{studentsWithDiscount}</FitStatValue></div>
           </div>
         </div>
       </div>}
@@ -1178,9 +1187,9 @@ export default function Finance() {
                 <h2 className="text-lg font-bold text-slate-800 dark:text-white">Payment Accounts</h2>
                 <p className="text-sm text-slate-500 mt-0.5">These accounts appear on all student invoices as payment destinations.</p>
               </div>
-              <a href="/settings" className="btn btn-secondary text-sm py-1.5 flex items-center gap-2">
-                <Edit size={14} /> Edit in Settings
-              </a>
+              <Link to="/payment-accounts" className="btn btn-secondary text-sm py-1.5 flex items-center gap-2">
+                <Edit size={14} /> Setup Accounts
+              </Link>
             </div>
 
             {filteredBankAccounts.length === 0 ? (
@@ -1190,11 +1199,11 @@ export default function Finance() {
                 </div>
                 <div className="text-center">
                   <p className="font-semibold text-slate-700 dark:text-slate-200">{bankAccounts.length === 0 ? 'No payment accounts configured' : 'No accounts match your search'}</p>
-                  <p className="text-sm text-slate-400 mt-1">{bankAccounts.length === 0 ? 'Add bank accounts in Settings > Payment Accounts' : 'Try another account name, number, bank, or method.'}</p>
+                  <p className="text-sm text-slate-400 mt-1">{bankAccounts.length === 0 ? 'Add bank accounts on the Payment Accounts page' : 'Try another account name, number, bank, or method.'}</p>
                 </div>
-                {bankAccounts.length === 0 && <a href="/settings" className="btn btn-primary text-sm py-1.5">
-                  <Plus size={14} /> Add Accounts in Settings
-                </a>}
+                {bankAccounts.length === 0 && <Link to="/payment-accounts" className="btn btn-primary text-sm py-1.5">
+                  <Plus size={14} /> Add Accounts
+                </Link>}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1236,7 +1245,7 @@ export default function Finance() {
                 <div>
                   <p className="text-sm font-semibold text-indigo-800 dark:text-indigo-200">Invoice Integration</p>
                   <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">
-                    All {bankAccounts.length} account{bankAccounts.length > 1 ? 's are' : ' is'} automatically embedded on student invoices in the Payment Details section. To update accounts, go to <a href="/settings" className="underline font-semibold">Settings &gt; Payment Accounts</a>.
+                    All {bankAccounts.length} account{bankAccounts.length > 1 ? 's are' : ' is'} automatically embedded on student invoices in the Payment Details section. To update accounts, open <Link to="/payment-accounts" className="underline font-semibold">Payment Accounts</Link>.
                   </p>
                 </div>
               </div>

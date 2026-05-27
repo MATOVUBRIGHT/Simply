@@ -1,19 +1,21 @@
 ﻿import { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { useEffect } from 'react';
 
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Edit, Mail, Phone, MapPin, Calendar, User,
   GraduationCap, BookOpen, CreditCard, FileText, CheckCircle, AlertCircle,
   Clock, Receipt, BarChart2, Printer, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Plus, Save, Trash2 } from 'lucide-react';
 import { Student, Class } from '@schofy/shared';
 import ImageModal from '../components/ImageModal';
-import DropdownModal from '../components/DropdownModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
 import { v4 as uuidv4 } from 'uuid';
+import { getSubjectDisplayCode } from '../utils/subjects';
 
 const PAYMENT_METHODS = [
   { value: 'cash', label: 'Cash' },
@@ -21,6 +23,18 @@ const PAYMENT_METHODS = [
   { value: 'mobile_money', label: 'Mobile Money' },
   { value: 'cheque', label: 'Cheque' },
   { value: 'card', label: 'Card' },
+];
+
+const A_LEVEL_COMBINATIONS = [
+  { name: 'PCM', subjects: ['Physics', 'Chemistry', 'Mathematics'] },
+  { name: 'PCB', subjects: ['Physics', 'Chemistry', 'Biology'] },
+  { name: 'PEM', subjects: ['Physics', 'Economics', 'Mathematics'] },
+  { name: 'MEG', subjects: ['Mathematics', 'Economics', 'Geography'] },
+  { name: 'HEG', subjects: ['History', 'Economics', 'Geography'] },
+  { name: 'HEL', subjects: ['History', 'Economics', 'Literature'] },
+  { name: 'LEG', subjects: ['Literature', 'Economics', 'Geography'] },
+  { name: 'BCM', subjects: ['Biology', 'Chemistry', 'Mathematics'] },
+  { name: 'Custom', subjects: [] },
 ];
 
 export default function StudentProfile() {
@@ -33,8 +47,24 @@ export default function StudentProfile() {
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [showClassDropdown, setShowClassDropdown] = useState(false);
   const [updatingClass, setUpdatingClass] = useState(false);
-  const [activeTab, setActiveTab] = useState<'info' | 'fees' | 'reports' | 'ledger' | 'more'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'subjects' | 'fees' | 'reports' | 'ledger' | 'more'>('info');
   const [expandedFee, setExpandedFee] = useState<string | null>(null);
+  const [editingMoreDetails, setEditingMoreDetails] = useState(false);
+  const [savingMoreDetails, setSavingMoreDetails] = useState(false);
+  const [editingSubjects, setEditingSubjects] = useState(false);
+  const [savingSubjects, setSavingSubjects] = useState(false);
+  const [subjectDraft, setSubjectDraft] = useState({
+    optionalSubjectIds: [] as string[],
+    combinationName: '',
+    customCombinationName: '',
+    customCombinationSubjects: '',
+  });
+  const [moreDraft, setMoreDraft] = useState({
+    medicalInfo: '',
+    tuitionFee: '',
+    boardingFee: '',
+    customFields: [] as { id: string; label: string; value: string }[],
+  });
 
   // Pay modal state
   const [showPayModal, setShowPayModal] = useState<{ feeId: string; remaining: number; desc: string } | null>(null);
@@ -54,11 +84,13 @@ export default function StudentProfile() {
   const { data: examsData } = useTableData(sid, 'exams');
   const { data: attendanceData } = useTableData(sid, 'attendance');
   const { data: settingsData } = useTableData(sid, 'settings');
+  const { data: subjectsData } = useTableData(sid, 'subjects');
 
   const student = useMemo(() =>
     (studentsData.find((s: any) => s.id === id) as Student) || null,
     [studentsData, id]);
   const classes = classesData as Class[];
+  const subjects = subjectsData as any[];
 
   // ── Fee calculations ────────────────────────────────────────────────────────
   const studentFees = useMemo(() =>
@@ -164,6 +196,50 @@ export default function StudentProfile() {
     finally { setUpdatingClass(false); setShowClassDropdown(false); }
   }
 
+  function addMoreCustomField() {
+    setMoreDraft(prev => ({
+      ...prev,
+      customFields: [...prev.customFields, { id: uuidv4(), label: '', value: '' }],
+    }));
+  }
+
+  function updateMoreCustomField(fieldId: string, updates: Partial<{ label: string; value: string }>) {
+    setMoreDraft(prev => ({
+      ...prev,
+      customFields: prev.customFields.map(field => field.id === fieldId ? { ...field, ...updates } : field),
+    }));
+  }
+
+  function removeMoreCustomField(fieldId: string) {
+    setMoreDraft(prev => ({
+      ...prev,
+      customFields: prev.customFields.filter(field => field.id !== fieldId),
+    }));
+  }
+
+  async function saveMoreDetails() {
+    if (!sid || !student || savingMoreDetails) return;
+    setSavingMoreDetails(true);
+    try {
+      const cleanCustomFields = moreDraft.customFields
+        .map(field => ({ ...field, label: field.label.trim(), value: field.value.trim() }))
+        .filter(field => field.label || field.value);
+      await dataService.update(sid, 'students', student.id, {
+        medicalInfo: moreDraft.medicalInfo.trim(),
+        tuitionFee: moreDraft.tuitionFee === '' ? undefined : Number(moreDraft.tuitionFee),
+        boardingFee: moreDraft.boardingFee === '' ? undefined : Number(moreDraft.boardingFee),
+        customFields: cleanCustomFields,
+        updatedAt: new Date().toISOString(),
+      } as any);
+      setEditingMoreDetails(false);
+      addToast('More details updated', 'success');
+    } catch {
+      addToast('Failed to update more details', 'error');
+    } finally {
+      setSavingMoreDetails(false);
+    }
+  }
+
   function openPayModal(fee: any) {
     setShowPayModal({ feeId: fee.id, remaining: fee.remaining, desc: fee.description });
     setPayAmount(String(fee.remaining));
@@ -221,6 +297,88 @@ export default function StudentProfile() {
   const profileCustomFields = useMemo(() => Array.isArray((student as any)?.customFields) ? (student as any).customFields.filter((field: any) => field?.label) : [], [student]);
   const registeredRequirements = useMemo(() => Array.isArray((student as any)?.requirements) ? (student as any).requirements.filter(Boolean) : [], [student]);
   const registeredAttachments = useMemo(() => Array.isArray((student as any)?.attachments) ? (student as any).attachments.filter((item: any) => item?.name || item?.file) : [], [student]);
+  const classSubjects = useMemo(
+    () => subjects.filter((subject: any) => subject.classId === student?.classId).sort((a: any, b: any) => String(a.name || '').localeCompare(String(b.name || ''))),
+    [subjects, student?.classId]
+  );
+  const subjectProfile = useMemo(() => ((student as any)?.subjectProfile || {}) as any, [student]);
+  const optionalSubjectIds = useMemo(() => new Set<string>(Array.isArray(subjectProfile.optionalSubjectIds) ? subjectProfile.optionalSubjectIds : []), [subjectProfile]);
+  const combinationSubjects = useMemo(() => {
+    if (subjectProfile.combinationName === 'Custom') {
+      return String(subjectProfile.customCombinationSubjects || '')
+        .split(',')
+        .map((item: string) => item.trim())
+        .filter(Boolean);
+    }
+    return A_LEVEL_COMBINATIONS.find(combo => combo.name === subjectProfile.combinationName)?.subjects || [];
+  }, [subjectProfile]);
+  const isSeniorFiveOrSix = useMemo(() => {
+    const currentClass = getClassName(student?.classId || '');
+    return /\b(s\s*5|s\s*6|senior\s*5|senior\s*6|a[-\s]?level)\b/i.test(currentClass);
+  }, [student?.classId, classesData]);
+  const defaultCoreSubjects = useMemo(() => {
+    if (classSubjects.length > 0) return classSubjects;
+    return [];
+  }, [classSubjects]);
+
+  useEffect(() => {
+    if (!student) return;
+    setMoreDraft({
+      medicalInfo: (student as any).medicalInfo || '',
+      tuitionFee: (student as any).tuitionFee != null ? String((student as any).tuitionFee) : '',
+      boardingFee: (student as any).boardingFee != null ? String((student as any).boardingFee) : '',
+      customFields: Array.isArray((student as any).customFields)
+        ? (student as any).customFields.map((field: any) => ({
+          id: field.id || uuidv4(),
+          label: String(field.label || ''),
+          value: String(field.value || ''),
+        }))
+        : [],
+    });
+  }, [student]);
+
+  useEffect(() => {
+    if (!student) return;
+    const profile = ((student as any).subjectProfile || {}) as any;
+    setSubjectDraft({
+      optionalSubjectIds: Array.isArray(profile.optionalSubjectIds) ? profile.optionalSubjectIds : [],
+      combinationName: profile.combinationName || '',
+      customCombinationName: profile.customCombinationName || '',
+      customCombinationSubjects: profile.customCombinationSubjects || '',
+    });
+  }, [student]);
+
+  function toggleOptionalSubject(subjectId: string) {
+    setSubjectDraft(prev => ({
+      ...prev,
+      optionalSubjectIds: prev.optionalSubjectIds.includes(subjectId)
+        ? prev.optionalSubjectIds.filter(id => id !== subjectId)
+        : [...prev.optionalSubjectIds, subjectId],
+    }));
+  }
+
+  async function saveSubjectProfile() {
+    if (!sid || !student || savingSubjects) return;
+    setSavingSubjects(true);
+    try {
+      await dataService.update(sid, 'students', student.id, {
+        subjectProfile: {
+          optionalSubjectIds: subjectDraft.optionalSubjectIds,
+          combinationName: subjectDraft.combinationName,
+          customCombinationName: subjectDraft.customCombinationName.trim(),
+          customCombinationSubjects: subjectDraft.customCombinationSubjects.trim(),
+          updatedAt: new Date().toISOString(),
+        },
+        updatedAt: new Date().toISOString(),
+      } as any);
+      setEditingSubjects(false);
+      addToast('Student subjects updated', 'success');
+    } catch {
+      addToast('Failed to update student subjects', 'error');
+    } finally {
+      setSavingSubjects(false);
+    }
+  }
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -258,13 +416,13 @@ export default function StudentProfile() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700">
-        {(['info', 'fees', 'reports', 'ledger', 'more'] as const).map(tab => (
+        {(['info', 'subjects', 'fees', 'reports', 'ledger', 'more'] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
               activeTab === tab ? 'border-primary-500 text-primary-600 dark:text-primary-400'
               : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
             }`}>
-            {tab === 'fees' ? 'Fees & Payments' : tab === 'reports' ? 'Academic Documents' : tab === 'ledger' ? 'Ledger' : tab === 'more' ? 'More' : 'Profile'}
+            {tab === 'subjects' ? 'Subjects' : tab === 'fees' ? 'Fees & Payments' : tab === 'reports' ? 'Academic Documents' : tab === 'ledger' ? 'Ledger' : tab === 'more' ? 'More' : 'Profile'}
           </button>
         ))}
       </div>
@@ -344,17 +502,134 @@ export default function StudentProfile() {
                 <BookOpen size={18} className="text-slate-400" />
               </button>
             </div>
-            <DropdownModal isOpen={showClassDropdown} onClose={() => setShowClassDropdown(false)} title="Change Class" icon={<GraduationCap size={20} />}>
-              <div className="p-2">
-                {classes.map(cls => (
-                  <button key={cls.id} onClick={() => handleClassChange(cls.id)}
-                    className={`w-full px-4 py-3 text-left rounded-lg transition-colors flex items-center justify-between ${student.classId === cls.id ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
-                    <div className="flex items-center gap-3"><BookOpen size={16} className={student.classId === cls.id ? 'text-primary-500' : 'text-slate-400'} /><span className="font-medium">{cls.name}</span></div>
-                    {student.classId === cls.id && <span className="text-xs bg-primary-100 dark:bg-primary-800 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded-full">Current</span>}
-                  </button>
-                ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'subjects' && (
+        <div className="space-y-5">
+          <div className="card">
+            <div className="card-header flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold flex items-center gap-2"><BookOpen size={18} className="text-primary-500" /> Student Subjects</h3>
+                <p className="text-xs text-slate-500 mt-1">Default class subjects, optional subjects, and A-level combinations for this student.</p>
               </div>
-            </DropdownModal>
+              <div className="flex items-center gap-2">
+                {editingSubjects ? (
+                  <>
+                    <button type="button" onClick={() => setEditingSubjects(false)} className="btn btn-secondary text-sm">Cancel</button>
+                    <button type="button" onClick={saveSubjectProfile} disabled={savingSubjects} className="btn btn-primary text-sm"><Save size={16} /> {savingSubjects ? 'Saving...' : 'Save'}</button>
+                  </>
+                ) : (
+                  <button type="button" onClick={() => setEditingSubjects(true)} className="btn btn-primary text-sm"><Edit size={16} /> Edit Subjects</button>
+                )}
+              </div>
+            </div>
+            <div className="card-body space-y-5">
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200">Default Subjects</h4>
+                  <span className="badge badge-info">{defaultCoreSubjects.length} from {getClassName(student.classId)}</span>
+                </div>
+                {defaultCoreSubjects.length === 0 ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                    No default subjects are assigned to this class yet. Add them on the Subjects page.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {defaultCoreSubjects.map((subject: any) => (
+                      <div key={subject.id} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                        <p className="font-semibold text-slate-800 dark:text-white">{subject.name}</p>
+                        <p className="mt-1 font-mono text-xs text-slate-400">{getSubjectDisplayCode(subject)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <h4 className="mb-2 text-sm font-bold text-slate-700 dark:text-slate-200">OPs / Optional Subjects</h4>
+                {editingSubjects ? (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {classSubjects.map((subject: any) => {
+                      const selected = subjectDraft.optionalSubjectIds.includes(subject.id);
+                      return (
+                        <button
+                          key={subject.id}
+                          type="button"
+                          onClick={() => toggleOptionalSubject(subject.id)}
+                          className={`rounded-xl border p-3 text-left transition-colors ${selected ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300' : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800'}`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="font-semibold">{subject.name}</p>
+                              <p className="mt-1 font-mono text-xs text-slate-400">{getSubjectDisplayCode(subject)}</p>
+                            </div>
+                            {selected && <CheckCircle size={17} className="shrink-0 text-primary-500" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : optionalSubjectIds.size === 0 ? (
+                  <p className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/50">No optional subjects assigned yet.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {classSubjects.filter((subject: any) => optionalSubjectIds.has(subject.id)).map((subject: any) => (
+                      <span key={subject.id} className="badge badge-success">{subject.name} ({getSubjectDisplayCode(subject)})</span>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200">S5 / S6 Combinations</h4>
+                  {!isSeniorFiveOrSix && <span className="text-xs font-medium text-slate-400">Shown for secondary planning</span>}
+                </div>
+                {editingSubjects ? (
+                  <div className="space-y-3">
+                    <select
+                      value={subjectDraft.combinationName}
+                      onChange={e => setSubjectDraft(prev => ({ ...prev, combinationName: e.target.value }))}
+                      className="form-input max-w-md"
+                    >
+                      <option value="">No combination selected</option>
+                      {A_LEVEL_COMBINATIONS.map(combo => (
+                        <option key={combo.name} value={combo.name}>{combo.name}{combo.subjects.length ? ` - ${combo.subjects.join(', ')}` : ''}</option>
+                      ))}
+                    </select>
+                    {subjectDraft.combinationName === 'Custom' && (
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <input
+                          value={subjectDraft.customCombinationName}
+                          onChange={e => setSubjectDraft(prev => ({ ...prev, customCombinationName: e.target.value }))}
+                          className="form-input"
+                          placeholder="Custom combination name, e.g. PCM/ICT"
+                        />
+                        <input
+                          value={subjectDraft.customCombinationSubjects}
+                          onChange={e => setSubjectDraft(prev => ({ ...prev, customCombinationSubjects: e.target.value }))}
+                          className="form-input"
+                          placeholder="Subjects separated by commas"
+                        />
+                      </div>
+                    )}
+                  </div>
+                ) : subjectProfile.combinationName ? (
+                  <div className="rounded-xl border border-primary-200 bg-primary-50 p-4 dark:border-primary-800 dark:bg-primary-900/20">
+                    <p className="text-sm font-black text-primary-700 dark:text-primary-300">
+                      {subjectProfile.combinationName === 'Custom' ? subjectProfile.customCombinationName || 'Custom Combination' : subjectProfile.combinationName}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {combinationSubjects.map((subject: string) => <span key={subject} className="badge badge-info">{subject}</span>)}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/50">No A-level combination assigned yet.</p>
+                )}
+              </section>
+            </div>
           </div>
         </div>
       )}
@@ -408,28 +683,135 @@ export default function StudentProfile() {
           </div>
 
           <div className="card">
-            <div className="card-header flex items-center gap-2">
-              <User size={18} className="text-violet-500" />
-              <h3 className="font-semibold">Custom Fields</h3>
-            </div>
-            <div className="card-body">
-              {profileCustomFields.length === 0 ? (
-                <p className="text-sm text-slate-400">No custom profile fields registered.</p>
+            <div className="card-header flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <User size={18} className="text-violet-500" />
+                <h3 className="font-semibold">More Details</h3>
+              </div>
+              {editingMoreDetails ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingMoreDetails(false)}
+                    disabled={savingMoreDetails}
+                    className="btn btn-secondary py-1.5 px-3 text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveMoreDetails}
+                    disabled={savingMoreDetails}
+                    className="btn btn-primary py-1.5 px-3 text-sm"
+                  >
+                    <Save size={15} /> {savingMoreDetails ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
               ) : (
-                <ol className="grid grid-cols-1 gap-3">
-                  {profileCustomFields.map((field: any, index: number) => (
-                    <li key={field.id || `${field.label}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
-                      <div className="flex items-start gap-2">
-                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[11px] font-bold text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{index + 1}</span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{field.label}</p>
-                          <p className="mt-1 break-words text-sm font-medium text-slate-800 dark:text-slate-100">{field.value || 'N/A'}</p>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
+                <button type="button" onClick={() => setEditingMoreDetails(true)} className="btn btn-secondary py-1.5 px-3 text-sm">
+                  <Edit size={15} /> Edit
+                </button>
               )}
+            </div>
+            <div className="card-body space-y-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Medical Information</p>
+                  {editingMoreDetails ? (
+                    <textarea
+                      value={moreDraft.medicalInfo}
+                      onChange={e => setMoreDraft(prev => ({ ...prev, medicalInfo: e.target.value }))}
+                      className="form-input mt-2 min-h-[84px]"
+                      placeholder="Allergies, conditions, special needs..."
+                    />
+                  ) : (
+                    <p className="mt-1 break-words text-sm font-medium text-slate-800 dark:text-slate-100">{student.medicalInfo || 'N/A'}</p>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 gap-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tuition Fee</p>
+                    {editingMoreDetails ? (
+                      <input
+                        type="number"
+                        min="0"
+                        value={moreDraft.tuitionFee}
+                        onChange={e => setMoreDraft(prev => ({ ...prev, tuitionFee: e.target.value }))}
+                        className="form-input mt-2"
+                      />
+                    ) : (
+                      <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-100">{student.tuitionFee != null ? formatMoney(student.tuitionFee) : 'N/A'}</p>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Boarding Fee</p>
+                    {editingMoreDetails ? (
+                      <input
+                        type="number"
+                        min="0"
+                        value={moreDraft.boardingFee}
+                        onChange={e => setMoreDraft(prev => ({ ...prev, boardingFee: e.target.value }))}
+                        className="form-input mt-2"
+                      />
+                    ) : (
+                      <p className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-100">{student.boardingFee != null ? formatMoney(student.boardingFee) : 'N/A'}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Custom Fields</p>
+                  {editingMoreDetails && (
+                    <button type="button" onClick={addMoreCustomField} className="btn btn-secondary py-1.5 px-3 text-sm">
+                      <Plus size={15} /> Add field
+                    </button>
+                  )}
+                </div>
+                {editingMoreDetails ? (
+                  <div className="space-y-2">
+                    {moreDraft.customFields.length === 0 && <p className="text-sm text-slate-400">No custom profile fields registered.</p>}
+                    {moreDraft.customFields.map(field => (
+                      <div key={field.id} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800/50 sm:grid-cols-[1fr_1fr_auto]">
+                        <input
+                          type="text"
+                          value={field.label}
+                          onChange={e => updateMoreCustomField(field.id, { label: e.target.value })}
+                          className="form-input text-sm"
+                          placeholder="Field name"
+                        />
+                        <input
+                          type="text"
+                          value={field.value}
+                          onChange={e => updateMoreCustomField(field.id, { value: e.target.value })}
+                          className="form-input text-sm"
+                          placeholder="Value"
+                        />
+                        <button type="button" onClick={() => removeMoreCustomField(field.id)} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : profileCustomFields.length === 0 ? (
+                  <p className="text-sm text-slate-400">No custom profile fields registered.</p>
+                ) : (
+                  <ol className="grid grid-cols-1 gap-3">
+                    {profileCustomFields.map((field: any, index: number) => (
+                      <li key={field.id || `${field.label}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+                        <div className="flex items-start gap-2">
+                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[11px] font-bold text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">{index + 1}</span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{field.label}</p>
+                            <p className="mt-1 break-words text-sm font-medium text-slate-800 dark:text-slate-100">{field.value || 'N/A'}</p>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -713,6 +1095,58 @@ export default function StudentProfile() {
       )}
 
       {/* ── Pay Modal — full page blur, centered ────────────────────────────── */}
+      {showClassDropdown && student && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowClassDropdown(false)}>
+          <div className="modal-card w-full max-w-xs overflow-hidden sm:max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex items-center gap-2">
+                <GraduationCap size={18} className="text-white" />
+                <h3 className="font-bold text-white">Change Class</h3>
+              </div>
+              <button onClick={() => setShowClassDropdown(false)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors" aria-label="Close class popup">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600">
+                <p className="text-xs text-slate-500">Student</p>
+                <p className="font-semibold text-slate-800 dark:text-white">{student.firstName} {student.lastName}</p>
+                <p className="text-xs text-slate-500 mt-1">Current class: <span className="font-bold text-slate-700 dark:text-slate-200">{getClassName(student.classId)}</span></p>
+              </div>
+
+              <div className="max-h-80 overflow-y-auto pr-1 space-y-2">
+                {classes.map(cls => (
+                  <button
+                    key={cls.id}
+                    type="button"
+                    onClick={() => handleClassChange(cls.id)}
+                    disabled={updatingClass}
+                    className={`w-full px-4 py-3 text-left rounded-lg transition-colors flex items-center justify-between border ${
+                      student.classId === cls.id
+                        ? 'border-primary-200 bg-primary-50 text-primary-700 dark:border-primary-800 dark:bg-primary-900/20 dark:text-primary-300'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/50'
+                    } disabled:opacity-60`}
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <BookOpen size={16} className={student.classId === cls.id ? 'text-primary-500' : 'text-slate-400'} />
+                      <span className="truncate font-medium">{cls.name}</span>
+                    </div>
+                    {student.classId === cls.id && <span className="shrink-0 text-xs bg-primary-100 dark:bg-primary-800 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded-full">Current</span>}
+                  </button>
+                ))}
+                {!classes.length && (
+                  <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-slate-500 dark:border-slate-700">No classes found.</p>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button onClick={() => setShowClassDropdown(false)} className="btn btn-secondary">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      , document.body)}
+
       {showPayModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setShowPayModal(null)}>
           <div className="modal-card w-full max-w-md" onClick={e => e.stopPropagation()}>

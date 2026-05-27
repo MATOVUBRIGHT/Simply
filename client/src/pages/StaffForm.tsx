@@ -9,6 +9,7 @@ import { generateStaffId } from '../utils/idFormat';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { useBackOrFallback } from '../utils/navigation';
 
 interface CustomField { id: string; label: string; value: string; }
 
@@ -32,6 +33,7 @@ export default function StaffForm() {
   const { user, schoolId } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBackOrFallback('/staff');
   const { addToast } = useToast();
   const [loading, setLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -168,7 +170,7 @@ export default function StaffForm() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <button onClick={() => navigate('/staff')} className="btn btn-ghost p-2"><ArrowLeft size={20} /></button>
+        <button onClick={goBack} className="btn btn-ghost p-2"><ArrowLeft size={20} /></button>
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">{isEditing ? 'Edit Staff' : 'Add New Staff'}</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{isEditing ? 'Update staff information' : 'Fill in the staff details'}</p>
@@ -331,7 +333,7 @@ export default function StaffForm() {
           </div>
         </div>
         <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
-          <button type="button" onClick={() => navigate('/staff')} className="btn btn-secondary">Cancel</button>
+          <button type="button" onClick={goBack} className="btn btn-secondary">Cancel</button>
           <button type="submit" disabled={loading} className="btn btn-primary">
             {loading ? <><Loader2 size={18} className="animate-spin" /> Saving...</> : <><Save size={18} /> {isEditing ? 'Update' : 'Add Staff'}</>}
           </button>

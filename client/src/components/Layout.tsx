@@ -31,6 +31,7 @@ import {
   Send,
   ExternalLink,
   Paperclip,
+  WalletCards,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
@@ -50,9 +51,10 @@ import { store, useTableData } from '../lib/store';
 import { supabase } from '../lib/supabase';
 import { parseAdminMessageLink } from '../utils/adminMessageLinks';
 import { downloadAttachment, openExternalLink } from '../utils/externalActions';
+import { useConfirm } from './ConfirmModal';
 
 const assetBase = import.meta.env.BASE_URL || './';
-const APP_VERSION = '2.4.0';
+const APP_VERSION = 'Version1';
 const DEFAULT_PROFILE_IMAGE =
   "data:image/svg+xml,%3Csvg width='96' height='96' viewBox='0 0 96 96' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='96' height='96' rx='48' fill='%23E0F2FE'/%3E%3Ccircle cx='48' cy='36' r='16' fill='%230F4C81'/%3E%3Cpath d='M22 82c4.8-17.5 15.1-26 26-26s21.2 8.5 26 26' fill='%232DA32D'/%3E%3C/svg%3E";
 
@@ -60,23 +62,44 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
+
 const menuItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: [UserRole.ADMIN, UserRole.TEACHER, UserRole.ACCOUNTANT] },
   { path: '/students', label: 'Students', icon: GraduationCap, roles: [UserRole.ADMIN, UserRole.TEACHER] },
+  { path: '/parents', label: 'Parents & Emails', icon: Users, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/admission', label: 'Admission', icon: UserPlus, roles: [UserRole.ADMIN] },
   { path: '/staff', label: 'Teachers & Staff', icon: Users, roles: [UserRole.ADMIN] },
-  { path: '/classes', label: 'Classes', icon: Building2, roles: [UserRole.ADMIN, UserRole.TEACHER] },
+  { path: '/classes', label: 'Classes & Timetables', icon: Building2, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/attendance', label: 'Attendance', icon: Calendar, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/day-boarding', label: 'Day & Boarding', icon: BedDouble, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/subjects', label: 'Subjects', icon: BookOpen, roles: [UserRole.ADMIN, UserRole.TEACHER] },
+  { path: '/homework-tests', label: 'Assignments & Tests', icon: ClipboardList, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/grades', label: 'Exams & Grades', icon: Award, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/finance', label: 'Fees & Finance', icon: Receipt, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
+  { path: '/payment-accounts', label: 'Payment Accounts', icon: CreditCard, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
+  { path: '/expenses', label: 'Expenses', icon: WalletCards, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
   { path: '/invoices', label: 'Invoices', icon: FileBarChart, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
   { path: '/transport', label: 'Transport', icon: Bus, roles: [UserRole.ADMIN] },
   { path: '/announcements', label: 'Announcements', icon: MessageSquare, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/reports', label: 'Reports', icon: ClipboardList, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
   { path: '/roles', label: 'Roles & Access', icon: Shield, roles: [UserRole.ADMIN] },
   { path: '/settings', label: 'Settings', icon: Settings, roles: [UserRole.ADMIN] },
+];
+
+const ORGANIZED_SIDEBAR_KEY = 'schofy_organized_sidebar';
+
+const sidebarSections = [
+  { label: 'People', pages: ['/students', '/parents', '/admission', '/staff'] },
+  { label: 'Academics', pages: ['/classes', '/subjects', '/homework-tests', '/grades'] },
+  { label: 'Daily Records', pages: ['/attendance', '/day-boarding'] },
+  { label: 'Finance', pages: ['/finance', '/payment-accounts', '/expenses', '/invoices'] },
+  { label: 'Communication', pages: ['/announcements'] },
+  { label: 'Operations', pages: ['/transport', '/reports', '/roles', '/settings'] },
 ];
 
 function Layout({ children }: LayoutProps) {
@@ -86,6 +109,8 @@ function Layout({ children }: LayoutProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [organizedSidebar, setOrganizedSidebar] = useState(() => localStorage.getItem(ORGANIZED_SIDEBAR_KEY) === 'true');
+  const organizedSidebarSettingRef = useRef<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationType[]>([]);
   const [profileImage, setProfileImage] = useState<string>(DEFAULT_PROFILE_IMAGE);
   const [deletedItemsCount, setDeletedItemsCount] = useState(0);
@@ -102,6 +127,7 @@ function Layout({ children }: LayoutProps) {
   const tenantId = schoolId || user?.id;
   const { isSyncing, syncNow, isSyncEnabled } = useSync();
   const { addToast } = useToast();
+  const confirm = useConfirm();
   const headerRef = useRef<HTMLDivElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
@@ -109,6 +135,7 @@ function Layout({ children }: LayoutProps) {
   const { data: settings } = useTableData(schoolId || user?.id || '', 'settings');
   const schoolName = useMemo(() => settings.find((s: any) => s.key === 'schoolName')?.value || 'Schofy', [settings]);
   const schoolLogo = useMemo(() => settings.find((s: any) => s.key === 'schoolLogo')?.value || '', [settings]);
+  const syncedOrganizedSidebar = useMemo(() => settings.find((s: any) => s.key === ORGANIZED_SIDEBAR_KEY)?.value, [settings]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -194,6 +221,20 @@ function Layout({ children }: LayoutProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    function handleSidebarShortcut(event: KeyboardEvent) {
+      if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || isTypingTarget(event.target)) return;
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+
+      event.preventDefault();
+      setSidebarHovered(false);
+      setSidebarOpen(event.key === 'ArrowRight');
+    }
+
+    window.addEventListener('keydown', handleSidebarShortcut);
+    return () => window.removeEventListener('keydown', handleSidebarShortcut);
+  }, []);
+
   function loadDeletedItemsCount() {
     if (!user?.id) return;
     try {
@@ -274,6 +315,15 @@ function Layout({ children }: LayoutProps) {
     }
   }, []);
 
+  useEffect(() => {
+    if (syncedOrganizedSidebar !== 'true' && syncedOrganizedSidebar !== 'false') return;
+    if (organizedSidebarSettingRef.current === syncedOrganizedSidebar) return;
+    organizedSidebarSettingRef.current = syncedOrganizedSidebar;
+    const next = syncedOrganizedSidebar === 'true';
+    setOrganizedSidebar(next);
+    localStorage.setItem(ORGANIZED_SIDEBAR_KEY, syncedOrganizedSidebar);
+  }, [syncedOrganizedSidebar]);
+
   async function loadNotifications() {
     if (!user?.id) return;
     try {
@@ -345,6 +395,58 @@ function Layout({ children }: LayoutProps) {
     } catch (error) {
       console.error('Failed to delete notification:', error);
     }
+  }
+
+  async function openNotification(notif: NotificationType) {
+    setNotifOpen(false);
+    if (user?.id && !notif.read) {
+      try {
+        await dataService.update(user.id, 'notifications', notif.id, { ...notif, read: true } as any);
+        await loadNotifications();
+      } catch {
+        // Navigation should still happen even if the read state update fails offline.
+      }
+    }
+
+    const link = String(notif.link || '').trim();
+    if (!link || parseAdminMessageLink(link)) {
+      navigate(`/notifications?selected=${encodeURIComponent(notif.id)}`);
+      return;
+    }
+
+    if (link.startsWith('/')) {
+      navigate(link);
+      return;
+    }
+
+    navigate(`/notifications?selected=${encodeURIComponent(notif.id)}`);
+  }
+
+  async function toggleSidebarOrganization() {
+    const next = !organizedSidebar;
+    const ok = await confirm({
+      title: next ? 'Organize Sidebar?' : 'Restore Default Sidebar?',
+      description: next
+        ? 'Group related pages into beginner-friendly sections. Dashboard will stay at the top.'
+        : 'Return the sidebar to the default flat page order.',
+      confirmLabel: next ? 'Organize Sidebar' : 'Restore Default',
+      variant: 'info',
+    });
+    if (!ok) return;
+    setOrganizedSidebar(next);
+    const savedValue = next ? 'true' : 'false';
+    localStorage.setItem(ORGANIZED_SIDEBAR_KEY, savedValue);
+    organizedSidebarSettingRef.current = savedValue;
+    if (tenantId) {
+      try {
+        await dataService.saveSettings(tenantId, { [ORGANIZED_SIDEBAR_KEY]: savedValue });
+        window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
+      } catch {
+        addToast('Sidebar preference saved locally. It will sync when cloud is available.', 'warning');
+      }
+    }
+    setProfileOpen(false);
+    addToast(next ? 'Sidebar organized into sections' : 'Sidebar reverted to default', 'success');
   }
 
   async function closeBroadcastPopup(markRead = false) {
@@ -433,6 +535,18 @@ function Layout({ children }: LayoutProps) {
   })();
 
   const filteredMenuItems = user ? menuItems : [];
+  const dashboardItem = filteredMenuItems.find(item => item.path === '/');
+  const assignedSidebarPaths = new Set(sidebarSections.flatMap(section => section.pages));
+  const organizedMenuSections = sidebarSections
+    .map(section => ({
+      ...section,
+      items: section.pages
+        .map(path => filteredMenuItems.find(item => item.path === path))
+        .filter(Boolean) as typeof filteredMenuItems,
+    }))
+    .filter(section => section.items.length > 0);
+  const moreMenuItems = filteredMenuItems.filter(item => item.path !== '/' && !assignedSidebarPaths.has(item.path));
+  const showSidebarText = sidebarOpen || sidebarHovered || mobileSidebarOpen;
   const broadcastLinkMeta = parseAdminMessageLink(broadcastPopup?.link);
 
   return (
@@ -555,9 +669,9 @@ function Layout({ children }: LayoutProps) {
 
           {/* Navigation */}
           <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1 custom-scrollbar overflow-x-visible" style={{ direction: 'rtl' }}>
-            <div style={{ direction: 'ltr' }}>
-              {filteredMenuItems.map(item => {
-                const isActive = location.pathname === item.path;
+            <div className="space-y-1" style={{ direction: 'ltr' }}>
+              {(organizedSidebar && dashboardItem ? [dashboardItem] : filteredMenuItems).map(item => {
+                const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
                 const Icon = item.icon;
                 return (
                   <Link
@@ -574,20 +688,86 @@ function Layout({ children }: LayoutProps) {
                     {/* Simple nav item — no complex hover expand */}
                     <div className="flex items-center gap-3 h-full w-full px-4">
                       <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
-                      <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100' : 'opacity-0 w-0'}`}>
+                      <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0'}`}>
                         {item.label}
                       </span>
                     </div>
                   </Link>
                 );
               })}
+              {organizedSidebar && organizedMenuSections.map(section => (
+                <div key={section.label} className="pt-3 first:pt-0">
+                  <p className={`px-4 pb-1 text-[11px] font-black uppercase tracking-wide text-slate-700 dark:text-slate-200 transition-all ${showSidebarText ? 'opacity-100' : 'h-2 overflow-hidden opacity-0'}`}>
+                    {section.label}
+                  </p>
+                  <div className="space-y-1">
+                    {section.items.map(item => {
+                      const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
+                      const Icon = item.icon;
+                      return (
+                        <Link
+                          key={item.path}
+                          to={item.path}
+                          onClick={() => setMobileSidebarOpen(false)}
+                          className={`flex items-center rounded-lg group relative h-11 ${
+                            isActive
+                              ? 'text-white shadow-sm'
+                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                          style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
+                        >
+                          <div className="flex items-center gap-3 h-full w-full px-4">
+                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
+                            <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0'}`}>
+                              {item.label}
+                            </span>
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {organizedSidebar && moreMenuItems.length > 0 && (
+                <div className="pt-3">
+                  <p className={`px-4 pb-1 text-[11px] font-black uppercase tracking-wide text-slate-700 dark:text-slate-200 transition-all ${showSidebarText ? 'opacity-100' : 'h-2 overflow-hidden opacity-0'}`}>
+                    More
+                  </p>
+                  <div className="space-y-1">
+                    {moreMenuItems.map(item => {
+                      const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
+                      const Icon = item.icon;
+                      return (
+                        <Link
+                          key={item.path}
+                          to={item.path}
+                          onClick={() => setMobileSidebarOpen(false)}
+                          className={`flex items-center rounded-lg group relative h-11 ${
+                            isActive
+                              ? 'text-white shadow-sm'
+                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                          style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
+                        >
+                          <div className="flex items-center gap-3 h-full w-full px-4">
+                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
+                            <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0'}`}>
+                              {item.label}
+                            </span>
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </nav>
 
           {/* Sidebar Footer: Minimize Button & Powered By on same line */}
           <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0">
             <div className={`transition-all duration-300 ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Powered by <span className="font-medium">Schofy</span> · v{APP_VERSION}</p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Powered by <span className="font-medium">Schofy</span> · {APP_VERSION}</p>
             </div>
             
             <button
@@ -708,10 +888,10 @@ function Layout({ children }: LayoutProps) {
                   {notifications.length === 0 ? (
                     <div className="py-10 text-center"><Bell className="mx-auto text-slate-300 mb-2" size={32} /><p className="text-slate-400 text-sm">No notifications</p></div>
                   ) : notifications.slice(0, 5).map(notif => (
-                    <div key={notif.id} className={`px-4 py-3 border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer group ${!notif.read ? 'bg-indigo-50/50 dark:bg-indigo-900/20' : ''}`}>
+                    <div key={notif.id} onClick={() => void openNotification(notif)} className={`px-4 py-3 border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer group ${!notif.read ? 'bg-indigo-50/50 dark:bg-indigo-900/20' : ''}`}>
                       <div className="flex items-start gap-3">
                         {!notif.read && <div className="w-2 h-2 bg-indigo-600 rounded-full mt-1.5 shrink-0 animate-pulse" />}
-                        <div className="flex-1 min-w-0" onClick={() => notif.link && navigate(notif.link)}>
+                        <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{notif.title}</p>
                           <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{notif.message}</p>
                         </div>
@@ -750,6 +930,7 @@ function Layout({ children }: LayoutProps) {
                     <span className="text-[10px] font-medium uppercase px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600">Admin</span>
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1">{planStatusLabel}</p>
+                  <p className="text-[10px] font-semibold text-slate-400 mt-1">{APP_VERSION}</p>
                 </div>
                 <div className="p-2">
                   {[
@@ -764,6 +945,11 @@ function Layout({ children }: LayoutProps) {
                       <span className="font-medium text-sm">{label}</span>
                     </button>
                   ))}
+                  <button onClick={() => void toggleSidebarOrganization()}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                    <ClipboardList size={16} className="text-slate-400 shrink-0" />
+                    <span className="font-medium text-sm">{organizedSidebar ? 'Default Sidebar' : 'Organize Sidebar'}</span>
+                  </button>
                   <div className="border-t border-slate-100 dark:border-slate-700 my-1 mx-3" />
                   {isStaffMode && (
                     <button onClick={() => { setProfileOpen(false); staffLogout(); }}

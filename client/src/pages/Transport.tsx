@@ -13,6 +13,7 @@ import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 
 export default function Transport() {
   const { user, schoolId } = useAuth();
@@ -250,12 +251,10 @@ export default function Transport() {
     setImportProgress(0);
     try {
       const now = new Date().toISOString();
-      let successCount = 0;
       const previewSnapshot = [...importPreview];
       closeImportModal();
       addToast(`Importing ${previewSnapshot.length} route${previewSnapshot.length !== 1 ? 's' : ''}... completing in background`, 'info');
-      for (let i = 0; i < previewSnapshot.length; i++) {
-        const data = previewSnapshot[i];
+      const tasks = previewSnapshot.map((data) => async () => {
         const route: TransportRoute = {
           id: uuidv4(),
           name: (data.name as string) || 'Unknown',
@@ -264,9 +263,8 @@ export default function Transport() {
           createdAt: now,
         };
         await dataService.create(id, 'transportRoutes', route as any);
-        successCount++;
-        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
-      }
+      });
+      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
       setIsImporting(false);
       closeImportModal();
       setShowImportSuccess(true);
@@ -323,7 +321,7 @@ export default function Transport() {
               </div>
             )}
           </div>
-          <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary" title="Import CSV">
+          <button onClick={() => setShowImportModal(true)} className="btn btn-secondary" title="Import CSV">
             <Upload size={16} />
             <span className="hidden sm:inline">Import</span>
           </button>

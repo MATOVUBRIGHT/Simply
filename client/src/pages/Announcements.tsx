@@ -13,6 +13,7 @@ import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { matchesTextSearch } from '../utils/searchMatch';
+import { deleteInThirtyPercentBatches } from '../utils/bulkDelete';
 
 const priorityConfig: Record<string, { 
   bg: string; 
@@ -242,23 +243,24 @@ export default function Announcements() {
     
     try {
       const now = new Date().toISOString();
-      
-      for (const idAnnouncement of selectedAnnouncements) {
-        const announcement = announcements.find(a => a.id === idAnnouncement);
-        if (announcement) {
-          await dataService.delete(id, 'announcements', idAnnouncement);
-          addToRecycleBin(id, {
+      const idsToDelete = Array.from(selectedAnnouncements);
+      const recycleItems = idsToDelete
+        .map(idAnnouncement => announcements.find(a => a.id === idAnnouncement))
+        .filter(Boolean) as Announcement[];
+
+      recycleItems.forEach(announcement => {
+        addToRecycleBin(id, {
             id: `announcement-${Date.now()}-${Math.random()}`,
             type: 'announcement',
             name: announcement.title,
             data: announcement,
             deletedAt: now
-          });
-        }
-      }
+        });
+      });
+      const deletedCount = await deleteInThirtyPercentBatches(id, 'announcements', idsToDelete);
       setSelectedAnnouncements(new Set());
       setSelectMode(false);
-      addToast(`${selectedAnnouncements.size} announcements moved to recycle bin`, 'success');
+      addToast(`${deletedCount} announcements moved to recycle bin`, 'success');
     } catch (error) {
       addToast('Failed to delete announcements', 'error');
     }

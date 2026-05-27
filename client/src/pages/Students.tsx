@@ -19,6 +19,8 @@ import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { BulkEditClassModal } from '../components/BulkEditClassModal';
 import { getSubscriptionAccessState } from '../utils/plans';
+import { deleteInThirtyPercentBatches } from '../utils/bulkDelete';
+import { FitStatValue } from '../components/FitStatValue';
 
 const avatarColors = [
   'bg-rose-500',
@@ -648,24 +650,22 @@ export default function Students() {
     
     try {
       const now = new Date().toISOString();
-      let deletedCount = 0;
-      
-      for (const studentId of selectedStudents) {
-        const student = students.find(s => s.id === studentId);
-        const result = await dataService.delete(id, 'students', studentId);
-        
-        if (result.success && student) {
-          deletedCount++;
-          addToRecycleBin(id, {
-            id: `student-${Date.now()}-${Math.random()}`,
-            type: 'student',
-            name: `${student.firstName} ${student.lastName}`,
-            data: student,
-            deletedAt: now
-          });
-        }
-      }
-      
+      const idsToDelete = Array.from(selectedStudents);
+      const recycleItems = idsToDelete
+        .map(studentId => students.find(s => s.id === studentId))
+        .filter(Boolean) as Student[];
+
+      recycleItems.forEach(student => {
+        addToRecycleBin(id, {
+          id: `student-${Date.now()}-${Math.random()}`,
+          type: 'student',
+          name: `${student.firstName} ${student.lastName}`,
+          data: student,
+          deletedAt: now
+        });
+      });
+      const deletedCount = await deleteInThirtyPercentBatches(id, 'students', idsToDelete);
+
       if (deletedCount > 0) {
         window.dispatchEvent(new Event('studentsUpdated'));
       }
@@ -1228,7 +1228,6 @@ export default function Students() {
           });
         }
       }
-
       const batchSize = Math.max(1, Math.ceil(importTasks.length * 0.3));
       let processedCount = 0;
       for (let start = 0; start < importTasks.length; start += batchSize) {
@@ -1400,9 +1399,9 @@ export default function Students() {
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
               <Users size={24} className="text-white" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-white/80">Total Students</p>
-              <p className="text-2xl font-bold text-white">{totalEnrolled}</p>
+              <FitStatValue>{totalEnrolled}</FitStatValue>
             </div>
           </div>
         </button>
@@ -1414,9 +1413,9 @@ export default function Students() {
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
               <UserCheck size={24} className="text-white" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-white/80">Active Students</p>
-              <p className="text-2xl font-bold text-white">{activeCount}</p>
+              <FitStatValue>{activeCount}</FitStatValue>
             </div>
           </div>
         </button>
@@ -1428,9 +1427,9 @@ export default function Students() {
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
               <UserMinus size={24} className="text-white" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-white/80">Deactivated</p>
-              <p className="text-2xl font-bold text-white">{deactivatedCount}</p>
+              <FitStatValue>{deactivatedCount}</FitStatValue>
             </div>
           </div>
         </button>
@@ -1442,9 +1441,9 @@ export default function Students() {
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
               <GraduationCap size={24} className="text-white" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-white/80">School Records</p>
-              <p className="text-2xl font-bold text-white">{completedCount}</p>
+              <FitStatValue>{completedCount}</FitStatValue>
             </div>
           </div>
         </button>
@@ -1857,7 +1856,7 @@ export default function Students() {
                           </div>
                         </div>
                       </td>
-                      <td className="font-mono text-xs bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 rounded">
+                      <td className="font-mono text-xs text-slate-700 dark:text-slate-300">
                         {student.studentId || student.admissionNo}
                       </td>
                       <td>
@@ -2125,7 +2124,7 @@ export default function Students() {
             if (event.target === event.currentTarget && !isImporting) closeImportModal();
           }}
         >
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-[min(92vw,60rem)] max-h-[86vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-[min(92vw,30rem)] max-h-[86vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />

@@ -16,9 +16,9 @@
     "dev:desktop": "npm run dev --workspace=desktop",
     "build": "npm run build --workspace=client && npm run build --workspace=server",
     "electron": "npm run start --workspace=desktop",
-    "build:desktop": "npm run build --workspace=client && npm run build --workspace=desktop",
-    "build:desktop:lite": "npm run build --workspace=client && npm run build:lite --workspace=desktop",
-    "build:desktop:win7": "npm run build --workspace=client && npm run build:win7 --workspace=desktop"
+    "build:desktop": "npm run build --workspace=client -- --mode desktop && npm run build --workspace=desktop",
+    "build:desktop:lite": "npm run build --workspace=client -- --mode desktop && npm run build:lite --workspace=desktop",
+    "build:desktop:win7": "npm run build --workspace=client -- --mode desktop && npm run build:win7 --workspace=desktop"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

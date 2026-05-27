@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { BedDouble, Home, Users, Search, GraduationCap, Save } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, BedDouble, Eye, Home, Users, Search, GraduationCap, Save } from 'lucide-react';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -8,12 +8,16 @@ import { useTableData } from '../lib/store';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { getBoardingStatus } from '../utils/studentBoarding';
 import { matchesStudentSearch } from '../utils/studentSearch';
+import { useBackOrFallback } from '../utils/navigation';
 
 const HOSTEL_KEYS = ['hosteldormitory', 'hostel', 'dormitory', 'dorm', 'boardinghouse'];
 
 export default function DayBoarding() {
   const { user, schoolId } = useAuth();
   const { addToast } = useToast();
+  const navigate = useNavigate();
+  const goBack = useBackOrFallback('/day-boarding');
+  const { boardingType, gender } = useParams<{ boardingType?: string; gender?: string }>();
   const sid = schoolId || user?.id || '';
   const students = useActiveStudents();
   const { data: classesData } = useTableData(sid, 'classes');
@@ -22,6 +26,9 @@ export default function DayBoarding() {
   const [savingHostelId, setSavingHostelId] = useState<string | null>(null);
 
   const className = (classId?: string) => (classesData as any[]).find(c => c.id === classId)?.name || 'No class';
+  const selectedType = boardingType === 'boarding' ? 'boarding' : boardingType === 'day' ? 'day' : null;
+  const selectedGender = gender === 'girls' ? 'girls' : gender === 'boys' ? 'boys' : null;
+  const detailMode = Boolean(selectedType && selectedGender);
 
   const getHostel = (student: any) => {
     const direct = student.hostel || student.hostelName || student.dormitory || student.dormitoryName;
@@ -126,15 +133,53 @@ export default function DayBoarding() {
     </div>
   );
 
+  const renderGenderSummary = (type: 'day' | 'boarding', genderKey: 'boys' | 'girls', list: any[]) => {
+    const isBoarding = type === 'boarding';
+    const Icon = genderKey === 'boys' ? Users : GraduationCap;
+    return (
+      <button
+        type="button"
+        onClick={() => navigate(`/day-boarding/${type}/${genderKey}`)}
+        className="rounded-xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/40 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-primary-600 dark:hover:bg-primary-900/10"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${isBoarding ? 'bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300' : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
+              <Icon size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold capitalize text-slate-800 dark:text-white">{genderKey}</p>
+              <p className="text-xs text-slate-500">{list.length} student{list.length === 1 ? '' : 's'}</p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200">
+            <Eye size={13} /> View all
+          </span>
+        </div>
+      </button>
+    );
+  };
+
   const dayTotal = groups.day.boys.length + groups.day.girls.length;
   const boardingTotal = groups.boarding.boys.length + groups.boarding.girls.length;
+  const selectedList = detailMode ? groups[selectedType!][selectedGender!] : [];
+  const detailTitle = detailMode
+    ? `${selectedType === 'boarding' ? 'Boarding' : 'Day'} ${selectedGender === 'boys' ? 'Boys' : 'Girls'}`
+    : '';
 
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Day & Boarding</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Students separated by day or boarding, boys and girls.</p>
+          {detailMode && (
+            <button onClick={goBack} className="mb-2 inline-flex items-center gap-1 text-sm font-semibold text-primary-600 hover:underline">
+              <ArrowLeft size={16} /> Day & Boarding
+            </button>
+          )}
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">{detailMode ? detailTitle : 'Day & Boarding'}</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            {detailMode ? `${selectedList.length} student${selectedList.length === 1 ? '' : 's'} in this list.` : 'Students separated by day or boarding, boys and girls.'}
+          </p>
         </div>
         <div className="relative">
           <Search size={18} className="search-input-icon" />
@@ -163,29 +208,44 @@ export default function DayBoarding() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+      {detailMode ? (
         <section className="card overflow-hidden">
           <div className="card-header flex items-center justify-between">
-            <h2 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><Home size={20} className="text-emerald-500" /> Day Students</h2>
-            <span className="badge badge-success">{dayTotal}</span>
+            <h2 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+              {selectedType === 'boarding' ? <BedDouble size={20} className="text-violet-500" /> : <Home size={20} className="text-emerald-500" />}
+              {detailTitle}
+            </h2>
+            <span className="badge badge-info">{selectedList.length}</span>
           </div>
-          <div className="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
-            {renderList('Boys', groups.day.boys)}
-            {renderList('Girls', groups.day.girls)}
+          <div className="card-body">
+            {renderList(detailTitle, selectedList, selectedType === 'boarding')}
           </div>
         </section>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+          <section className="card overflow-hidden">
+            <div className="card-header flex items-center justify-between">
+              <h2 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><Home size={20} className="text-emerald-500" /> Day Students</h2>
+              <span className="badge badge-success">{dayTotal}</span>
+            </div>
+            <div className="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
+              {renderGenderSummary('day', 'boys', groups.day.boys)}
+              {renderGenderSummary('day', 'girls', groups.day.girls)}
+            </div>
+          </section>
 
-        <section className="card overflow-hidden">
-          <div className="card-header flex items-center justify-between">
-            <h2 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><BedDouble size={20} className="text-violet-500" /> Boarding Students</h2>
-            <span className="badge badge-info">{boardingTotal}</span>
-          </div>
-          <div className="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
-            {renderList('Boys', groups.boarding.boys, true)}
-            {renderList('Girls', groups.boarding.girls, true)}
-          </div>
-        </section>
-      </div>
+          <section className="card overflow-hidden">
+            <div className="card-header flex items-center justify-between">
+              <h2 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><BedDouble size={20} className="text-violet-500" /> Boarding Students</h2>
+              <span className="badge badge-info">{boardingTotal}</span>
+            </div>
+            <div className="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
+              {renderGenderSummary('boarding', 'boys', groups.boarding.boys)}
+              {renderGenderSummary('boarding', 'girls', groups.boarding.girls)}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

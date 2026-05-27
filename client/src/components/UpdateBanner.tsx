@@ -3,17 +3,16 @@ import { Sparkles, X, ChevronDown, ChevronUp } from 'lucide-react';
 
 // Bump this version string whenever you deploy new features.
 // The banner shows once per version, then is dismissed forever.
-const APP_VERSION = '2.4.0';
+const APP_VERSION = 'Version1';
 const STORAGE_KEY = `schofy_seen_update_${APP_VERSION}`;
 
 const CHANGELOG = [
-  { text: 'Subjects now show as a deduplicated list - no more repeats' },
-  { text: 'Exam Marks: selecting "CAT" shows all classes at once' },
-  { text: 'Staff form: subject list deduplicated by name' },
-  { text: 'Term defaults now follow your Settings -> Current Term' },
-  { text: 'Notifications & profile dropdowns now blur the full app' },
-  { text: 'Offline cache upgraded to IndexedDB - faster cold starts' },
-  { text: 'Errors caught silently - no raw crashes in the UI' },
+  { text: 'New report card templates with school logo watermark and PDF export.' },
+  { text: 'Classes & Timetables now includes colored timetable blocks, full screen editing, room, exam, event, and free-time support.' },
+  { text: 'Student profiles now include Subjects, optional OPs, and S5/S6 combinations.' },
+  { text: 'Finance adds expenses, profit reporting, payment accounts, invoice improvements, and one-time verification codes.' },
+  { text: 'Parents & Emails, Assignments, custom grading, sidebar organization, and assistant read-aloud are now available.' },
+  { text: 'Sync, offline queue handling, list performance, imports, searches, filters, and responsive scrolling were improved.' },
 ];
 
 export default function UpdateBanner() {
@@ -47,7 +46,7 @@ export default function UpdateBanner() {
             <Sparkles size={16} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-bold text-white text-sm leading-tight">Schofy updated to v{APP_VERSION}</p>
+            <p className="font-bold text-white text-sm leading-tight">Schofy updated to {APP_VERSION}</p>
             <p className="text-white/70 text-xs">New features & improvements</p>
           </div>
           <button

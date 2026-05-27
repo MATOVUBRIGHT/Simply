@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { Bot, Send, Sparkles, Square, Trash2, Volume2, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -21,6 +21,27 @@ const CHAT_STORAGE_KEY = 'schofy_assistant_chat';
 const CHAT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const assetBase = import.meta.env.BASE_URL || './';
 const ASSISTANT_ICON = `${assetBase}schofy-assistant-icon.png`;
+
+const NATURAL_LADY_VOICE_HINTS = [
+  'natural', 'neural', 'online', 'premium', 'female', 'woman', 'zira',
+  'susan', 'samantha', 'victoria', 'karen', 'moira', 'tessa', 'aria',
+  'jenny', 'michelle', 'emma', 'olivia', 'sonia', 'ava',
+];
+
+function pickNaturalLadyVoice(voices: SpeechSynthesisVoice[]) {
+  const englishVoices = voices.filter((voice) => /^en([-_]|$)/i.test(voice.lang || ''));
+  const candidates = englishVoices.length ? englishVoices : voices;
+  const scored = candidates
+    .map((voice) => {
+      const haystack = `${voice.name} ${voice.voiceURI} ${voice.lang}`.toLowerCase();
+      const score = NATURAL_LADY_VOICE_HINTS.reduce((total, hint) => (
+        haystack.includes(hint) ? total + 1 : total
+      ), 0) + (voice.localService ? 0 : 0.5);
+      return { voice, score };
+    })
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.score > 0 ? scored[0].voice : candidates[0] || null;
+}
 
 const quickPrompts = [
   'How do I import students?',
@@ -44,10 +65,12 @@ const dailyLauncherTexts = [
 const assistantPages: Array<{ label: string; path: string; keywords: string[]; note: string }> = [
   { label: 'Dashboard', path: '/', keywords: ['dashboard', 'home', 'overview', 'stats', 'calendar'], note: 'school overview and current-month calendar' },
   { label: 'Students', path: '/students', keywords: ['student', 'students', 'learners', 'pupils', 'import students', 'export students'], note: 'student lists, imports, exports, and actions' },
+  { label: 'Parents', path: '/parents', keywords: ['parents', 'guardians', 'parent details', 'guardian details'], note: 'parent contacts by student and class' },
+  { label: 'Parent Emails', path: '/parent-emails', keywords: ['parent emails', 'email parents', 'guardian emails', 'send email'], note: 'select and email parents' },
   { label: 'Add Student', path: '/students/new', keywords: ['add student', 'new student', 'create student'], note: 'new student form' },
   { label: 'Admission', path: '/admission', keywords: ['admission', 'register', 'enroll'], note: 'student admission workflow' },
   { label: 'Teachers & Staff', path: '/staff', keywords: ['staff', 'teacher', 'teachers', 'employees'], note: 'staff and teacher records' },
-  { label: 'Classes', path: '/classes', keywords: ['class', 'classes', 'stream', 'streams'], note: 'classes, streams, and class details' },
+  { label: 'Classes & Timetables', path: '/classes', keywords: ['class', 'classes', 'stream', 'streams', 'timetable', 'timetables'], note: 'classes, streams, timetables, and class details' },
   { label: 'Attendance', path: '/attendance', keywords: ['attendance', 'present', 'absent', 'late'], note: 'daily attendance marking' },
   { label: 'Day & Boarding', path: '/day-boarding', keywords: ['boarding', 'day', 'hostel', 'dormitory'], note: 'day and boarding students' },
   { label: 'Subjects', path: '/subjects', keywords: ['subject', 'subjects', 'courses'], note: 'subject setup and imports' },
@@ -56,7 +79,7 @@ const assistantPages: Array<{ label: string; path: string; keywords: string[]; n
   { label: 'Finance', path: '/finance', keywords: ['finance', 'fees', 'bursary', 'discount', 'requirements', 'fees structure'], note: 'finance overview and student tags' },
   { label: 'Ledger', path: '/finance?tab=ledger', keywords: ['ledger', 'student ledger', 'opening balance', 'closing balance'], note: 'student fee ledger and balances' },
   { label: 'Payments', path: '/finance?tab=payments', keywords: ['payment', 'payments', 'record payment'], note: 'payment records and imports' },
-  { label: 'Payment Accounts', path: '/finance?tab=accounts', keywords: ['accounts', 'payment accounts', 'bank accounts', 'mobile money'], note: 'payment destinations for invoices' },
+  { label: 'Payment Accounts', path: '/payment-accounts', keywords: ['accounts', 'payment accounts', 'bank accounts', 'mobile money'], note: 'payment destinations for invoices' },
   { label: 'Invoices', path: '/invoices', keywords: ['invoice', 'invoices', 'billing', 'receipt'], note: 'student invoices and payment details' },
   { label: 'Transport', path: '/transport', keywords: ['transport', 'bus', 'routes'], note: 'transport routes and fees' },
   { label: 'Announcements', path: '/announcements', keywords: ['announcement', 'announcements', 'notice', 'notice board', 'events'], note: 'school notices and events' },
@@ -222,6 +245,8 @@ export default function SchofyAssistant() {
   const [showDailyHint, setShowDailyHint] = useState(true);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>(loadStoredMessages);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [speechVoices, setSpeechVoices] = useState<SpeechSynthesisVoice[]>([]);
   const location = useLocation();
   const navigate = useNavigate();
   const { isOnline } = useAuth();
@@ -256,6 +281,27 @@ export default function SchofyAssistant() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, open]);
 
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setSpeakingId(null);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+    const loadVoices = () => setSpeechVoices(window.speechSynthesis.getVoices());
+    loadVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+  }, []);
+
   const sendMessage = (value = input) => {
     const text = value.trim();
     if (!text) return;
@@ -273,13 +319,38 @@ export default function SchofyAssistant() {
   };
 
   const openPlans = () => {
+    window.speechSynthesis?.cancel();
+    setSpeakingId(null);
     setOpen(false);
     navigate('/plans');
   };
 
   const openPageAction = (path: string) => {
+    window.speechSynthesis?.cancel();
+    setSpeakingId(null);
     setOpen(false);
     navigate(path);
+  };
+
+  const readMessageAloud = (message: ChatMessage) => {
+    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') return;
+    if (speakingId === message.id) {
+      window.speechSynthesis.cancel();
+      setSpeakingId(null);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(message.text);
+    const voice = pickNaturalLadyVoice(speechVoices.length ? speechVoices : window.speechSynthesis.getVoices());
+    if (voice) utterance.voice = voice;
+    utterance.lang = voice?.lang || 'en-US';
+    utterance.rate = 0.86;
+    utterance.pitch = 1.08;
+    utterance.volume = 1;
+    utterance.onend = () => setSpeakingId(current => current === message.id ? null : current);
+    utterance.onerror = () => setSpeakingId(current => current === message.id ? null : current);
+    setSpeakingId(message.id);
+    window.speechSynthesis.speak(utterance);
   };
 
   return createPortal(
@@ -327,7 +398,7 @@ export default function SchofyAssistant() {
               <button type="button" onClick={clearChat} className="rounded-[5px] p-2 text-white hover:bg-white/20" aria-label="Clear assistant chat">
                 <Trash2 size={16} />
               </button>
-              <button type="button" onClick={() => setOpen(false)} className="rounded-[5px] p-2 text-white hover:bg-white/20" aria-label="Close assistant">
+              <button type="button" onClick={() => { window.speechSynthesis?.cancel(); setSpeakingId(null); setOpen(false); }} className="rounded-[5px] p-2 text-white hover:bg-white/20" aria-label="Close assistant">
                 <X size={18} />
               </button>
             </div>
@@ -341,7 +412,22 @@ export default function SchofyAssistant() {
                     ? 'bg-indigo-600 text-white'
                     : 'border border-slate-200 bg-white text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200'
                 }`}>
-                  {message.role === 'assistant' && <Sparkles size={13} className="mb-1 inline-block text-emerald-500" />}
+                  {message.role === 'assistant' && (
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <Sparkles size={13} className="inline-block text-emerald-500" />
+                      {'speechSynthesis' in window && (
+                        <button
+                          type="button"
+                          onClick={() => readMessageAloud(message)}
+                          className="rounded-[5px] p-1 text-slate-400 transition hover:bg-slate-100 hover:text-emerald-600 dark:hover:bg-slate-800"
+                          title={speakingId === message.id ? 'Stop reading' : 'Read aloud slowly'}
+                          aria-label={speakingId === message.id ? 'Stop reading message' : 'Read message aloud'}
+                        >
+                          {speakingId === message.id ? <Square size={13} /> : <Volume2 size={14} />}
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <p>{message.text}</p>
                   {message.role === 'assistant' && message.actions && message.actions.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">

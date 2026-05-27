@@ -20,18 +20,25 @@ import { supabaseAnonKey, supabaseUrl } from './lib/supabase';
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Students = lazy(() => import('./pages/Students'));
+const Parents = lazy(() => import('./pages/Parents'));
+const ParentEmails = lazy(() => import('./pages/ParentEmails'));
 const StudentForm = lazy(() => import('./pages/StudentForm'));
 const Admission = lazy(() => import('./pages/Admission'));
 const StudentProfile = lazy(() => import('./pages/StudentProfile'));
 const Staff = lazy(() => import('./pages/Staff'));
 const StaffForm = lazy(() => import('./pages/StaffForm'));
+const StaffProfile = lazy(() => import('./pages/StaffProfile'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const Classes = lazy(() => import('./pages/Classes'));
 const ClassDetail = lazy(() => import('./pages/ClassDetail'));
+const Timetable = lazy(() => import('./pages/Timetable'));
 const Subjects = lazy(() => import('./pages/Subjects'));
+const HomeworkTests = lazy(() => import('./pages/HomeworkTests'));
 const Attendance = lazy(() => import('./pages/Attendance'));
 const DayBoarding = lazy(() => import('./pages/DayBoarding'));
 const Finance = lazy(() => import('./pages/Finance'));
+const PaymentAccounts = lazy(() => import('./pages/PaymentAccounts'));
+const Expenses = lazy(() => import('./pages/Expenses'));
 const Transport = lazy(() => import('./pages/Transport'));
 const Announcements = lazy(() => import('./pages/Announcements'));
 const Notifications = lazy(() => import('./pages/Notifications'));
@@ -42,6 +49,7 @@ const NotFound = lazy(() => import('./pages/NotFound'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const Grades = lazy(() => import('./pages/Grades'));
 const ExamMarks = lazy(() => import('./pages/ExamMarks'));
+const CustomGrading = lazy(() => import('./pages/CustomGrading'));
 const ReportCard = lazy(() => import('./pages/ReportCard'));
 const Plans = lazy(() => import('./pages/Plans'));
 const RecycleBin = lazy(() => import('./pages/RecycleBin'));
@@ -106,6 +114,8 @@ function MainApp() {
                     <Route path="/" element={<ErrorBoundary inline><Dashboard /></ErrorBoundary>} />
                     <Route path="/dashboard" element={<Navigate to="/" replace />} />
                     <Route path="/students" element={<ErrorBoundary inline><Students /></ErrorBoundary>} />
+                    <Route path="/parents" element={<ErrorBoundary inline><Parents /></ErrorBoundary>} />
+                    <Route path="/parent-emails" element={<ErrorBoundary inline><ParentEmails /></ErrorBoundary>} />
                     <Route path="/students/new" element={<ErrorBoundary inline><StudentForm /></ErrorBoundary>} />
                     <Route path="/admission" element={<ErrorBoundary inline><Admission /></ErrorBoundary>} />
                     <Route path="/students/:id" element={<ErrorBoundary inline><StudentProfile /></ErrorBoundary>} />
@@ -113,18 +123,24 @@ function MainApp() {
                     <Route path="/staff" element={<ErrorBoundary inline><Staff /></ErrorBoundary>} />
                     <Route path="/teachers" element={<Navigate to="/staff" replace />} />
                     <Route path="/staff/new" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
-                    <Route path="/staff/:id" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
-                    <Route path="/teachers/:id" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
+                    <Route path="/staff/:id" element={<ErrorBoundary inline><StaffProfile /></ErrorBoundary>} />
+                    <Route path="/teachers/:id" element={<ErrorBoundary inline><StaffProfile /></ErrorBoundary>} />
                     <Route path="/staff/:id/edit" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
                     <Route path="/payroll" element={<ErrorBoundary inline><Payroll /></ErrorBoundary>} />
                     <Route path="/classes" element={<ErrorBoundary inline><Classes /></ErrorBoundary>} />
+                    <Route path="/classes/timetable" element={<ErrorBoundary inline><Timetable /></ErrorBoundary>} />
                     <Route path="/classes/:id" element={<ErrorBoundary inline><ClassDetail /></ErrorBoundary>} />
                     <Route path="/subjects" element={<ErrorBoundary inline><Subjects /></ErrorBoundary>} />
+                    <Route path="/homework-tests" element={<ErrorBoundary inline><HomeworkTests /></ErrorBoundary>} />
                     <Route path="/attendance" element={<ErrorBoundary inline><Attendance /></ErrorBoundary>} />
                     <Route path="/day-boarding" element={<ErrorBoundary inline><DayBoarding /></ErrorBoundary>} />
+                    <Route path="/day-boarding/:boardingType/:gender" element={<ErrorBoundary inline><DayBoarding /></ErrorBoundary>} />
                     <Route path="/finance" element={<ErrorBoundary inline><Finance /></ErrorBoundary>} />
+                    <Route path="/payment-accounts" element={<ErrorBoundary inline><PaymentAccounts /></ErrorBoundary>} />
+                    <Route path="/expenses" element={<ErrorBoundary inline><Expenses /></ErrorBoundary>} />
                     <Route path="/invoices" element={<ErrorBoundary inline><Invoices /></ErrorBoundary>} />
                     <Route path="/grades" element={<ErrorBoundary inline><Grades /></ErrorBoundary>} />
+                    <Route path="/grades/custom-grading" element={<ErrorBoundary inline><CustomGrading /></ErrorBoundary>} />
                     <Route path="/exam-marks" element={<ErrorBoundary inline><ExamMarks /></ErrorBoundary>} />
                     <Route path="/report-card/:id" element={<ErrorBoundary inline><ReportCard /></ErrorBoundary>} />
                     <Route path="/transport" element={<ErrorBoundary inline><Transport /></ErrorBoundary>} />

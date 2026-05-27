@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 
-import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2, Clock, ArrowLeft } from 'lucide-react';
+import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2, Clock, ArrowLeft, KeyRound, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, cachePlanStateLocally, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { supabase } from '../lib/supabase';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
+import { redeemPaymentVerificationCode } from '../utils/paymentVerification';
 
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
@@ -39,6 +40,15 @@ export default function Plans() {
   const [accessPopup, setAccessPopup] = useState<{ title: string; message: string; days: number | null; canProceed: boolean } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [transactionId, setTransactionId] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [verifyingCode, setVerifyingCode] = useState(false);
+  const [verificationPopup, setVerificationPopup] = useState<{
+    status: 'verifying' | 'success' | 'failed';
+    title: string;
+    message: string;
+    reason?: string;
+    canProceed?: boolean;
+  } | null>(null);
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
   const [accessState, setAccessState] = useState<SubscriptionAccessState | null>(null);
   const [latestReceipt, setLatestReceipt] = useState<Awaited<ReturnType<typeof getLatestReceipt>>>(null);
@@ -285,6 +295,56 @@ export default function Plans() {
     return `$${amount}`;
   }
 
+  async function handleVerifyCode() {
+    const authId = schoolId || user?.id;
+    if (!authId) return;
+    setVerifyingCode(true);
+    setAccessNotice(null);
+    setVerificationPopup({
+      status: 'verifying',
+      title: 'Verifying code',
+      message: 'Checking this payment verification code...',
+    });
+    try {
+      const result = await redeemPaymentVerificationCode(authId, user?.id, verificationCode);
+      if (result.status === 'valid') {
+        setVerificationCode('');
+        setPaymentSubmitted(false);
+        setShowPaymentModal(false);
+        setAccessNotice({ type: 'success', message: result.message });
+        setVerificationPopup({
+          status: 'success',
+          title: 'Valid code',
+          message: `${result.message} Redirecting to dashboard...`,
+          canProceed: true,
+        });
+        await loadPlanState();
+        window.setTimeout(() => navigate('/'), 1200);
+      } else {
+        const reason =
+          result.status === 'used'
+            ? 'This code was already used before. One-time codes cannot be reused.'
+            : result.status === 'terminated'
+              ? 'This code was stopped by the admin and cannot activate a plan.'
+              : result.status === 'invalid'
+                ? 'The code may be wrongly typed, incomplete, or not from Schofy.'
+                : 'The system could not complete verification right now.';
+        setVerificationPopup({
+          status: 'failed',
+          title: 'Code verification failed',
+          message: result.message,
+          reason,
+        });
+        setAccessNotice({
+          type: 'error',
+          message: `${result.message} ${reason}`,
+        });
+      }
+    } finally {
+      setVerifyingCode(false);
+    }
+  }
+
   const handleDownloadInvoice = () => {
     const receiptAmount = latestReceipt ? formatAmount(Number(latestReceipt.amount || 0)) : 'N/A';
     const invoice = `SCHOFY RECEIPT
@@ -427,6 +487,42 @@ Powered by Schofy`;
       </div>
 
       {/* First-time user — no plan yet: show trial request */}
+      <div className="hidden">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+              <KeyRound size={16} className="text-emerald-600" />
+              Payment verification code
+            </h2>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Enter a one-time Schofy code to activate the matching plan online or offline.
+            </p>
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-xl">
+            <input
+              type="text"
+              value={verificationCode}
+              onChange={(e) => setVerificationCode(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleVerifyCode(); }}
+              placeholder="Enter verification code"
+              className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <button
+              type="button"
+              onClick={() => void handleVerifyCode()}
+              disabled={verifyingCode}
+              className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              style={{ backgroundColor: 'var(--solid-emerald)' }}
+            >
+              {verifyingCode ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+              Verify
+            </button>
+          </div>
+        </div>
+      </div>
+
       {accessNotice && (
         <div className={`rounded-xl border p-4 text-sm font-semibold ${
           accessNotice.type === 'success'
@@ -732,6 +828,31 @@ Powered by Schofy`;
                   />
                 </div>
 
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/60 dark:bg-emerald-900/20">
+                  <label className="mb-1 block text-xs font-medium text-emerald-800 dark:text-emerald-200">Have a verification code?</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={verificationCode}
+                      onChange={(e) => setVerificationCode(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleVerifyCode(); }}
+                      placeholder="Enter code"
+                      className="min-w-0 flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 dark:border-emerald-800 dark:bg-slate-800 dark:text-white"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleVerifyCode()}
+                      disabled={verifyingCode}
+                      className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    >
+                      {verifyingCode ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                      Verify
+                    </button>
+                  </div>
+                </div>
+
                 <div className="flex gap-2">
                   <a href="https://wa.me/256750034304" target="_blank" rel="noopener noreferrer" className="flex-1 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1">
                     <MessageCircle size={12} /> WhatsApp
@@ -835,6 +956,38 @@ Powered by Schofy`;
                     Plan: <strong>{selectedPlan.name}</strong> · Amount: <strong>{formatAmount(getPlanAmount(selectedPlan))}</strong>
                   </p>
                   <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">Activation within 24 hours after verification.</p>
+                </div>
+
+                <div className="mb-4 rounded-xl border border-emerald-200 bg-white p-3 text-left dark:border-emerald-900/60 dark:bg-slate-900">
+                  <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                    <KeyRound size={16} className="text-emerald-600" />
+                    Payment verification code
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Enter a one-time Schofy code to activate the matching plan online or offline.
+                  </p>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="text"
+                      value={verificationCode}
+                      onChange={(e) => setVerificationCode(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleVerifyCode(); }}
+                      placeholder="Enter verification code"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleVerifyCode()}
+                      disabled={verifyingCode}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      style={{ backgroundColor: 'var(--solid-emerald)' }}
+                    >
+                      {verifyingCode ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+                      Verify
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -1032,6 +1185,53 @@ Powered by Schofy`;
                 </a>
                 <button onClick={() => setShowRenewModal(false)} className="w-full py-2 text-slate-400 text-sm">Cancel</button>
               </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {verificationPopup && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 text-center shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full ${
+              verificationPopup.status === 'success'
+                ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300'
+                : verificationPopup.status === 'failed'
+                  ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-300'
+                  : 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300'
+            }`}>
+              {verificationPopup.status === 'verifying' && <Loader2 size={22} className="animate-spin" />}
+              {verificationPopup.status === 'success' && <Check size={22} />}
+              {verificationPopup.status === 'failed' && <AlertTriangle size={22} />}
+            </div>
+            <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">{verificationPopup.title}</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{verificationPopup.message}</p>
+            {verificationPopup.reason && (
+              <div className="mt-3 rounded-lg bg-slate-50 p-3 text-left text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                <p className="font-bold text-slate-800 dark:text-white">Possible reason</p>
+                <p className="mt-1">{verificationPopup.reason}</p>
+              </div>
+            )}
+            <div className="mt-5 flex gap-2">
+              {verificationPopup.status === 'failed' && (
+                <a
+                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nMy payment verification code failed.\nSchool: ${user?.email || ''}\nSchool ID: ${schoolId || user?.id || ''}\nCode entered: ${verificationCode}\n\nPlease help me verify.`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 rounded-lg bg-green-500 px-4 py-2 text-sm font-semibold text-white hover:bg-green-600"
+                >
+                  Contact admin
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => verificationPopup.canProceed ? navigate('/') : setVerificationPopup(null)}
+                disabled={verificationPopup.status === 'verifying'}
+                className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
+              >
+                {verificationPopup.canProceed ? 'Go to dashboard' : verificationPopup.status === 'failed' ? 'Try again' : 'Please wait'}
+              </button>
             </div>
           </div>
         </div>,

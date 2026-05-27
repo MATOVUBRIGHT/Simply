@@ -12,6 +12,24 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
+import { FitStatValue } from '../components/FitStatValue';
+
+type ImportAttendanceRow = {
+  date: string;
+  admissionNo: string;
+  studentName?: string;
+  className?: string;
+  status: AttendanceStatus;
+};
+
+type ImportProgress = {
+  total: number;
+  processed: number;
+  saved: number;
+  skipped: number;
+};
+
+const IMPORT_BATCH_SIZE = 30;
 
 const avatarColors = [
   'from-orange-500 to-red-400',
@@ -43,6 +61,7 @@ export default function Attendance() {
   const { addToast } = useToast();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const autoSaveTimersRef = useRef<Record<string, number>>({});
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -52,10 +71,16 @@ export default function Attendance() {
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [importTemplateClassId, setImportTemplateClassId] = useState('');
+  const [importTemplateStudentIds, setImportTemplateStudentIds] = useState<Set<string>>(new Set());
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress>({ total: 0, processed: 0, saved: 0, skipped: 0 });
 
   const attendanceExpectedFields = [
     { key: 'date', label: 'Date', required: true },
     { key: 'admissionNo', label: 'ID', required: true },
+    { key: 'studentName', label: 'Student Name', required: false },
+    { key: 'className', label: 'Class', required: false },
     { key: 'status', label: 'Status', required: true },
   ];
 
@@ -66,6 +91,21 @@ export default function Attendance() {
       ? all.filter(s => s.classId === selectedClass && s.status !== 'completed')
       : all.filter(s => s.status !== 'completed');
   }, [studentsData, selectedClass]);
+
+  const studentsForImportTemplate = useMemo(() => {
+    if (!importTemplateClassId) return [];
+    return (studentsData as Student[])
+      .filter(s => s.classId === importTemplateClassId && s.status !== 'completed')
+      .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
+  }, [studentsData, importTemplateClassId]);
+
+  const selectedImportClassName = useMemo(() => (
+    (classes.find((c: any) => c.id === importTemplateClassId) as any)?.name || ''
+  ), [classes, importTemplateClassId]);
+
+  useEffect(() => {
+    setImportTemplateStudentIds(new Set(studentsForImportTemplate.map(student => student.id)));
+  }, [importTemplateClassId, studentsForImportTemplate]);
 
   // Derive today's attendance from store - instant, no fetch
   const allAttendance = attendanceData as AttendanceRecord[];
@@ -90,8 +130,60 @@ export default function Attendance() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  function normalizeAttendanceStatus(value: unknown): AttendanceStatus {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'absent' || raw === 'a') return AttendanceStatus.ABSENT;
+    if (raw === 'late' || raw === 'l') return AttendanceStatus.LATE;
+    return AttendanceStatus.PRESENT;
+  }
+
+  function waitForPaint() {
+    return new Promise<void>(resolve => {
+      window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+    });
+  }
+
+  async function saveSingleAttendance(studentId: string, status: AttendanceStatus, date = selectedDate) {
+    const id = schoolId || user?.id;
+    if (!id) return;
+    const now = new Date().toISOString();
+    const existingRecord = allAttendance.find(record =>
+      record.date === date &&
+      record.entityType === EntityType.STUDENT &&
+      record.entityId === studentId
+    );
+    if (existingRecord) {
+      await dataService.update(id, 'attendance', existingRecord.id, { ...existingRecord, status, updatedAt: now } as any);
+      return;
+    }
+    await dataService.create(id, 'attendance', {
+      id: uuidv4(),
+      entityType: EntityType.STUDENT,
+      entityId: studentId,
+      date,
+      status,
+      createdAt: now,
+    } as any);
+  }
+
+  function scheduleAttendanceSave(studentId: string, status: AttendanceStatus) {
+    const key = `${selectedDate}:${studentId}`;
+    if (autoSaveTimersRef.current[key]) window.clearTimeout(autoSaveTimersRef.current[key]);
+    autoSaveTimersRef.current[key] = window.setTimeout(() => {
+      void saveSingleAttendance(studentId, status).catch(() => addToast('Failed to auto-save attendance', 'error'));
+      delete autoSaveTimersRef.current[key];
+    }, 250);
+  }
+
+  useEffect(() => {
+    return () => {
+      Object.values(autoSaveTimersRef.current).forEach(timer => window.clearTimeout(timer));
+    };
+  }, []);
+
   function handleStatusChange(studentId: string, status: AttendanceStatus) {
     setAttendance(prev => ({ ...prev, [studentId]: status }));
+    scheduleAttendanceSave(studentId, status);
   }
 
   async function handleSave() {
@@ -194,29 +286,81 @@ export default function Attendance() {
     setShowExportMenu(false);
   }
 
-  function downloadTemplate() {
-    import('xlsx').then(({ utils, writeFile }) => {
-      const headers = attendanceExpectedFields.map(f => f.label);
-      const sampleRows = [
-        ['2024-01-15', 'ADM001', 'present'],
-        ['2024-01-15', 'ADM002', 'absent'],
-      ];
-      const ws = utils.aoa_to_sheet([headers, ...sampleRows]);
-      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
-      const wb = utils.book_new();
-      utils.book_append_sheet(wb, ws, 'Attendance');
-      writeFile(wb, 'attendance-import-template.xlsx');
-      addToast('Template downloaded', 'success');
+  function openImportModal() {
+    setImportStep('upload');
+    setImportTemplateClassId(selectedClass || '');
+    setImportTemplateStudentIds(new Set());
+    setShowImportModal(true);
+  }
+
+  function handleImportTemplateClassChange(classId: string) {
+    setImportTemplateClassId(classId);
+    setImportTemplateStudentIds(new Set());
+  }
+
+  function toggleImportTemplateStudent(studentId: string) {
+    setImportTemplateStudentIds(prev => {
+      const next = new Set(prev);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      return next;
     });
   }
 
-  function closeImportModal() {
+  function selectAllImportTemplateStudents() {
+    setImportTemplateStudentIds(new Set(studentsForImportTemplate.map(student => student.id)));
+  }
+
+  function clearImportTemplateStudentSelection() {
+    setImportTemplateStudentIds(new Set());
+  }
+
+  function downloadTemplate() {
+    if (!importTemplateClassId) {
+      addToast('Select a class first so the template can include its students.', 'warning');
+      return;
+    }
+    const selectedTemplateStudents = studentsForImportTemplate.filter(student =>
+      importTemplateStudentIds.has(student.id)
+    );
+    if (selectedTemplateStudents.length === 0) {
+      addToast('No students selected for this template.', 'warning');
+      return;
+    }
+    import('xlsx').then(({ utils, writeFile }) => {
+      const headers = attendanceExpectedFields.map(f => f.label);
+      const className = selectedImportClassName || 'Selected Class';
+      const rosterRows = selectedTemplateStudents.map(student => [
+        selectedDate,
+        student.admissionNo || student.studentId || student.id,
+        `${student.firstName} ${student.lastName}`,
+        className,
+        attendance[student.id] || AttendanceStatus.PRESENT,
+      ]);
+      const ws = utils.aoa_to_sheet([
+        [`// ATTENDANCE IMPORT TEMPLATE - ${className} - ${selectedDate}. Edit Status only: present, absent, late.`],
+        headers,
+        ...rosterRows,
+      ]);
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 4, 14) }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, 'Attendance');
+      writeFile(wb, `attendance-${className}-${selectedDate}.xlsx`);
+      addToast(`Template downloaded for ${selectedTemplateStudents.length} student${selectedTemplateStudents.length === 1 ? '' : 's'}`, 'success');
+    });
+  }
+
+  function closeImportModal(force = false) {
+    if (isImporting && !force) return;
     setShowImportModal(false);
     setImportStep('upload');
     setCsvHeaders([]);
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
+    setImportTemplateClassId('');
+    setImportTemplateStudentIds(new Set());
+    setImportProgress({ total: 0, processed: 0, saved: 0, skipped: 0 });
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -258,69 +402,145 @@ export default function Attendance() {
         if (matchingHeader) autoMapping[field.key] = matchingHeader;
       });
       setFieldMapping(autoMapping);
-      setImportStep('map');
-      setShowImportModal(true);
+      const hasRequiredMapping = attendanceExpectedFields
+        .filter(field => field.required)
+        .every(field => autoMapping[field.key]);
+      if (hasRequiredMapping) {
+        const mappedData = buildImportPreviewFromRows(headers, data, autoMapping);
+        setImportPreview(mappedData);
+        setImportStep('preview');
+        setShowImportModal(true);
+        await waitForPaint();
+        await executeImport(mappedData);
+      } else {
+        setImportStep('map');
+        setShowImportModal(true);
+      }
     } catch (error) { addToast('Failed to read Excel file', 'error'); }
     event.target.value = '';
   }
 
-  function processMapping() {
-    const mappedData: { date: string; admissionNo: string; status: string }[] = [];
-    for (const row of csvData) {
+  function buildImportPreviewFromRows(headers: string[], rows: string[][], mapping: Record<string, string>): ImportAttendanceRow[] {
+    const mappedData: ImportAttendanceRow[] = [];
+    for (const row of rows) {
       const record: any = {};
       attendanceExpectedFields.forEach(field => {
-        const csvHeader = fieldMapping[field.key];
+        const csvHeader = mapping[field.key];
         if (csvHeader) {
-          const headerIndex = csvHeaders.indexOf(csvHeader);
+          const headerIndex = headers.indexOf(csvHeader);
           if (headerIndex !== -1 && row[headerIndex]) {
             record[field.key] = row[headerIndex];
           }
         }
       });
-      if (record.date && record.admissionNo) mappedData.push(record);
+      if (record.date && record.admissionNo) mappedData.push({ ...record, status: normalizeAttendanceStatus(record.status) });
     }
+    return mappedData;
+  }
+
+  function buildImportPreviewFromMapping(mapping = fieldMapping): ImportAttendanceRow[] {
+    return buildImportPreviewFromRows(csvHeaders, csvData, mapping);
+  }
+
+  function processMapping() {
+    const mappedData = buildImportPreviewFromMapping();
     setImportPreview(mappedData);
     setImportStep('preview');
   }
 
-  async function executeImport() {
+  async function executeImport(recordsToImport = importPreview as ImportAttendanceRow[]) {
     const id = schoolId || user?.id;
-    if (!id || importPreview.length === 0) { addToast('No valid records to import', 'error'); return; }
+    if (!id || recordsToImport.length === 0) { addToast('No valid records to import', 'error'); return; }
+    setIsImporting(true);
+    setImportProgress({ total: recordsToImport.length, processed: 0, saved: 0, skipped: 0 });
     try {
       const now = new Date().toISOString();
       let successCount = 0;
+      let skippedCount = 0;
+      const allActiveStudents = (studentsData as Student[]).filter(s => s.status !== 'completed');
+      const studentByIdentifier = new Map<string, Student>();
+      allActiveStudents.forEach(student => {
+        [student.admissionNo, (student as any).studentId, student.id]
+          .filter(Boolean)
+          .forEach(identifier => studentByIdentifier.set(String(identifier), student));
+      });
+      const existingAttendanceByKey = new Map<string, AttendanceRecord>();
+      allAttendance
+        .filter(record => record.entityType === EntityType.STUDENT)
+        .forEach(record => existingAttendanceByKey.set(`${record.date}:${record.entityId}`, record));
+      const importedStudentClassIds = new Set<string>();
+      const importedDates = new Set<string>();
+      const currentDateAttendanceUpdates: Record<string, AttendanceStatus> = {};
 
-      for (const data of importPreview as any[]) {
-        const student = students.find(s => s.admissionNo === data.admissionNo);
-        if (!student) continue;
+      for (let start = 0; start < recordsToImport.length; start += IMPORT_BATCH_SIZE) {
+        const batch = recordsToImport.slice(start, start + IMPORT_BATCH_SIZE);
+        const batchUpdates: Record<string, AttendanceStatus> = {};
+        const writes = batch.map(async data => {
+          const student = studentByIdentifier.get(String(data.admissionNo));
+          if (!student) {
+            skippedCount++;
+            return;
+          }
+          if (student.classId) importedStudentClassIds.add(student.classId);
+          if (data.date) importedDates.add(data.date);
 
-        // Use store data - no network call
-        const existingRecord = allAttendance.find(a => a.date === data.date && a.entityId === student.id);
+          const status = normalizeAttendanceStatus(data.status);
+          const existingRecord = existingAttendanceByKey.get(`${data.date}:${student.id}`);
+          if (existingRecord) {
+            await dataService.update(id, 'attendance', existingRecord.id, { ...existingRecord, status, updatedAt: now } as any);
+          } else {
+            const newRecord: AttendanceRecord = {
+              id: uuidv4(),
+              entityType: EntityType.STUDENT,
+              entityId: student.id,
+              date: data.date,
+              status,
+              createdAt: now,
+            };
+            await dataService.create(id, 'attendance', newRecord as any);
+            existingAttendanceByKey.set(`${data.date}:${student.id}`, newRecord);
+          }
+          if (data.date === selectedDate) {
+            batchUpdates[student.id] = status;
+            currentDateAttendanceUpdates[student.id] = status;
+          }
+          successCount++;
+        });
 
-        if (existingRecord) {
-          await dataService.update(id, 'attendance', existingRecord.id, { status: data.status as AttendanceStatus } as any);
-        } else {
-          const newRecord: AttendanceRecord = {
-            id: uuidv4(),
-            entityType: EntityType.STUDENT,
-            entityId: student.id,
-            date: data.date,
-            status: data.status as AttendanceStatus,
-            createdAt: now,
-          };
-          await dataService.create(id, 'attendance', newRecord as any);
+        await Promise.all(writes);
+        if (Object.keys(batchUpdates).length > 0) {
+          setAttendance(prev => ({ ...prev, ...batchUpdates }));
         }
-        successCount++;
+        setImportProgress({
+          total: recordsToImport.length,
+          processed: Math.min(start + batch.length, recordsToImport.length),
+          saved: successCount,
+          skipped: skippedCount,
+        });
+        await waitForPaint();
       }
-      closeImportModal();
+      if (importedDates.size === 1) setSelectedDate([...importedDates][0]);
+      if (importedStudentClassIds.size === 1) setSelectedClass([...importedStudentClassIds][0]);
+      if (Object.keys(currentDateAttendanceUpdates).length > 0) {
+        setAttendance(prev => ({ ...prev, ...currentDateAttendanceUpdates }));
+      }
+      addToast(`Saved ${successCount} attendance record${successCount === 1 ? '' : 's'}`, 'success');
+      closeImportModal(true);
       setShowImportSuccess(true);
-    } catch (error) { addToast('Failed to import attendance', 'error'); }
+    } catch (error) {
+      addToast('Failed to import attendance', 'error');
+    } finally {
+      setIsImporting(false);
+    }
   }
 
   const presentCount = Object.values(attendance).filter(s => s === AttendanceStatus.PRESENT).length;
   const absentCount = Object.values(attendance).filter(s => s === AttendanceStatus.ABSENT).length;
   const lateCount = Object.values(attendance).filter(s => s === AttendanceStatus.LATE).length;
   const totalMarked = presentCount + absentCount + lateCount;
+  const importPercent = importProgress.total > 0
+    ? Math.round((importProgress.processed / importProgress.total) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -368,7 +588,7 @@ export default function Attendance() {
               </div>
             )}
           </div>
-          <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary" title="Import CSV">
+          <button onClick={openImportModal} className="btn btn-secondary" title="Import attendance">
             <Upload size={16} />
             <span className="hidden sm:inline">Import</span>
           </button>
@@ -395,8 +615,8 @@ export default function Attendance() {
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
               <Check size={24} className="text-white" />
             </div>
-            <div>
-              <p className="text-2xl font-bold text-white">{presentCount}</p>
+            <div className="min-w-0">
+              <FitStatValue>{presentCount}</FitStatValue>
               <p className="text-xs text-white/80 font-medium">Present</p>
             </div>
           </div>
@@ -406,8 +626,8 @@ export default function Attendance() {
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
               <X size={24} className="text-white" />
             </div>
-            <div>
-              <p className="text-2xl font-bold text-white">{absentCount}</p>
+            <div className="min-w-0">
+              <FitStatValue>{absentCount}</FitStatValue>
               <p className="text-xs text-white/80 font-medium">Absent</p>
             </div>
           </div>
@@ -417,8 +637,8 @@ export default function Attendance() {
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
               <Clock size={24} className="text-white" />
             </div>
-            <div>
-              <p className="text-2xl font-bold text-white">{lateCount}</p>
+            <div className="min-w-0">
+              <FitStatValue>{lateCount}</FitStatValue>
               <p className="text-xs text-white/80 font-medium">Late</p>
             </div>
           </div>
@@ -428,8 +648,8 @@ export default function Attendance() {
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
               <Users size={24} className="text-white" />
             </div>
-            <div>
-              <p className="text-2xl font-bold text-white">{totalMarked}/{students.length}</p>
+            <div className="min-w-0">
+              <FitStatValue>{totalMarked}/{students.length}</FitStatValue>
               <p className="text-xs text-white/80 font-medium">Marked</p>
             </div>
           </div>
@@ -522,7 +742,7 @@ export default function Attendance() {
                       </div>
                     </div>
                   </td>
-                  <td className="font-mono text-sm bg-slate-50 dark:bg-slate-800/50 px-3 py-1 rounded-lg">
+                  <td className="font-mono text-sm text-slate-700 dark:text-slate-300">
                     {s.studentId || s.admissionNo}
                   </td>
                   {!selectedClass && (
@@ -578,33 +798,118 @@ export default function Attendance() {
 
       {showImportModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={(e) => { if (e.target === e.currentTarget) closeImportModal(); }}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg animate-modal-in border border-slate-200 dark:border-slate-700 overflow-hidden animate-modal-in">
             <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
                 <h2 className="font-bold text-white">Import Attendance</h2>
               </div>
-              <button onClick={closeImportModal} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+              <button onClick={() => closeImportModal()} disabled={isImporting} className="p-1 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                 <X size={18} className="text-white" />
               </button>
             </div>
 
             <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
+              {isImporting && (
+                <div className="mb-4 rounded-xl border border-indigo-100 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-900/20 p-4">
+                  <div className="flex items-center justify-between text-sm mb-2">
+                    <span className="font-semibold text-indigo-700 dark:text-indigo-200">Importing attendance</span>
+                    <span className="font-bold text-indigo-700 dark:text-indigo-200">{importPercent}%</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-white dark:bg-slate-700 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-indigo-500 to-cyan-500 transition-all duration-200"
+                      style={{ width: `${importPercent}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-300">
+                    <span>{importProgress.processed}/{importProgress.total} processed</span>
+                    <span>{importProgress.saved} saved{importProgress.skipped ? `, ${importProgress.skipped} skipped` : ''}</span>
+                  </div>
+                </div>
+              )}
+
               {importStep === 'upload' && (
                 <div className="space-y-4">
+                  <div>
+                    <label className="form-label">Select Class *</label>
+                    <select
+                      value={importTemplateClassId}
+                      onChange={e => handleImportTemplateClassChange(e.target.value)}
+                      className="form-input"
+                    >
+                      <option value="">Choose a class</option>
+                      {classes.map((c: any) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {importTemplateClassId && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="form-label mb-0">Students in Template</label>
+                        <div className="flex gap-2 text-xs">
+                          <button
+                            type="button"
+                            onClick={selectAllImportTemplateStudents}
+                            className="text-indigo-600 dark:text-indigo-400 hover:underline"
+                          >
+                            All ({importTemplateStudentIds.size}/{studentsForImportTemplate.length})
+                          </button>
+                          <span className="text-slate-300">-</span>
+                          <button
+                            type="button"
+                            onClick={clearImportTemplateStudentSelection}
+                            className="text-slate-500 hover:underline"
+                          >
+                            None
+                          </button>
+                        </div>
+                      </div>
+                      {studentsForImportTemplate.length === 0 ? (
+                        <p className="text-sm text-amber-600 dark:text-amber-400 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                          No active students in this class.
+                        </p>
+                      ) : (
+                        <div className="max-h-44 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700">
+                          {studentsForImportTemplate.map(student => {
+                            const selected = importTemplateStudentIds.has(student.id);
+                            return (
+                              <label key={student.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={() => toggleImportTemplateStudent(student.id)}
+                                  className="w-4 h-4 rounded border-slate-300 text-indigo-600"
+                                />
+                                <span className="text-sm text-slate-700 dark:text-slate-200 flex-1">{student.firstName} {student.lastName}</span>
+                                <span className="text-xs text-slate-400 font-mono">{student.studentId || student.admissionNo}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-2 mb-4">
-                    <button onClick={downloadTemplate} className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-lg transition-colors text-sm font-medium">
+                    <button
+                      onClick={downloadTemplate}
+                      disabled={isImporting || !importTemplateClassId || importTemplateStudentIds.size === 0}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-lg transition-colors text-sm font-medium"
+                    >
                       <Download size={14} />
                       Download Template
                     </button>
                   </div>
 
                   <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors cursor-pointer text-center"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => { if (!isImporting) fileInputRef.current?.click(); }}
                   >
                     <Upload size={28} className="mx-auto text-slate-400 mb-2" />
                     <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Click to upload Excel file (.xlsx)</p>
-                    <p className="text-xs text-slate-400 mt-1">or drag and drop</p>
+                    <p className="text-xs text-slate-400 mt-1">Records are saved automatically when you import</p>
                   </div>
 
                   <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3">
@@ -662,8 +967,8 @@ export default function Attendance() {
                   </div>
 
                   <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={closeImportModal} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
-                    <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
+                    <button onClick={() => closeImportModal()} disabled={isImporting} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
+                    <button onClick={processMapping} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
                       Preview <ArrowRight size={14} />
                     </button>
                   </div>
@@ -713,9 +1018,9 @@ export default function Attendance() {
                   </div>
 
                   <div className="flex justify-between pt-2">
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
-                    <button onClick={executeImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
-                      <CheckIcon size={14} /> Import {importPreview.length}
+                    <button onClick={() => setImportStep('map')} disabled={isImporting} className="btn btn-secondary py-1.5 px-3 text-sm">Back</button>
+                    <button onClick={() => executeImport()} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">
+                      <CheckIcon size={14} /> {isImporting ? `Saving ${importPercent}%` : `Import & Save ${importPreview.length}`}
                     </button>
                   </div>
                 </div>

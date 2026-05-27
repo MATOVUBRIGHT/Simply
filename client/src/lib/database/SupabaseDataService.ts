@@ -96,7 +96,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     'id','school_id','name','level','stream','capacity','created_at','updated_at',
   ],
   subjects: [
-    'id','school_id','name','class_id','teacher_id','created_at','updated_at',
+    'id','school_id','name','code','class_id','teacher_id','created_at','updated_at',
   ],
   fees: [
     'id','school_id','student_id','class_id','description','amount','paid_amount',
@@ -155,8 +155,8 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   ],
   settings: ['id','school_id','key','value','created_at','updated_at'],
   timetable: [
-    'id','school_id','class_id','subject_id','teacher_id','day_of_week',
-    'start_time','end_time','created_at','updated_at',
+    'id','school_id','class_id','subject_id','teacher_id','day_of_week','period',
+    'entry_type','exam_id','custom_name','room','start_time','end_time','created_at','updated_at',
   ],
   schools: [
     'id','name','registration_number','address','phone','email','logo_url',
@@ -177,7 +177,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   ],
   expenses: [
     'id','school_id','title','category','amount','date','recorded_by',
-    'notes','created_at','updated_at',
+    'payment_method','notes','created_at','updated_at',
   ],
   audit_logs: [
     'id','school_id','user_id','action','resource','details','created_at',
@@ -246,6 +246,65 @@ for (const [t, cols] of Object.entries(TABLE_COLUMNS)) {
   COLUMN_SETS[t] = new Set(cols);
 }
 
+const SCHEMA_DISABLED_COLUMNS_KEY = 'schofy_disabled_remote_columns';
+const DEFAULT_DISABLED_REMOTE_COLUMNS: Record<string, string[]> = {
+  timetable: ['entry_type', 'exam_id', 'custom_name'],
+  expenses: ['payment_method'],
+};
+const disabledRemoteColumns: Record<string, Set<string>> = {};
+
+function loadDisabledRemoteColumns() {
+  if (Object.keys(disabledRemoteColumns).length > 0) return;
+  Object.entries(DEFAULT_DISABLED_REMOTE_COLUMNS).forEach(([table, columns]) => {
+    disabledRemoteColumns[table] = new Set(columns);
+  });
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SCHEMA_DISABLED_COLUMNS_KEY) || '{}') as Record<string, string[]>;
+    Object.entries(parsed).forEach(([table, columns]) => {
+      disabledRemoteColumns[table] = new Set([...(disabledRemoteColumns[table] || []), ...columns]);
+    });
+  } catch { /* ignore */ }
+}
+
+function saveDisabledRemoteColumns() {
+  try {
+    const serializable = Object.fromEntries(Object.entries(disabledRemoteColumns).map(([table, columns]) => [table, Array.from(columns)]));
+    localStorage.setItem(SCHEMA_DISABLED_COLUMNS_KEY, JSON.stringify(serializable));
+  } catch { /* ignore */ }
+}
+
+function isRemoteColumnDisabled(remoteTable: string, column: string) {
+  loadDisabledRemoteColumns();
+  return disabledRemoteColumns[remoteTable]?.has(column) || false;
+}
+
+function markRemoteColumnDisabled(remoteTable: string, column: string) {
+  if (!remoteTable || !column) return;
+  loadDisabledRemoteColumns();
+  if (!disabledRemoteColumns[remoteTable]) disabledRemoteColumns[remoteTable] = new Set();
+  if (disabledRemoteColumns[remoteTable].has(column)) return;
+  disabledRemoteColumns[remoteTable].add(column);
+  saveDisabledRemoteColumns();
+  console.debug(`[schema] ${remoteTable}.${column} is missing remotely; syncing without it until the database migration is applied.`);
+}
+
+function parseMissingRemoteColumn(error: any, remoteTable: string) {
+  const msg = String(error?.message || error || '');
+  const tableColumn = msg.match(/column\s+([a-z0-9_]+)\.([a-z0-9_]+)\s+does not exist/i);
+  if (tableColumn) return { table: tableColumn[1], column: tableColumn[2] };
+  const schemaCache = msg.match(/Could not find the '([^']+)' column of '([^']+)'/i);
+  if (schemaCache) return { table: schemaCache[2], column: schemaCache[1] };
+  return null;
+}
+
+function getRemoteSelectColumns(remoteTable: string) {
+  const cols = (TABLE_COLUMNS as any)[remoteTable] || ['*'];
+  if (cols[0] === '*') return '*';
+  loadDisabledRemoteColumns();
+  const disabled = disabledRemoteColumns[remoteTable];
+  return (disabled ? cols.filter((col: string) => !disabled.has(col)) : cols).join(',');
+}
+
 function isUUID(v: any): boolean {
   return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 }
@@ -266,6 +325,7 @@ function toRemote(data: any, remoteTable: string, contextSchoolId?: string): any
     if (v === undefined) continue;
     const col = k === 'schoolId' ? 'school_id' : camelToSnake(k);
     if (allowed && !allowed.has(col)) continue;
+    if (isRemoteColumnDisabled(remoteTable, col)) continue;
 
     // UUID Validation with table-specific overrides
     if (UUID_COLUMNS.has(col) && v !== null) {
@@ -985,14 +1045,13 @@ class SupabaseDataService {
     if (!session) return;
 
     const rt = getSupabaseTable(tableName);
-    const cols = (TABLE_COLUMNS as any)[rt] || ['*'];
 
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
 
       // DELTA SYNC: Only fetch what we need (specific columns + school filter)
-      let q = this.db.from(rt).select(cols.join(','));
+      let q = this.db.from(rt).select(getRemoteSelectColumns(rt));
       
       if (!NO_SCHOOL_FILTER.has(rt) && rt !== 'schools') {
         q = applyScope(q, rt, sid);
@@ -1059,7 +1118,7 @@ class SupabaseDataService {
       this._realtimeStopTimer = null;
     }
     if ((this._realtimeStarted || this._realtimeStarting) && this._realtimeSid === sid) {
-      console.log('[Realtime] Already started, skipping duplicate initialization');
+      console.debug('[Realtime] Already started, skipping duplicate initialization');
       return;
     }
     
@@ -1123,7 +1182,7 @@ class SupabaseDataService {
           }
 
           notifyUI(tableName);
-          console.log(`[Realtime] ${eventType} on ${table} processed`);
+          console.debug(`[Realtime] ${eventType} on ${table} processed`);
         }) as any;
       }
 
@@ -1213,10 +1272,10 @@ class SupabaseDataService {
         // Trigger background fetch immediately
         // For cloud-first, if we have never checked this table, wait for the fetch.
         if (!hasCacheEntry) {
-          return await this._fetchAndMerge(sid, tableName);
+          return await this._fetchAndMerge(sid, tableName, forceRefresh);
         } else {
           // If we have cache, return it but kick off a background refresh
-          void this._fetchAndMerge(sid, tableName);
+          void this._fetchAndMerge(sid, tableName, forceRefresh);
         }
       }
     }
@@ -1225,11 +1284,11 @@ class SupabaseDataService {
   }
 
   /** Internal helper for cloud-first fetching with delta sync and conflict resolution */
-  private async _fetchAndMerge(sid: string, tableName: string): Promise<any[]> {
+  private async _fetchAndMerge(sid: string, tableName: string, fullRefresh = false): Promise<any[]> {
     if (!canUseRemoteTable(tableName)) {
       return cacheGet(sid, tableName) || [];
     }
-    const key = cacheKey(sid, tableName);
+    const key = `${cacheKey(sid, tableName)}:${fullRefresh ? 'full' : 'delta'}`;
     const existingInflight = inflight.get(key);
     if (existingInflight) return existingInflight;
 
@@ -1238,7 +1297,6 @@ class SupabaseDataService {
     if (!session) return cacheGet(sid, tableName) || [];
 
     const rt = getSupabaseTable(tableName);
-    const cols = (TABLE_COLUMNS as any)[rt] || ['*'];
 
     const req = (async () => {
       try {
@@ -1250,28 +1308,28 @@ class SupabaseDataService {
           return ts > max ? ts : max;
         }, '');
 
-        let q = this.db.from(rt).select(cols.join(','));
+        let q = this.db.from(rt).select(getRemoteSelectColumns(rt));
         if (!NO_SCHOOL_FILTER.has(rt) && rt !== 'schools') {
           q = applyScope(q, rt, sid);
         } else if (rt === 'schools') {
           q = q.eq('id', sid);
         }
 
-        if (lastModified && local.length > 0) {
+        if (!fullRefresh && lastModified && local.length > 0) {
           q = q.gt('updated_at', lastModified);
         }
 
         const { data, error } = await q;
-        if (error) throw error;
-
-        if (!data || data.length === 0) {
-          cacheSet(sid, tableName, local);
-          return local;
+        if (error) {
+          const missing = parseMissingRemoteColumn(error, rt);
+          if (missing?.table === rt) {
+            markRemoteColumnDisabled(rt, missing.column);
+            inflight.delete(key);
+            return this.getAll(sid, tableName, fullRefresh);
+          }
+          throw error;
         }
 
-        const remoteRecords = filterDeleted(sid, tableName, data.map(mapToLocal));
-        
-        // 2. Conflict Resolution: Use updated_at to merge
         const pendingIds = new Set(
           loadQueueSync()
             .filter(q => q.tableName === tableName)
@@ -1279,8 +1337,39 @@ class SupabaseDataService {
             .filter(Boolean)
         );
 
+        if (!data || data.length === 0) {
+          if (fullRefresh) {
+            const pendingLocal = local.filter(record => pendingIds.has(record.id));
+            cacheSet(sid, tableName, pendingLocal);
+            notifyUI(tableName);
+            return pendingLocal;
+          }
+          cacheSet(sid, tableName, local);
+          return local;
+        }
+
+        const remoteRecords = filterDeleted(sid, tableName, data.map(mapToLocal));
+        
+        // 2. Conflict Resolution: Use updated_at to merge
         const localMap = new Map(local.map(r => [r.id, r]));
         let changed = false;
+
+        if (fullRefresh) {
+          const remoteMap = new Map(remoteRecords.map(r => [r.id, r]));
+          const pendingLocalById = new Map(local.filter(record => pendingIds.has(record.id)).map(record => [record.id, record]));
+          const mergedRemote = remoteRecords.map(record => pendingLocalById.get(record.id) || record);
+          const pendingOnlyLocal = Array.from(pendingLocalById.values()).filter(record => !remoteMap.has(record.id));
+          const final = [...mergedRemote, ...pendingOnlyLocal];
+          const beforeIds = local.map(record => record.id).sort().join('|');
+          const afterIds = final.map(record => record.id).sort().join('|');
+          const beforeTs = local.map(record => `${record.id}:${record.updatedAt || record.updated_at || record.createdAt || ''}`).sort().join('|');
+          const afterTs = final.map(record => `${record.id}:${record.updatedAt || record.updated_at || record.createdAt || ''}`).sort().join('|');
+          if (beforeIds !== afterIds || beforeTs !== afterTs) {
+            cacheSet(sid, tableName, final);
+            notifyUI(tableName);
+          }
+          return final;
+        }
 
         for (const remote of remoteRecords) {
           // Never overwrite pending local changes
@@ -1358,7 +1447,7 @@ class SupabaseDataService {
     if (!query) return [];
     const all = await this.getAll(userId, tableName);
     const searchFields = [...fields];
-    if (tableName === 'students') searchFields.push('firstName', 'lastName', 'studentId', 'admissionNo', 'id');
+    if (tableName === 'students') searchFields.push('firstName', 'lastName', 'studentId', 'admissionNo');
     if (tableName === 'staff') searchFields.push('firstName', 'lastName', 'employeeId', 'id');
     return all.filter(item => matchesTextSearch(searchFields.map(f => item[f]), query));
   }
@@ -1971,6 +2060,12 @@ class SupabaseDataService {
             break;
           } catch (e: any) {
             const msg = e.message || '';
+            const missing = parseMissingRemoteColumn(e, getSupabaseTable(item.tableName));
+            if (missing?.table === getSupabaseTable(item.tableName)) {
+              markRemoteColumnDisabled(missing.table, missing.column);
+              console.warn(`[offline] Remote schema is missing ${missing.table}.${missing.column}; retrying ${item.op} without that column.`);
+              continue;
+            }
             if (isUnrecoverable(msg)) {
               unrecoverable = true;
               deadLetter(item, msg);

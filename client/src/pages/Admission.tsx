@@ -13,6 +13,7 @@ import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, ge
 import { getSubscriptionAccessState } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { BoardingStatus, withBoardingStatus } from '../utils/studentBoarding';
+import { useBackOrFallback } from '../utils/navigation';
 
 const steps = [
   { id: 1, label: 'Student Info', icon: User },
@@ -30,6 +31,7 @@ const commonRequirements = [
 export default function Admission() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
+  const goBack = useBackOrFallback('/students');
   const { addToast } = useToast();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -143,7 +145,7 @@ export default function Admission() {
       }
 
       const cap = await getClassCapacityState(id, form.classId);
-      if (cap?.isFull) { addToast(`${cap.name} is full. Choose another class.`, 'error'); setLoading(false); return; }
+      if (cap?.isFull) addToast(`${cap.name} is at capacity. Increase capacity or continue; this student will still be counted.`, 'warning');
       const now = new Date().toISOString();
       const students = await dataService.getAll(id, 'students');
       const existing = students.flatMap((s: any) => [s.admissionNo, s.studentId].filter(Boolean) as string[]);
@@ -184,7 +186,7 @@ export default function Admission() {
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate('/students')} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
+        <button onClick={goBack} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
           <ArrowLeft size={20} />
         </button>
         <div>
@@ -276,8 +278,8 @@ export default function Admission() {
                 <select name="classId" value={form.classId} onChange={handleChange} className="form-input">
                   <option value="">Select Class</option>
                   {classes.map(c => (
-                    <option key={c.id} value={c.id} disabled={c.isFull}>
-                      {c.name} ({c.enrolled}/{c.capacity}){c.isFull ? ' — Full' : ''}
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.enrolled}/{c.capacity}){c.isFull ? ' - increase capacity or ignore' : ''}
                     </option>
                   ))}
                 </select>

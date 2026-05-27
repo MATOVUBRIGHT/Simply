@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, CreditCard } from 'lucide-react';
+import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, CreditCard, Pencil } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, Fee, FeeStructure, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -14,10 +14,16 @@ import { getFeeStructuresByClass, createFeeStructure, deleteFeeStructure, getCat
 import { ClassOption } from '../utils/classroom';
 import { matchesStudentSearch } from '../utils/studentSearch';
 import { matchesTextSearch } from '../utils/searchMatch';
+import { runTasksInPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
+import { useConfirm } from '../components/ConfirmModal';
+import InvoiceTemplate, { DEFAULT_INVOICE_LABELS, InvoiceLabels } from '../components/InvoiceTemplate';
+import { FitStatValue } from '../components/FitStatValue';
+import { shouldSaveOnEnter } from '../utils/keyboard';
 
 interface Invoice {
   id: string;
   studentId: string;
+  classId?: string;
   studentName: string;
   description: string;
   amount: number;
@@ -75,6 +81,7 @@ export default function Invoices() {
   const [showStatusFilter, setShowStatusFilter] = useState(false);
   const [showTermFilter, setShowTermFilter] = useState(false);
   const { addToast } = useToast();
+  const confirm = useConfirm();
   const { formatMoney, currency } = useCurrency();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -97,6 +104,13 @@ export default function Invoices() {
   const [viewMode, setViewMode] = useState<'invoices' | 'students'>('invoices');
   const [managementPage, setManagementPage] = useState<'structures' | 'bursary' | 'discount' | null>(null);
   const [selectedStudentForView, setSelectedStudentForView] = useState<any | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [invoiceDraft, setInvoiceDraft] = useState({ description: '', amount: '', status: 'pending', term: '', year: '', dueDate: '' });
+  const [savingInvoiceEdit, setSavingInvoiceEdit] = useState(false);
+  const [deletingInvoiceId, setDeletingInvoiceId] = useState<string | null>(null);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
+  const [filterClassId, setFilterClassId] = useState<string>('all');
+  const [filterStructure, setFilterStructure] = useState<string>('all');
   
   const [showStructureModal, setShowStructureModal] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -124,11 +138,15 @@ export default function Invoices() {
   const [showPromotionBanner, setShowPromotionBanner] = useState(false);
   const [expiredTerm, setExpiredTerm] = useState('');
   const [recordingPaymentId, setRecordingPaymentId] = useState<string | null>(null);
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
+  const [paymentDraft, setPaymentDraft] = useState({ amount: '', method: PaymentMethod.CASH });
   const [showAccountsModal, setShowAccountsModal] = useState(false);
+  const [isInvoiceTemplateEditing, setIsInvoiceTemplateEditing] = useState(false);
+  const [invoiceTemplateLabels, setInvoiceTemplateLabels] = useState<InvoiceLabels>(DEFAULT_INVOICE_LABELS);
   const [accountDrafts, setAccountDrafts] = useState([
-    { accountName: '', accountNumber: '', bankName: '', paymentMethod: 'BANK TRANSFER' },
-    { accountName: '', accountNumber: '', bankName: '', paymentMethod: '' },
-    { accountName: '', accountNumber: '', bankName: '', paymentMethod: '' },
+    { accountName: '', accountNumber: '', bankName: '', bankBranch: '', paymentMethod: 'BANK TRANSFER' },
+    { accountName: '', accountNumber: '', bankName: '', bankBranch: '', paymentMethod: '' },
+    { accountName: '', accountNumber: '', bankName: '', bankBranch: '', paymentMethod: '' },
   ]);
   const [savingAccounts, setSavingAccounts] = useState(false);
 
@@ -138,8 +156,10 @@ export default function Invoices() {
   const { data: feesData, refresh: refreshFees } = useTableData(sid, 'fees');
   const { data: paymentsData, refresh: refreshPayments } = useTableData(sid, 'payments');
   const { data: settingsData } = useTableData(sid, 'settings');
+  const { data: feeStructuresData } = useTableData(sid, 'feeStructures');
   const fees = feesData as any[];
   const payments = paymentsData as any[];
+  const allFeeStructures = feeStructuresData as FeeStructure[];
   const filteredBursaryStudents = useMemo(() => {
     return students.filter((student: any) => {
       if (filterBursaryClass !== 'all' && student.classId !== filterBursaryClass) return false;
@@ -178,14 +198,40 @@ export default function Invoices() {
   const bankAccounts = useMemo(() => {
     const obj: Record<string, string> = {};
     (settingsData as any[]).forEach((s: any) => { obj[s.key] = s.value; });
+    try {
+      const saved = obj.paymentAccountsJson ? JSON.parse(obj.paymentAccountsJson) : null;
+      if (Array.isArray(saved)) {
+        return saved
+          .filter((account: any) => !account.hidden)
+          .map((account: any) => ({
+            accountName: account.accountName || '',
+            accountNumber: account.accountNumber || '',
+            bankName: String(account.paymentMethod || '').toLowerCase().includes('mobile') ? '' : account.bankName || '',
+            bankBranch: String(account.paymentMethod || '').toLowerCase().includes('mobile') || String(account.paymentMethod || '').toLowerCase().includes('cash') ? '' : account.bankBranch || '',
+            paymentMethod: account.paymentMethod || '',
+          }))
+          .filter((account: any) => account.accountName || account.accountNumber || account.bankName || account.bankBranch || account.paymentMethod);
+      }
+    } catch {
+      // Fall back to legacy account settings.
+    }
     const accounts = [];
     for (const suffix of ['', '2', '3']) {
+      if (obj[`paymentAccountHidden${suffix}`] === 'true') continue;
       const name = obj[`bankAccountName${suffix}`];
       const number = obj[`bankAccountNumber${suffix}`];
       const bank = obj[`bankName${suffix}`];
+      const branch = obj[`bankBranch${suffix}`];
       const method = obj[`paymentMethod${suffix}`];
-      if (name || number || bank) {
-        accounts.push({ accountName: name || '', accountNumber: number || '', bankName: bank || '', paymentMethod: method || '' });
+      const loweredMethod = String(method || '').toLowerCase();
+      if (name || number || bank || branch || method) {
+        accounts.push({
+          accountName: name || '',
+          accountNumber: number || '',
+          bankName: loweredMethod.includes('mobile') ? '' : bank || '',
+          bankBranch: loweredMethod.includes('mobile') || loweredMethod.includes('cash') ? '' : branch || '',
+          paymentMethod: method || '',
+        });
       }
     }
     return accounts;
@@ -198,10 +244,34 @@ export default function Invoices() {
   }, [settingsData]);
 
   useEffect(() => {
+    try {
+      const saved = schoolSettings.invoiceTemplateLabels ? JSON.parse(schoolSettings.invoiceTemplateLabels) : {};
+      setInvoiceTemplateLabels({ ...DEFAULT_INVOICE_LABELS, ...saved });
+    } catch {
+      setInvoiceTemplateLabels(DEFAULT_INVOICE_LABELS);
+    }
+  }, [schoolSettings.invoiceTemplateLabels]);
+
+  async function updateInvoiceTemplateLabels(nextLabels: Partial<InvoiceLabels>) {
+    if (Object.keys(nextLabels).length === 0) return;
+    const authId = schoolId || user?.id;
+    const merged = { ...invoiceTemplateLabels, ...nextLabels };
+    setInvoiceTemplateLabels(merged);
+    if (!authId) return;
+    try {
+      await dataService.saveSettings(authId, { invoiceTemplateLabels: JSON.stringify(merged) });
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'settings' } }));
+    } catch {
+      addToast('Failed to save invoice template', 'error');
+    }
+  }
+
+  useEffect(() => {
     const next = ['', '2', '3'].map((suffix, index) => ({
       accountName: schoolSettings[`bankAccountName${suffix}`] || '',
       accountNumber: schoolSettings[`bankAccountNumber${suffix}`] || '',
       bankName: schoolSettings[`bankName${suffix}`] || '',
+      bankBranch: schoolSettings[`bankBranch${suffix}`] || '',
       paymentMethod: schoolSettings[`paymentMethod${suffix}`] || (index === 0 ? 'BANK TRANSFER' : ''),
     }));
     setAccountDrafts(next);
@@ -213,11 +283,24 @@ export default function Invoices() {
     setSavingAccounts(true);
     try {
       const payload: Record<string, string> = {};
+      const cleanedAccounts = accountDrafts.map(account => {
+        const method = account.paymentMethod.trim();
+        const loweredMethod = method.toLowerCase();
+        return {
+          accountName: account.accountName.trim(),
+          accountNumber: loweredMethod.includes('cash') ? '' : account.accountNumber.trim(),
+          bankName: loweredMethod.includes('mobile') ? '' : account.bankName.trim(),
+          bankBranch: loweredMethod.includes('mobile') || loweredMethod.includes('cash') ? '' : account.bankBranch.trim(),
+          paymentMethod: method,
+        };
+      });
+      payload.paymentAccountsJson = JSON.stringify(cleanedAccounts);
       ['', '2', '3'].forEach((suffix, index) => {
-        const account = accountDrafts[index] || { accountName: '', accountNumber: '', bankName: '', paymentMethod: '' };
+        const account = cleanedAccounts[index] || { accountName: '', accountNumber: '', bankName: '', bankBranch: '', paymentMethod: '' };
         payload[`bankAccountName${suffix}`] = account.accountName.trim();
         payload[`bankAccountNumber${suffix}`] = account.accountNumber.trim();
         payload[`bankName${suffix}`] = account.bankName.trim();
+        payload[`bankBranch${suffix}`] = account.bankBranch.trim();
         payload[`paymentMethod${suffix}`] = account.paymentMethod.trim();
       });
       await dataService.saveSettings(authId, payload);
@@ -233,6 +316,124 @@ export default function Invoices() {
   function refreshInvoices() {
     refreshFees();
     refreshPayments();
+  }
+
+  function openEditInvoice(invoice: Invoice) {
+    setEditingInvoice(invoice);
+    setInvoiceDraft({
+      description: invoice.description || '',
+      amount: String(invoice.amount || ''),
+      status: invoice.status || 'pending',
+      term: String(invoice.term || selectedTerm),
+      year: String(invoice.year || selectedYear),
+      dueDate: invoice.dueDate || '',
+    });
+  }
+
+  async function handleSaveInvoiceEdit() {
+    const id = schoolId || user?.id;
+    if (!id || !editingInvoice || savingInvoiceEdit) return;
+    const amount = Number(invoiceDraft.amount);
+    if (!invoiceDraft.description.trim() || !Number.isFinite(amount) || amount < 0) {
+      addToast('Enter a valid description and amount', 'error');
+      return;
+    }
+    setSavingInvoiceEdit(true);
+    try {
+      const existingFee = fees.find(fee => fee.id === editingInvoice.id);
+      const nextStatus = invoiceDraft.status as Invoice['status'];
+      await dataService.update(id, 'fees', editingInvoice.id, {
+        ...(existingFee || {}),
+        description: invoiceDraft.description.trim(),
+        amount,
+        status: nextStatus,
+        term: invoiceDraft.term || selectedTerm,
+        year: invoiceDraft.year || selectedYear,
+        dueDate: invoiceDraft.dueDate || existingFee?.dueDate || editingInvoice.dueDate,
+        updatedAt: new Date().toISOString(),
+      } as any);
+      if (nextStatus === 'paid' && editingInvoice.paidAmount < amount) {
+        await dataService.create(id, 'payments', {
+          id: uuidv4(),
+          feeId: editingInvoice.id,
+          studentId: editingInvoice.studentId,
+          amount: amount - editingInvoice.paidAmount,
+          method: PaymentMethod.CASH,
+          date: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        } as any);
+      }
+      setEditingInvoice(null);
+      addToast('Invoice updated', 'success');
+      refreshInvoices();
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: nextStatus === 'paid' ? 'payments' : 'fees' } }));
+    } catch {
+      addToast('Failed to update invoice', 'error');
+    } finally {
+      setSavingInvoiceEdit(false);
+    }
+  }
+
+  async function handleDeleteInvoice(invoice: Invoice) {
+    const id = schoolId || user?.id;
+    if (!id || deletingInvoiceId) return;
+    const ok = await confirm({
+      title: 'Delete Invoice',
+      description: `Delete "${invoice.description}" for ${invoice.studentName}? Payments linked to this fee will remain in records.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setDeletingInvoiceId(invoice.id);
+    try {
+      await dataService.delete(id, 'fees', invoice.id);
+      setSelectedInvoiceIds(prev => prev.filter(selectedId => selectedId !== invoice.id));
+      addToast('Invoice deleted', 'success');
+      refreshInvoices();
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'fees' } }));
+    } catch {
+      addToast('Failed to delete invoice', 'error');
+    } finally {
+      setDeletingInvoiceId(null);
+    }
+  }
+
+  function toggleInvoiceSelection(invoiceId: string) {
+    setSelectedInvoiceIds(prev => (
+      prev.includes(invoiceId)
+        ? prev.filter(id => id !== invoiceId)
+        : [...prev, invoiceId]
+    ));
+  }
+
+  async function handleDeleteSelectedInvoices() {
+    const id = schoolId || user?.id;
+    if (!id || selectedInvoiceIds.length === 0 || deletingInvoiceId) return;
+    const selectedSet = new Set(selectedInvoiceIds);
+    const selectedInvoices = invoices.filter(invoice => selectedSet.has(invoice.id));
+    const ok = await confirm({
+      title: 'Delete Selected Invoices',
+      description: `Delete ${selectedInvoices.length} selected invoice${selectedInvoices.length === 1 ? '' : 's'}? Payments linked to these fees will remain in records.`,
+      confirmLabel: 'Delete selected',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setDeletingInvoiceId('bulk');
+    try {
+      const tasks = selectedInvoices.map(invoice => async () => {
+        await dataService.delete(id, 'fees', invoice.id);
+      });
+      await runTasksInPercentBatches(tasks, 0.5);
+      setSelectedInvoiceIds([]);
+      addToast(`Deleted ${selectedInvoices.length} invoice${selectedInvoices.length === 1 ? '' : 's'}`, 'success');
+      refreshInvoices();
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'fees' } }));
+    } catch {
+      addToast('Failed to delete selected invoices', 'error');
+    } finally {
+      setDeletingInvoiceId(null);
+    }
   }
   const activeInvoiceTerm = filterTerm !== 'all' ? filterTerm : selectedTerm;
   const activeInvoiceYear = selectedYear;
@@ -316,11 +517,14 @@ export default function Invoices() {
       const student = allStudents.find(s => s.id === fee.studentId);
       const studentPayments = payments.filter(p => p.feeId === fee.id);
       const paidAmount = studentPayments.reduce((sum, p) => sum + p.amount, 0);
-      const status = paidAmount >= fee.amount ? 'paid' : paidAmount > 0 ? 'partial' : 'pending';
+      const paymentStatus: Invoice['status'] = paidAmount >= fee.amount ? 'paid' : paidAmount > 0 ? 'partial' : 'pending';
+      const manualStatus = ['paid', 'partial', 'pending', 'overdue'].includes(String(fee.status)) ? fee.status as Invoice['status'] : '';
+      const status: Invoice['status'] = paymentStatus === 'paid' ? 'paid' : manualStatus || paymentStatus;
       
       invoiceMap.set(fee.id, {
         id: fee.id,
         studentId: fee.studentId || '',
+        classId: fee.classId || student?.classId || '',
         studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
         description: fee.description,
         amount: fee.amount,
@@ -512,12 +716,36 @@ export default function Invoices() {
   async function handleDeleteStructure(idStructure: string) {
     const id = schoolId || user?.id;
     if (!id || deletingStructureId) return;
+    const structure = feeStructures.find(item => item.id === idStructure) || allFeeStructures.find(item => item.id === idStructure);
     setDeletingStructureId(idStructure);
     try {
+      let deletedInvoices = 0;
+      if (structure) {
+        const structureName = String(structure.name || structure.description || 'Fee').trim().toLowerCase();
+        const relatedFees = fees.filter((fee: any) => {
+          const feeDescription = String(fee.description || '').trim().toLowerCase();
+          return String(fee.classId || '') === String(structure.classId || selectedClassId || '') &&
+            String(fee.term || '') === String(structure.term || selectedTerm || '') &&
+            String(fee.year || '') === String(structure.year || selectedYear || '') &&
+            Math.abs(Number(fee.amount || 0) - Number(structure.amount || 0)) < 0.01 &&
+            (feeDescription === structureName || feeDescription.startsWith(`${structureName} (`));
+        });
+        const relatedFeeIds = relatedFees.map((fee: any) => fee.id);
+        const relatedPayments = payments.filter((payment: any) => relatedFeeIds.includes(payment.feeId));
+        await Promise.all([
+          ...relatedPayments.map((payment: any) => dataService.delete(id, 'payments', payment.id)),
+          ...relatedFees.map((fee: any) => dataService.delete(id, 'fees', fee.id)),
+        ]);
+        deletedInvoices = relatedFees.length;
+      }
       await deleteFeeStructure(id, idStructure);
       setFeeStructures(prev => prev.filter(s => s.id !== idStructure));
       setSelectedStructureIds(prev => prev.filter(sid => sid !== idStructure));
-      addToast('Fee structure deleted', 'success');
+      refreshInvoices();
+      window.dispatchEvent(new CustomEvent('dataRefresh'));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'fees' } }));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'payments' } }));
+      addToast(deletedInvoices > 0 ? `Fee structure deleted with ${deletedInvoices} generated invoice${deletedInvoices === 1 ? '' : 's'}` : 'Fee structure deleted', 'success');
     } catch (error) {
       addToast('Failed to delete fee structure', 'error');
     } finally {
@@ -734,14 +962,14 @@ export default function Invoices() {
       let invoiceCount = 0;
       const now = new Date().toISOString();
 
-      for (const student of studentsInClass) {
+      const tasks = studentsInClass.map((student) => async () => {
         // Skip if student already has an invoice for this term/year
         const alreadyInvoiced = fees.some(
           f => f.studentId === student.id &&
                String(f.term) === String(selectedTerm) &&
                String(f.year) === String(yearInt)
         );
-        if (alreadyInvoiced) continue;
+        if (alreadyInvoiced) return;
 
         const studentBursary = classBursaries.find(b => b.studentId === student.id);
         if (studentBursary) {
@@ -753,7 +981,7 @@ export default function Invoices() {
             year: yearInt, status: 'pending', createdAt: now,
           } as any);
           invoiceCount++;
-          continue;
+          return;
         }
 
         for (const structure of structuresToApply) {
@@ -778,7 +1006,8 @@ export default function Invoices() {
           } as any);
           invoiceCount++;
         }
-      }
+      });
+      await runTasksInPercentBatches(tasks, 0.4);
 
       addToast(`Created ${invoiceCount} invoices for ${studentsInClass.length} students`, 'success');
       setShowCreateModal(false);
@@ -863,10 +1092,11 @@ export default function Invoices() {
     try {
       let totalInvoiced = 0;
       let classesProcessed = 0;
-      for (const cls of classes) {
+      const tasks = classes.map((cls) => async () => {
         const { fees: created } = await generateInvoicesFromStructure(id, cls.id, selectedTerm, selectedYear);
         if (created.length > 0) { totalInvoiced += created.length; classesProcessed++; }
-      }
+      });
+      await runTasksInPercentBatches(tasks, 0.4);
       if (totalInvoiced === 0) {
         addToast('No fee structures found. Set up fee structures per class first.', 'info');
         setManagementPage('structures');
@@ -878,29 +1108,35 @@ export default function Invoices() {
     finally { (window as any).__bulkInvoicing = false; }
   }
 
-  async function markAsPaid(invoiceId: string) {
+  function openPaymentModal(invoice: Invoice) {
+    const remainingAmount = Math.max(0, invoice.amount - invoice.paidAmount);
+    setPaymentInvoice(invoice);
+    setPaymentDraft({ amount: String(remainingAmount), method: PaymentMethod.CASH });
+  }
+
+  async function saveInvoicePayment() {
     const id = schoolId || user?.id;
-    if (!id) return;
+    if (!id || !paymentInvoice) return;
     if (recordingPaymentId) return;
-    const invoice = invoices.find(i => i.id === invoiceId);
-    if (!invoice) return;
+    const amount = Number(paymentDraft.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      addToast('Enter a valid payment amount', 'error');
+      return;
+    }
 
-    const remainingAmount = invoice.amount - invoice.paidAmount;
-    const paymentAmount = prompt(`Enter payment amount (remaining: ${formatMoney(remainingAmount)}):`, remainingAmount.toString());
-    if (!paymentAmount || isNaN(parseFloat(paymentAmount))) return;
-
-    setRecordingPaymentId(invoiceId);
+    setRecordingPaymentId(paymentInvoice.id);
     try {
       await dataService.create(id, 'payments', {
         id: uuidv4(),
-        feeId: invoiceId,
-        studentId: invoice.studentId,
-        amount: parseFloat(paymentAmount),
-        method: PaymentMethod.CASH,
+        feeId: paymentInvoice.id,
+        studentId: paymentInvoice.studentId,
+        amount,
+        method: paymentDraft.method,
         date: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       } as any);
       addToast('Payment recorded', 'success');
+      setPaymentInvoice(null);
       refreshInvoices();
       window.dispatchEvent(new CustomEvent('dataRefresh'));
       window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'payments' } }));
@@ -1052,19 +1288,11 @@ export default function Invoices() {
       const now = new Date().toISOString();
       const year = new Date().getFullYear().toString();
       let successCount = 0;
-
-      for (let i = 0; i < importPreview.length; i++) {
-        const data = importPreview[i];
+      const tasks = importPreview.map((data) => async () => {
         const student = students.find(s => `${s.firstName} ${s.lastName}` === data.studentName);
-        if (!student) {
-          setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
-          continue;
-        }
+        if (!student) return;
         const id = schoolId || user?.id;
-        if (!id) {
-          setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
-          continue;
-        }
+        if (!id) return;
         const fee: Fee = {
           id: uuidv4(),
           studentId: student.id,
@@ -1076,8 +1304,8 @@ export default function Invoices() {
         };
         await dataService.create(id, 'fees', fee as any);
         successCount++;
-        setImportProgress(Math.round(((i + 1) / importPreview.length) * 100));
-      }
+      });
+      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
       addToast(`Successfully imported ${successCount} invoices`, 'success');
       closeImportModal();
       refreshInvoices();
@@ -1087,11 +1315,25 @@ export default function Invoices() {
     finally { setIsImporting(false); }
   }
 
+  const invoiceStructureOptions = useMemo(() => {
+    const values = new Set<string>();
+    invoices.forEach(invoice => {
+      if (invoice.description) values.add(invoice.description);
+    });
+    allFeeStructures.forEach(structure => {
+      if (structure.name) values.add(structure.name);
+    });
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [invoices, allFeeStructures]);
+
   const filteredInvoices = invoices.filter(inv => {
     if (filterStatus !== 'all' && inv.status !== filterStatus) return false;
     if (filterTerm !== 'all' && inv.term !== filterTerm) return false;
+    if (filterClassId !== 'all' && inv.classId !== filterClassId) return false;
+    if (filterStructure !== 'all' && inv.description !== filterStructure) return false;
     if (searchTerm) {
-      if (!matchesTextSearch([inv.studentName, inv.description, inv.status, inv.term, inv.year], searchTerm)) {
+      const className = classes.find(c => c.id === inv.classId)?.name || '';
+      if (!matchesTextSearch([inv.studentName, inv.description, inv.status, inv.term, inv.year, className], searchTerm)) {
         return false;
       }
     }
@@ -1185,7 +1427,7 @@ export default function Invoices() {
                   </div>
                 )}
               </div>
-              <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary">
+              <button onClick={() => setShowImportModal(true)} className="btn btn-secondary">
                 <Upload size={16} />
                 <span className="hidden sm:inline">Import</span>
               </button>
@@ -1207,10 +1449,6 @@ export default function Invoices() {
               <button onClick={() => { setManagementPage('discount'); setShowDiscountModal(false); }} className="btn btn-secondary">
                 <Percent size={16} />
                 <span className="hidden sm:inline">Discount</span>
-              </button>
-              <button onClick={() => setShowAccountsModal(true)} className="btn btn-secondary">
-                <CreditCard size={16} />
-                <span className="hidden sm:inline">Payment Accounts</span>
               </button>
               <button
                 onClick={handleBulkInvoiceAllClasses}
@@ -1235,11 +1473,11 @@ export default function Invoices() {
                 <div className="stat-icon stat-icon-violet text-white">
                   <FileText size={24} />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm text-white/80">Total Invoiced</p>
-                  <p className="text-2xl font-bold text-white">
+                  <FitStatValue>
                     {formatMoney(stats.total)}
-                  </p>
+                  </FitStatValue>
                 </div>
               </div>
             </div>
@@ -1248,11 +1486,11 @@ export default function Invoices() {
                 <div className="stat-icon stat-icon-green text-white">
                   <DollarSign size={24} />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm text-white/80">Collected</p>
-                  <p className="text-2xl font-bold text-white">
+                  <FitStatValue>
                     {formatMoney(stats.collected)}
-                  </p>
+                  </FitStatValue>
                 </div>
               </div>
             </div>
@@ -1261,11 +1499,11 @@ export default function Invoices() {
                 <div className="stat-icon stat-icon-red text-white">
                   <Clock size={24} />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm text-white/80">Pending</p>
-                  <p className="text-2xl font-bold text-white">
+                  <FitStatValue>
                     {formatMoney(stats.pending)}
-                  </p>
+                  </FitStatValue>
                 </div>
               </div>
             </div>
@@ -1274,11 +1512,11 @@ export default function Invoices() {
                 <div className="stat-icon text-white" style={{background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'}}>
                   <Award size={24} />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm text-white/80">Bursary</p>
-                  <p className="text-2xl font-bold text-white">
+                  <FitStatValue>
                     {formatMoney(stats.bursary)}
-                  </p>
+                  </FitStatValue>
                 </div>
               </div>
             </div>
@@ -1287,11 +1525,11 @@ export default function Invoices() {
                 <div className="stat-icon stat-icon-blue text-white">
                   <Percent size={24} />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm text-white/80">Discount</p>
-                  <p className="text-2xl font-bold text-white">
+                  <FitStatValue>
                     {formatMoney(stats.discount)}
-                  </p>
+                  </FitStatValue>
                 </div>
               </div>
             </div>
@@ -1501,8 +1739,8 @@ export default function Invoices() {
 
       {!managementPage && <div className="card">
         <div className="card-header">
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <button
                 onClick={() => { setViewMode('invoices'); setFilterStatus('all'); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -1522,7 +1760,7 @@ export default function Invoices() {
                 Student View
               </button>
             </div>
-            <div className="relative flex-1 w-full sm:max-w-xs">
+            <div className="relative min-w-[170px] flex-1 basis-[220px]">
               <Search size={18} className="search-input-icon" />
               <input
                 type="text"
@@ -1532,7 +1770,7 @@ export default function Invoices() {
                 className="search-input"
               />
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-wrap items-center gap-2 overflow-visible">
               <button
                 ref={statusFilterButtonRef}
                 onClick={() => {
@@ -1577,6 +1815,7 @@ export default function Invoices() {
                           { value: 'paid', label: 'Paid', icon: CheckCircle, iconClass: 'text-emerald-500' },
                           { value: 'partial', label: 'Partial', icon: Clock, iconClass: 'text-amber-500' },
                           { value: 'pending', label: 'Pending', icon: XCircle, iconClass: 'text-red-500' },
+                          { value: 'overdue', label: 'Overdue', icon: XCircle, iconClass: 'text-red-600' },
                         ]
                     ).map(({ value, label, icon: Icon, iconClass }) => (
                       <button
@@ -1643,6 +1882,37 @@ export default function Invoices() {
                   </div>
                 </div>,
                 document.body
+              )}
+              {viewMode === 'invoices' && (
+                <>
+                  <select value={filterClassId} onChange={(e) => setFilterClassId(e.target.value)} className={`${pageSelectClass} h-10 w-[118px] max-w-full px-3 pr-7 text-sm`}>
+                    <option value="all">All Classes</option>
+                    {classes.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+                  </select>
+                  <select value={filterStructure} onChange={(e) => setFilterStructure(e.target.value)} className={`${pageSelectClass} h-10 w-[128px] max-w-full px-3 pr-7 text-sm`}>
+                    <option value="all">All Fee Items</option>
+                    {invoiceStructureOptions.map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  {(filterClassId !== 'all' || filterStructure !== 'all') && (
+                    <button
+                      onClick={() => { setFilterClassId('all'); setFilterStructure('all'); }}
+                      className="btn btn-secondary"
+                    >
+                      <X size={16} /> Clear
+                    </button>
+                  )}
+                  {selectedInvoiceIds.length > 0 && (
+                    <button
+                      onClick={handleDeleteSelectedInvoices}
+                      disabled={!!deletingInvoiceId}
+                      className="btn bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
+                      title="Delete invoices selected by double-clicking rows"
+                    >
+                      {deletingInvoiceId === 'bulk' ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Trash2 size={16} />}
+                      Delete Selected ({selectedInvoiceIds.length})
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -1757,8 +2027,10 @@ export default function Invoices() {
             <table>
               <thead>
                 <tr>
+                  {selectedInvoiceIds.length > 0 && <th>Select</th>}
                   <th>No.</th>
                   <th>Student</th>
+                  <th>Class</th>
                   <th>Description</th>
                   <th>Amount</th>
                   <th>Paid</th>
@@ -1771,13 +2043,13 @@ export default function Invoices() {
               <tbody>
                 {!fees || !payments || !allStudents ? (
                   <tr>
-                    <td colSpan={9} className="text-center py-12">
+                    <td colSpan={selectedInvoiceIds.length > 0 ? 11 : 10} className="text-center py-12">
                       <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-200 border-t-primary-500 mx-auto"></div>
                     </td>
                   </tr>
                 ) : filteredInvoices.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="text-center py-12">
+                    <td colSpan={selectedInvoiceIds.length > 0 ? 11 : 10} className="text-center py-12">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                           <FileText size={32} className="text-violet-400" />
@@ -1791,10 +2063,31 @@ export default function Invoices() {
                   </tr>
                 ) : filteredInvoices.map((invoice, index) => {
                   const StatusIcon = statusConfig[invoice.status].icon;
+                  const isSelected = selectedInvoiceIds.includes(invoice.id);
                   return (
-                    <tr key={invoice.id}>
+                    <tr
+                      key={invoice.id}
+                      onDoubleClick={() => toggleInvoiceSelection(invoice.id)}
+                      onClick={() => {
+                        if (selectedInvoiceIds.length > 0) toggleInvoiceSelection(invoice.id);
+                      }}
+                      className={`cursor-pointer transition-colors ${isSelected ? 'bg-red-50 dark:bg-red-900/20' : ''}`}
+                      title={selectedInvoiceIds.length > 0 ? 'Click to select or unselect' : 'Double-click to start selecting invoices'}
+                    >
+                      {selectedInvoiceIds.length > 0 && (
+                        <td onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleInvoiceSelection(invoice.id)}
+                            className="h-4 w-4 rounded border-slate-300"
+                            title="Select invoice for delete"
+                          />
+                        </td>
+                      )}
                       <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                       <td className="font-medium">{invoice.studentName}</td>
+                      <td>{classes.find(c => c.id === invoice.classId)?.name || '-'}</td>
                       <td>{invoice.description}</td>
                       <td className="font-semibold">{formatMoney(invoice.amount)}</td>
                       <td className="text-emerald-600 font-semibold">{formatMoney(invoice.paidAmount)}</td>
@@ -1809,9 +2102,10 @@ export default function Invoices() {
                       </td>
                       <td><span className="badge badge-info">Term {invoice.term}</span></td>
                       <td>
+                        <div className="flex flex-wrap items-center gap-2">
                         {invoice.status !== 'paid' && (
                           <button
-                            onClick={() => markAsPaid(invoice.id)}
+                            onClick={() => openPaymentModal(invoice)}
                             disabled={!!recordingPaymentId}
                             className="btn btn-secondary text-sm py-1.5 disabled:opacity-70"
                           >
@@ -1821,6 +2115,23 @@ export default function Invoices() {
                             {recordingPaymentId === invoice.id ? 'Saving...' : 'Record'}
                           </button>
                         )}
+                          <button
+                            onClick={() => openEditInvoice(invoice)}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
+                            title="Edit invoice"
+                          >
+                            <Pencil size={13} /> Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteInvoice(invoice)}
+                            disabled={!!deletingInvoiceId}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-100 disabled:opacity-60 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/40"
+                            title="Delete invoice"
+                          >
+                            {deletingInvoiceId === invoice.id ? <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Trash2 size={13} />}
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1830,6 +2141,143 @@ export default function Invoices() {
           )}
         </div>
       </div>}
+
+      {paymentInvoice && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={() => !recordingPaymentId && setPaymentInvoice(null)}>
+          <div
+            className="modal-card w-full max-w-md"
+            onClick={e => e.stopPropagation()}
+            onKeyDown={e => {
+              if (!shouldSaveOnEnter(e)) return;
+              e.preventDefault();
+              void saveInvoicePayment();
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div>
+                <h3 className="font-bold text-white">Record Payment</h3>
+                <p className="text-xs text-white/75">{paymentInvoice.studentName}</p>
+              </div>
+              <button onClick={() => setPaymentInvoice(null)} disabled={!!recordingPaymentId} className="rounded-lg p-1.5 transition-colors hover:bg-white/20 disabled:opacity-50">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800">
+                <p className="font-semibold text-slate-800 dark:text-white">{paymentInvoice.description}</p>
+                <p className="mt-1 text-slate-500">
+                  Balance: <span className="font-bold text-red-600">{formatMoney(Math.max(0, paymentInvoice.amount - paymentInvoice.paidAmount))}</span>
+                </p>
+              </div>
+              <div>
+                <label className="form-label">Payment Amount ({currency.symbol})</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={paymentDraft.amount}
+                  onChange={e => setPaymentDraft(prev => ({ ...prev, amount: e.target.value }))}
+                  className="form-input"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="form-label">Payment Method</label>
+                <select
+                  value={paymentDraft.method}
+                  onChange={e => setPaymentDraft(prev => ({ ...prev, method: e.target.value as PaymentMethod }))}
+                  className="form-input"
+                >
+                  <option value={PaymentMethod.CASH}>Cash</option>
+                  <option value={PaymentMethod.BANK_TRANSFER}>Bank Transfer</option>
+                  <option value={PaymentMethod.CARD}>Card</option>
+                  <option value={PaymentMethod.OTHER}>Other</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setPaymentInvoice(null)} className="btn btn-secondary" disabled={!!recordingPaymentId}>Cancel</button>
+                <button onClick={saveInvoicePayment} className="btn btn-primary" disabled={!!recordingPaymentId}>
+                  {recordingPaymentId === paymentInvoice.id ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <DollarSign size={16} />}
+                  {recordingPaymentId === paymentInvoice.id ? 'Saving...' : 'Save Payment'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {editingInvoice && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={() => setEditingInvoice(null)}>
+          <div
+            className="modal-card w-full max-w-lg"
+            onClick={e => e.stopPropagation()}
+            onKeyDown={e => {
+              if (!shouldSaveOnEnter(e)) return;
+              e.preventDefault();
+              void handleSaveInvoiceEdit();
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div>
+                <h3 className="font-bold text-white">Edit Invoice</h3>
+                <p className="text-xs text-white/75">{editingInvoice.studentName}</p>
+              </div>
+              <button onClick={() => setEditingInvoice(null)} className="rounded-lg p-1.5 transition-colors hover:bg-white/20">
+                <X size={18} className="text-white" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div>
+                <label className="form-label">Description</label>
+                <input value={invoiceDraft.description} onChange={e => setInvoiceDraft(p => ({ ...p, description: e.target.value }))} className="form-input" />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="form-label">Amount ({currency.symbol})</label>
+                  <input type="number" min="0" step="0.01" value={invoiceDraft.amount} onChange={e => setInvoiceDraft(p => ({ ...p, amount: e.target.value }))} className="form-input" />
+                </div>
+                <div>
+                  <label className="form-label">Due Date</label>
+                  <input type="date" value={invoiceDraft.dueDate} onChange={e => setInvoiceDraft(p => ({ ...p, dueDate: e.target.value }))} className="form-input" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="form-label">Term</label>
+                  <select value={invoiceDraft.term} onChange={e => setInvoiceDraft(p => ({ ...p, term: e.target.value }))} className="form-input">
+                    <option value="1">Term 1</option>
+                    <option value="2">Term 2</option>
+                    <option value="3">Term 3</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Year</label>
+                  <input value={invoiceDraft.year} onChange={e => setInvoiceDraft(p => ({ ...p, year: e.target.value }))} className="form-input" />
+                </div>
+              </div>
+              <div>
+                <label className="form-label">Status</label>
+                <select value={invoiceDraft.status} onChange={e => setInvoiceDraft(p => ({ ...p, status: e.target.value }))} className="form-input">
+                  <option value="pending">Pending</option>
+                  <option value="partial">Partial</option>
+                  <option value="paid">Paid</option>
+                  <option value="overdue">Overdue</option>
+                </select>
+                <p className="mt-1 text-xs text-slate-500">Selecting Paid records the remaining balance as a cash payment.</p>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setEditingInvoice(null)} className="btn btn-secondary" disabled={savingInvoiceEdit}>Cancel</button>
+                <button onClick={handleSaveInvoiceEdit} className="btn btn-primary" disabled={savingInvoiceEdit}>
+                  {savingInvoiceEdit ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Save size={16} />}
+                  {savingInvoiceEdit ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {showCreateModal && (
         <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
@@ -2753,8 +3201,91 @@ export default function Invoices() {
         </div>
       , document.body)}
 
-      {/* Student Invoice Detail Modal — all invoices + payment accounts */}
+      {/* Student Invoice Template Modal */}
       {selectedStudentForView && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-sm"
+          onClick={() => setSelectedStudentForView(null)}
+        >
+          <div onClick={e => e.stopPropagation()} className="w-full">
+            {(() => {
+              const studentRecord: any = allStudents.find((student: any) => student.id === selectedStudentForView.id) || {};
+              const className = classes.find(cls => cls.id === (selectedStudentForView.classId || studentRecord.classId))?.name || 'Class not assigned';
+              const studentFees = fees.filter(fee => fee.studentId === selectedStudentForView.id);
+              const previousFees = studentFees.filter((fee: any) => isBeforeTerm(fee, activeInvoiceTerm, activeInvoiceYear));
+              const currentFees = studentFees
+                .filter((fee: any) => String(fee.term) === String(activeInvoiceTerm) && String(fee.year) === String(activeInvoiceYear))
+                .sort((a: any, b: any) => new Date(a.createdAt || '').getTime() - new Date(b.createdAt || '').getTime());
+              const previousIds = new Set(previousFees.map((fee: any) => fee.id));
+              const currentIds = new Set(currentFees.map((fee: any) => fee.id));
+              const openingBalance = Math.max(
+                0,
+                previousFees.reduce((sum: number, fee: any) => sum + Number(fee.amount || 0), 0)
+                - payments.filter((payment: any) => previousIds.has(payment.feeId)).reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0)
+              );
+              const termCharges = currentFees.reduce((sum: number, fee: any) => sum + Number(fee.amount || 0), 0);
+              const paid = payments.filter((payment: any) => currentIds.has(payment.feeId)).reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
+              const closingBalance = Math.max(0, openingBalance + termCharges - paid);
+              const items = [
+                ...(openingBalance > 0 ? [{ description: 'Opening balance from previous term', amount: openingBalance, qty: 1 }] : []),
+                ...currentFees.map((fee: any) => ({
+                  description: `${fee.description || 'Fee'} - Term ${fee.term || activeInvoiceTerm}, ${fee.year || activeInvoiceYear}`,
+                  amount: Number(fee.amount || 0),
+                  qty: 1,
+                })),
+              ];
+              return (
+                <InvoiceTemplate
+                  school={{
+                    name: schoolSettings.schoolName || 'School',
+                    address: schoolSettings.schoolAddress || '',
+                    phone: schoolSettings.schoolPhone || '',
+                    email: schoolSettings.schoolEmail || '',
+                    logo: schoolSettings.schoolLogo || '',
+                    motto: schoolSettings.schoolMotto || 'Education for the Future',
+                  }}
+                  student={{
+                    name: selectedStudentForView.studentName,
+                    id: selectedStudentForView.admissionNo || studentRecord.studentId || selectedStudentForView.id,
+                    class: className,
+                    guardian: studentRecord.guardianName || '',
+                    address: studentRecord.address || '',
+                    phone: studentRecord.guardianPhone || studentRecord.phone || '',
+                    email: studentRecord.guardianEmail || studentRecord.email || '',
+                  }}
+                  invoice={{
+                    number: `INV-${String(selectedStudentForView.id).slice(0, 8).toUpperCase()}-${activeInvoiceTerm}-${activeInvoiceYear}`,
+                    date: new Date().toLocaleDateString(),
+                    dueDate: currentFees[0]?.dueDate || '',
+                    items,
+                    subtotal: termCharges,
+                    openingBalance,
+                    termCharges,
+                    tax: 0,
+                    total: openingBalance + termCharges,
+                    paid,
+                    balance: closingBalance,
+                    closingBalance,
+                    status: closingBalance <= 0 ? 'paid' : 'pending',
+                    term: `Term ${activeInvoiceTerm}`,
+                    year: activeInvoiceYear,
+                  }}
+                  bankInfo={bankAccounts[0]}
+                  labels={invoiceTemplateLabels}
+                  isLiveEditing={isInvoiceTemplateEditing}
+                  onToggleLiveEdit={() => setIsInvoiceTemplateEditing(prev => !prev)}
+                  onUpdateLabels={updateInvoiceTemplateLabels}
+                  onClose={() => setSelectedStudentForView(null)}
+                />
+              );
+            })()}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Legacy student invoice detail modal is disabled; template view above is used. */}
+      {false && selectedStudentForView && createPortal(
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
@@ -2936,7 +3467,8 @@ export default function Invoices() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {bankAccounts.map((acc, i) => (
                       <div key={i} className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-                        <p className="font-semibold text-slate-800 dark:text-white text-sm">{acc.bankName}</p>
+                        <p className="font-semibold text-slate-800 dark:text-white text-sm">{acc.bankName || acc.paymentMethod || `Account ${i + 1}`}</p>
+                        {acc.bankBranch && <p className="text-xs text-slate-500 mt-0.5">Branch: {acc.bankBranch}</p>}
                         <p className="text-xs text-slate-500 mt-0.5">{acc.accountName}</p>
                         <p className="font-mono text-sm font-bold text-indigo-600 dark:text-indigo-400 mt-1">{acc.accountNumber}</p>
                         {acc.paymentMethod && <span className="badge badge-info text-[10px] mt-1">{acc.paymentMethod}</span>}
@@ -2997,6 +3529,15 @@ export default function Invoices() {
                         onChange={e => setAccountDrafts(prev => prev.map((item, i) => i === index ? { ...item, bankName: e.target.value } : item))}
                         className="form-input"
                         placeholder="Bank, Airtel, MTN..."
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Branch</label>
+                      <input
+                        value={account.bankBranch}
+                        onChange={e => setAccountDrafts(prev => prev.map((item, i) => i === index ? { ...item, bankBranch: e.target.value } : item))}
+                        className="form-input"
+                        placeholder="Bank branch"
                       />
                     </div>
                     <div>

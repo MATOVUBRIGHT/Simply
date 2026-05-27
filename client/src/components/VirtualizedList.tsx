@@ -1,7 +1,7 @@
 // client/src/components/VirtualizedList.tsx
 // High-performance list component using virtualization
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 
 interface VirtualizedListProps<T> {
   items: T[];
@@ -31,6 +31,8 @@ function VirtualizedListComponent<T>({
   keyExtractor,
 }: VirtualizedListProps<T>) {
     const [scrollTop, setScrollTop] = useState(0);
+    const frameRef = useRef<number | null>(null);
+    const latestScrollTopRef = useRef(0);
 
     // Calculate visible range
     const visibleRange = useMemo(() => {
@@ -51,13 +53,22 @@ function VirtualizedListComponent<T>({
 
     const handleScroll = useCallback(
       (e: React.UIEvent<HTMLDivElement>) => {
-        const target = e.currentTarget;
-        const newScrollTop = target.scrollTop;
-        setScrollTop(newScrollTop);
-        onScroll?.(newScrollTop);
+        latestScrollTopRef.current = e.currentTarget.scrollTop;
+        if (frameRef.current !== null) return;
+        frameRef.current = window.requestAnimationFrame(() => {
+          frameRef.current = null;
+          setScrollTop(latestScrollTopRef.current);
+          onScroll?.(latestScrollTopRef.current);
+        });
       },
       [onScroll]
     );
+
+    useEffect(() => {
+      return () => {
+        if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
+      };
+    }, []);
 
     const offsetY = visibleRange.startIndex * itemHeight;
     const totalHeight = items.length * itemHeight;
@@ -65,7 +76,7 @@ function VirtualizedListComponent<T>({
     return (
       <div
         className={`overflow-y-auto ${className}`}
-        style={{ height: containerHeight }}
+        style={{ height: containerHeight, contain: 'strict', willChange: 'scroll-position' }}
         onScroll={handleScroll}
       >
         {/* Spacer before visible items */}

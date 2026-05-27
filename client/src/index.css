@@ -43,6 +43,19 @@
   box-sizing: border-box;
 }
 
+button,
+a,
+[role="button"],
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+.transition-all {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter !important;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: var(--bg-primary);
@@ -154,6 +167,13 @@ html {
 
 .app-page-content {
   min-height: 100%;
+}
+
+.app-page-content > .card,
+.app-page-content > [class*="card-solid"],
+.app-page-content > section {
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
 }
 
 .page-shell-enter {
@@ -463,6 +483,8 @@ html {
   background: var(--bg-primary);
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
+  contain: content;
+  will-change: scroll-position;
   /* Let nested scroll areas pass wheel movement to the page at their edges. */
   overscroll-behavior: auto;
 }
@@ -475,8 +497,8 @@ html {
 .list-card {
   display: flex;
   flex-direction: column;
-  min-height: clamp(360px, calc(100dvh - 360px), 760px);
-  max-height: calc(100dvh - 160px);
+  min-height: 0;
+  max-height: none;
 }
 
 .card:has(> .table-container) > .table-container,
@@ -534,11 +556,11 @@ table {
 }
 
 th {
-  @apply px-6 py-4 text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50;
+  @apply px-4 py-3 text-xs font-black uppercase tracking-wide text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50;
 }
 
 td {
-  @apply px-6 py-4 text-sm font-medium border-b border-slate-50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 transition-colors;
+  @apply px-4 py-3 text-sm font-medium border-b border-slate-50 dark:border-slate-800/50 text-slate-600 dark:text-slate-300 transition-colors;
 }
 
 tbody tr {
@@ -792,8 +814,7 @@ textarea.form-input {
 }
 
 /* Keep filters/dropdowns above nearby cards and tables. */
-.card:focus-within,
-.card:has(.absolute),
+.dropdown-parent,
 .card-header:has(.absolute),
 .relative:has(> .absolute) {
   z-index: 80;
@@ -1116,6 +1137,47 @@ textarea.form-input {
 .stat-card .text-xl {
   font-size: clamp(1rem, 1.5vw, 1.25rem);
   line-height: 1.4;
+}
+
+.has-long-stat-value .stat-icon,
+.has-long-stat-value [class*="stat-icon"] {
+  width: 2.25rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
+}
+
+.has-long-stat-value .stat-icon svg,
+.has-long-stat-value [class*="stat-icon"] svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.has-long-stat-value p:not(.fit-stat-value) {
+  font-size: 0.75rem;
+  line-height: 1.15;
+}
+
+.has-long-stat-value .fit-stat-wrap {
+  overflow: visible;
+}
+
+.has-long-stat-value .fit-stat-value {
+  letter-spacing: 0;
+}
+
+.card-solid-indigo.has-long-stat-value,
+.card-solid-emerald.has-long-stat-value,
+.card-solid-rose.has-long-stat-value,
+.card-solid-violet.has-long-stat-value,
+.card-solid-cyan.has-long-stat-value,
+.card-solid-purple.has-long-stat-value,
+.card-solid-red.has-long-stat-value,
+.card-solid-teal.has-long-stat-value,
+.card-solid-yellow.has-long-stat-value,
+.card-solid-slate.has-long-stat-value,
+.card-solid-amber.has-long-stat-value,
+.stat-card.has-long-stat-value {
+  overflow: visible;
 }
 
 /* Solid color cards (no gradients) - Color Hierarchy */
@@ -1685,13 +1747,57 @@ textarea.form-input {
   overflow-y: visible;
 }
 
+.button-scroll,
+.toolbar-scroll,
+.action-row,
+.filter-row,
+.page-header .page-actions {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.button-scroll-both,
+.button-scroll-y {
+  max-width: 100%;
+  max-height: min(42dvh, 360px);
+  overflow: auto;
+  scroll-behavior: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.button-scroll::-webkit-scrollbar,
+.toolbar-scroll::-webkit-scrollbar,
+.action-row::-webkit-scrollbar,
+.filter-row::-webkit-scrollbar,
+.page-header .page-actions::-webkit-scrollbar,
+.button-scroll-both::-webkit-scrollbar,
+.button-scroll-y::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.button-scroll > *,
+.toolbar-scroll > *,
+.action-row > *,
+.filter-row > *,
+.page-header .page-actions > * {
+  flex: 0 0 auto;
+}
+
 /* Action button rows — always horizontal, never wrap, never shrink */
 .action-row {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex-shrink: 0;
 }
 
@@ -1707,8 +1813,7 @@ textarea.form-input {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
-  overflow: visible;
+  flex-wrap: nowrap;
   padding-bottom: 2px;
 }
 
@@ -1736,7 +1841,7 @@ textarea.form-input {
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 /* Tables — always scroll horizontally */
@@ -1778,7 +1883,6 @@ textarea.form-input {
 .flex.gap-3.flex-wrap,
 .flex.gap-4.flex-wrap {
   min-width: 0;
-  overflow: visible;
 }
 
 /* Dropdown menus — always on top, never clipped */
@@ -1830,9 +1934,19 @@ textarea.form-input {
   /* Filter buttons row scrolls */
   .flex.gap-2.flex-wrap,
   .flex.gap-1.flex-wrap {
-    flex-wrap: wrap;
-    overflow: visible;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
     padding-bottom: 2px;
+    scroll-behavior: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .flex.gap-2.flex-wrap > *,
+  .flex.gap-1.flex-wrap > * {
+    flex: 0 0 auto;
   }
 
 }

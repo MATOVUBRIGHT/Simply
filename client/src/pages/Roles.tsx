@@ -9,13 +9,18 @@ import { useStaffAuth, logStaffActivity } from '../contexts/StaffAuthContext';
 const ALL_PAGES = [
   { path: '/', label: 'Dashboard' },
   { path: '/students', label: 'Students' },
+  { path: '/parents', label: 'Parents' },
+  { path: '/parent-emails', label: 'Parent Emails' },
   { path: '/admission', label: 'Admission' },
   { path: '/attendance', label: 'Attendance' },
   { path: '/day-boarding', label: 'Day & Boarding' },
-  { path: '/classes', label: 'Classes' },
+  { path: '/classes', label: 'Classes & Timetables' },
   { path: '/subjects', label: 'Subjects' },
+  { path: '/homework-tests', label: 'Assignments & Tests' },
   { path: '/grades', label: 'Exams & Grades' },
+  { path: '/grades/custom-grading', label: 'Custom Grading' },
   { path: '/finance', label: 'Fees & Finance' },
+  { path: '/payment-accounts', label: 'Payment Accounts' },
   { path: '/invoices', label: 'Invoices' },
   { path: '/transport', label: 'Transport' },
   { path: '/announcements', label: 'Announcements' },
@@ -24,10 +29,10 @@ const ALL_PAGES = [
 ];
 
 const ROLE_PRESETS: Record<string, string[]> = {
-  teacher: ['/', '/students', '/attendance', '/day-boarding', '/classes', '/subjects', '/grades', '/announcements'],
-  accountant: ['/', '/finance', '/invoices', '/reports'],
+  teacher: ['/', '/students', '/parents', '/parent-emails', '/attendance', '/day-boarding', '/classes', '/subjects', '/homework-tests', '/grades', '/announcements'],
+  accountant: ['/', '/finance', '/payment-accounts', '/invoices', '/reports'],
   librarian: ['/', '/students', '/announcements'],
-  receptionist: ['/', '/students', '/admission', '/announcements'],
+  receptionist: ['/', '/students', '/parents', '/parent-emails', '/admission', '/announcements'],
   custom: [],
 };
 

@@ -9,6 +9,10 @@ import { supabase } from '../../lib/supabase';
 import { PLAN_DEFINITIONS } from '../../utils/plans';
 import { useAdminTheme } from '../AdminThemeContext';
 
+const DEFAULT_GRANT_PLAN = 'starter';
+const UNLIMITED_PLAN_ID = 'unlimited';
+const UNLIMITED_EXPIRY_YEAR = 2099;
+
 interface SchoolDetail {
   schoolId: string;
   schoolName: string;
@@ -38,7 +42,7 @@ export default function AdminSchoolDetail() {
   const [showExtendModal, setShowExtendModal] = useState(false);
 
   // Grant/extend form state
-  const [grantPlan, setGrantPlan] = useState('nursery_primary');
+  const [grantPlan, setGrantPlan] = useState(DEFAULT_GRANT_PLAN);
   const [grantUnit, setGrantUnit] = useState<'days' | 'weeks' | 'months' | 'free'>('months');
   const [grantAmount, setGrantAmount] = useState(3);
   const [extendUnit, setExtendUnit] = useState<'days' | 'weeks' | 'months'>('months');
@@ -102,8 +106,13 @@ export default function AdminSchoolDetail() {
     try {
       const now = new Date();
       const endsAt = new Date(now);
+      const selectedPlan = PLAN_DEFINITIONS.find(p => p.id === grantPlan) || PLAN_DEFINITIONS[0];
+      const isUnlimitedGrant = grantPlan === UNLIMITED_PLAN_ID;
 
-      if (grantUnit === 'free') {
+      if (isUnlimitedGrant) {
+        endsAt.setFullYear(UNLIMITED_EXPIRY_YEAR, 11, 31);
+        endsAt.setHours(23, 59, 59, 999);
+      } else if (grantUnit === 'free') {
         // Free trial: 7 days by default
         endsAt.setDate(endsAt.getDate() + 7);
       } else if (grantUnit === 'days') {
@@ -114,7 +123,7 @@ export default function AdminSchoolDetail() {
         endsAt.setMonth(endsAt.getMonth() + grantAmount);
       }
 
-      const label = grantUnit === 'free' ? 'Free Trial (7 days)' : `${grantAmount} ${grantUnit}`;
+      const label = isUnlimitedGrant ? 'Unlimited one-time desktop access' : grantUnit === 'free' ? 'Free Trial (7 days)' : `${grantAmount} ${grantUnit}`;
 
       const subData = {
         school_id: schoolId,
@@ -124,7 +133,15 @@ export default function AdminSchoolDetail() {
         starts_at: now.toISOString(),
         ends_at: endsAt.toISOString(),
         updated_at: now.toISOString(),
-        metadata: { grantedByAdmin: true, grantedAt: now.toISOString(), accessType: grantUnit === 'free' ? 'free_trial' : 'paid', label },
+        metadata: {
+          grantedByAdmin: true,
+          grantedAt: now.toISOString(),
+          accessType: isUnlimitedGrant ? 'one_time_desktop' : grantUnit === 'free' ? 'free_trial' : 'paid',
+          label,
+          planName: selectedPlan.name,
+          planLimit: selectedPlan.studentLimit,
+          unlimited: isUnlimitedGrant,
+        },
       };
 
       if (detail.subId) {
@@ -137,9 +154,17 @@ export default function AdminSchoolDetail() {
         { school_id: schoolId, key: 'subscriptionPlanId', value: grantPlan, updated_at: now.toISOString() },
         { school_id: schoolId, key: 'subscriptionExpiryDate', value: endsAt.toISOString(), updated_at: now.toISOString() },
         { school_id: schoolId, key: 'subscriptionPlanEligible', value: true, updated_at: now.toISOString() },
+        { school_id: schoolId, key: 'subscriptionPlanLimit', value: selectedPlan.studentLimit, updated_at: now.toISOString() },
+        { school_id: schoolId, key: 'subscriptionPlanName', value: selectedPlan.name, updated_at: now.toISOString() },
       ], { onConflict: 'school_id,key' });
 
-      setSuccess(`Access granted: ${PLAN_DEFINITIONS.find(p => p.id === grantPlan)?.name} — ${label} (expires ${endsAt.toLocaleDateString()})`);
+      await supabase.from('schools').update({
+        plan: grantPlan,
+        max_students: selectedPlan.studentLimit,
+        updated_at: now.toISOString(),
+      }).eq('id', schoolId);
+
+      setSuccess(`Access granted: ${selectedPlan.name} - ${label} (expires ${endsAt.toLocaleDateString()})`);
       setShowGrantModal(false);
       await loadDetail();
     } catch (err: any) {
@@ -373,7 +398,7 @@ export default function AdminSchoolDetail() {
               </div>
 
               {/* Amount — hidden for free */}
-              {grantUnit !== 'free' && (
+              {grantPlan !== UNLIMITED_PLAN_ID && grantUnit !== 'free' && (
                 <div>
                   <label className={`block text-xs font-medium ${t.muted} mb-1.5`}>
                     Duration ({grantUnit})
@@ -407,10 +432,17 @@ export default function AdminSchoolDetail() {
               )}
 
               {/* Free trial note */}
-              {grantUnit === 'free' && (
+              {grantPlan !== UNLIMITED_PLAN_ID && grantUnit === 'free' && (
                 <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-violet-900/20 border border-violet-800 text-violet-300' : 'bg-violet-50 border border-violet-200 text-violet-700'}`}>
                   <p className="font-semibold mb-1">🎁 Free Trial — 7 days</p>
                   <p>School gets full access for 7 days at no cost. After expiry they must subscribe.</p>
+                </div>
+              )}
+
+              {grantPlan === UNLIMITED_PLAN_ID && (
+                <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800 text-emerald-300' : 'bg-emerald-50 border border-emerald-200 text-emerald-700'}`}>
+                  <p className="font-semibold mb-1">Unlimited plan</p>
+                  <p>Grants unlimited student access for the one-time desktop version and stores the unlimited limit for this school.</p>
                 </div>
               )}
 
@@ -419,7 +451,10 @@ export default function AdminSchoolDetail() {
                 <span className="font-medium">Expires: </span>
                 {(() => {
                   const d = new Date();
-                  if (grantUnit === 'free') d.setDate(d.getDate() + 7);
+                  if (grantPlan === UNLIMITED_PLAN_ID) {
+                    d.setFullYear(UNLIMITED_EXPIRY_YEAR, 11, 31);
+                    d.setHours(23, 59, 59, 999);
+                  } else if (grantUnit === 'free') d.setDate(d.getDate() + 7);
                   else if (grantUnit === 'days') d.setDate(d.getDate() + grantAmount);
                   else if (grantUnit === 'weeks') d.setDate(d.getDate() + grantAmount * 7);
                   else d.setMonth(d.getMonth() + grantAmount);
@@ -431,7 +466,7 @@ export default function AdminSchoolDetail() {
                 <button onClick={() => setShowGrantModal(false)} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
                 <button onClick={grantAccess} disabled={saving} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
                   {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
-                  {grantUnit === 'free' ? 'Grant Free Trial' : 'Grant Access'}
+                  {grantPlan === UNLIMITED_PLAN_ID ? 'Grant Unlimited' : grantUnit === 'free' ? 'Grant Free Trial' : 'Grant Access'}
                 </button>
               </div>
             </div>

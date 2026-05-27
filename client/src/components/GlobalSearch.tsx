@@ -5,8 +5,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { getClassDisplayName } from '../utils/classroom';
 import { store } from '../lib/store';
-import { matchesStudentSearch } from '../utils/studentSearch';
+import { getStudentDisplayId, matchesStudentSearch } from '../utils/studentSearch';
 import { matchesTextSearch } from '../utils/searchMatch';
+import { getSubjectDisplayCode } from '../utils/subjects';
 
 interface SearchResult {
   id: string;
@@ -20,6 +21,8 @@ interface SearchResult {
 const pages = [
   { path: '/', title: 'Dashboard', subtitle: 'Main dashboard', icon: LayoutDashboard, keywords: ['home', 'dashboard', 'overview', 'stats'] },
   { path: '/students', title: 'Students', subtitle: 'Manage students', icon: GraduationCap, keywords: ['students', 'pupils', 'enrollment', 'learners'] },
+  { path: '/parents', title: 'Parents & Guardians', subtitle: 'Parent contacts by student and class', icon: Users, keywords: ['parents', 'guardians', 'parent details', 'guardian details', 'parent contacts'] },
+  { path: '/parent-emails', title: 'Parent Emails', subtitle: 'Select and email parents', icon: MessageSquare, keywords: ['parent emails', 'email parents', 'guardian emails', 'send email to parents'] },
   { path: '/students/new', title: 'Add Student', subtitle: 'Open new student form', icon: UserPlus, keywords: ['add student', 'new student', 'create student', 'student form'] },
   { path: '/students', title: 'Import Students', subtitle: 'Open students page import button', icon: GraduationCap, keywords: ['import students', 'student template', 'excel students', 'csv students', 'upload students'] },
   { path: '/students', title: 'Export Students', subtitle: 'Open students page export button', icon: GraduationCap, keywords: ['export students', 'download students', 'student list'] },
@@ -27,13 +30,15 @@ const pages = [
   { path: '/staff', title: 'Teachers & Staff', subtitle: 'Manage staff members', icon: Users, keywords: ['staff', 'teachers', 'employees', 'faculty'] },
   { path: '/staff/new', title: 'Add Staff', subtitle: 'Open new staff form', icon: UserPlus, keywords: ['add staff', 'add teacher', 'new teacher', 'new staff', 'staff form'] },
   { path: '/payroll', title: 'Payroll', subtitle: 'Staff salary payments', icon: Receipt, keywords: ['payroll', 'salary', 'staff payments', 'wages'] },
-  { path: '/classes', title: 'Classes', subtitle: 'Manage classes', icon: BookOpen, keywords: ['classes', 'classrooms', 'grades', 'streams'] },
+  { path: '/classes', title: 'Classes & Timetables', subtitle: 'Manage classes and timetables', icon: BookOpen, keywords: ['classes', 'classrooms', 'grades', 'streams', 'timetables'] },
   { path: '/classes', title: 'Add Class', subtitle: 'Open classes page actions', icon: BookOpen, keywords: ['add class', 'new class', 'create class', 'class import', 'class template'] },
   { path: '/attendance', title: 'Attendance', subtitle: 'Track attendance', icon: Calendar, keywords: ['attendance', 'present', 'absent', 'mark'] },
   { path: '/attendance', title: 'Import Attendance', subtitle: 'Open attendance import tools', icon: Calendar, keywords: ['import attendance', 'attendance template', 'attendance excel'] },
   { path: '/subjects', title: 'Subjects', subtitle: 'Manage subjects', icon: BookOpen, keywords: ['subjects', 'subject', 'subjects', 'courses'] },
   { path: '/subjects', title: 'Import Subjects', subtitle: 'Open subject import tools', icon: BookOpen, keywords: ['import subjects', 'subject template', 'subject excel'] },
+  { path: '/homework-tests', title: 'Assignments & Tests', subtitle: 'Issued assignments, tests, completion and results', icon: ClipboardList, keywords: ['assignment', 'assignments', 'homework', 'tests', 'completed assignment', 'test results'] },
   { path: '/grades', title: 'Exams & Grades', subtitle: 'Manage exams and grades', icon: Award, keywords: ['exams', 'grades', 'results', 'marks', 'scores'] },
+  { path: '/grades/custom-grading', title: 'Custom Grading', subtitle: 'Set grade boundaries and remarks', icon: Award, keywords: ['custom grading', 'grading scale', 'grade boundaries', 'marks scale'] },
   { path: '/exam-marks', title: 'Exam Marks', subtitle: 'Enter and manage exam marks', icon: Award, keywords: ['exam marks', 'marks entry', 'scores', 'results', 'academic marks'] },
   { path: '/report-card/new', title: 'Report Card Template', subtitle: 'Design and print report cards', icon: Award, keywords: ['report card', 'academic document', 'student report card', 'report template'] },
   { path: '/finance', title: 'Fees & Finance', subtitle: 'Financial management', icon: Receipt, keywords: ['finance', 'fees', 'payments', 'money', 'ledger', 'opening balance', 'closing balance'] },
@@ -42,12 +47,12 @@ const pages = [
   { path: '/finance?tab=invoices', title: 'Finance Invoices', subtitle: 'Finance invoice list', icon: FileBarChart, keywords: ['finance invoices', 'invoice list', 'term invoices', 'student invoices'] },
   { path: '/finance?tab=payments', title: 'Payments', subtitle: 'Record and review payments', icon: Receipt, keywords: ['payments', 'record payment', 'payment history', 'paid fees'] },
   { path: '/finance?tab=payments', title: 'Import Payments', subtitle: 'Open payment import tools', icon: Receipt, keywords: ['import payments', 'payment template', 'payments excel'] },
-  { path: '/finance?tab=accounts', title: 'Payment Accounts', subtitle: 'Accounts shown on invoices and reports', icon: Receipt, keywords: ['accounts', 'payment accounts', 'bank accounts', 'mobile money', 'payment details'] },
+  { path: '/payment-accounts', title: 'Payment Accounts', subtitle: 'Accounts shown on invoices and reports', icon: Receipt, keywords: ['accounts', 'payment accounts', 'bank accounts', 'mobile money', 'payment details'] },
   { path: '/day-boarding', title: 'Day & Boarding', subtitle: 'Day and boarding students', icon: Users, keywords: ['day', 'boarding', 'boys', 'girls', 'students'] },
   { path: '/day-boarding', title: 'Assign Dormitory / Hostel', subtitle: 'Boarding student dormitory assignment', icon: Users, keywords: ['assign dormitory', 'assign hostel', 'hostel', 'dormitory', 'boarding room'] },
   { path: '/invoices', title: 'Invoices', subtitle: 'View invoices', icon: FileBarChart, keywords: ['invoices', 'billing', 'receipts'] },
   { path: '/invoices', title: 'Student Invoices', subtitle: 'Open student invoice view', icon: FileBarChart, keywords: ['student invoices', 'student invoice', 'invoice student', 'invoice template'] },
-  { path: '/invoices', title: 'Invoice Payment Accounts', subtitle: 'Add payment details shown on invoices', icon: Receipt, keywords: ['invoice accounts', 'add payment details', 'invoice payment details', 'bank details on invoice'] },
+  { path: '/payment-accounts', title: 'Invoice Payment Accounts', subtitle: 'Add payment details shown on invoices', icon: Receipt, keywords: ['invoice accounts', 'add payment details', 'invoice payment details', 'bank details on invoice'] },
   { path: '/invoices', title: 'Import Invoices', subtitle: 'Open invoice import tools', icon: FileBarChart, keywords: ['import invoices', 'invoice excel', 'invoice template import'] },
   { path: '/transport', title: 'Transport', subtitle: 'Transport management', icon: Bus, keywords: ['transport', 'bus', 'transportation', 'routes'] },
   { path: '/transport', title: 'Import Transport Routes', subtitle: 'Open transport route import tools', icon: Bus, keywords: ['import transport', 'route template', 'bus route import'] },
@@ -61,7 +66,7 @@ const pages = [
   { path: '/plans', title: 'Plans & Subscription', subtitle: 'Plan status, upgrade and renewal', icon: Receipt, keywords: ['plans', 'subscription', 'upgrade', 'trial', 'billing'] },
   { path: '/recycle-bin', title: 'Recycle Bin', subtitle: 'Restore deleted records', icon: ClipboardList, keywords: ['recycle bin', 'deleted', 'restore', 'trash'] },
   { path: '/settings', title: 'Settings', subtitle: 'System settings', icon: Settings, keywords: ['settings', 'preferences', 'config'] },
-  { path: '/settings', title: 'Payment Accounts Settings', subtitle: 'Configure invoice payment accounts', icon: Settings, keywords: ['payment accounts settings', 'bank settings', 'mobile money settings', 'invoice accounts settings'] },
+  { path: '/payment-accounts', title: 'Payment Accounts Settings', subtitle: 'Configure invoice payment accounts', icon: Settings, keywords: ['payment accounts settings', 'bank settings', 'mobile money settings', 'invoice accounts settings'] },
   { path: '/settings', title: 'Cloud Backup', subtitle: 'Backup and sync settings', icon: Settings, keywords: ['cloud backup', 'google drive', 'backup', 'restore backup', 'sync settings'] },
   { path: '/settings', title: 'New Term', subtitle: 'Promote students and start a new term', icon: Settings, keywords: ['new term', 'promote students', 'complete term', 'start term', 'term settings'] },
   { path: '/settings', title: 'School Logo & Info', subtitle: 'School name, logo, currency and details', icon: Settings, keywords: ['school logo', 'school info', 'currency', 'app logo', 'school settings'] },
@@ -75,6 +80,7 @@ export default function GlobalSearch() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const searchRequestId = useRef(0);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (query.length < 2) {
@@ -100,6 +106,20 @@ export default function GlobalSearch() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!searchRef.current || searchRef.current.contains(event.target as Node)) return;
+      searchRequestId.current++;
+      setQuery('');
+      setResults([]);
+      setSelectedIndex(-1);
+      setLoading(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, []);
 
   async function searchData(rawQuery: string) {
@@ -154,11 +174,12 @@ export default function GlobalSearch() {
         .filter(s => matchesStudentSearch(s, searchTerm, [getClassDisplayName(s.classId, classes)]))
         .slice(0, 3)
         .forEach(s => {
+          const displayId = getStudentDisplayId(s) || 'No ID';
           found.push({
             id: s.id,
             type: 'student',
             title: `${s.firstName} ${s.lastName}`,
-            subtitle: `${s.admissionNo} - ${getClassDisplayName(s.classId, classes)}`,
+            subtitle: `${displayId} - ${getClassDisplayName(s.classId, classes)}`,
             link: `/students/${s.id}`,
             image: s.photoUrl || undefined,
           });
@@ -179,14 +200,15 @@ export default function GlobalSearch() {
         });
 
       subjects
-        .filter(s => matchesTextSearch([s.name, s.code, getClassDisplayName(s.classId, classes)], searchTerm))
+        .filter(s => matchesTextSearch([s.name, getSubjectDisplayCode(s), getClassDisplayName(s.classId, classes)], searchTerm))
         .slice(0, 2)
         .forEach(s => {
+          const code = getSubjectDisplayCode(s);
           found.push({
             id: s.id,
             type: 'subject',
             title: s.name,
-            subtitle: `${s.code} - ${getClassDisplayName(s.classId, classes)}`,
+            subtitle: `${code} - ${getClassDisplayName(s.classId, classes)}`,
             link: '/subjects',
           });
         });
@@ -265,7 +287,7 @@ export default function GlobalSearch() {
   }
 
   return (
-    <div className="relative w-full">
+    <div ref={searchRef} className="relative w-full">
       <div className="relative flex items-center">
         <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         <input

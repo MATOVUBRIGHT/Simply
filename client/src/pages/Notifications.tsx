@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Bell, Trash2, CheckCheck, Info, CheckCircle, AlertCircle, AlertTriangle, MessageSquare, Send, X, ExternalLink, Paperclip } from 'lucide-react';
 import { Notification } from '@schofy/shared';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,6 +28,8 @@ const typeConfig: Record<string, { bg: string; text: string; icon: any }> = {
 export default function Notifications() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
+  const [searchParams] = useSearchParams();
+  const selectedId = searchParams.get('selected') || '';
   const confirm = useConfirm();
   const [replyTarget, setReplyTarget] = useState<Notification | null>(null);
   const [replyBody, setReplyBody] = useState('');
@@ -41,6 +44,14 @@ export default function Notifications() {
   useEffect(() => {
     void loadSchoolReplies();
   }, [sid]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById(`notification-${selectedId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [selectedId, notifications.length]);
 
   async function loadSchoolReplies() {
     if (!supabase || !sid) return;
@@ -220,7 +231,8 @@ export default function Notifications() {
             return (
               <div 
                 key={notif.id} 
-                className={`flex items-start gap-4 p-4 hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-b-0 ${!notif.read ? 'bg-blue-50/30' : ''}`}
+                id={`notification-${notif.id}`}
+                className={`flex items-start gap-4 p-4 hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-b-0 ${!notif.read ? 'bg-blue-50/30' : ''} ${selectedId === notif.id ? 'ring-2 ring-inset ring-indigo-500 bg-indigo-50/70' : ''}`}
               >
                 <div className={`w-10 h-10 rounded-full ${config.bg} flex items-center justify-center shrink-0`}>
                   <Icon size={20} className={config.text} />

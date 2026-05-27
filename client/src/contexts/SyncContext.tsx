@@ -138,10 +138,13 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         const result = await syncService.runFullSyncCycle(showNotifications ? 'manual' : 'automatic');
         if (showNotifications && result.success) {
           await store.refreshCurrentPage(sid, true);
+        } else if (result.success) {
+          await store.refreshCurrentPage(sid, true);
         }
         await loadPendingCount();
         if (result.success) {
           setLastSyncTime(new Date());
+          window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { source: showNotifications ? 'manual-sync' : 'automatic-sync' } }));
           if (showNotifications) {
             addToast('Data synced', 'success');
           }

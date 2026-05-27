@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Users, DollarSign, Calendar, UserCheck, BookOpen, ChevronDown, FileText, Printer, Layers, Receipt, Award, Percent, Search } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Users, DollarSign, Calendar, UserCheck, BookOpen, ChevronDown, FileText, Printer, Layers, Receipt, Award, Percent, Search, TrendingUp, WalletCards } from 'lucide-react';
 import { useCurrency } from '../hooks/useCurrency';
 import { useToast } from '../contexts/ToastContext';
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/export';
@@ -8,6 +8,7 @@ import { useTableData } from '../lib/store';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { openPrintPreview } from '../utils/printPreview';
 import { matchesTextSearch } from '../utils/searchMatch';
+import { computeProfitSummary } from '../utils/profit';
 
 type ReportType = 'terms' | 'students' | 'fees' | 'payments' | 'attendance' | 'staff' | 'classes' | 'academic' | 'bursaries' | 'discounts' | 'invoices';
 type ReportRow = Record<string, string | number>;
@@ -101,6 +102,8 @@ export default function Reports() {
   const [dateTo, setDateTo] = useState('');
   const [selectedTerm, setSelectedTerm] = useState('all');
   const [selectedYear, setSelectedYear] = useState('all');
+  const [profitTerm, setProfitTerm] = useState('all');
+  const [profitYear, setProfitYear] = useState('all');
   const [selectedClass, setSelectedClass] = useState('all');
   const [search, setSearch] = useState('');
   const { formatMoney } = useCurrency();
@@ -120,6 +123,8 @@ export default function Reports() {
   const { data: bursariesData } = useTableData(sid, 'bursaries');
   const { data: discountsData } = useTableData(sid, 'discounts');
   const { data: invoicesData } = useTableData(sid, 'invoices');
+  const { data: salaryPaymentsData } = useTableData(sid, 'salaryPayments');
+  const { data: expensesData } = useTableData(sid, 'expenses');
   const { data: settingsData } = useTableData(sid, 'settings');
 
   const settings = useMemo(() => getSettingsMap(settingsData as any[]), [settingsData]);
@@ -135,15 +140,46 @@ export default function Reports() {
   const bursaries = bursariesData as any[];
   const discounts = discountsData as any[];
   const invoices = invoicesData as any[];
+  const salaryPayments = salaryPaymentsData as any[];
+  const expenses = expensesData as any[];
   const bankAccounts = useMemo(() => {
+    try {
+      const saved = settings.paymentAccountsJson ? JSON.parse(settings.paymentAccountsJson) : null;
+      if (Array.isArray(saved)) {
+        return saved
+          .filter((account: any) => !account.hidden)
+          .map((account: any) => {
+            const method = String(account.paymentMethod || '').toLowerCase();
+            return {
+              accountName: account.accountName || '',
+              accountNumber: method.includes('cash') ? '' : account.accountNumber || '',
+              bankName: method.includes('mobile') ? '' : account.bankName || '',
+              bankBranch: method.includes('mobile') || method.includes('cash') ? '' : account.bankBranch || '',
+              paymentMethod: account.paymentMethod || '',
+            };
+          })
+          .filter((account: any) => account.accountName || account.accountNumber || account.bankName || account.bankBranch || account.paymentMethod);
+      }
+    } catch {
+      // Use legacy account settings below.
+    }
     const accounts = [];
     for (const suffix of ['', '2', '3']) {
+      if (settings[`paymentAccountHidden${suffix}`] === 'true') continue;
       const accountName = settings[`bankAccountName${suffix}`];
       const accountNumber = settings[`bankAccountNumber${suffix}`];
       const bankName = settings[`bankName${suffix}`];
+      const bankBranch = settings[`bankBranch${suffix}`];
       const paymentMethod = settings[`paymentMethod${suffix}`];
-      if (accountName || accountNumber || bankName || paymentMethod) {
-        accounts.push({ accountName, accountNumber, bankName, paymentMethod });
+      const method = String(paymentMethod || '').toLowerCase();
+      if (accountName || accountNumber || bankName || bankBranch || paymentMethod) {
+        accounts.push({
+          accountName,
+          accountNumber: method.includes('cash') ? '' : accountNumber,
+          bankName: method.includes('mobile') ? '' : bankName,
+          bankBranch: method.includes('mobile') || method.includes('cash') ? '' : bankBranch,
+          paymentMethod,
+        });
       }
     }
     return accounts;
@@ -188,6 +224,21 @@ export default function Reports() {
     const student = getStudent(row.studentId || row.entityId);
     return row.classId === selectedClass || student?.classId === selectedClass;
   }
+
+  const profitSummary = useMemo(() => {
+    return computeProfitSummary({
+      fees,
+      payments,
+      salaryPayments,
+      expenses,
+      students,
+      term: profitTerm,
+      year: profitYear,
+      classId: selectedClass,
+      dateFrom,
+      dateTo,
+    });
+  }, [fees, payments, salaryPayments, expenses, students, profitTerm, profitYear, selectedClass, dateFrom, dateTo]);
 
   function makeRows(): ReportRow[] {
     const searchMatch = (row: ReportRow) => matchesTextSearch(Object.values(row), search);
@@ -379,6 +430,19 @@ export default function Reports() {
     }, new Set<string>()));
     return keys.map(key => ({ key, label: columnLabels[key] || key }));
   }, [rows]);
+  const groupedRows = useMemo(() => {
+    const groups = new Map<string, ReportRow[]>();
+    rows.forEach(row => {
+      const key = normalize(row.className) || (selectedReport === 'staff' ? 'Staff' : 'Unassigned');
+      const list = groups.get(key) || [];
+      list.push(row);
+      groups.set(key, list);
+    });
+    const classOrder = new Map(classes.map((cls: any, index: number) => [cls.name, index]));
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => (classOrder.get(a) ?? 9999) - (classOrder.get(b) ?? 9999) || a.localeCompare(b))
+      .map(([className, groupRows]) => ({ className, rows: groupRows }));
+  }, [rows, classes, selectedReport]);
   const reportLabel = reportTypes.find(r => r.id === selectedReport)?.label || 'Report';
 
   function exportRows(kind: 'pdf' | 'csv' | 'excel') {
@@ -396,7 +460,7 @@ export default function Reports() {
 
   function printReport() {
     setShowExportMenu(false);
-    window.setTimeout(() => openPrintPreview(reportLabel), 50);
+    window.setTimeout(() => openPrintPreview(reportLabel, '#reports-selected-print'), 50);
   }
 
   return (
@@ -434,26 +498,86 @@ export default function Reports() {
         })}
       </div>
 
-      <div className="card print-area">
+      <section className="card overflow-hidden">
+        <div className="card-header flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-2">
+            <TrendingUp size={18} className="text-emerald-500" />
+            <h2 className="font-bold text-slate-800 dark:text-white">Profit Summary</h2>
+            <span className="text-xs text-slate-400">Uses class/date filters plus profit term/year</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:w-72">
+            <select value={profitTerm} onChange={e => setProfitTerm(e.target.value)} className="form-input form-select truncate px-3 pr-7">
+              <option value="all">All terms</option>
+              {termOptions.map(term => <option key={term} value={term}>Term {term}</option>)}
+            </select>
+            <select value={profitYear} onChange={e => setProfitYear(e.target.value)} className="form-input form-select truncate px-3 pr-7">
+              <option value="all">All years</option>
+              {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="card-body grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+            <p className="text-xs font-bold uppercase text-slate-400">Expected Income</p>
+            <p className="mt-1 text-lg font-black text-slate-900 dark:text-white">{formatMoney(profitSummary.billed)}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-800 dark:bg-emerald-900/20">
+            <p className="text-xs font-bold uppercase text-emerald-600 dark:text-emerald-300">Profit Collected</p>
+            <p className="mt-1 text-lg font-black text-emerald-700 dark:text-emerald-200">{formatMoney(profitSummary.collected)}</p>
+          </div>
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
+            <p className="text-xs font-bold uppercase text-red-600 dark:text-red-300">Expenses</p>
+            <p className="mt-1 text-lg font-black text-red-700 dark:text-red-200">{formatMoney(profitSummary.totalExpenses)}</p>
+          </div>
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-800 dark:bg-indigo-900/20">
+            <p className="text-xs font-bold uppercase text-indigo-600 dark:text-indigo-300">Net Profit Available</p>
+            <p className={`mt-1 text-lg font-black ${profitSummary.netProfit >= 0 ? 'text-indigo-700 dark:text-indigo-200' : 'text-red-600 dark:text-red-300'}`}>{formatMoney(profitSummary.netProfit)}</p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+            <p className="flex items-center gap-1 text-xs font-bold uppercase text-amber-700 dark:text-amber-300"><WalletCards size={13} /> Not Paid</p>
+            <p className="mt-1 text-lg font-black text-amber-800 dark:text-amber-200">{formatMoney(profitSummary.unpaid)}</p>
+            <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">Needed to cover expenses: {formatMoney(profitSummary.amountNeededForProfit)}</p>
+          </div>
+        </div>
+      </section>
+
+      <div id="reports-selected-print" className="card print-area">
         <div className="card-header flex flex-wrap items-center justify-between gap-3">
           <span>{reportLabel}</span>
           <span className="badge badge-info">{rows.length} rows</span>
         </div>
         <div className="card-body space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3 print:hidden">
-            <div className="input-icon-wrapper xl:col-span-2">
+          <div className="hidden border-b border-slate-300 pb-4 text-slate-900 print:flex print:items-start print:justify-between print:gap-4">
+            <div className="flex items-start gap-3">
+              {settings.schoolLogo && <img src={settings.schoolLogo} alt="School logo" className="h-16 w-16 object-contain" />}
+              <div>
+                <h2 className="text-2xl font-black uppercase tracking-tight">{settings.schoolName || 'School'}</h2>
+                {settings.schoolAddress && <p className="text-sm text-slate-600">{settings.schoolAddress}</p>}
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+                  {settings.schoolPhone && <span>Tel: {settings.schoolPhone}</span>}
+                  {settings.schoolEmail && <span>Email: {settings.schoolEmail}</span>}
+                </div>
+              </div>
+            </div>
+            <div className="text-right text-sm">
+              <p className="font-bold uppercase tracking-wide">{reportLabel}</p>
+              <p className="text-slate-500">Printed {new Date().toLocaleDateString()}</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 print:hidden md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_minmax(112px,130px)_minmax(112px,130px)_minmax(130px,160px)_minmax(210px,240px)]">
+            <div className="input-icon-wrapper">
               <Search size={16} className="input-icon" />
               <input value={search} onChange={e => setSearch(e.target.value)} className="form-input form-input-with-icon" placeholder="Search report..." />
             </div>
-            <select value={selectedTerm} onChange={e => setSelectedTerm(e.target.value)} className="form-input">
+            <select value={selectedTerm} onChange={e => setSelectedTerm(e.target.value)} className="form-input form-select truncate px-3 pr-7">
               <option value="all">All terms</option>
               {termOptions.map(term => <option key={term} value={term}>Term {term}</option>)}
             </select>
-            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="form-input">
+            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="form-input form-select truncate px-3 pr-7">
               <option value="all">All years</option>
               {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
             </select>
-            <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="form-input">
+            <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="form-input form-select truncate px-3 pr-7">
               <option value="all">All classes</option>
               {classes.map((cls: any) => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
             </select>
@@ -469,6 +593,7 @@ export default function Reports() {
                 {bankAccounts.map((account, index) => (
                   <div key={index} className="rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900">
                     <p className="font-bold text-slate-800 dark:text-white">{account.bankName || account.paymentMethod || `Account ${index + 1}`}</p>
+                    {account.bankBranch && <p className="mt-1 text-slate-500">Branch: {account.bankBranch}</p>}
                     {account.accountName && <p className="mt-1 text-slate-500">{account.accountName}</p>}
                     {account.accountNumber && <p className="mt-1 font-mono font-bold text-indigo-600 dark:text-indigo-300">{account.accountNumber}</p>}
                     {account.paymentMethod && <p className="mt-1 text-xs uppercase tracking-wide text-slate-400">{account.paymentMethod}</p>}
@@ -486,8 +611,17 @@ export default function Reports() {
               <tbody>
                 {rows.length === 0 ? (
                   <tr><td colSpan={Math.max(columns.length, 1)} className="text-center py-12 text-slate-400">No records match this report.</td></tr>
-                ) : rows.slice(0, 300).map((row, index) => (
-                  <tr key={index}>{columns.map(column => <td key={column.key}>{row[column.key] ?? '-'}</td>)}</tr>
+                ) : groupedRows.map(group => (
+                  <Fragment key={group.className}>
+                    <tr className="bg-slate-50 dark:bg-slate-800/80">
+                      <td colSpan={Math.max(columns.length, 1)} className="px-4 py-2 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-300">
+                        {group.className} <span className="ml-2 font-semibold normal-case text-slate-400">{group.rows.length} record{group.rows.length === 1 ? '' : 's'}</span>
+                      </td>
+                    </tr>
+                    {group.rows.slice(0, Math.max(0, 300)).map((row, index) => (
+                      <tr key={`${group.className}-${index}`}>{columns.map(column => <td key={column.key}>{row[column.key] ?? '-'}</td>)}</tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

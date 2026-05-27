@@ -14,6 +14,8 @@ import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { PortalDropdown } from '../components/PortalDropdown';
+import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
+import { getSubjectCode as readSubjectCode, getSubjectDisplayCode, normalizeSubjectCode } from '../utils/subjects';
 
 const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
   'nursery': [
@@ -86,8 +88,20 @@ const subjectColors = [
 ];
 
 function getSubjectColor(name: string) {
-  const index = name.charCodeAt(0) % subjectColors.length;
+  const index = (name || 'S').charCodeAt(0) % subjectColors.length;
   return subjectColors[index];
+}
+
+function getSubjectName(subject: any) {
+  return String(subject?.name || subject?.subjectName || subject?.subject_name || '').trim();
+}
+
+function getSubjectCode(subject: any) {
+  return readSubjectCode(subject);
+}
+
+function getSubjectClassId(subject: any) {
+  return String(subject?.classId || subject?.class_id || '').trim();
 }
 
 const SubjectActions = ({ 
@@ -126,7 +140,7 @@ const SubjectActions = ({
             <PortalDropdown.Divider />
           </>
         )}
-        <PortalDropdown.Item icon={<Trash2 size={13} />} label="Remove" danger onClick={() => { onDelete({ name: sub.name, ids: [sub.id] }); setIsOpen(false); }} />
+        <PortalDropdown.Item icon={<Trash2 size={13} />} label="Remove" danger onClick={() => { onDelete({ name: getSubjectName(sub) || 'Subject', ids: [sub.id] }); setIsOpen(false); }} />
       </PortalDropdown>
     </>
   );
@@ -161,7 +175,7 @@ const SubjectRow = memo(({
           : i % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/50 dark:bg-slate-800/50'
       } hover:bg-slate-50 dark:hover:bg-slate-700/30`}
       onClick={() => onSelect(sub.id)}
-      onDoubleClick={() => onDoubleClick(group || { name: sub.name, ids: [sub.id] })}
+      onDoubleClick={() => onDoubleClick(group || { name: getSubjectName(sub) || 'Subject', ids: [sub.id] })}
     >
       <td className="px-4 py-2.5 text-xs text-slate-400">
         {selectMode ? (
@@ -176,15 +190,15 @@ const SubjectRow = memo(({
       </td>
       <td className="px-4 py-2.5">
         <div className="flex items-center gap-2.5">
-          <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${getSubjectColor(sub.name)} flex items-center justify-center shrink-0`}>
+          <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${getSubjectColor(getSubjectName(sub))} flex items-center justify-center shrink-0`}>
             <Book size={13} className="text-white" />
           </div>
-          <span className="font-medium text-slate-800 dark:text-white">{sub.name}</span>
+          <span className="font-medium text-slate-800 dark:text-white">{getSubjectName(sub) || 'Untitled subject'}</span>
         </div>
       </td>
       <td className="px-4 py-2.5">
-        <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 font-mono text-xs font-semibold text-slate-600 dark:text-slate-300">
-          {sub.code || <span className="text-slate-400 font-normal italic">no code</span>}
+        <span className="inline-flex items-center font-mono text-xs font-semibold text-slate-600 dark:text-slate-300">
+          {getSubjectDisplayCode(sub)}
         </span>
       </td>
       <td className="px-4 py-2.5 text-right" onClick={e => e.stopPropagation()}>
@@ -236,6 +250,7 @@ export default function Subjects() {
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<Partial<Subject>[]>([]);
+  const [importWarnings, setImportWarnings] = useState<{ row: number; subject: string; className: string; reason: string }[]>([]);
   const [selectedSubjects, setSelectedSubjects] = useState<Set<string>>(new Set());
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
   const clickTimeoutRef = useRef<number | null>(null);
@@ -257,7 +272,7 @@ export default function Subjects() {
     { key: 'classId', label: 'Class', required: true },
   ];
 
-  function getClassLevel(classId: string): string {
+function getClassLevel(classId: string): string {
     const cls = classes.find(c => c.id === classId) as any;
     if (!cls) return '';
     const name = cls.name?.toLowerCase() || '';
@@ -300,7 +315,7 @@ export default function Subjects() {
       ? words[0].slice(0, 4)
       : words.map((word) => word[0]).join('').slice(0, 6);
 
-    const existingCodes = new Set(subjects.map((subject) => (subject.code || '').toUpperCase()));
+    const existingCodes = new Set(subjects.map((subject) => getSubjectCode(subject).toUpperCase()));
     if (!existingCodes.has(base)) {
       return base;
     }
@@ -381,31 +396,65 @@ export default function Subjects() {
     }
   }
 
+  function handleSelectClassSubjects(classSubjectIds: string[]) {
+    setSelectMode(true);
+    setSelectedSubjects(prev => {
+      const next = new Set(prev);
+      const allSelected = classSubjectIds.every(id => next.has(id));
+      classSubjectIds.forEach(id => {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      });
+      return next;
+    });
+  }
+
   async function handleBulkDelete() {
+    await deleteSelectedSubjectIds(Array.from(selectedSubjects));
+  }
+
+  async function deleteSelectedSubjectIds(subjectIds: string[]) {
     const id = schoolId || user?.id;
-    if (!id || selectedSubjects.size === 0) return;
+    if (!id || subjectIds.length === 0) return;
     const ok = await confirm({
-      title: `Delete ${selectedSubjects.size} Subject${selectedSubjects.size > 1 ? 's' : ''}`,
-      description: `This will delete ${selectedSubjects.size} subject entr${selectedSubjects.size > 1 ? 'ies' : 'y'} and move them to the recycle bin.`,
+      title: `Delete ${subjectIds.length} Subject${subjectIds.length > 1 ? 's' : ''}`,
+      description: `This will delete ${subjectIds.length} subject entr${subjectIds.length > 1 ? 'ies' : 'y'} and move them to the recycle bin.`,
       confirmLabel: 'Delete',
       variant: 'danger',
     });
     if (!ok) return;
     try {
       const now = new Date().toISOString();
-      for (const idSubject of selectedSubjects) {
-        const subject = subjects.find(s => s.id === idSubject);
-        if (subject) {
-          await dataService.delete(id, 'subjects', idSubject);
-          addToRecycleBin(id, { id: `subject-${Date.now()}-${Math.random()}`, type: 'subject', name: subject.name, data: subject, deletedAt: now });
-        }
-      }
-      setSelectedSubjects(new Set());
+      const recycleItems = subjectIds
+        .map(idSubject => subjects.find(s => s.id === idSubject))
+        .filter(Boolean) as Subject[];
+      recycleItems.forEach(subject => {
+        addToRecycleBin(id, { id: `subject-${Date.now()}-${Math.random()}`, type: 'subject', name: getSubjectName(subject) || 'Subject', data: subject, deletedAt: now });
+      });
+      await deleteInThirtyPercentBatches(id, 'subjects', subjectIds);
+      setSelectedSubjects(prev => {
+        const next = new Set(prev);
+        subjectIds.forEach(subjectId => next.delete(subjectId));
+        return next;
+      });
       setSelectMode(false);
-      addToast(`${selectedSubjects.size} subjects deleted`, 'success');
+      addToast(`${subjectIds.length} subjects deleted`, 'success');
     } catch {
       addToast('Failed to delete subjects', 'error');
     }
+  }
+
+  async function deleteSubjectIdsWithoutSelection(subjectIds: string[]) {
+    const id = schoolId || user?.id;
+    if (!id || subjectIds.length === 0) return;
+    const now = new Date().toISOString();
+    const recycleItems = subjectIds
+      .map(idSubject => subjects.find(s => s.id === idSubject))
+      .filter(Boolean) as Subject[];
+    recycleItems.forEach(subject => {
+      addToRecycleBin(id, { id: `subject-${Date.now()}-${Math.random()}`, type: 'subject', name: getSubjectName(subject) || 'Subject', data: subject, deletedAt: now });
+    });
+    await deleteInThirtyPercentBatches(id, 'subjects', subjectIds);
   }
 
   // Delete all entries for a subject group (all classes it's assigned to)
@@ -422,14 +471,7 @@ export default function Subjects() {
     });
     if (!ok) return;
     try {
-      const now = new Date().toISOString();
-      for (const idSubject of group.ids) {
-        const subject = subjects.find(s => s.id === idSubject);
-        await dataService.delete(id, 'subjects', idSubject);
-        if (subject) {
-          addToRecycleBin(id, { id: `subject-${Date.now()}-${Math.random()}`, type: 'subject', name: subject.name, data: subject, deletedAt: now });
-        }
-      }
+      await deleteSubjectIdsWithoutSelection(group.ids);
       addToast(`"${group.name}" deleted`, 'success');
     } catch {
       addToast('Failed to delete subject', 'error');
@@ -455,7 +497,7 @@ export default function Subjects() {
     const id = schoolId || user?.id;
     if (!id || !editGroup || editSubmitting) return;
     const name = editForm.name.trim();
-    const code = editForm.code.trim();
+    const code = normalizeSubjectCode(editForm.code);
     if (!name || !code) { addToast('Name and code are required', 'error'); return; }
     if (editClassIds.length === 0) { addToast('Select at least one class', 'error'); return; }
     setEditSubmitting(true);
@@ -495,7 +537,7 @@ export default function Subjects() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const name = formData.name.trim();
-    const code = formData.code.trim();
+    const code = normalizeSubjectCode(formData.code);
     if (!name || !code) { addToast('Subject name and code are required', 'error'); return; }
     if (selectedClassIds.length === 0) { addToast('Select at least one class', 'error'); return; }
     const id = schoolId || user?.id;
@@ -503,7 +545,7 @@ export default function Subjects() {
     setSubmitting(true);
     try {
       const now = new Date().toISOString();
-      const existingKeys = new Set(subjects.map(s => `${s.name.toLowerCase()}::${s.classId}`));
+      const existingKeys = new Set(subjects.map(s => `${getSubjectName(s).toLowerCase()}::${getSubjectClassId(s)}`));
       const newSubjects = selectedClassIds
         .filter(classId => !existingKeys.has(`${name.toLowerCase()}::${classId}`))
         .map(classId => ({ id: uuidv4(), name, code, classId, createdAt: now } satisfies Subject));
@@ -529,7 +571,7 @@ export default function Subjects() {
       { key: 'code' as keyof Subject, label: 'Code' },
       { key: 'classId' as keyof Subject, label: 'Class' },
     ];
-    exportToCSV(subjects, 'subjects', columns);
+    exportToCSV(subjects.map(subject => ({ ...subject, code: getSubjectDisplayCode(subject) })), 'subjects', columns);
     addToast('Exported to CSV', 'success');
   }
 
@@ -539,7 +581,7 @@ export default function Subjects() {
       { key: 'code', label: 'Code' },
       { key: 'classId', label: 'Class' },
     ];
-    exportToPDF('Subjects Report', subjects, columns, 'subjects');
+    exportToPDF('Subjects Report', subjects.map(subject => ({ ...subject, code: getSubjectDisplayCode(subject) })), columns, 'subjects');
     addToast('Exported to PDF', 'success');
     setShowExportMenu(false);
   }
@@ -550,7 +592,7 @@ export default function Subjects() {
       { key: 'code' as keyof Subject, label: 'Code' },
       { key: 'classId' as keyof Subject, label: 'Class' },
     ];
-    exportToExcel(subjects, 'subjects', columns);
+    exportToExcel(subjects.map(subject => ({ ...subject, code: getSubjectDisplayCode(subject) })), 'subjects', columns);
     addToast('Exported to Excel', 'success');
     setShowExportMenu(false);
   }
@@ -599,6 +641,7 @@ export default function Subjects() {
     setCsvData([]);
     setFieldMapping({});
     setImportPreview([]);
+    setImportWarnings([]);
     setIsImporting(false);
     setImportProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -648,9 +691,25 @@ export default function Subjects() {
     return result;
   }
 
+  function resolveImportClass(raw: string): { id: string; name: string } | null {
+    const value = String(raw || '').trim();
+    if (!value) return null;
+    const normClass = (s: string) => s.toLowerCase().replace(/[\s._\-]/g, '');
+    const key = normClass(value);
+    const exact = (classes as any[]).find((c: any) => normClass(c.name || '') === key || String(c.id) === value);
+    if (exact) return { id: exact.id, name: exact.name || value };
+    const loose = (classes as any[]).find((c: any) => {
+      const classKey = normClass(c.name || '');
+      return classKey && (classKey.includes(key) || key.includes(classKey));
+    });
+    return loose ? { id: loose.id, name: loose.name || value } : null;
+  }
+
   function processMapping() {
     const mappedData: Partial<Subject>[] = [];
-    for (const row of csvData) {
+    const warnings: { row: number; subject: string; className: string; reason: string }[] = [];
+    for (let rowIndex = 0; rowIndex < csvData.length; rowIndex++) {
+      const row = csvData[rowIndex];
       const subject: Partial<Subject> = {};
       subjectExpectedFields.forEach(field => {
         const csvHeader = fieldMapping[field.key];
@@ -661,10 +720,30 @@ export default function Subjects() {
           }
         }
       });
-      if (subject.name) mappedData.push(subject);
+      const name = String((subject as any).name || '').trim();
+      const code = normalizeSubjectCode((subject as any).code);
+      const rawClass = String((subject as any).classId || '').trim();
+      if (!name) {
+        warnings.push({ row: rowIndex + 2, subject: '-', className: rawClass || '-', reason: 'Missing subject name' });
+        continue;
+      }
+      if (!code) {
+        warnings.push({ row: rowIndex + 2, subject: name, className: rawClass || '-', reason: 'Missing subject code' });
+        continue;
+      }
+      const resolvedClass = resolveImportClass(rawClass);
+      if (!resolvedClass) {
+        warnings.push({ row: rowIndex + 2, subject: name, className: rawClass || '-', reason: rawClass ? 'Class not found' : 'Missing class' });
+        continue;
+      }
+      mappedData.push({ ...subject, name, code, classId: resolvedClass.id, className: resolvedClass.name } as any);
     }
     setImportPreview(mappedData);
+    setImportWarnings(warnings);
     setImportStep('preview');
+    if (warnings.length > 0) {
+      addToast(`${warnings.length} row${warnings.length === 1 ? '' : 's'} flagged and skipped. Fix the class/name/code to import them.`, 'warning');
+    }
   }
 
   async function executeImport() {
@@ -673,42 +752,20 @@ export default function Subjects() {
     setIsImporting(true);
     setImportProgress(0);
 
-    // Build case-insensitive class name to ID lookup
-    const normClass = (s: string) => s.toLowerCase().replace(/[\s._\-]/g, '');
-    const classLookup = new Map<string, string>();
-    (classes as any[]).forEach((c: any) => {
-      classLookup.set(normClass(c.name), c.id);
-      classLookup.set(c.id, c.id);
-    });
-    function resolveClassId(raw: string): string {
-      if (!raw) return '';
-      const key = normClass(raw);
-      if (classLookup.has(key)) return classLookup.get(key)!;
-      for (const [k, v] of classLookup) {
-        if (k.includes(key) || key.includes(k)) return v;
-      }
-      return raw;
-    }
-
     try {
       const now = new Date().toISOString();
-      let successCount = 0;
       const previewSnapshot = [...importPreview];
-      
-      for (let i = 0; i < previewSnapshot.length; i++) {
-        const data = previewSnapshot[i];
-        const resolvedClassId = resolveClassId((data.classId as string) || '');
+      const tasks = previewSnapshot.map((data) => async () => {
         const subject: Subject = {
           id: uuidv4(),
           name: (data.name as string) || 'Unknown',
-          code: (data.code as string) || '',
-          classId: resolvedClassId,
+          code: normalizeSubjectCode(data.code),
+          classId: (data.classId as string) || '',
           createdAt: now,
         };
         await dataService.create(id, 'subjects', subject as any);
-        successCount++;
-        setImportProgress(Math.round(((i + 1) / previewSnapshot.length) * 100));
-      }
+      });
+      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
       
       setIsImporting(false);
       closeImportModal();
@@ -719,21 +776,25 @@ export default function Subjects() {
     }
   }
 
-  const uniqueSubjects = [...new Set(subjects.map(s => s.name))];
-  const primaryCount = [...new Set(subjects.filter(s => getClassLevel(s.classId) === 'primary').map(s => s.name))].length;
-  const secondaryCount = [...new Set(subjects.filter(s => ['jss','ss'].includes(getClassLevel(s.classId))).map(s => s.name))].length;
+  const uniqueSubjects = [...new Set(subjects.map(s => getSubjectName(s)).filter(Boolean))];
+  const primaryCount = [...new Set(subjects.filter(s => getClassLevel(getSubjectClassId(s)) === 'primary').map(s => getSubjectName(s)))].length;
+  const secondaryCount = [...new Set(subjects.filter(s => ['jss','ss'].includes(getClassLevel(getSubjectClassId(s)))).map(s => getSubjectName(s)))].length;
 
   // Group subjects by name: one row per subject, showing all assigned classes.
   const groupedSubjects = useMemo(() => {
     const map = new Map<string, { name: string; code: string; ids: string[]; classIds: string[] }>();
     for (const s of subjects) {
-      const key = s.name.toLowerCase();
+      const name = getSubjectName(s);
+      if (!name) continue;
+      const code = getSubjectCode(s);
+      const classId = getSubjectClassId(s);
+      const key = name.toLowerCase();
       if (!map.has(key)) {
-        map.set(key, { name: s.name, code: s.code || '', ids: [], classIds: [] });
+        map.set(key, { name, code, ids: [], classIds: [] });
       }
       const entry = map.get(key)!;
       entry.ids.push(s.id);
-      entry.classIds.push(s.classId);
+      if (classId) entry.classIds.push(classId);
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [subjects]);
@@ -762,18 +823,46 @@ export default function Subjects() {
   );
 
   const subjectsByClass = useMemo(() => {
-    return classesSorted.map(cls => {
-      const classSubjects = subjects.filter((s: any) => s.classId === cls.id);
+    const grouped = classesSorted.map(cls => {
+      const classSubjects = subjects.filter((s: any) => getSubjectClassId(s) === cls.id);
       const filtered = searchTerm
         ? classSubjects.filter((s: any) =>
-            s.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            s.code?.toLowerCase().includes(searchTerm.toLowerCase())
+            getSubjectName(s).toLowerCase().includes(searchTerm.toLowerCase()) ||
+            getSubjectCode(s).toLowerCase().includes(searchTerm.toLowerCase())
           )
         : classSubjects;
       if (filtered.length === 0) return null;
-      return { cls, subjects: [...filtered].sort((a: any, b: any) => a.name.localeCompare(b.name)) };
+      return { cls, subjects: [...filtered].sort((a: any, b: any) => getSubjectName(a).localeCompare(getSubjectName(b))) };
     }).filter(Boolean) as { cls: any; subjects: any[] }[];
+
+    const assignedClassIds = new Set(classesSorted.map(cls => cls.id));
+    const unassignedSubjects = subjects.filter((s: any) => {
+      const classId = getSubjectClassId(s);
+      return !classId || !assignedClassIds.has(classId);
+    });
+    const filteredUnassigned = searchTerm
+      ? unassignedSubjects.filter((s: any) =>
+          getSubjectName(s).toLowerCase().includes(searchTerm.toLowerCase()) ||
+          getSubjectCode(s).toLowerCase().includes(searchTerm.toLowerCase())
+        )
+      : unassignedSubjects;
+    if (filteredUnassigned.length > 0) {
+      grouped.push({
+        cls: { id: '__unassigned__', name: 'Unassigned Subjects' },
+        subjects: [...filteredUnassigned].sort((a: any, b: any) => getSubjectName(a).localeCompare(getSubjectName(b))),
+      });
+    }
+    return grouped;
   }, [classesSorted, subjects, searchTerm]);
+
+  useEffect(() => {
+    if (subjectsByClass.length === 0) return;
+    setExpandedClasses(prev => {
+      const next = new Set(prev);
+      subjectsByClass.forEach(({ cls }) => next.add(cls.id));
+      return next;
+    });
+  }, [subjectsByClass]);
 
   return (
     <div className="space-y-6">
@@ -821,7 +910,7 @@ export default function Subjects() {
               </div>
             )}
           </div>
-          <button onClick={() => { setShowImportModal(true); fileInputRef.current?.click(); }} className="btn btn-secondary" title="Import CSV">
+          <button onClick={() => setShowImportModal(true)} className="btn btn-secondary" title="Import CSV">
             <Upload size={16} />
             <span className="hidden sm:inline">Import</span>
           </button>
@@ -1080,6 +1169,8 @@ export default function Subjects() {
           <div className="divide-y divide-slate-200 dark:divide-slate-700">
             {subjectsByClass.map(({ cls, subjects: classSubjects }) => {
               const isOpen = expandedClasses.has(cls.id);
+              const classSubjectIds = classSubjects.map((subject: any) => subject.id);
+              const selectedInClass = classSubjectIds.filter((subjectId: string) => selectedSubjects.has(subjectId)).length;
               return (
                 <div key={cls.id}>
                   <button
@@ -1092,6 +1183,30 @@ export default function Subjects() {
                     <div className="flex-1 min-w-0">
                       <h3 className="font-bold text-slate-800 dark:text-white">{cls.name}</h3>
                       <p className="text-xs text-slate-500 mt-0.5">{classSubjects.length} subject{classSubjects.length !== 1 ? 's' : ''}</p>
+                    </div>
+                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectClassSubjects(classSubjectIds)}
+                        className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                          selectedInClass === classSubjects.length
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {selectedInClass === classSubjects.length ? <CheckSquare size={13} /> : <Square size={13} />}
+                        {selectedInClass > 0 ? `${selectedInClass}/${classSubjects.length}` : 'Select all'}
+                      </button>
+                      {selectedInClass > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => deleteSelectedSubjectIds(classSubjectIds.filter((subjectId: string) => selectedSubjects.has(subjectId)))}
+                          className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-100 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/40"
+                        >
+                          <Trash2 size={13} />
+                          Delete
+                        </button>
+                      )}
                     </div>
                     <ChevronRight size={18} className={`text-slate-400 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
                   </button>
@@ -1113,7 +1228,7 @@ export default function Subjects() {
                               key={sub.id}
                               sub={sub}
                               i={i}
-                              group={groupedSubjects.find(g => g.name.toLowerCase() === sub.name.toLowerCase())}
+                              group={groupedSubjects.find(g => g.name.toLowerCase() === getSubjectName(sub).toLowerCase())}
                               selectMode={selectMode}
                               isSelected={selectedSubjects.has(sub.id)}
                               onSelect={handleRowClick}
@@ -1329,6 +1444,39 @@ export default function Subjects() {
                     </p>
                   </div>
 
+                  {importWarnings.length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-800 dark:bg-amber-900/20">
+                      <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                        {importWarnings.length} row{importWarnings.length === 1 ? '' : 's'} flagged and skipped
+                      </p>
+                      <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                        These rows will not import until the subject name, code, and class match your existing classes.
+                      </p>
+                      <div className="mt-2 max-h-28 overflow-y-auto rounded border border-amber-200 bg-white/70 dark:border-amber-800 dark:bg-slate-900/30">
+                        <table className="w-full text-xs">
+                          <thead className="sticky top-0 bg-amber-100 dark:bg-amber-900/40">
+                            <tr>
+                              <th className="px-2 py-1.5 text-left font-semibold text-amber-800 dark:text-amber-200">Row</th>
+                              <th className="px-2 py-1.5 text-left font-semibold text-amber-800 dark:text-amber-200">Subject</th>
+                              <th className="px-2 py-1.5 text-left font-semibold text-amber-800 dark:text-amber-200">Class</th>
+                              <th className="px-2 py-1.5 text-left font-semibold text-amber-800 dark:text-amber-200">Issue</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {importWarnings.map((warning, index) => (
+                              <tr key={`${warning.row}-${index}`} className="border-t border-amber-100 dark:border-amber-900/40">
+                                <td className="px-2 py-1.5 text-amber-700 dark:text-amber-300">{warning.row}</td>
+                                <td className="px-2 py-1.5 text-slate-700 dark:text-slate-200">{warning.subject}</td>
+                                <td className="px-2 py-1.5 text-slate-500 dark:text-slate-400">{warning.className}</td>
+                                <td className="px-2 py-1.5 text-amber-700 dark:text-amber-300">{warning.reason}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
@@ -1336,6 +1484,7 @@ export default function Subjects() {
                           <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">#</th>
                           <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Name</th>
                           <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Code</th>
+                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Class</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -1343,7 +1492,8 @@ export default function Subjects() {
                           <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
                             <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
                             <td className="px-2 py-1.5">{(subject as any).name || '-'}</td>
-                            <td className="px-2 py-1.5">{(subject as any).code || '-'}</td>
+                            <td className="px-2 py-1.5">{getSubjectDisplayCode(subject) || '-'}</td>
+                            <td className="px-2 py-1.5">{(subject as any).className || '-'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1357,7 +1507,7 @@ export default function Subjects() {
 
                   <div className="flex justify-between pt-2">
                     <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
-                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                    <button onClick={executeImport} disabled={isImporting || importPreview.length === 0} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
                       {isImporting ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing {importProgress}%</> : <><Check size={14} /> Import {importPreview.length}</>}
                     </button>
                   </div>

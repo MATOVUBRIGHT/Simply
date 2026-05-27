@@ -180,7 +180,7 @@ export interface Class {
 export interface Subject {
     id: string;
     name: string;
-    code: string;
+    code: string | number;
     classId: string;
     teacherId?: string;
     createdAt: string;
@@ -307,6 +307,11 @@ export interface TimetableEntry {
     dayOfWeek: number;
     period: number;
     subjectId: string;
+    teacherId?: string;
+    entryType?: 'class' | 'exam' | 'event' | 'free';
+    examId?: string;
+    customName?: string;
+    room?: string;
     startTime: string;
     endTime: string;
     createdAt: string;
