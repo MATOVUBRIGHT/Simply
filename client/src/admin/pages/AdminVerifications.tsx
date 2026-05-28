@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   ClipboardCheck, CheckCircle, XCircle, Clock, RefreshCw,
   ShieldCheck, ShieldOff, Eye, AlertTriangle, Ban, KeyRound,
+  RotateCcw,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { PLAN_DEFINITIONS } from '../../utils/plans';
@@ -45,6 +46,12 @@ interface VerificationCodeRow {
   amount: number;
   used: boolean;
   terminated: boolean;
+  usedBySchoolId?: string;
+  usedBySchoolName?: string;
+  usedByEmail?: string;
+  usedAt?: string;
+  subscriptionId?: string;
+  subscriptionStatus?: string;
 }
 
 export default function AdminVerifications() {
@@ -60,6 +67,7 @@ export default function AdminVerifications() {
   const [success, setSuccess] = useState('');
   const [codeRows, setCodeRows] = useState<VerificationCodeRow[]>([]);
   const [codeSearch, setCodeSearch] = useState('');
+  const [codeFilter, setCodeFilter] = useState<'used' | 'terminated' | 'unused' | 'all'>('used');
 
   useEffect(() => { load(); }, []);
 
@@ -121,15 +129,25 @@ export default function AdminVerifications() {
       });
 
       setItems(rows);
-      const usedCodeHashes = new Set(
-        subs
-          .map((sub: any) => sub?.metadata?.verificationCodeHash)
-          .filter((hash: unknown): hash is string => typeof hash === 'string' && Boolean(hash))
-      );
+      const usedCodeDetails = new Map<string, Partial<VerificationCodeRow>>();
+      subs.forEach((sub: any) => {
+        const hash = sub?.metadata?.verificationCodeHash;
+        if (typeof hash !== 'string' || !hash) return;
+        if (usedCodeDetails.has(hash)) return;
+        usedCodeDetails.set(hash, {
+          usedBySchoolId: String(sub.school_id || ''),
+          usedBySchoolName: schoolNames[sub.school_id] || 'Unnamed School',
+          usedByEmail: schoolEmails[sub.school_id] || 'â€”',
+          usedAt: sub.metadata?.activatedAt || sub.starts_at || sub.created_at || sub.updated_at,
+          subscriptionId: sub.id,
+          subscriptionStatus: sub.status,
+        });
+      });
       const terminatedHashes = new Set(await loadTerminatedVerificationCodeHashes());
       setCodeRows(getVerificationCodeCatalog().map((code) => ({
         ...code,
-        used: usedCodeHashes.has(code.codeHash),
+        ...usedCodeDetails.get(code.codeHash),
+        used: usedCodeDetails.has(code.codeHash),
         terminated: terminatedHashes.has(code.codeHash),
       })));
     } catch (err: any) {
@@ -265,12 +283,61 @@ export default function AdminVerifications() {
     }
   }
 
+  async function reEnableCode(row: VerificationCodeRow) {
+    setSaving(true); setError('');
+    try {
+      const now = new Date().toISOString();
+      const terminated = getLocalTerminatedVerificationCodeHashes().filter(hash => hash !== row.codeHash);
+      setLocalTerminatedVerificationCodeHashes(terminated);
+      if (supabase) {
+        const client = supabase;
+        await client.from('settings').upsert([{
+          school_id: VERIFICATION_CONTROL_TENANT,
+          key: VERIFICATION_TERMINATED_SETTING,
+          value: terminated,
+          updated_at: now,
+          created_at: now,
+        }], { onConflict: 'school_id,key' });
+
+        const { data } = await client
+          .from('subscriptions')
+          .select('id, ends_at, metadata')
+          .contains('metadata', { verificationCodeHash: row.codeHash });
+        await Promise.all((data || []).map((sub: any) => {
+          const endsAt = sub.ends_at ? new Date(sub.ends_at).getTime() : 0;
+          const nextMetadata = { ...(sub.metadata || {}) };
+          delete nextMetadata.terminatedByAdmin;
+          delete nextMetadata.terminatedAt;
+          nextMetadata.reEnabledByAdmin = true;
+          nextMetadata.reEnabledAt = now;
+          return client
+            .from('subscriptions')
+            .update({
+              status: endsAt > Date.now() ? 'active' : 'rejected',
+              updated_at: now,
+              metadata: nextMetadata,
+            })
+            .eq('id', sub.id);
+        }));
+      }
+      setSuccess(`Re-enabled ${row.label}.`);
+      await load();
+    } catch (err: any) {
+      setError(err.message || 'Could not re-enable code.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const filtered = items.filter(i => filter === 'all' || i.status === filter);
   const pendingCount = items.filter(i => i.status === 'pending').length;
   const filteredCodes = codeRows.filter((row) => {
+    if (codeFilter === 'used' && !row.used) return false;
+    if (codeFilter === 'terminated' && !row.terminated) return false;
+    if (codeFilter === 'unused' && (row.used || row.terminated)) return false;
     const q = codeSearch.trim().toLowerCase();
     if (!q) return true;
-    return `${row.label} ${row.planName} ${row.billingCycle} ${row.codeHash} ${row.tokenHash}`.toLowerCase().includes(q);
+    return `${row.label} ${row.planName} ${row.billingCycle} ${row.codeHash} ${row.tokenHash} ${row.usedBySchoolName || ''} ${row.usedByEmail || ''}`.toLowerCase().includes(q);
   });
 
   function formatSubmittedAmount(item: PendingVerification) {
@@ -391,16 +458,30 @@ export default function AdminVerifications() {
               Verification Codes
             </h2>
             <p className={`text-xs ${textMuted}`}>
-              Hash-only deployed code list. Used: {codeRows.filter((row) => row.used).length} / {codeRows.length}
+              Used: {codeRows.filter((row) => row.used).length} · Terminated: {codeRows.filter((row) => row.terminated).length} · Total: {codeRows.length}
             </p>
           </div>
-          <input
-            type="text"
-            value={codeSearch}
-            onChange={(e) => setCodeSearch(e.target.value)}
-            placeholder="Search code label, plan, token hash..."
-            className={`w-full rounded-xl border px-3 py-2 text-sm sm:max-w-sm ${isDark ? 'border-slate-700 bg-slate-800 text-white' : 'border-slate-200 bg-white text-slate-900'}`}
-          />
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <div className={`flex rounded-xl p-1 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+              {(['used', 'terminated', 'unused', 'all'] as const).map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setCodeFilter(status)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition-colors ${codeFilter === status ? 'bg-indigo-600 text-white' : isDark ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              value={codeSearch}
+              onChange={(e) => setCodeSearch(e.target.value)}
+              placeholder="Search label, school, plan, hash..."
+              className={`w-full rounded-xl border px-3 py-2 text-sm sm:w-72 ${isDark ? 'border-slate-700 bg-slate-800 text-white' : 'border-slate-200 bg-white text-slate-900'}`}
+            />
+          </div>
         </div>
         <div className="max-h-[520px] overflow-auto">
           <table className="w-full text-sm">
@@ -408,6 +489,7 @@ export default function AdminVerifications() {
               <tr className={`border-b ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <th className={thClass}>Label</th>
                 <th className={thClass}>Plan</th>
+                <th className={thClass}>Used By</th>
                 <th className={thClass}>Amount</th>
                 <th className={thClass}>Token</th>
                 <th className={thClass}>Status</th>
@@ -419,6 +501,17 @@ export default function AdminVerifications() {
                 <tr key={row.codeHash} className={`border-b ${isDark ? 'border-slate-800/50' : 'border-slate-100'} ${rowHover}`}>
                   <td className={`px-5 py-3 font-mono text-xs ${textPrimary}`}>{row.label}</td>
                   <td className={`px-5 py-3 text-sm ${textPrimary}`}>{row.planName} <span className={textMuted}>({row.billingCycle})</span></td>
+                  <td className="px-5 py-3">
+                    {row.used ? (
+                      <>
+                        <p className={`text-sm font-medium ${textPrimary}`}>{row.usedBySchoolName || 'Unknown school'}</p>
+                        <p className={`text-xs ${textMuted}`}>{row.usedByEmail || row.usedBySchoolId || 'No email'}</p>
+                        {row.usedAt && <p className={`text-[11px] ${textMuted}`}>{new Date(row.usedAt).toLocaleString()}</p>}
+                      </>
+                    ) : (
+                      <span className={`text-xs ${textMuted}`}>Not used</span>
+                    )}
+                  </td>
                   <td className={`px-5 py-3 text-sm ${textPrimary}`}>${row.amount}</td>
                   <td className={`max-w-[220px] truncate px-5 py-3 font-mono text-xs ${textMuted}`} title={row.tokenHash}>{row.tokenHash}</td>
                   <td className="px-5 py-3">
@@ -431,20 +524,32 @@ export default function AdminVerifications() {
                     )}
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => terminateCode(row)}
-                      disabled={saving || row.terminated}
-                      className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                    >
-                      <Ban size={12} />
-                      Terminate
-                    </button>
+                    {row.terminated ? (
+                      <button
+                        type="button"
+                        onClick={() => reEnableCode(row)}
+                        disabled={saving}
+                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        <RotateCcw size={12} />
+                        Re-enable
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => terminateCode(row)}
+                        disabled={saving}
+                        className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        <Ban size={12} />
+                        Terminate
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
               {!filteredCodes.length && (
-                <tr><td colSpan={6} className={`px-5 py-12 text-center text-sm ${textMuted}`}>No verification codes match your search</td></tr>
+                <tr><td colSpan={7} className={`px-5 py-12 text-center text-sm ${textMuted}`}>No verification codes match your search</td></tr>
               )}
             </tbody>
           </table>

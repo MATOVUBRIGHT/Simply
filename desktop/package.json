@@ -1,6 +1,6 @@
 {
   "name": "@schofy/desktop",
-  "version": "1.0.10",
+  "version": "1.1.0",
   "description": "Schofy desktop app",
   "author": "Schofy",
   "main": "main.js",

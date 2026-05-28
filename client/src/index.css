@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+[data-preview-fullscreen-root]:fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  overflow: auto !important;
+  background: #ffffff;
+  padding: 1rem;
+}
+
+.dark [data-preview-fullscreen-root]:fullscreen {
+  background: #0f172a;
+}
+
 :root {
   --primary-color: #4F46E5;
   --primary-color-rgb: 79, 70, 229;

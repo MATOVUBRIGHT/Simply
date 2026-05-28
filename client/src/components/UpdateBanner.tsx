@@ -3,7 +3,7 @@ import { Sparkles, X, ChevronDown, ChevronUp } from 'lucide-react';
 
 // Bump this version string whenever you deploy new features.
 // The banner shows once per version, then is dismissed forever.
-const APP_VERSION = 'Version1';
+const APP_VERSION = 'Version1.1';
 const STORAGE_KEY = `schofy_seen_update_${APP_VERSION}`;
 
 const CHANGELOG = [

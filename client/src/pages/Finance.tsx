@@ -13,6 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { FullscreenButton } from '../components/FullscreenButton';
 import LiveEditable from '../components/LiveEditable';
 import { matchesStudentSearch } from '../utils/studentSearch';
 import { openPrintPreview } from '../utils/printPreview';
@@ -390,17 +391,24 @@ export default function Finance() {
     setIsImporting(true);
     try {
       const now = new Date().toISOString();
+      let importedCount = 0;
+      let skippedCount = 0;
       const tasks = importPreview
         .map((d, i) => ({ d, i }))
         .filter(({ i }) => !duplicateImportRows.has(i))
         .map(({ d }) => async () => {
         const s = students.find(x => matchesStudentSearch(x, d.studentName));
-        if (!s) return;
+        if (!s) {
+          skippedCount++;
+          return;
+        }
         await dataService.create(id, 'payments', { id: uuidv4(), feeId: '', studentId: s.id, amount: parseFloat(d.amount), method: (d.method as PaymentMethod) || PaymentMethod.CASH, date: d.date || now, createdAt: now } as any);
+        importedCount++;
       });
       await runTasksInThirtyPercentBatches(tasks);
       setIsImporting(false);
       closeImportModal();
+      addToast(`${importedCount} payment${importedCount === 1 ? '' : 's'} imported${skippedCount ? `, ${skippedCount} skipped because no student matched` : ''}`, skippedCount ? 'warning' : 'success');
       setShowImportSuccess(true);
     } catch {
       setIsImporting(false);
@@ -1395,11 +1403,14 @@ export default function Finance() {
                 </div>
               )}
               {importStep === 'preview' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 1</span><ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span><ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3 Preview</span>
+                <div data-preview-fullscreen-root className="space-y-3 rounded-xl bg-white p-1 dark:bg-slate-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 1</span><ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span><ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3 Preview</span>
+                    </div>
+                    <FullscreenButton />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
@@ -1413,7 +1424,7 @@ export default function Finance() {
                     <table className="w-full text-xs">
                       <thead><tr className="bg-slate-50 dark:bg-slate-700/50"><th className="px-3 py-2 text-left">Student</th><th className="px-3 py-2 text-left">Amount</th><th className="px-3 py-2 text-left">Date</th><th className="px-3 py-2 text-left">Status</th></tr></thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 10).map((r, i) => (
+                        {importPreview.map((r, i) => (
                           <tr key={i} className={duplicateImportRows.has(i) ? 'bg-amber-50 dark:bg-amber-900/10' : ''}>
                             <td className="px-3 py-2">{r.studentName}</td>
                             <td className="px-3 py-2">{r.amount}</td>

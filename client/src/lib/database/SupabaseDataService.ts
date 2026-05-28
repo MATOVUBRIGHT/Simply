@@ -812,10 +812,14 @@ function cacheApplyCreate(sid: string, tableName: string, record: any) {
   cacheSet(sid, tableName, existing);
 }
 function cacheApplyUpdate(sid: string, tableName: string, id: string, data: any) {
-  const existing = cacheGet(sid, tableName) || [];
+  const cached = cacheGet(sid, tableName);
+  if (!cached) return false;
+  const existing = cached;
   const idx = existing.findIndex(r => r.id === id);
-  if (idx >= 0) existing[idx] = { ...existing[idx], ...data };
+  if (idx < 0) return false;
+  existing[idx] = { ...existing[idx], ...data };
   cacheSet(sid, tableName, existing);
+  return true;
 }
 function cacheApplyDelete(sid: string, tableName: string, id: string) {
   const existing = cacheGet(sid, tableName) || [];
@@ -823,13 +827,13 @@ function cacheApplyDelete(sid: string, tableName: string, id: string) {
   void deleteFromDesktopDB(sid, tableName, id);
 }
 
-function notifyUI(table: string) {
+function notifyUI(table: string, options: { forceRefresh?: boolean } = {}) {
   // Push updated cache data directly into the store — instant UI update
   const sid = localStorage.getItem('schofy_current_school_id') || '';
   const storeRef = (globalThis as any).__schofyStore;
   if (sid && storeRef) {
     const cached = memCache.get(cacheKey(sid, table));
-    if (cached) {
+    if (cached && !options.forceRefresh) {
       storeRef.push(sid, table, cached.data);
     } else {
       storeRef.invalidate(sid, table);
@@ -1161,6 +1165,8 @@ class SupabaseDataService {
           if (!record) return;
           const localRecord = mapToLocal(record);
 
+          let needsRefresh = false;
+
           if (eventType === 'INSERT' || eventType === 'UPDATE') {
             const pendingIds = new Set(
               loadQueueSync()
@@ -1174,14 +1180,15 @@ class SupabaseDataService {
             if (eventType === 'INSERT') {
               cacheApplyCreate(sid, tableName, localRecord);
             } else {
-              cacheApplyUpdate(sid, tableName, localRecord.id, localRecord);
+              const applied = cacheApplyUpdate(sid, tableName, localRecord.id, localRecord);
+              needsRefresh = !applied;
             }
           } else if (eventType === 'DELETE') {
             markDeleted(sid, tableName, localRecord.id);
             cacheApplyDelete(sid, tableName, localRecord.id);
           }
 
-          notifyUI(tableName);
+          notifyUI(tableName, { forceRefresh: needsRefresh });
           console.debug(`[Realtime] ${eventType} on ${table} processed`);
         }) as any;
       }
@@ -1566,8 +1573,8 @@ class SupabaseDataService {
     const record = { ...data, updatedAt: new Date().toISOString() };
 
     // Optimistic cache update
-    cacheApplyUpdate(sid, tableName, id, record);
-    notifyUI(tableName);
+    const appliedOptimisticUpdate = cacheApplyUpdate(sid, tableName, id, record);
+    notifyUI(tableName, { forceRefresh: !appliedOptimisticUpdate });
 
     if (!isCloudSyncEnabled()) {
       return { success: true, syncedRemotely: false, savedLocally: true, record };
@@ -1609,8 +1616,8 @@ class SupabaseDataService {
       const finalRecord = remoteData ? mapToLocal(remoteData) : { ...record, id };
 
       // Update cache
-      cacheApplyUpdate(sid, tableName, id, finalRecord);
-      notifyUI(tableName);
+      const appliedRemoteUpdate = cacheApplyUpdate(sid, tableName, id, finalRecord);
+      notifyUI(tableName, { forceRefresh: !appliedRemoteUpdate });
 
       return { success: true, syncedRemotely: true, savedLocally: true, record: finalRecord };
     } catch (e: any) {

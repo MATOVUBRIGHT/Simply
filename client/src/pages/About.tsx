@@ -60,7 +60,7 @@ export default function About() {
             <div className="mb-4 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
               <img src={APP_LOGO} alt="Schofy app logo" className="h-full w-full object-cover" />
             </div>
-            <p className="text-xs font-black uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Schofy Version1</p>
+            <p className="text-xs font-black uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Schofy Version1.1</p>
             <h1 className="mt-2 text-3xl font-black text-slate-900 dark:text-white">About Schofy</h1>
             <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
               Schofy is an offline-first school management system for keeping daily school records organized, printable, and ready to sync when online access is enabled.

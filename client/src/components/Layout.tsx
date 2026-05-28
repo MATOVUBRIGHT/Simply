@@ -55,7 +55,7 @@ import { downloadAttachment, openExternalLink } from '../utils/externalActions';
 import { useConfirm } from './ConfirmModal';
 
 const assetBase = import.meta.env.BASE_URL || './';
-const APP_VERSION = 'Version1';
+const APP_VERSION = 'Version1.1';
 const DEFAULT_PROFILE_IMAGE =
   "data:image/svg+xml,%3Csvg width='96' height='96' viewBox='0 0 96 96' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='96' height='96' rx='48' fill='%23E0F2FE'/%3E%3Ccircle cx='48' cy='36' r='16' fill='%230F4C81'/%3E%3Cpath d='M22 82c4.8-17.5 15.1-26 26-26s21.2 8.5 26 26' fill='%232DA32D'/%3E%3C/svg%3E";
 

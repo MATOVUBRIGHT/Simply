@@ -19,9 +19,11 @@ import { useThrottle } from '../hooks/useDebounce';
 import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { BulkEditClassModal } from '../components/BulkEditClassModal';
+import { FullscreenButton } from '../components/FullscreenButton';
 import { getSubscriptionAccessState } from '../utils/plans';
 import { deleteInThirtyPercentBatches } from '../utils/bulkDelete';
 import { FitStatValue } from '../components/FitStatValue';
+import { LargeDataSpinner } from '../components/LargeDataSpinner';
 import { sortStudentsForList } from '../utils/studentOrdering';
 
 const avatarColors = [
@@ -123,27 +125,35 @@ export default function Students() {
   const sid = schoolId || user?.id || '';
   const confirm = useConfirm();
   // All students from store — always up to date, used for stats cards
-  const { data: allStudentsData } = useTableData(sid, 'students');
+  const { data: allStudentsData, loading: studentsStoreLoading } = useTableData(sid, 'students');
   const allStudents = allStudentsData as Student[];
+  const { data: classesStoreData } = useTableData(sid, 'classes');
   const { data: feesData } = useTableData(sid, 'fees');
   const { data: paymentsData } = useTableData(sid, 'payments');
   const { formatMoney } = useCurrency();
 
+  const paidByFee = new Map<string, number>();
+  (paymentsData as any[]).forEach((payment) => {
+    if (!payment.feeId) return;
+    paidByFee.set(payment.feeId, (paidByFee.get(payment.feeId) || 0) + Number(payment.amount || 0));
+  });
+  const financeByStudent = new Map<string, { status: string; balance: number; invoiced: number; paid: number }>();
+  (feesData as any[]).forEach((fee) => {
+    if (!fee.studentId) return;
+    const current = financeByStudent.get(fee.studentId) || { status: 'none', balance: 0, invoiced: 0, paid: 0 };
+    current.invoiced += Number(fee.amount || 0);
+    current.paid += paidByFee.get(fee.id) || 0;
+    current.balance = current.invoiced - current.paid;
+    current.status = current.balance <= 0 ? 'paid' : current.paid > 0 ? 'partial' : 'pending';
+    financeByStudent.set(fee.studentId, current);
+  });
+
   // Compute invoice status and balance per student
   function getStudentFinance(studentId: string) {
-    const studentFees = feesData.filter((f: any) => f.studentId === studentId);
-    if (studentFees.length === 0) return { status: 'none', balance: 0, invoiced: 0 };
-    const invoiced = studentFees.reduce((s: number, f: any) => s + (f.amount || 0), 0);
-    const paid = studentFees.reduce((s: number, f: any) => {
-      const fp = paymentsData.filter((p: any) => p.feeId === f.id);
-      return s + fp.reduce((a: number, p: any) => a + (p.amount || 0), 0);
-    }, 0);
-    const balance = invoiced - paid;
-    const status = balance <= 0 ? 'paid' : paid > 0 ? 'partial' : 'pending';
-    return { status, balance, invoiced };
+    return financeByStudent.get(studentId) || { status: 'none', balance: 0, invoiced: 0 };
   }
 
-  const { loadPage, searchStudents } = useStudents();
+  const { loadPage, searchStudents, refresh: refreshStudents } = useStudents();
   const [students, setStudents] = useState<Student[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -153,7 +163,7 @@ export default function Students() {
   const [currentPage, setCurrentPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
   const [selectedClass, setSelectedClass] = useState('');
-  const itemsPerPage = showAll ? 99999 : 10;
+  const itemsPerPage = showAll ? 100 : 10;
   const { addToast } = useToast();
   // ... rest of state stays same
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -239,15 +249,8 @@ export default function Students() {
   }, [search]);
 
   const loadClasses = useCallback(async () => {
-    const id = schoolId || user?.id;
-    if (!id) return;
-    try {
-      const classesData = await dataService.getAll(id, 'classes');
-      setClasses(sortClassesBySectionThenLevel(classesData));
-    } catch (error) {
-      console.error('Failed to load classes:', error);
-    }
-  }, [user?.id]);
+    setClasses(sortClassesBySectionThenLevel(classesStoreData as Class[]));
+  }, [classesStoreData]);
 
   const loadData = useCallback(async () => {
     const id = schoolId || user?.id;
@@ -288,6 +291,20 @@ export default function Students() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const handleStudentsUpdated = (event?: Event) => {
+      const table = (event as CustomEvent<{ table?: string }> | undefined)?.detail?.table;
+      if (table && table !== 'students') return;
+      refreshStudents();
+      void loadData();
+    };
+
+    window.addEventListener('studentsUpdated', handleStudentsUpdated);
+    return () => {
+      window.removeEventListener('studentsUpdated', handleStudentsUpdated);
+    };
+  }, [loadData, refreshStudents]);
 
   const availableClassIds = sortClassesBySectionThenLevel(classes)
     .map((classItem) => classItem.id)
@@ -1788,10 +1805,11 @@ export default function Students() {
                 {loading ? (
                   <tr>
                     <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
-                      <div className="flex flex-col items-center gap-2 text-slate-400">
-                        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                        <p className="text-sm">Loading...</p>
-                      </div>
+                      <LargeDataSpinner
+                        label={studentsStoreLoading ? 'Loading student records...' : 'Preparing student list...'}
+                        detail="Large schools may take a moment while records are indexed."
+                        compact
+                      />
                     </td>
                   </tr>
                 ) : paginatedStudents.length === 0 ? (
@@ -1923,10 +1941,7 @@ export default function Students() {
           ) : (
             <div className="p-4">
               {loading ? (
-                <div className="flex flex-col items-center gap-2 text-slate-400 py-12">
-                  <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-sm">Loading school records...</p>
-                </div>
+                <LargeDataSpinner label="Loading school records..." detail="Preparing archived students for browsing." />
               ) : getGroupedCompletedStudents().length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-12">
                   <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
@@ -2030,7 +2045,7 @@ export default function Students() {
           <div className="px-4 py-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
               {showAll ? (
-                <><span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students (all)</>
+                <><span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(totalCount, itemsPerPage)}</span> of <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students</>
               ) : (
                 <><span className="font-medium text-slate-700 dark:text-slate-300">{Math.min((currentPage - 1) * itemsPerPage + 1, totalCount)}</span>{' - '}<span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span>{' of '}<span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span></>
               )}
@@ -2039,7 +2054,7 @@ export default function Students() {
               onClick={() => { setShowAll(v => !v); setCurrentPage(1); }}
               className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
             >
-              {showAll ? 'Show Pages' : 'Show All'}
+              {showAll ? 'Show Pages' : 'Show More'}
             </button>
           </div>
         )}
@@ -2220,7 +2235,7 @@ export default function Students() {
               )}
 
               {importStep === 'preview' && (
-                <div className="flex flex-col h-[calc(86vh-56px)] -m-5">
+                <div data-preview-fullscreen-root className="flex flex-col h-[calc(86vh-56px)] -m-5 bg-white dark:bg-slate-800">
                   <div className="flex items-center gap-4 px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
                     <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                       <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
@@ -2230,6 +2245,7 @@ export default function Students() {
                       <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3 Review</span>
                     </div>
                     <div className="flex gap-3 ml-auto">
+                      <FullscreenButton />
                       <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-3 py-1">
                         <p className="text-sm text-emerald-700 dark:text-emerald-300">
                           <strong>{hasImportOverflow ? allowedNewImportCount : newEnrolledImportCount}</strong> import available

@@ -13,6 +13,7 @@ import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { FullscreenButton } from '../components/FullscreenButton';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
@@ -98,15 +99,17 @@ export default function Grades() {
   // All active students across all classes
   const students = activeStudents;
   const subjectById = useMemo(() => new Map((subjects as any[]).map((subject) => [subject.id, subject])), [subjects]);
+  const studentById = useMemo(() => new Map(allStudents.map((student) => [student.id, student])), [allStudents]);
+  const examById = useMemo(() => new Map((examsData as any[]).map((exam) => [exam.id, exam])), [examsData]);
   const gradingScale = useMemo(() => getSavedGradingScale(settingsData as any[]), [settingsData]);
   const getGrade = useCallback((score: number) => getGradeFromScale(score, gradingScale), [gradingScale]);
 
   const grades = useMemo(() => {
     const deduped = new Map<string, StudentGrade>();
     for (const g of examResults as any[]) {
-      const student = allStudents.find(s => s.id === g.studentId);
+      const student = studentById.get(g.studentId);
       const subject = subjectById.get(g.subjectId);
-      const exam = examsData.find((e: any) => e.id === g.examId) as any;
+      const exam = examById.get(g.examId) as any;
       const subjectKey = getSubjectIdentity(subject, g.subjectName, g.subjectId);
       const row = {
         ...g,
@@ -124,7 +127,7 @@ export default function Grades() {
       if (!existing || rowTime >= existingTime) deduped.set(key, row);
     }
     return Array.from(deduped.values());
-  }, [examResults, allStudents, subjectById, examsData]);
+  }, [examResults, studentById, subjectById, examById]);
 
   const gradeExpectedFields = [
     { key: 'studentId', label: 'Student ID', required: true },
@@ -217,7 +220,7 @@ export default function Grades() {
         const res = await dataService.create(id, 'exams', newExam as any);
         examId = res.record?.id || newExam.id;
       }
-      const student = allStudents.find(s => s.id === bulkForm.studentId);
+      const student = studentById.get(bulkForm.studentId);
       const maxScore = parseFloat(bulkForm.maxScore) || 100;
       const tasks = entries.map(([subjectId, scoreStr]) => async () => {
         const score = parseFloat(scoreStr);
@@ -648,8 +651,9 @@ export default function Grades() {
       }
 
       const tasks = importPreview.map((data) => async () => {
-        const student = allStudents.find(s => s.id === (data as any).studentId);
+        const student = studentById.get((data as any).studentId);
         const subject = subjectById.get((data as any).subjectId);
+        if (!student || !subject) return 'skipped' as const;
         const subjectKey = getSubjectIdentity(subject, subject?.name, (data as any).subjectId);
         const score = (data as any).score as number;
         const maxScore = (data as any).maxScore as number || 100;
@@ -667,6 +671,7 @@ export default function Grades() {
           await dataService.update(id, 'examResults', existing.id, {
             ...existing, score, maxScore, grade: gradeInfo.grade, remarks: gradeInfo.remark, updatedAt: now,
           } as any);
+          return 'imported' as const;
         } else {
           await dataService.create(id, 'examResults', {
             id: uuidv4(),
@@ -683,12 +688,22 @@ export default function Grades() {
             examType: importExamType,
             createdAt: now,
           } as any);
+          return 'imported' as const;
         }
       });
-      await runTasksInThirtyPercentBatches(tasks);
+      let importedCount = 0;
+      let skippedCount = 0;
+      await runTasksInThirtyPercentBatches(tasks.map(task => async () => {
+        const result = await task();
+        if (result === 'skipped') skippedCount++;
+        else importedCount++;
+      }));
       await keepLoadingVisible(loadingStarted);
       setIsImportingGrades(false);
       closeImportModal();
+      if (skippedCount > 0) {
+        addToast(`${importedCount} grade entr${importedCount === 1 ? 'y' : 'ies'} imported, ${skippedCount} skipped because student or subject was not found`, 'warning');
+      }
       setShowImportSuccess(true);
     } catch (error) {
       await keepLoadingVisible(loadingStarted);
@@ -700,7 +715,7 @@ export default function Grades() {
   const filteredGrades = grades.filter(g => {
     if (filterTerm !== 'all' && g.term !== filterTerm) return false;
     if (filterClass !== 'all') {
-      const student = allStudents.find(s => s.id === g.studentId);
+      const student = studentById.get(g.studentId);
       if (student?.classId !== filterClass) return false;
     }
     if (searchTerm) {
@@ -739,7 +754,7 @@ export default function Grades() {
   const gradesByClass = useMemo(() => {
     return classesSorted.map(cls => {
       const classGrades = filteredGrades.filter(g => {
-        const student = allStudents.find(s => s.id === g.studentId);
+        const student = studentById.get(g.studentId);
         return student?.classId === cls.id;
       });
       if (classGrades.length === 0) return null;
@@ -765,7 +780,7 @@ export default function Grades() {
 
       return { cls, studentList, uniqueSubjects, totalGrades: classGrades.length };
     }).filter(Boolean) as { cls: any; studentList: any[]; uniqueSubjects: any[]; totalGrades: number }[];
-  }, [classesSorted, filteredGrades, allStudents, subjectById, getGrade]);
+  }, [classesSorted, filteredGrades, studentById, subjectById, getGrade]);
 
   return (
     <div className="space-y-6">
@@ -1639,7 +1654,10 @@ export default function Grades() {
 
               {/* -- Step 3: Preview -- */}
               {importStep === 'preview' && (
-                <div className="space-y-3">
+                <div data-preview-fullscreen-root className="space-y-3 rounded-xl bg-white p-1 dark:bg-slate-800">
+                  <div className="flex justify-end">
+                    <FullscreenButton />
+                  </div>
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 space-y-1">
                     <p className="text-sm text-emerald-700 dark:text-emerald-300 font-medium">
                       ? {importPreview.length} grade entr{importPreview.length !== 1 ? 'ies' : 'y'} ready to import
@@ -1662,7 +1680,7 @@ export default function Grades() {
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {importPreview.map((g: any, i) => {
-                          const student = allStudents.find(s => s.id === g.studentId);
+                          const student = studentById.get(g.studentId);
                           const subject = (subjects as any[]).find(s => s.id === g.subjectId);
                           const score = g.score as number;
                           const maxScore = (g.maxScore as number) || 100;
@@ -1689,7 +1707,7 @@ export default function Grades() {
                       </tbody>
                     </table>
                   </div>
-                  {importPreview.some((g: any) => !allStudents.find(s => s.id === g.studentId) || !(subjects as any[]).find(s => s.id === g.subjectId)) && (
+                  {importPreview.some((g: any) => !studentById.get(g.studentId) || !subjectById.get(g.subjectId)) && (
                     <p className="text-xs text-amber-600 dark:text-amber-400">? Some entries show "Not found" - they will be skipped during import.</p>
                   )}
                   <div className="flex justify-between pt-2">

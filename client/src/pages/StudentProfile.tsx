@@ -191,6 +191,9 @@ export default function StudentProfile() {
     setUpdatingClass(true);
     try {
       await dataService.update(authId, 'students', student.id, { classId: newClassId, updatedAt: new Date().toISOString() } as any);
+      window.dispatchEvent(new CustomEvent('studentsUpdated'));
+      window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'students' } }));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'students' } }));
       addToast('Class updated', 'success');
     } catch { addToast('Failed to update class', 'error'); }
     finally { setUpdatingClass(false); setShowClassDropdown(false); }

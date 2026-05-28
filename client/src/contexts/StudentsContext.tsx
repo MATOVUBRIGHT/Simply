@@ -31,12 +31,12 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
     async (page: number, pageSize: number, filter?: (item: any) => boolean) => {
       const id = schoolId || user?.id;
       if (!id) return { items: [], total: 0 };
-      const all = sortStudentsForList(await dataService.getAll(id, 'students'));
+      const all = students.length > 0 ? students : sortStudentsForList(await dataService.getAll(id, 'students'));
       const filtered = filter ? all.filter(filter) : all;
       const start = (page - 1) * pageSize;
       return { items: filtered.slice(start, start + pageSize), total: filtered.length };
     },
-    [user, schoolId]
+    [user, schoolId, students]
   );
 
   const searchStudents = useCallback(

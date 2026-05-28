@@ -15,7 +15,7 @@ import { deleteInThirtyPercentBatches, processInThirtyPercentBatches, runTasksIn
 import { compressImageFile } from '../utils/imageCompression';
 import { cleanupDeletedClassReferences } from '../utils/classDeletionCleanup';
 
-const APP_VERSION_LABEL = 'Version1';
+const APP_VERSION_LABEL = 'Version1.1';
 
 const currencies = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },

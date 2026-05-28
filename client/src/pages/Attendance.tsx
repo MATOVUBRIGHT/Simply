@@ -11,6 +11,7 @@ import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { FullscreenButton } from '../components/FullscreenButton';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { FitStatValue } from '../components/FitStatValue';
 
@@ -976,13 +977,16 @@ export default function Attendance() {
               )}
 
               {importStep === 'preview' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                <div data-preview-fullscreen-root className="space-y-3 rounded-xl bg-white p-1 dark:bg-slate-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 1</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                    </div>
+                    <FullscreenButton />
                   </div>
 
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
@@ -1001,7 +1005,7 @@ export default function Attendance() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {(importPreview as any[]).slice(0, 5).map((record, index) => (
+                        {(importPreview as any[]).map((record, index) => (
                           <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
                             <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
                             <td className="px-2 py-1.5">{(record as any).date || '-'}</td>
@@ -1010,11 +1014,6 @@ export default function Attendance() {
                         ))}
                       </tbody>
                     </table>
-                    {importPreview.length > 5 && (
-                      <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">
-                        ... and {importPreview.length - 5} more
-                      </div>
-                    )}
                   </div>
 
                   <div className="flex justify-between pt-2">

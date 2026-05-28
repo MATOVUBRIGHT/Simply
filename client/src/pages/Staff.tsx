@@ -16,6 +16,7 @@ import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
+import { FullscreenButton } from '../components/FullscreenButton';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 
@@ -1052,13 +1053,16 @@ export default function StaffPage() {
                 </div>
               )}
               {importStep === 'preview' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                <div data-preview-fullscreen-root className="space-y-3 rounded-xl bg-white p-1 dark:bg-slate-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                    </div>
+                    <FullscreenButton />
                   </div>
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
                     <p className="text-sm text-emerald-700 dark:text-emerald-300"><strong>{importPreview.length}</strong> staff ready to import</p>
@@ -1073,7 +1077,7 @@ export default function StaffPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 5).map((staffMember, index) => (
+                        {importPreview.map((staffMember, index) => (
                           <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
                             <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
                             <td className="px-2 py-1.5">{(staffMember as any).firstName} {(staffMember as any).lastName}</td>
@@ -1082,9 +1086,6 @@ export default function StaffPage() {
                         ))}
                       </tbody>
                     </table>
-                    {importPreview.length > 5 && (
-                      <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">... and {importPreview.length - 5} more</div>
-                    )}
                   </div>
                   <div className="flex justify-between pt-2">
                     <div className="flex-1 max-w-40">

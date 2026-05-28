@@ -14,6 +14,7 @@ import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { PortalDropdown } from '../components/PortalDropdown';
+import { FullscreenButton } from '../components/FullscreenButton';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { getSubjectCode as readSubjectCode, getSubjectDisplayCode, normalizeSubjectCode } from '../utils/subjects';
 
@@ -235,6 +236,8 @@ export default function Subjects() {
 
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ name: '', code: '', customSubject: false });
+  const [entryMode, setEntryMode] = useState<'single' | 'multiple'>('single');
+  const [multipleSubjectText, setMultipleSubjectText] = useState('');
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [selectedLevel, setSelectedLevel] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
@@ -328,15 +331,42 @@ function getClassLevel(classId: string): string {
     return `${base}${suffix}`;
   }
 
+  function generateSubjectCodeWithExisting(name: string, existingCodes: Set<string>) {
+    const cleaned = name.toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').trim();
+    if (!cleaned) return '';
+
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    const base = words.length === 1
+      ? words[0].slice(0, 4)
+      : words.map((word) => word[0]).join('').slice(0, 6);
+
+    if (!existingCodes.has(base)) {
+      existingCodes.add(base);
+      return base;
+    }
+
+    let suffix = 2;
+    while (existingCodes.has(`${base}${suffix}`)) {
+      suffix += 1;
+    }
+
+    const code = `${base}${suffix}`;
+    existingCodes.add(code);
+    return code;
+  }
+
   const classesForSelectedLevel = sortClassesBySectionThenLevel(
     classes.filter((c) => getClassLevel(c.id) === selectedLevel)
   );
+  const visibleClassOptions = selectedLevel ? classesForSelectedLevel : classes;
 
   function resetSubjectForm() {
     setShowForm(false);
     setSelectedLevel('');
     setSelectedClassIds([]);
     setFormData({ name: '', code: '', customSubject: false });
+    setEntryMode('single');
+    setMultipleSubjectText('');
   }
 
   function toggleClassSelection(classId: string) {
@@ -536,9 +566,27 @@ function getClassLevel(classId: string): string {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const name = formData.name.trim();
-    const code = normalizeSubjectCode(formData.code);
-    if (!name || !code) { addToast('Subject name and code are required', 'error'); return; }
+    const singleName = formData.name.trim();
+    const singleCode = normalizeSubjectCode(formData.code);
+    const usedCodes = new Set(subjects.map((subject) => getSubjectCode(subject).toUpperCase()).filter(Boolean));
+    const subjectEntries = entryMode === 'multiple'
+      ? multipleSubjectText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const parts = line.split(/\s*(?:,|\||\t| - )\s*/).map((part) => part.trim()).filter(Boolean);
+          const name = parts[0] || '';
+          const explicitCode = normalizeSubjectCode(parts[1] || '');
+          return { name, code: explicitCode || generateSubjectCodeWithExisting(name, usedCodes) };
+        })
+        .filter((entry) => entry.name && entry.code)
+      : [{ name: singleName, code: singleCode }].filter((entry) => entry.name && entry.code);
+
+    if (subjectEntries.length === 0) {
+      addToast(entryMode === 'multiple' ? 'Enter at least one subject' : 'Subject name and code are required', 'error');
+      return;
+    }
     if (selectedClassIds.length === 0) { addToast('Select at least one class', 'error'); return; }
     const id = schoolId || user?.id;
     if (!id || submitting) return;
@@ -546,18 +594,29 @@ function getClassLevel(classId: string): string {
     try {
       const now = new Date().toISOString();
       const existingKeys = new Set(subjects.map(s => `${getSubjectName(s).toLowerCase()}::${getSubjectClassId(s)}`));
-      const newSubjects = selectedClassIds
-        .filter(classId => !existingKeys.has(`${name.toLowerCase()}::${classId}`))
-        .map(classId => ({ id: uuidv4(), name, code, classId, createdAt: now } satisfies Subject));
+      const newSubjects: Subject[] = [];
+      subjectEntries.forEach(({ name, code }) => {
+        selectedClassIds.forEach((classId) => {
+          const key = `${name.toLowerCase()}::${classId}`;
+          if (existingKeys.has(key)) return;
+          existingKeys.add(key);
+          newSubjects.push({ id: uuidv4(), name, code, classId, createdAt: now } satisfies Subject);
+        });
+      });
 
       if (newSubjects.length === 0) {
-        addToast('Subject already exists for all selected classes', 'warning');
+        addToast(subjectEntries.length === 1 ? 'Subject already exists for all selected classes' : 'Subjects already exist for all selected classes', 'warning');
         return;
       }
       // Fire all creates in parallel; optimistic cache updates happen immediately.
       await Promise.all(newSubjects.map(s => dataService.create(id, 'subjects', s as any)));
       resetSubjectForm();
-      addToast(`Added "${name}" to ${newSubjects.length} class${newSubjects.length > 1 ? 'es' : ''}`, 'success');
+      addToast(
+        subjectEntries.length === 1
+          ? `Added "${subjectEntries[0].name}" to ${newSubjects.length} class${newSubjects.length > 1 ? 'es' : ''}`
+          : `Added ${newSubjects.length} subject entr${newSubjects.length === 1 ? 'y' : 'ies'} from ${subjectEntries.length} subjects`,
+        'success'
+      );
     } catch {
       addToast('Failed to add subject', 'error');
     } finally {
@@ -1002,61 +1061,98 @@ function getClassLevel(classId: string): string {
                 </div>
                 <div className="space-y-5">
 
-                {/* Subject name */}
                 <div>
-                  <label className="form-label">Subject Name *</label>
-                  {selectedLevel && ugandaSubjects[selectedLevel]?.length > 0 && !formData.customSubject ? (
-                    <select
-                      value={formData.name}
-                      onChange={e => {
-                        if (e.target.value === '__custom__') {
-                          setFormData(prev => ({ ...prev, name: '', code: '', customSubject: true }));
-                        } else {
-                          const s = ugandaSubjects[selectedLevel]?.find(x => x.name === e.target.value);
-                          setFormData(prev => ({ ...prev, name: e.target.value, code: s ? generateSubjectCode(s.name) || s.code : prev.code, customSubject: false }));
-                        }
-                      }}
-                      className="form-input"
-                    >
-                      <option value="">Select subject</option>
-                      {ugandaSubjects[selectedLevel].map(s => (
-                        <option key={s.name} value={s.name}>{s.name}</option>
-                      ))}
-                      <option value="__custom__">+ Custom subject...</option>
-                    </select>
-                  ) : (
-                    <div className="flex gap-2">
-                      <input
-                        value={formData.name}
-                        onChange={e => {
-                          const n = e.target.value;
-                          setFormData(prev => ({ ...prev, name: n, code: generateSubjectCode(n) || prev.code }));
-                        }}
-                        className="form-input flex-1"
-                        placeholder="e.g. Mathematics"
-                        autoFocus
-                        required
-                      />
-                      {formData.customSubject && (
-                        <button type="button" onClick={() => setFormData(prev => ({ ...prev, name: '', code: '', customSubject: false }))}
-                          className="btn btn-secondary text-xs px-3">Presets</button>
-                      )}
-                    </div>
-                  )}
+                  <label className="form-label">Entry Type</label>
+                  <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+                    {(['single', 'multiple'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setEntryMode(mode)}
+                        className={`rounded-lg px-3 py-2 text-sm font-semibold capitalize transition-colors ${
+                          entryMode === mode
+                            ? 'bg-white text-primary-700 shadow-sm dark:bg-slate-700 dark:text-primary-300'
+                            : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {/* Code */}
-                <div>
-                  <label className="form-label">Subject Code *</label>
-                  <input
-                    value={formData.code}
-                    onChange={e => setFormData(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
-                    className="form-input font-mono"
-                    placeholder="e.g. MATH"
-                    maxLength={10}
-                    required
-                  />
-                </div>
+                {entryMode === 'single' ? (
+                  <>
+                    {/* Subject name */}
+                    <div>
+                      <label className="form-label">Subject Name *</label>
+                      {selectedLevel && ugandaSubjects[selectedLevel]?.length > 0 && !formData.customSubject ? (
+                        <select
+                          value={formData.name}
+                          onChange={e => {
+                            if (e.target.value === '__custom__') {
+                              setFormData(prev => ({ ...prev, name: '', code: '', customSubject: true }));
+                            } else {
+                              const s = ugandaSubjects[selectedLevel]?.find(x => x.name === e.target.value);
+                              setFormData(prev => ({ ...prev, name: e.target.value, code: s ? generateSubjectCode(s.name) || s.code : prev.code, customSubject: false }));
+                            }
+                          }}
+                          className="form-input"
+                        >
+                          <option value="">Select subject</option>
+                          {ugandaSubjects[selectedLevel].map(s => (
+                            <option key={s.name} value={s.name}>{s.name}</option>
+                          ))}
+                          <option value="__custom__">+ Custom subject...</option>
+                        </select>
+                      ) : (
+                        <div className="flex gap-2">
+                          <input
+                            value={formData.name}
+                            onChange={e => {
+                              const n = e.target.value;
+                              setFormData(prev => ({ ...prev, name: n, code: generateSubjectCode(n) || prev.code }));
+                            }}
+                            className="form-input flex-1"
+                            placeholder="e.g. Mathematics"
+                            autoFocus
+                            required={entryMode === 'single'}
+                          />
+                          {formData.customSubject && (
+                            <button type="button" onClick={() => setFormData(prev => ({ ...prev, name: '', code: '', customSubject: false }))}
+                              className="btn btn-secondary text-xs px-3">Presets</button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Code */}
+                    <div>
+                      <label className="form-label">Subject Code *</label>
+                      <input
+                        value={formData.code}
+                        onChange={e => setFormData(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
+                        className="form-input font-mono"
+                        placeholder="e.g. MATH"
+                        maxLength={10}
+                        required={entryMode === 'single'}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <label className="form-label">Subjects *</label>
+                    <textarea
+                      value={multipleSubjectText}
+                      onChange={e => setMultipleSubjectText(e.target.value)}
+                      className="form-input min-h-40 font-mono text-sm"
+                      placeholder={'Mathematics, MATH\nEnglish, ENG\nScience'}
+                      autoFocus
+                      required={entryMode === 'multiple'}
+                    />
+                    <p className="mt-2 text-xs text-slate-500">Use one subject per line. Add a code after a comma, or leave it blank to auto-generate.</p>
+                  </div>
+                )}
 
                 {/* Level filter */}
                 <div>
@@ -1079,7 +1175,7 @@ function getClassLevel(classId: string): string {
                   <div className="flex items-center justify-between mb-2">
                     <label className="form-label mb-0">Assign to Classes *</label>
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => setSelectedClassIds(classesForSelectedLevel.map(c => c.id))}
+                      <button type="button" onClick={() => setSelectedClassIds(visibleClassOptions.map(c => c.id))}
                         className="text-xs text-primary-600 dark:text-primary-400 hover:underline">All</button>
                       <span className="text-slate-300">-+</span>
                       <button type="button" onClick={() => setSelectedClassIds([])}
@@ -1087,7 +1183,7 @@ function getClassLevel(classId: string): string {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
-                    {(selectedLevel ? classesForSelectedLevel : classes).map(cls => {
+                    {visibleClassOptions.map(cls => {
                       const sel = selectedClassIds.includes(cls.id);
                       return (
                         <button key={cls.id} type="button" onClick={() => toggleClassSelection(cls.id)}
@@ -1100,7 +1196,7 @@ function getClassLevel(classId: string): string {
                         </button>
                       );
                     })}
-                    {(selectedLevel ? classesForSelectedLevel : classes).length === 0 && (
+                    {visibleClassOptions.length === 0 && (
                       <p className="col-span-3 text-sm text-slate-400 py-2">No classes found. Add classes first.</p>
                     )}
                   </div>
@@ -1112,9 +1208,9 @@ function getClassLevel(classId: string): string {
                 {/* Footer */}
                 <div className="flex gap-3 justify-end pt-4">
                   <button type="button" onClick={resetSubjectForm} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Cancel</button>
-                  <button type="submit" disabled={submitting || !formData.name || !formData.code || selectedClassIds.length === 0}
+                  <button type="submit" disabled={submitting || (entryMode === 'single' ? (!formData.name || !formData.code) : !multipleSubjectText.trim()) || selectedClassIds.length === 0}
                     className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 disabled:opacity-50" style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}>
-                    {submitting ? 'Saving...' : 'Save Subject'}
+                    {submitting ? 'Saving...' : entryMode === 'multiple' ? 'Save Subjects' : 'Save Subject'}
                   </button>
                 </div>
               </div>
@@ -1437,13 +1533,16 @@ function getClassLevel(classId: string): string {
               )}
 
               {importStep === 'preview' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                <div data-preview-fullscreen-root className="space-y-3 rounded-xl bg-white p-1 dark:bg-slate-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                    </div>
+                    <FullscreenButton />
                   </div>
 
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
@@ -1496,7 +1595,7 @@ function getClassLevel(classId: string): string {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 5).map((subject, index) => (
+                        {importPreview.map((subject, index) => (
                           <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
                             <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
                             <td className="px-2 py-1.5">{(subject as any).name || '-'}</td>
@@ -1506,11 +1605,6 @@ function getClassLevel(classId: string): string {
                         ))}
                       </tbody>
                     </table>
-                    {importPreview.length > 5 && (
-                      <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">
-                        ... and {importPreview.length - 5} more
-                      </div>
-                    )}
                   </div>
 
                   <div className="flex justify-between pt-2">

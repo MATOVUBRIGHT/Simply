@@ -3,6 +3,7 @@ import { Phone, Mail, MapPin, Printer, Download, X, Palette, Check, RefreshCw, U
 import { useCurrency } from '../hooks/useCurrency';
 import LiveEditable from './LiveEditable';
 import { openPrintPreview } from '../utils/printPreview';
+import { FullscreenButton } from './FullscreenButton';
 
 export interface InvoiceLabels {
   invoiceTitle: string;
@@ -202,7 +203,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
   const displayLogo = labels.logo || school.logo;
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-y-auto max-w-4xl w-full mx-auto my-4 animate-modal-in flex flex-col" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
+    <div data-preview-fullscreen-root className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-y-auto max-w-4xl w-full mx-auto my-4 animate-modal-in flex flex-col" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
       {/* Header Toolbar */}
       <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 print:hidden">
         <div className="flex items-center gap-4">
@@ -245,6 +246,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <FullscreenButton />
           <button 
             onClick={() => openPrintPreview('Invoice', '#invoice-print')} 
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold transition-all"

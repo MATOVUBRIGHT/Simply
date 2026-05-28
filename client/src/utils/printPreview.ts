@@ -22,6 +22,7 @@ export function openPrintPreview(title: string, selector = '.print-area') {
           <h2>${escapeHtml(title)}</h2>
         </div>
         <div class="schofy-print-preview-actions">
+          <button type="button" data-fullscreen>Full Screen</button>
           <button type="button" data-print>Print / Save PDF</button>
           <button type="button" data-close>Close</button>
         </div>
@@ -40,6 +41,7 @@ export function openPrintPreview(title: string, selector = '.print-area') {
     #${PREVIEW_ID} .schofy-print-preview-header h2 { margin: 0; font-size: 16px; line-height: 1.25; font-weight: 800; }
     #${PREVIEW_ID} .schofy-print-preview-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     #${PREVIEW_ID} button { border: 0; border-radius: 9px; padding: 9px 13px; font-size: 13px; font-weight: 800; cursor: pointer; }
+    #${PREVIEW_ID} button[data-fullscreen] { background: #334155; color: white; }
     #${PREVIEW_ID} button[data-print] { background: #16a34a; color: white; }
     #${PREVIEW_ID} button[data-close] { background: #e2e8f0; color: #0f172a; }
     #${PREVIEW_ID} iframe { width: 100%; height: 100%; border: 0; background: #e5e7eb; }
@@ -73,12 +75,22 @@ export function openPrintPreview(title: string, selector = '.print-area') {
     win.focus();
     setTimeout(() => win.print(), 80);
   };
+  const toggleFullscreen = async () => {
+    const panel = overlay.querySelector<HTMLElement>('.schofy-print-preview-panel');
+    if (!panel) return;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await panel.requestFullscreen?.();
+    }
+  };
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') close();
   };
 
   overlay.querySelector('[data-close]')?.addEventListener('click', close);
   overlay.querySelector('[data-print]')?.addEventListener('click', print);
+  overlay.querySelector('[data-fullscreen]')?.addEventListener('click', toggleFullscreen);
   document.addEventListener('keydown', onKeyDown);
 }
 

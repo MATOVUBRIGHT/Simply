@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { AlertTriangle, CreditCard, LogOut, RefreshCw, Clock, MessageCircle, Phone } from 'lucide-react';
+import { AlertTriangle, CreditCard, LogOut, RefreshCw, Clock, MessageCircle, Phone, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { cachePlanStateLocally, getSubscriptionAccessState, SubscriptionAccessState, PLAN_DEFINITIONS } from '../utils/plans';
 import { supabase } from '../lib/supabase';
 import { cacheReady } from '../lib/database/SupabaseDataService';
 import { createVerifiedPlanProof, readVerifiedPlanProof, restoreVerifiedPlanProof } from '../utils/planProof';
+import { redeemPaymentVerificationCode } from '../utils/paymentVerification';
 
 // Routes always accessible regardless of subscription
 const ALLOWED_ROUTES = ['/plans', '/subscribe', '/login'];
@@ -89,6 +90,9 @@ export default function SubscriptionGate({ children }: Props) {
   const [pendingTid,  setPendingTid]  = useState<string | null>(null);
   const [checking,    setChecking]    = useState(true);
   const [checkProgress, setCheckProgress] = useState(0);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [verifyingCode, setVerifyingCode] = useState(false);
+  const [verificationNotice, setVerificationNotice] = useState<{ type: 'success' | 'error'; message: string; reason?: string } | null>(null);
 
   const isAllowedRoute = ALLOWED_ROUTES.some(r => location.pathname.startsWith(r));
 
@@ -110,7 +114,11 @@ export default function SubscriptionGate({ children }: Props) {
     // Always read local cache first — works 100% offline
     let state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
 
-    const applyLocalState = (pendingFlag = localStorage.getItem(OFFLINE_PENDING_KEY) === '1') => {
+    const applyLocalState = (
+      pendingFlag = localStorage.getItem(OFFLINE_PENDING_KEY) === '1',
+      options: { enforcePlanLimit?: boolean } = {}
+    ) => {
+      const enforcePlanLimit = options.enforcePlanLimit ?? true;
       const hasActiveCurrentPlan = state.status === 'active' || state.status === 'expiring';
       const pending = pendingFlag && !hasActiveCurrentPlan;
       cacheSubscriptionLocally(state, pendingFlag);
@@ -125,7 +133,7 @@ export default function SubscriptionGate({ children }: Props) {
       } else if (state.status === 'expired' || state.status === 'incomplete') {
         setBlocked(true);
         setBlockReason(state.status as BlockReason);
-      } else if (state.plan && state.used > state.plan.studentLimit) {
+      } else if (enforcePlanLimit && state.plan && state.used > state.plan.studentLimit) {
         setBlocked(true);
         setBlockReason('limit');
       } else {
@@ -146,7 +154,8 @@ export default function SubscriptionGate({ children }: Props) {
         return;
       }
       await restoreVerifiedPlanProof(tenantId);
-      applyLocalState();
+      state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
+      applyLocalState(false, { enforcePlanLimit: false });
       setCheckProgress(100);
       setChecking(false);
       return;
@@ -256,7 +265,7 @@ export default function SubscriptionGate({ children }: Props) {
       }
     } catch {
       // Offline — use the local state we already loaded above
-      applyLocalState();
+      applyLocalState(localStorage.getItem(OFFLINE_PENDING_KEY) === '1', { enforcePlanLimit: online });
     } finally {
       setCheckProgress(100);
       setTimeout(() => setChecking(false), 120);
@@ -273,6 +282,43 @@ export default function SubscriptionGate({ children }: Props) {
   }, [checkSubscription]);
 
   const handleLogout = async () => { await logout(); navigate('/login'); };
+
+  const handleVerifyCode = async () => {
+    const tenantId = schoolId || user?.id;
+    if (!tenantId || verifyingCode) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setVerificationNotice({
+        type: 'error',
+        message: 'Connect to the internet to verify a new code.',
+        reason: 'Your already verified plan stays saved for offline access, but plan changes and first-time code verification require internet.',
+      });
+      return;
+    }
+    setVerifyingCode(true);
+    setVerificationNotice(null);
+    try {
+      const result = await redeemPaymentVerificationCode(tenantId, user?.id, verificationCode);
+      if (result.status === 'valid') {
+        setVerificationCode('');
+        setVerificationNotice({ type: 'success', message: `${result.message} Redirecting to dashboard...` });
+        setChecking(true);
+        await checkSubscription();
+        window.setTimeout(() => navigate('/'), 900);
+        return;
+      }
+      const reason =
+        result.status === 'used'
+          ? 'This code was used before. One-time codes cannot be reused.'
+          : result.status === 'terminated'
+            ? 'This code was stopped by the admin.'
+            : result.status === 'invalid'
+              ? 'The code may be wrongly typed, incomplete, or not from Schofy.'
+              : 'Connect to internet and try again, or contact admin.';
+      setVerificationNotice({ type: 'error', message: result.message, reason });
+    } finally {
+      setVerifyingCode(false);
+    }
+  };
 
   // WhatsApp message with receipt details
   const whatsappMsg = () => {
@@ -378,6 +424,49 @@ export default function SubscriptionGate({ children }: Props) {
                     </p>
                   )}
                   <p className="text-xs text-amber-600">Activation within 24 hours after verification.</p>
+                </div>
+              )}
+
+              {blockReason === 'pending' && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-left">
+                  <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                    <KeyRound size={16} className="text-emerald-600" />
+                    Verification code
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Already received your one-time Schofy code? Enter it here to activate immediately.
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="text"
+                      value={verificationCode}
+                      onChange={(event) => setVerificationCode(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') void handleVerifyCode(); }}
+                      placeholder="Enter verification code"
+                      className="min-w-0 flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleVerifyCode()}
+                      disabled={verifyingCode}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      {verifyingCode ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+                      Verify
+                    </button>
+                  </div>
+                  {verificationNotice && (
+                    <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+                      verificationNotice.type === 'success'
+                        ? 'border-emerald-200 bg-white text-emerald-700'
+                        : 'border-red-200 bg-red-50 text-red-700'
+                    }`}>
+                      <p className="font-semibold">{verificationNotice.message}</p>
+                      {verificationNotice.reason && <p className="mt-0.5">{verificationNotice.reason}</p>}
+                    </div>
+                  )}
                 </div>
               )}
 

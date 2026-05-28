@@ -77,7 +77,15 @@ export default function StudentForm() {
     try {
       const student = await dataService.get(idAuth, 'students', id!);
       if (student) {
-        setFormData({ ...student, boardingStatus: getBoardingStatus(student), customFields: student.customFields || [], attachments: student.attachments || [] } as any);
+        setFormData({
+          ...student,
+          classId: student.classId || '',
+          status: student.status || 'active',
+          gender: student.gender || Gender.MALE,
+          boardingStatus: getBoardingStatus(student),
+          customFields: student.customFields || [],
+          attachments: student.attachments || [],
+        } as any);
         setStudentId(student.studentId || student.admissionNo || '');
       }
     } catch { addToast('Failed to load student data', 'error'); }
@@ -200,7 +208,9 @@ export default function StudentForm() {
         } as Student, ((formData as any).boardingStatus || 'day') as BoardingStatus);
         await dataService.create(idAuth, 'students', newStudent as any);
       }
-      window.dispatchEvent(new Event('studentsUpdated'));
+      window.dispatchEvent(new CustomEvent('studentsUpdated'));
+      window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'students' } }));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'students' } }));
       setShowSuccess(true);
       await new Promise(resolve => setTimeout(resolve, 1500));
       navigate('/students');
@@ -271,14 +281,14 @@ export default function StudentForm() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="form-label">Status</label>
-                    <select name="status" value={formData.status} onChange={handleChange} className="form-input">
+                    <select name="status" value={formData.status || 'active'} onChange={handleChange} className="form-input">
                       <option value="active">Active</option>
                       <option value="inactive">Inactive</option>
                     </select>
                   </div>
                   <div>
                     <label className="form-label">Gender *</label>
-                    <select name="gender" value={formData.gender} onChange={handleChange} className="form-input">
+                    <select name="gender" value={formData.gender || Gender.MALE} onChange={handleChange} className="form-input">
                       <option value={Gender.MALE}>Male</option>
                       <option value={Gender.FEMALE}>Female</option>
                       <option value={Gender.OTHER}>Other</option>
@@ -291,21 +301,21 @@ export default function StudentForm() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="form-label">First Name *</label>
-                <input type="text" name="firstName" value={formData.firstName} onChange={handleChange}
+                <input type="text" name="firstName" value={formData.firstName || ''} onChange={handleChange}
                   className="form-input" placeholder="First name" required />
               </div>
               <div>
                 <label className="form-label">Last Name *</label>
-                <input type="text" name="lastName" value={formData.lastName} onChange={handleChange}
+                <input type="text" name="lastName" value={formData.lastName || ''} onChange={handleChange}
                   className="form-input" placeholder="Last name" required />
               </div>
               <div>
                 <label className="form-label">Date of Birth</label>
-                <input type="date" name="dob" value={formData.dob} onChange={handleChange} className="form-input" />
+                <input type="date" name="dob" value={formData.dob || ''} onChange={handleChange} className="form-input" />
               </div>
               <div>
                 <label className="form-label">Class *</label>
-                <select name="classId" value={formData.classId} onChange={handleChange} className="form-input" required>
+                <select name="classId" value={formData.classId || ''} onChange={handleChange} className="form-input" required>
                   <option value="">Select Class</option>
                   {classes.map(c => (
                     <option key={c.id} value={c.id}>
@@ -325,7 +335,7 @@ export default function StudentForm() {
 
             <div>
               <label className="form-label">Address</label>
-              <textarea name="address" value={formData.address} onChange={handleChange}
+              <textarea name="address" value={formData.address || ''} onChange={handleChange}
                 className="form-input" rows={2} placeholder="Home address" />
             </div>
           </div>
@@ -339,12 +349,12 @@ export default function StudentForm() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="form-label">Guardian Name *</label>
-                <input type="text" name="guardianName" value={formData.guardianName} onChange={handleChange}
+                <input type="text" name="guardianName" value={formData.guardianName || ''} onChange={handleChange}
                   className="form-input" placeholder="Full name" required />
               </div>
               <div>
                 <label className="form-label">Guardian Phone *</label>
-                <input type="tel" name="guardianPhone" value={formData.guardianPhone} onChange={handleChange}
+                <input type="tel" name="guardianPhone" value={formData.guardianPhone || ''} onChange={handleChange}
                   className="form-input" placeholder="Phone number" required />
               </div>
               <div className="sm:col-span-2">

@@ -15,6 +15,7 @@ import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { sortClassesBySectionThenLevel, groupClassesBySection } from '../utils/classroom';
 import { PortalDropdown } from '../components/PortalDropdown';
+import { FullscreenButton } from '../components/FullscreenButton';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { cleanupDeletedClassReferences } from '../utils/classDeletionCleanup';
 
@@ -1032,13 +1033,16 @@ export default function Classes() {
                 </div>
               )}
               {importStep === 'preview' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                <div data-preview-fullscreen-root className="space-y-3 rounded-xl bg-white p-1 dark:bg-slate-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                    </div>
+                    <FullscreenButton />
                   </div>
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
                     <p className="text-sm text-emerald-700 dark:text-emerald-300"><strong>{importPreview.length}</strong> classes ready to import</p>
@@ -1053,7 +1057,7 @@ export default function Classes() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 5).map((classItem, index) => (
+                        {importPreview.map((classItem, index) => (
                           <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
                             <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
                             <td className="px-2 py-1.5">{(classItem as any).name || '-'}</td>
@@ -1062,9 +1066,6 @@ export default function Classes() {
                         ))}
                       </tbody>
                     </table>
-                    {importPreview.length > 5 && (
-                      <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">... and {importPreview.length - 5} more</div>
-                    )}
                   </div>
                   <div className="flex justify-between pt-2">
                     <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>

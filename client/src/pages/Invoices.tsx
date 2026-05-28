@@ -18,6 +18,7 @@ import { matchesTextSearch } from '../utils/searchMatch';
 import { runTasksInPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { useConfirm } from '../components/ConfirmModal';
 import InvoiceTemplate, { DEFAULT_INVOICE_LABELS, InvoiceLabels } from '../components/InvoiceTemplate';
+import { FullscreenButton } from '../components/FullscreenButton';
 import { FitStatValue } from '../components/FitStatValue';
 import { shouldSaveOnEnter } from '../utils/keyboard';
 
@@ -1290,11 +1291,18 @@ export default function Invoices() {
       const now = new Date().toISOString();
       const year = new Date().getFullYear().toString();
       let successCount = 0;
+      let skippedCount = 0;
       const tasks = importPreview.map((data) => async () => {
-        const student = students.find(s => `${s.firstName} ${s.lastName}` === data.studentName);
-        if (!student) return;
+        const student = students.find(s => matchesStudentSearch(s, data.studentName));
+        if (!student) {
+          skippedCount++;
+          return;
+        }
         const id = schoolId || user?.id;
-        if (!id) return;
+        if (!id) {
+          skippedCount++;
+          return;
+        }
         const fee: Fee = {
           id: uuidv4(),
           studentId: student.id,
@@ -1308,7 +1316,7 @@ export default function Invoices() {
         successCount++;
       });
       await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
-      addToast(`Successfully imported ${successCount} invoices`, 'success');
+      addToast(`Successfully imported ${successCount} invoices${skippedCount ? `, ${skippedCount} skipped because no student matched` : ''}`, skippedCount ? 'warning' : 'success');
       closeImportModal();
       refreshInvoices();
       window.dispatchEvent(new CustomEvent('dataRefresh'));
@@ -2486,13 +2494,16 @@ export default function Invoices() {
               )}
 
               {importStep === 'preview' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 1</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span>
-                    <ArrowRight size={12} />
-                    <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                <div data-preview-fullscreen-root className="space-y-3 rounded-xl bg-white p-1 dark:bg-slate-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 1</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><CheckIcon size={10} /> 2</span>
+                      <ArrowRight size={12} />
+                      <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
+                    </div>
+                    <FullscreenButton />
                   </div>
 
                   <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
@@ -2511,7 +2522,7 @@ export default function Invoices() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.slice(0, 5).map((record, index) => (
+                        {importPreview.map((record, index) => (
                           <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
                             <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
                             <td className="px-2 py-1.5">{record.studentName || '-'}</td>
@@ -2520,11 +2531,6 @@ export default function Invoices() {
                         ))}
                       </tbody>
                     </table>
-                    {importPreview.length > 5 && (
-                      <div className="p-2 text-center text-xs text-slate-500 bg-slate-50 dark:bg-slate-700/50">
-                        ... and {importPreview.length - 5} more
-                      </div>
-                    )}
                   </div>
 
                   <div className="flex justify-between pt-2">

@@ -1,4 +1,24 @@
-# Schofy Version1 Release Notes
+# Schofy Release Notes
+
+## Version1.1
+
+This release improves verification-code control, import reliability, preview workflows, offline plan behavior, and large-school performance.
+
+### Highlights
+
+- Added plan-specific verification code sheets, including 100 Unlimited plan codes.
+- Added used verification code visibility in Super Admin with terminate and re-enable actions.
+- Added bulk subject entry from the Add Subject dialog.
+- Added full-screen controls to preview screens and templates.
+- Expanded import previews so all parsed rows are shown and unmatched/skipped rows are reported.
+- Kept verified plan access saved offline while blocking offline plan changes.
+- Improved large data loading with indexed lookups, paged student display, cached student pages, and loading spinners.
+
+### Technical Notes
+
+- App package versions are now `1.1.0`.
+- UI release labels are now `Version1.1`.
+- Desktop update manifest now points to `v1.1.0`.
 
 ## Version1
 
@@ -40,4 +60,3 @@ This release focuses on making Schofy broader, faster, and more school-ready acr
   - `timetable.entry_type`
   - `timetable.exam_id`
   - `timetable.custom_name`
-
