@@ -65,7 +65,7 @@ export default function Parents() {
                 <th className="w-[12%]">Class</th>
                 <th className="w-[13%]">Phone</th>
                 <th className="w-[18%]">Email</th>
-                <th className="w-[10%]">Action</th>
+                <th className="w-[8%] text-center">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -92,9 +92,27 @@ export default function Parents() {
                   <td className="break-words">{student.guardianPhone || '-'}</td>
                   <td className="break-words">{student.guardianEmail || '-'}</td>
                   <td>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {student.guardianPhone && <a href={`tel:${student.guardianPhone}`} className="btn btn-secondary py-1.5 text-xs"><Phone size={14} /> Call</a>}
-                      {student.guardianEmail && <a href={`mailto:${student.guardianEmail}`} className="btn btn-secondary py-1.5 text-xs"><Mail size={14} /> Email</a>}
+                    <div className="flex items-center justify-center gap-1.5">
+                      {student.guardianPhone && (
+                        <a
+                          href={`tel:${student.guardianPhone}`}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-emerald-900/20"
+                          title={`Call ${student.guardianName || 'guardian'}`}
+                          aria-label={`Call ${student.guardianName || 'guardian'}`}
+                        >
+                          <Phone size={15} />
+                        </a>
+                      )}
+                      {student.guardianEmail && (
+                        <a
+                          href={`mailto:${student.guardianEmail}`}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-indigo-900/20"
+                          title={`Email ${student.guardianName || 'guardian'}`}
+                          aria-label={`Email ${student.guardianName || 'guardian'}`}
+                        >
+                          <Mail size={15} />
+                        </a>
+                      )}
                     </div>
                   </td>
                 </tr>
