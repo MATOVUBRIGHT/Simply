@@ -22,6 +22,7 @@ import { BulkEditClassModal } from '../components/BulkEditClassModal';
 import { getSubscriptionAccessState } from '../utils/plans';
 import { deleteInThirtyPercentBatches } from '../utils/bulkDelete';
 import { FitStatValue } from '../components/FitStatValue';
+import { sortStudentsForList } from '../utils/studentOrdering';
 
 const avatarColors = [
   'bg-rose-500',
@@ -264,7 +265,8 @@ export default function Students() {
           const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
           return matchesClass && matchesView;
         });
-        setStudents(filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
+        const ordered = sortStudentsForList(filtered);
+        setStudents(ordered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
         setTotalCount(filtered.length);
       } else {
         const filter = (student: Student) => {
@@ -300,7 +302,8 @@ export default function Students() {
       const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
       return matchesClass && matchesView;
     });
-    setStudents(filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
+    const ordered = sortStudentsForList(filtered);
+    setStudents(ordered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
     setTotalCount(filtered.length);
   }, [allStudents, debouncedSearch, selectedClass, viewFilter, currentPage, itemsPerPage]);
 

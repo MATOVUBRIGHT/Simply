@@ -4,6 +4,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { useAuth } from './AuthContext';
 import { useTableData } from '../lib/store';
 import { matchesStudentSearch } from '../utils/studentSearch';
+import { sortStudentsForList } from '../utils/studentOrdering';
 
 interface StudentsContextType {
   students: Student[];
@@ -23,14 +24,17 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
 
   // Use the global store — all students, always fresh, works offline
   const { data: allStudentsData, loading, error, refresh } = useTableData(tenantId, 'students');
-  const students = allStudentsData as Student[];
+  const students = useMemo(() => sortStudentsForList(allStudentsData as Student[]), [allStudentsData]);
   const totalCount = students.length;
 
   const loadPage = useCallback(
     async (page: number, pageSize: number, filter?: (item: any) => boolean) => {
       const id = schoolId || user?.id;
       if (!id) return { items: [], total: 0 };
-      return await dataService.getPage(id, 'students', page, pageSize, filter);
+      const all = sortStudentsForList(await dataService.getAll(id, 'students'));
+      const filtered = filter ? all.filter(filter) : all;
+      const start = (page - 1) * pageSize;
+      return { items: filtered.slice(start, start + pageSize), total: filtered.length };
     },
     [user, schoolId]
   );
@@ -39,9 +43,9 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
     async (query: string) => {
       const id = schoolId || user?.id;
       if (!id) return [];
-      const localMatches = students.filter(student => matchesStudentSearch(student, query));
+      const localMatches = sortStudentsForList(students.filter(student => matchesStudentSearch(student, query)));
       if (localMatches.length > 0) return localMatches;
-      return await dataService.search(id, 'students', query, ['firstName', 'lastName', 'admissionNo', 'studentId']);
+      return sortStudentsForList(await dataService.search(id, 'students', query, ['firstName', 'lastName', 'admissionNo', 'studentId']));
     },
     [user, schoolId, students]
   );

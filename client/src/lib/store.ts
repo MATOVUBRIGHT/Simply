@@ -11,6 +11,7 @@
 import { useSyncExternalStore, useCallback } from 'react';
 import { dataService } from './database/SupabaseDataService';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
+import { sortStudentsForList } from '../utils/studentOrdering';
 
 type Listener = () => void;
 
@@ -33,7 +34,9 @@ class DataStore {
   private key(sid: string, table: string) { return `${sid}:${table}`; }
 
   private normalize(table: string, data: any[]) {
-    return table === 'classes' ? sortClassesBySectionThenLevel(data) : data;
+    if (table === 'classes') return sortClassesBySectionThenLevel(data);
+    if (table === 'students') return sortStudentsForList(data);
+    return data;
   }
 
   private get(sid: string, table: string): TableState {
