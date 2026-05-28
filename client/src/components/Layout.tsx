@@ -33,8 +33,6 @@ import {
   Paperclip,
   WalletCards,
   Info,
-  HelpCircle,
-  ScrollText,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
@@ -960,15 +958,15 @@ function Layout({ children }: LayoutProps) {
                     { label: 'Settings', icon: Settings, path: '/settings' },
                     { label: 'Notifications', icon: Bell, path: '/notifications' },
                     { label: 'Recycle Bin', icon: Trash2, path: '/recycle-bin' },
-                    { label: 'About App', icon: Info, path: '/about' },
-                    { label: 'Privacy Policy', icon: Shield, path: '/about#privacy' },
-                    { label: 'Terms of Use', icon: ScrollText, path: '/about#terms' },
-                    { label: 'Help & Support', icon: HelpCircle, path: '/about#support' },
-                  ].map(({ label, icon: Icon, path }) => (
+                    { label: 'About App', description: 'Privacy, terms, and help', icon: Info, path: '/about' },
+                  ].map(({ label, description, icon: Icon, path }) => (
                     <button key={path} onClick={() => { setProfileOpen(false); navigate(path); }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left">
                       <Icon size={16} className="text-slate-400 shrink-0" />
-                      <span className="font-medium text-sm">{label}</span>
+                      <span className="min-w-0">
+                        <span className="block font-medium text-sm">{label}</span>
+                        {description && <span className="block truncate text-[11px] text-slate-400">{description}</span>}
+                      </span>
                     </button>
                   ))}
                   <button onClick={() => void toggleSidebarOrganization()}
