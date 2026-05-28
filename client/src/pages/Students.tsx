@@ -15,6 +15,7 @@ import { addToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
+import { useThrottle } from '../hooks/useDebounce';
 import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { BulkEditClassModal } from '../components/BulkEditClassModal';
@@ -1281,17 +1282,18 @@ export default function Students() {
     if (showStatusFilter) setStatusDropdownPos(getDropdownPosition(statusFilterButtonRef.current));
     if (showClassFilter) setClassDropdownPos(getDropdownPosition(classFilterButtonRef.current));
   }, [showStatusFilter, showClassFilter]);
+  const throttledDropdownPositionUpdate = useThrottle(updateDropdownPositions, 50, [updateDropdownPositions]);
 
   useEffect(() => {
     updateDropdownPositions();
     if (!showStatusFilter && !showClassFilter) return;
-    window.addEventListener('scroll', updateDropdownPositions, true);
-    window.addEventListener('resize', updateDropdownPositions);
+    window.addEventListener('scroll', throttledDropdownPositionUpdate, true);
+    window.addEventListener('resize', throttledDropdownPositionUpdate);
     return () => {
-      window.removeEventListener('scroll', updateDropdownPositions, true);
-      window.removeEventListener('resize', updateDropdownPositions);
+      window.removeEventListener('scroll', throttledDropdownPositionUpdate, true);
+      window.removeEventListener('resize', throttledDropdownPositionUpdate);
     };
-  }, [showStatusFilter, showClassFilter, updateDropdownPositions]);
+  }, [showStatusFilter, showClassFilter, updateDropdownPositions, throttledDropdownPositionUpdate]);
 
   return (
     <div className="space-y-5 animate-fade-in">

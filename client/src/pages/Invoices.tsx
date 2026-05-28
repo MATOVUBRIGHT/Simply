@@ -5,6 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, Fee, FeeStructure, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrency } from '../hooks/useCurrency';
+import { useThrottle } from '../hooks/useDebounce';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
 import { useActiveStudents, useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -577,17 +578,18 @@ export default function Invoices() {
     if (showStatusFilter) setStatusDropdownPos(getDropdownPosition(statusFilterButtonRef.current));
     if (showTermFilter) setTermDropdownPos(getDropdownPosition(termFilterButtonRef.current));
   }, [showStatusFilter, showTermFilter]);
+  const throttledDropdownPositionUpdate = useThrottle(updateDropdownPositions, 50, [updateDropdownPositions]);
 
   useEffect(() => {
     updateDropdownPositions();
     if (!showStatusFilter && !showTermFilter) return;
-    window.addEventListener('scroll', updateDropdownPositions, true);
-    window.addEventListener('resize', updateDropdownPositions);
+    window.addEventListener('scroll', throttledDropdownPositionUpdate, true);
+    window.addEventListener('resize', throttledDropdownPositionUpdate);
     return () => {
-      window.removeEventListener('scroll', updateDropdownPositions, true);
-      window.removeEventListener('resize', updateDropdownPositions);
+      window.removeEventListener('scroll', throttledDropdownPositionUpdate, true);
+      window.removeEventListener('resize', throttledDropdownPositionUpdate);
     };
-  }, [showStatusFilter, showTermFilter, updateDropdownPositions]);
+  }, [showStatusFilter, showTermFilter, updateDropdownPositions, throttledDropdownPositionUpdate]);
 
   useEffect(() => {
     if (user?.id || schoolId) {

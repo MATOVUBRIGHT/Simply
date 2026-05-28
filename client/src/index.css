@@ -219,6 +219,33 @@ html {
   pointer-events: none;
 }
 
+@media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce) {
+  .transition-all {
+    transition-property: color, background-color, border-color, opacity, box-shadow !important;
+    transition-duration: 120ms !important;
+  }
+
+  .btn:not(:disabled):hover,
+  [class*="hover:scale"]:hover,
+  [class*="hover:-translate"]:hover {
+    transform: none !important;
+  }
+
+  .animate-fade-in,
+  .animate-fadeIn,
+  .animate-slide-up,
+  .animate-pop,
+  .animate-dropdown-in,
+  .animate-modal-in,
+  .animate-backdrop-in,
+  .page-shell-enter,
+  .plans-page-enter,
+  .plans-reveal {
+    animation-duration: 120ms !important;
+    filter: none !important;
+  }
+}
+
 /* ============================================
    UNIFIED POPUP & DROPDOWN TRANSITIONS
    ============================================ */
