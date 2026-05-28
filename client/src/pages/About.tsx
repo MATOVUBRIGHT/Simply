@@ -1,4 +1,4 @@
-import { BookOpen, CheckCircle2, HelpCircle, LockKeyhole, Mail, MessageCircle, Phone, ScrollText, ShieldCheck, Sparkles, WifiOff } from 'lucide-react';
+import { BookOpen, CheckCircle2, HelpCircle, LockKeyhole, Mail, MessageCircle, Phone, ScrollText, ShieldCheck, WifiOff } from 'lucide-react';
 
 function publicAssetPath(fileName: string) {
   const base = import.meta.env.BASE_URL || '/';
@@ -134,7 +134,9 @@ export default function About() {
       </Section>
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 text-center dark:border-slate-700 dark:bg-slate-800">
-        <Sparkles size={24} className="mx-auto mb-2 text-emerald-600" />
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border border-emerald-100 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <img src={APP_LOGO} alt="Schofy app logo" className="h-full w-full object-cover" />
+        </div>
         <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
           Powered by <span className="font-black text-emerald-600">Schofy</span> - School Management System
         </p>
