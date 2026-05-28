@@ -1,8 +1,8 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, Settings, Check, Building, Palette, Layout, FileText as FileTextIcon, Eye, X, GraduationCap, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Download, Settings, Check, Building, Palette, Layout, FileText as FileTextIcon, Eye, X, GraduationCap, RefreshCw, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useStudents } from '../contexts/StudentsContext';
@@ -31,6 +31,10 @@ function getSubjectIdentity(subject: any, fallbackName?: string, fallbackId?: st
 
 // ΓöÇΓöÇ Template ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 const TEMPLATE_KEY = 'schofy_report_template';
+const REPORT_TEMPLATE_CLASS_PREFIX = 'schofy_report_template_class_';
+const REPORT_TEMPLATE_SCHOOL_TYPE_PREFIX = 'schofy_report_template_school_type_';
+
+type TemplateSaveScope = 'device' | 'class' | 'schoolType' | 'all';
 
 type ReportTemplateType =
   | 'modern'
@@ -55,6 +59,7 @@ interface ReportTemplate {
   // Colors
   headerColor: string;
   accentColor: string;
+  textColor: string;
   // Sections
   showBehavior: boolean;
   showGradingSystem: boolean;
@@ -82,6 +87,8 @@ interface ReportTemplate {
   gradingScale: { grade: string; min: number; max: number; remark: string }[];
   // Behavior items
   behaviorItems: string[];
+  // Editable static words/headers on templates. Student records are not stored here.
+  textLabels: Record<string, string>;
 }
 
 const TEMPLATE_OPTIONS: { type: ReportTemplateType; label: string; icon: typeof Layout }[] = [
@@ -106,6 +113,7 @@ const DEFAULT_TEMPLATE: ReportTemplate = {
   schoolLogo: 'S',
   headerColor: '#1a5f5f',
   accentColor: '#7ecece',
+  textColor: '#0f172a',
   showBehavior: true,
   showGradingSystem: true,
   showAttendance: false,
@@ -137,6 +145,7 @@ const DEFAULT_TEMPLATE: ReportTemplate = {
     { grade: 'F9', min: 0, max: 49, remark: 'Fail' },
   ],
   behaviorItems: ['Diligent', 'Responsible', 'Respectful', 'Resourceful', 'Attentive'],
+  textLabels: {},
 };
 
 function loadTemplate(): ReportTemplate {
@@ -148,6 +157,24 @@ function loadTemplate(): ReportTemplate {
 }
 function saveTemplateLocal(t: ReportTemplate) {
   localStorage.setItem(TEMPLATE_KEY, JSON.stringify(t));
+}
+
+function parseTemplate(value: unknown): ReportTemplate | null {
+  try {
+    if (!value) return null;
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return { ...DEFAULT_TEMPLATE, ...(parsed as Partial<ReportTemplate>) };
+  } catch {
+    return null;
+  }
+}
+
+function classTemplateKey(sid: string, classId: string) {
+  return `${REPORT_TEMPLATE_CLASS_PREFIX}${sid}_${classId}`;
+}
+
+function schoolTypeTemplateKey(sid: string, schoolType: string) {
+  return `${REPORT_TEMPLATE_SCHOOL_TYPE_PREFIX}${sid}_${schoolType || 'default'}`;
 }
 
 export default function ReportCard() {
@@ -165,6 +192,8 @@ export default function ReportCard() {
   const [template, setTemplate] = useState<ReportTemplate>(loadTemplate);
   const [draft, setDraft] = useState<ReportTemplate>(loadTemplate);
   const [saving, setSaving] = useState(false);
+  const [loadedTemplateScope, setLoadedTemplateScope] = useState('');
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   // Undo/Redo History
   const [history, setHistory] = useState<ReportTemplate[]>([]);
@@ -215,7 +244,8 @@ export default function ReportCard() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
   }, [exams, examId, student?.classId]);
 
-  const className = classes.find((c: any) => c.id === student?.classId)?.name || '';
+  const classItem = classes.find((c: any) => c.id === student?.classId);
+  const className = classItem?.name || '';
 
   const settingsMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -230,6 +260,27 @@ export default function ReportCard() {
   const displayEmail = template.schoolEmail || settingsMap.schoolEmail || '';
   const displayLogo = template.schoolLogo && template.schoolLogo !== 'S' ? template.schoolLogo : settingsMap.schoolLogo || template.schoolLogo || 'S';
   const academicYear = settingsMap.academicYear || new Date().getFullYear().toString();
+  const schoolType = settingsMap.schoolType || settingsMap.schoolCategory || 'default';
+
+  useEffect(() => {
+    if (!sid || !student?.classId) return;
+    const scopeKey = `${sid}:${student.classId}:${schoolType}:${settingsMap.reportTemplate || ''}:${settingsMap[`reportTemplateClass_${student.classId}`] || ''}:${settingsMap[`reportTemplateSchoolType_${schoolType}`] || ''}`;
+    if (loadedTemplateScope === scopeKey) return;
+
+    const scopedTemplate =
+      parseTemplate(settingsMap[`reportTemplateClass_${student.classId}`]) ||
+      parseTemplate(localStorage.getItem(classTemplateKey(sid, student.classId))) ||
+      parseTemplate(settingsMap[`reportTemplateSchoolType_${schoolType}`]) ||
+      parseTemplate(localStorage.getItem(schoolTypeTemplateKey(sid, schoolType))) ||
+      parseTemplate(settingsMap.reportTemplate) ||
+      parseTemplate(localStorage.getItem(TEMPLATE_KEY)) ||
+      DEFAULT_TEMPLATE;
+
+    setTemplate(scopedTemplate);
+    setDraft(scopedTemplate);
+    saveTemplateLocal(scopedTemplate);
+    setLoadedTemplateScope(scopeKey);
+  }, [loadedTemplateScope, schoolType, settingsMap, sid, student?.classId]);
 
   const subjectById = useMemo(() => new Map((subjects as any[]).map((subject) => [subject.id, subject])), [subjects]);
 
@@ -544,26 +595,26 @@ export default function ReportCard() {
                 <p className="text-[11px] font-semibold text-slate-600">
                   <LiveEditable value={displayAddress || 'School address'} onSave={v => updateTemplate({ schoolAddress: v })} isLiveEditing={isLiveEditing} />
                 </p>
-                <p className="text-[10px] font-bold text-slate-500">{displayPhone || 'Phone'} {displayEmail ? ` | ${displayEmail}` : ''}</p>
+                <p className="text-[10px] font-bold text-slate-500">{editableText('named.phoneLabel', 'Phone')}: {displayPhone || '-'} {displayEmail ? <> | {editableText('named.emailLabel', 'Email')}: {displayEmail}</> : ''}</p>
               </div>
             </div>
             <div className="rounded-lg px-4 py-3 text-right text-white" style={{ backgroundColor: style.header }}>
-              <p className="text-[10px] font-black uppercase tracking-wide">Term {exam?.term || '-'} / {exam?.year || academicYear}</p>
-              <p className="text-lg font-black uppercase leading-tight">{style.title}</p>
+              <p className="text-[10px] font-black uppercase tracking-wide">{editableText('named.termLabel', 'Term')} {exam?.term || '-'} / {exam?.year || academicYear}</p>
+              <p className="text-lg font-black uppercase leading-tight">{editableText(`named.title.${template.type}`, style.title)}</p>
             </div>
           </div>
 
           <div className="mb-4 grid grid-cols-2 gap-2 rounded-lg border p-3 text-xs" style={{ backgroundColor: style.soft, borderColor: `${style.header}40` }}>
             {[
-              ['Student Name', `${student?.firstName || ''} ${student?.lastName || ''}`.trim() || '-'],
-              ['Student ID', student?.studentId || student?.admissionNo || '-'],
-              ['Class', className || '-'],
-              ['Exam', exam?.name || '-'],
-              ['Academic Year', academicYear],
-              ['Position', classPosition ? `${classPosition.position}${ordinal(classPosition.position)} of ${classPosition.outOf}` : '-'],
-            ].map(([label, value]) => (
+              ['named.studentName', 'Student Name', `${student?.firstName || ''} ${student?.lastName || ''}`.trim() || '-'],
+              ['named.studentId', 'Student ID', student?.studentId || student?.admissionNo || '-'],
+              ['named.class', 'Class', className || '-'],
+              ['named.exam', 'Exam', exam?.name || '-'],
+              ['named.academicYear', 'Academic Year', academicYear],
+              ['named.position', 'Position', classPosition ? `${classPosition.position}${ordinal(classPosition.position)} of ${classPosition.outOf}` : '-'],
+            ].map(([key, label, value]) => (
               <div key={label} className="flex items-center gap-2">
-                <span className="w-24 shrink-0 font-black uppercase text-slate-600">{label}:</span>
+                <span className="w-24 shrink-0 font-black uppercase text-slate-600">{editableText(String(key), String(label))}:</span>
                 <span className="flex-1 border-b border-slate-400 font-bold">{value}</span>
               </div>
             ))}
@@ -572,13 +623,13 @@ export default function ReportCard() {
           <table className="mb-4 w-full border-collapse text-xs">
             <thead>
               <tr className="text-white" style={{ backgroundColor: style.header }}>
-                <th className="border border-white/30 px-2 py-2 text-left font-black uppercase">{style.table}</th>
-                <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">Code</th>
-                {!showSubjectsOnly && <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">{style.score}</th>}
-                {!showSubjectsOnly && <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">Max</th>}
-                {!showSubjectsOnly && <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">Grade</th>}
-                {showCompetence && <th className="border border-white/30 px-2 py-2 text-left font-black uppercase">Competency / Comment</th>}
-                {!showCompetence && <th className="border border-white/30 px-2 py-2 text-left font-black uppercase">Remarks</th>}
+                <th className="border border-white/30 px-2 py-2 text-left font-black uppercase">{editableText('named.subjectHeader', style.table)}</th>
+                <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">{editableText('named.codeHeader', 'Code')}</th>
+                {!showSubjectsOnly && <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">{editableText('named.scoreHeader', style.score)}</th>}
+                {!showSubjectsOnly && <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">{editableText('named.maxHeader', 'Max')}</th>}
+                {!showSubjectsOnly && <th className="border border-white/30 px-2 py-2 text-center font-black uppercase">{editableText('named.gradeHeader', 'Grade')}</th>}
+                {showCompetence && <th className="border border-white/30 px-2 py-2 text-left font-black uppercase">{editableText('named.competencyHeader', 'Competency / Comment')}</th>}
+                {!showCompetence && <th className="border border-white/30 px-2 py-2 text-left font-black uppercase">{editableText('named.remarksHeader', 'Remarks')}</th>}
               </tr>
             </thead>
             <tbody>
@@ -594,7 +645,7 @@ export default function ReportCard() {
               ))}
               {!showSubjectsOnly && (
                 <tr className="font-black text-white" style={{ backgroundColor: style.header }}>
-                  <td className="border border-white/30 px-2 py-2 uppercase">Overall</td>
+                  <td className="border border-white/30 px-2 py-2 uppercase">{editableText('named.overallLabel', 'Overall')}</td>
                   <td className="border border-white/30 px-2 py-2 text-center">-</td>
                   <td className="border border-white/30 px-2 py-2 text-center">{totalScore}</td>
                   <td className="border border-white/30 px-2 py-2 text-center">{totalMax}</td>
@@ -607,13 +658,13 @@ export default function ReportCard() {
 
           <div className="mb-5 grid grid-cols-2 gap-4 text-xs">
             <div className="rounded-lg border p-3" style={{ borderColor: `${style.header}55` }}>
-              <p className="mb-2 font-black uppercase" style={{ color: style.header }}>{template.teacherCommentLabel}</p>
+              <p className="mb-2 font-black uppercase" style={{ color: style.header }}><LiveEditable value={template.teacherCommentLabel} onSave={v => updateTemplate({ teacherCommentLabel: v })} isLiveEditing={isLiveEditing} /></p>
               <div className="min-h-16 border-b border-slate-300">
                 <LiveEditable value={template.overallPerformanceTemplate} onSave={v => updateTemplate({ overallPerformanceTemplate: v })} isLiveEditing={isLiveEditing} />
               </div>
             </div>
             <div className="rounded-lg border p-3" style={{ borderColor: `${style.header}55` }}>
-              <p className="mb-2 font-black uppercase" style={{ color: style.header }}>Grading Summary</p>
+              <p className="mb-2 font-black uppercase" style={{ color: style.header }}>{editableText('named.gradingSummary', 'Grading Summary')}</p>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                 {template.gradingScale.slice(0, 8).map(scale => (
                   <p key={scale.grade}><span className="font-black">{scale.grade}</span> {scale.min}-{scale.max}: {scale.remark}</p>
@@ -630,13 +681,19 @@ export default function ReportCard() {
             ].map(label => (
               <div key={label}>
                 <div className="mb-2 h-10 border-b-2" style={{ borderColor: style.header }} />
-                <p className="font-black uppercase">{label}</p>
+                <p className="font-black uppercase">
+                  <LiveEditable value={label} onSave={v => {
+                    if (label === template.parentSignatureLabel) updateTemplate({ parentSignatureLabel: v });
+                    else if (label === template.principalSignatureLabel) updateTemplate({ principalSignatureLabel: v });
+                    else updateTemplate({ classTeacherLabel: v });
+                  }} isLiveEditing={isLiveEditing} />
+                </p>
               </div>
             ))}
           </div>
 
           <div className="mt-8 rounded-md px-3 py-2 text-center text-[10px] font-bold uppercase text-white" style={{ backgroundColor: style.header }}>
-            {template.footerText || 'This report card is generated from Schofy school records.'}
+            <LiveEditable value={template.footerText || 'This report card is generated from Schofy school records.'} onSave={v => updateTemplate({ footerText: v })} isLiveEditing={isLiveEditing} />
           </div>
         </div>
       </div>
@@ -649,14 +706,23 @@ export default function ReportCard() {
     setShowEditor(true);
   }
 
-  async function handleSave(applyAll: boolean) {
+  async function handleSave(scope: TemplateSaveScope) {
     setSaving(true);
     const dataToSave = showEditor ? draft : template;
     try {
       saveTemplateLocal(dataToSave);
       setTemplate({ ...dataToSave });
-      if (applyAll) {
-        await dataService.saveSettings(sid, { reportTemplate: JSON.stringify(dataToSave) });
+      const serialized = JSON.stringify(dataToSave);
+      if (scope === 'class' && student?.classId) {
+        localStorage.setItem(classTemplateKey(sid, student.classId), serialized);
+        await dataService.saveSettings(sid, { [`reportTemplateClass_${student.classId}`]: serialized });
+        addToast(`Template saved for ${className || 'this class'}`, 'success');
+      } else if (scope === 'schoolType') {
+        localStorage.setItem(schoolTypeTemplateKey(sid, schoolType), serialized);
+        await dataService.saveSettings(sid, { [`reportTemplateSchoolType_${schoolType}`]: serialized });
+        addToast(`Template saved for ${String(schoolType).replace(/_/g, ' ')} schools`, 'success');
+      } else if (scope === 'all') {
+        await dataService.saveSettings(sid, { reportTemplate: serialized });
         addToast('Template applied to all classes and devices', 'success');
       } else {
         addToast('Template saved', 'success');
@@ -681,12 +747,56 @@ export default function ReportCard() {
 
   const hdr = template.headerColor;
   const acc = template.accentColor;
+  const currentTemplateIndex = Math.max(0, TEMPLATE_OPTIONS.findIndex(option => option.type === template.type));
+  const currentTemplateOption = TEMPLATE_OPTIONS[currentTemplateIndex] || TEMPLATE_OPTIONS[0];
 
   const updateTemplate = (updates: Partial<ReportTemplate>) => {
     addToHistory(template);
     const newTemplate = { ...template, ...updates };
     setTemplate(newTemplate);
     saveTemplateLocal(newTemplate);
+  };
+
+  const getText = (key: string, fallback: string) => template.textLabels?.[key] || fallback;
+  const setText = (key: string, value: string) => {
+    updateTemplate({ textLabels: { ...(template.textLabels || {}), [key]: value } });
+  };
+  const editableText = (key: string, fallback: string) => (
+    <LiveEditable value={getText(key, fallback)} onSave={value => setText(key, value)} isLiveEditing={isLiveEditing} />
+  );
+  const editableKnownLabel = (label: string) => (
+    <LiveEditable
+      value={label}
+      onSave={value => {
+        if (label === template.teacherCommentLabel) updateTemplate({ teacherCommentLabel: value });
+        else if (label === template.classTeacherLabel) updateTemplate({ classTeacherLabel: value });
+        else if (label === template.principalSignatureLabel) updateTemplate({ principalSignatureLabel: value });
+        else if (label === template.parentSignatureLabel) updateTemplate({ parentSignatureLabel: value });
+        else if (label === template.nextTermLabel) updateTemplate({ nextTermLabel: value });
+        else setText(`label.${label}`, value);
+      }}
+      isLiveEditing={isLiveEditing}
+    />
+  );
+
+  const switchTemplate = (direction: -1 | 1) => {
+    const nextIndex = (currentTemplateIndex + direction + TEMPLATE_OPTIONS.length) % TEMPLATE_OPTIONS.length;
+    const nextTemplate = { ...template, type: TEMPLATE_OPTIONS[nextIndex].type };
+    addToHistory(template);
+    setTemplate(nextTemplate);
+    if (showEditor) setDraft(prev => ({ ...prev, type: TEMPLATE_OPTIONS[nextIndex].type }));
+    saveTemplateLocal(nextTemplate);
+  };
+
+  const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') updateTemplate({ schoolLogo: reader.result });
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
   };
 
   return (
@@ -697,6 +807,27 @@ export default function ReportCard() {
           <ArrowLeft size={20} />
         </button>
         <h1 className="text-xl font-bold text-slate-800 dark:text-white flex-1">Report Card</h1>
+        <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800">
+          <button
+            type="button"
+            onClick={() => switchTemplate(-1)}
+            className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+            title="Previous template"
+          >
+            <ChevronLeft size={17} />
+          </button>
+          <span className="min-w-[9rem] px-2 text-center text-xs font-bold text-slate-700 dark:text-slate-200">
+            {currentTemplateOption.label}
+          </span>
+          <button
+            type="button"
+            onClick={() => switchTemplate(1)}
+            className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+            title="Next template"
+          >
+            <ChevronRight size={17} />
+          </button>
+        </div>
         
         <button 
           onClick={() => setIsLiveEditing(!isLiveEditing)} 
@@ -727,11 +858,26 @@ export default function ReportCard() {
             </button>
             
             <button 
-              onClick={() => handleSave(true)} 
+              onClick={() => handleSave('class')} 
+              disabled={saving || !student?.classId}
+              className="btn btn-secondary flex items-center gap-2 ml-2"
+            >
+              <GraduationCap size={16} /> {saving ? 'Saving...' : 'Class'}
+            </button>
+            <button 
+              onClick={() => handleSave('schoolType')} 
               className="btn btn-primary flex items-center gap-2 ml-2"
               disabled={saving}
             >
-              <Settings size={16} /> {saving ? 'Saving...' : 'Apply to All'}
+              <Building size={16} /> {saving ? 'Saving...' : 'Type'}
+            </button>
+            <button 
+              onClick={() => handleSave('all')} 
+              className="btn btn-primary flex items-center gap-2"
+              disabled={saving}
+              style={{ backgroundColor: '#059669', borderColor: '#059669' }}
+            >
+              <Settings size={16} /> {saving ? 'Saving...' : 'All'}
             </button>
           </div>
         )}
@@ -745,7 +891,54 @@ export default function ReportCard() {
       </div>
 
       {/* ΓöÇΓöÇ Report Card ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */}
-      <div id="report-card-print" className="bg-white mx-auto max-w-2xl shadow-xl print:shadow-none print:max-w-full overflow-hidden" style={{ fontFamily: 'Arial, sans-serif' }}>
+      <div className={`grid gap-4 print:block ${isLiveEditing ? 'lg:grid-cols-[15rem_minmax(0,1fr)]' : ''}`}>
+        {isLiveEditing && (
+          <aside className="print:hidden h-fit rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800 lg:sticky lg:top-20">
+            <div className="mb-3 flex items-center gap-2">
+              <Palette size={16} className="text-primary-600" />
+              <h2 className="text-sm font-black text-slate-800 dark:text-white">Template Tools</h2>
+            </div>
+            <div className="space-y-3">
+              {[
+                ['Text', template.textColor || '#0f172a', (value: string) => updateTemplate({ textColor: value })],
+                ['Header', template.headerColor, (value: string) => updateTemplate({ headerColor: value })],
+                ['Accent', template.accentColor, (value: string) => updateTemplate({ accentColor: value })],
+              ].map(([label, value, onChange]: any) => (
+                <div key={label}>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">{label}</label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={value} onChange={e => onChange(e.target.value)} className="h-9 w-10 rounded border border-slate-200" />
+                    <input value={value} onChange={e => onChange(e.target.value)} className="form-input h-9 min-h-0 flex-1 px-2 py-1 font-mono text-xs" />
+                  </div>
+                </div>
+              ))}
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  ['#1a5f5f', '#7ecece'],
+                  ['#1d4ed8', '#22c55e'],
+                  ['#7c2222', '#d97706'],
+                  ['#1e3a5f', '#16a34a'],
+                ].map(([header, accent]) => (
+                  <button key={`${header}-${accent}`} type="button" onClick={() => updateTemplate({ headerColor: header, accentColor: accent })} className="h-8 rounded-lg border border-slate-200 p-1">
+                    <span className="block h-full rounded" style={{ background: `linear-gradient(90deg, ${header} 50%, ${accent} 50%)` }} />
+                  </button>
+                ))}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Logo</label>
+                <div className="flex gap-2">
+                  <input value={template.schoolLogo || ''} onChange={e => updateTemplate({ schoolLogo: e.target.value })} className="form-input h-9 min-h-0 flex-1 px-2 py-1 text-xs" placeholder="S or image URL" />
+                  <button type="button" onClick={() => logoInputRef.current?.click()} className="rounded-lg border border-slate-200 px-2 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700" title="Upload logo">
+                    <Upload size={15} />
+                  </button>
+                </div>
+                <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+              </div>
+            </div>
+          </aside>
+        )}
+
+      <div id="report-card-print" className="bg-white mx-auto max-w-2xl shadow-xl print:shadow-none print:max-w-full overflow-hidden" style={{ fontFamily: 'Arial, sans-serif', '--report-template-text-color': template.textColor || '#0f172a' } as React.CSSProperties}>
         {isNamedTemplate ? (
           renderNamedTemplate()
         ) : template.type === 'modern' ? (
@@ -771,9 +964,9 @@ export default function ReportCard() {
                     </p>
                   )}
                   <div className="flex flex-wrap gap-3 mt-1.5 text-xs" style={{ color: `${acc}cc` }}>
-                    <span>Addr: <LiveEditable value={displayAddress || 'Address'} onSave={v => updateTemplate({ schoolAddress: v })} isLiveEditing={isLiveEditing} /></span>
-                    <span>Tel: <LiveEditable value={displayPhone || 'Phone'} onSave={v => updateTemplate({ schoolPhone: v })} isLiveEditing={isLiveEditing} /></span>
-                    <span>Mail: <LiveEditable value={displayEmail || 'Email'} onSave={v => updateTemplate({ schoolEmail: v })} isLiveEditing={isLiveEditing} /></span>
+                    <span>{editableText('modern.addrLabel', 'Addr')}: <LiveEditable value={displayAddress || 'Address'} onSave={v => updateTemplate({ schoolAddress: v })} isLiveEditing={isLiveEditing} /></span>
+                    <span>{editableText('modern.telLabel', 'Tel')}: <LiveEditable value={displayPhone || 'Phone'} onSave={v => updateTemplate({ schoolPhone: v })} isLiveEditing={isLiveEditing} /></span>
+                    <span>{editableText('modern.mailLabel', 'Mail')}: <LiveEditable value={displayEmail || 'Email'} onSave={v => updateTemplate({ schoolEmail: v })} isLiveEditing={isLiveEditing} /></span>
                   </div>
                   <h2 className="text-lg font-bold mt-2" style={{ color: acc }}>
                     <LiveEditable 
@@ -803,16 +996,16 @@ export default function ReportCard() {
             <div className="px-5 py-3 border-b-2" style={{ borderColor: acc }}>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { label: 'Student Name:', value: `${student.firstName} ${student.lastName}` },
-                  { label: 'Student ID:', value: student.studentId || student.admissionNo },
-                  { label: 'Class:', value: className },
-                  { label: 'Academic Year:', value: academicYear },
-                  { label: 'Exam:', value: exam?.name || '-' },
-                  { label: 'Term:', value: `Term ${exam?.term} - ${exam?.year}` },
-                  ...(classPosition ? [{ label: 'Position:', value: `${classPosition.position}${ordinal(classPosition.position)} out of ${classPosition.outOf}` }] : []),
-                ].map(({ label, value }) => (
+                  { key: 'modern.studentName', label: 'Student Name:', value: `${student.firstName} ${student.lastName}` },
+                  { key: 'modern.studentId', label: 'Student ID:', value: student.studentId || student.admissionNo },
+                  { key: 'modern.class', label: 'Class:', value: className },
+                  { key: 'modern.academicYear', label: 'Academic Year:', value: academicYear },
+                  { key: 'modern.exam', label: 'Exam:', value: exam?.name || '-' },
+                  { key: 'modern.term', label: 'Term:', value: `Term ${exam?.term} - ${exam?.year}` },
+                  ...(classPosition ? [{ key: 'modern.position', label: 'Position:', value: `${classPosition.position}${ordinal(classPosition.position)} out of ${classPosition.outOf}` }] : []),
+                ].map(({ key, label, value }) => (
                   <div key={label} className="flex items-center gap-2">
-                    <span className="text-[10px] font-black uppercase text-slate-600 whitespace-nowrap w-28 shrink-0">{label}</span>
+                    <span className="text-[10px] font-black uppercase text-slate-600 whitespace-nowrap w-28 shrink-0">{editableText(key, label)}</span>
                     <span className="flex-1 px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: `${acc}30` }}>{value}</span>
                   </div>
                 ))}
@@ -826,17 +1019,17 @@ export default function ReportCard() {
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr style={{ backgroundColor: hdr, color: 'white' }}>
-                      <th className="px-2 py-1.5 text-left font-bold uppercase">Subject</th>
-                      <th className="px-2 py-1.5 text-center font-bold uppercase">Score</th>
-                      <th className="px-2 py-1.5 text-center font-bold uppercase">Max</th>
-                      <th className="px-2 py-1.5 text-center font-bold uppercase">%</th>
-                      <th className="px-2 py-1.5 text-center font-bold uppercase">Grade</th>
-                      <th className="px-2 py-1.5 text-left font-bold uppercase">Remarks</th>
+                      <th className="px-2 py-1.5 text-left font-bold uppercase">{editableText('modern.subjectHeader', 'Subject')}</th>
+                      <th className="px-2 py-1.5 text-center font-bold uppercase">{editableText('modern.scoreHeader', 'Score')}</th>
+                      <th className="px-2 py-1.5 text-center font-bold uppercase">{editableText('modern.maxHeader', 'Max')}</th>
+                      <th className="px-2 py-1.5 text-center font-bold uppercase">{editableText('modern.percentHeader', '%')}</th>
+                      <th className="px-2 py-1.5 text-center font-bold uppercase">{editableText('modern.gradeHeader', 'Grade')}</th>
+                      <th className="px-2 py-1.5 text-left font-bold uppercase">{editableText('modern.remarksHeader', 'Remarks')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {studentResults.length === 0 ? (
-                      <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400 text-xs">No results recorded for this exam</td></tr>
+                      <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400 text-xs">{editableText('modern.noResults', 'No results recorded for this exam')}</td></tr>
                     ) : studentResults.map((r, i) => (
                       <tr key={i} style={{ backgroundColor: i % 2 === 0 ? `${acc}18` : 'white' }}>
                         <td className="px-2 py-1.5 font-medium uppercase text-slate-700">{r.subject}</td>
@@ -850,7 +1043,7 @@ export default function ReportCard() {
                       </tr>
                     ))}
                     <tr style={{ backgroundColor: hdr, color: 'white' }}>
-                      <td className="px-2 py-1.5 font-bold uppercase">Overall</td>
+                      <td className="px-2 py-1.5 font-bold uppercase">{editableText('modern.overallLabel', 'Overall')}</td>
                       <td className="px-2 py-1.5 text-center font-bold">{totalScore}</td>
                       <td className="px-2 py-1.5 text-center">{totalMax}</td>
                       <td className="px-2 py-1.5 text-center font-bold">{overallPct}%</td>
@@ -868,14 +1061,14 @@ export default function ReportCard() {
               <div className="space-y-2.5">
                 {[
                   { label: template.teacherCommentLabel, value: '' },
-                  { label: 'Excellent In:', value: studentResults.filter(r => r.grade.startsWith('D')).map(r => r.subject).join(', ') },
-                  { label: 'Needs Improvement In:', value: studentResults.filter(r => r.grade === 'F9').map(r => r.subject).join(', ') },
+                  { label: getText('modern.excellentIn', 'Excellent In:'), editKey: 'modern.excellentIn', value: studentResults.filter(r => r.grade.startsWith('D')).map(r => r.subject).join(', ') },
+                  { label: getText('modern.needsImprovement', 'Needs Improvement In:'), editKey: 'modern.needsImprovement', value: studentResults.filter(r => r.grade === 'F9').map(r => r.subject).join(', ') },
                   ...(template.showClassTeacher ? [{ label: template.classTeacherLabel, value: '' }] : []),
                   { label: template.principalSignatureLabel, value: '' },
                   ...(template.showNextTerm ? [{ label: template.nextTermLabel, value: '' }] : []),
-                ].map(({ label, value }) => (
+                ].map(({ label, value, editKey }: any) => (
                   <div key={label} className="flex items-end gap-3">
-                    <span className="text-[10px] font-bold uppercase text-slate-600 w-40 shrink-0 pb-0.5">{label}</span>
+                    <span className="text-[10px] font-bold uppercase text-slate-600 w-40 shrink-0 pb-0.5">{editKey ? editableText(editKey, label) : editableKnownLabel(label)}</span>
                     <div className="flex-1 border-b border-slate-300 min-h-4 text-xs text-slate-600 pb-0.5">{value}</div>
                   </div>
                 ))}
@@ -889,18 +1082,20 @@ export default function ReportCard() {
                 <div className="grid grid-cols-2 gap-4">
                   {template.showBehavior && (
                     <div>
-                      <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>Behavior Assessment</div>
+                      <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>{editableText('modern.behaviorAssessment', 'Behavior Assessment')}</div>
                       {template.behaviorItems.map(b => (
                         <div key={b} className="flex items-center gap-2 py-0.5 border-b border-slate-100">
                           <div className="w-6 border-b border-slate-400 text-center text-[10px]">v</div>
-                          <span className="text-[10px] uppercase text-slate-600">{b}</span>
+                          <span className="text-[10px] uppercase text-slate-600">
+                            <LiveEditable value={b} onSave={value => updateTemplate({ behaviorItems: template.behaviorItems.map(item => item === b ? value : item) })} isLiveEditing={isLiveEditing} />
+                          </span>
                         </div>
                       ))}
                     </div>
                   )}
                   {template.showGradingSystem && (
                     <div>
-                      <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>Grading System</div>
+                      <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>{editableText('modern.gradingSystem', 'Grading System')}</div>
                       {template.gradingScale.map(({ grade, min, max, remark }) => (
                         <div key={grade} className="py-0.5 border-b border-slate-100">
                           <span className="text-[10px] font-bold text-slate-700">{grade} ({min}-{max}%): </span>
@@ -950,18 +1145,18 @@ export default function ReportCard() {
               <div className="px-10 space-y-8">
                 {/* ... existing section ... */}
                 <section>
-                  <h3 className="text-lg font-serif font-bold text-[#2d3748] border-b-2 border-slate-200 pb-1 mb-4">Student Information:</h3>
+                  <h3 className="text-lg font-serif font-bold text-[#2d3748] border-b-2 border-slate-200 pb-1 mb-4">{editableText('high.studentInformation', 'Student Information:')}</h3>
                   <div className="grid grid-cols-3 gap-6">
                     <div>
-                      <label className="text-xs font-bold block mb-1">Name:</label>
+                      <label className="text-xs font-bold block mb-1">{editableText('high.nameLabel', 'Name:')}</label>
                       <div className="border border-slate-300 rounded px-3 py-1.5 text-sm bg-slate-50 min-h-[38px] flex items-center">{student.firstName} {student.lastName}</div>
                     </div>
                     <div>
-                      <label className="text-xs font-bold block mb-1">Grade:</label>
+                      <label className="text-xs font-bold block mb-1">{editableText('high.gradeLabel', 'Grade:')}</label>
                       <div className="border border-slate-300 rounded px-3 py-1.5 text-sm bg-slate-50 min-h-[38px] flex items-center">{className}</div>
                     </div>
                     <div>
-                      <label className="text-xs font-bold block mb-1">School Year:</label>
+                      <label className="text-xs font-bold block mb-1">{editableText('high.schoolYearLabel', 'School Year:')}</label>
                       <div className="border border-slate-300 rounded px-3 py-1.5 text-sm bg-slate-50 min-h-[38px] flex items-center">{academicYear}-{Number(academicYear)+1}</div>
                     </div>
                   </div>
@@ -973,10 +1168,10 @@ export default function ReportCard() {
                     <table className="w-full border-collapse border border-slate-300 text-sm">
                       <thead>
                         <tr className="bg-[#7c2222] text-white">
-                          <th className="border border-slate-300 px-4 py-2 text-left font-bold">Subject</th>
-                          <th className="border border-slate-300 px-4 py-2 text-center font-bold">1st Semester</th>
-                          <th className="border border-slate-300 px-4 py-2 text-center font-bold">2nd Semester</th>
-                          <th className="border border-slate-300 px-4 py-2 text-center font-bold">Final Grade</th>
+                          <th className="border border-slate-300 px-4 py-2 text-left font-bold">{editableText('high.subjectHeader', 'Subject')}</th>
+                          <th className="border border-slate-300 px-4 py-2 text-center font-bold">{editableText('high.firstSemesterHeader', '1st Semester')}</th>
+                          <th className="border border-slate-300 px-4 py-2 text-center font-bold">{editableText('high.secondSemesterHeader', '2nd Semester')}</th>
+                          <th className="border border-slate-300 px-4 py-2 text-center font-bold">{editableText('high.finalGradeHeader', 'Final Grade')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -996,7 +1191,7 @@ export default function ReportCard() {
                 {/* Grading & Attendance Grid */}
                 <div className="grid grid-cols-2 gap-10">
                   <section>
-                    <h3 className="text-md font-bold text-[#2d3748] mb-3">Grading Scale:</h3>
+                    <h3 className="text-md font-bold text-[#2d3748] mb-3">{editableText('high.gradingScale', 'Grading Scale:')}</h3>
                     <ul className="space-y-1 text-xs">
                       {template.gradingScale.slice(0, 5).map(s => (
                         <li key={s.grade} className="flex gap-2">
@@ -1007,7 +1202,7 @@ export default function ReportCard() {
                     </ul>
                   </section>
                   <section>
-                    <h3 className="text-md font-bold text-[#2d3748] mb-3">Attendance:</h3>
+                    <h3 className="text-md font-bold text-[#2d3748] mb-3">{editableText('high.attendance', 'Attendance:')}</h3>
                     <ul className="space-y-1 text-xs">
                       <li className="flex gap-2">
                         <span className="font-bold">• Days Present:</span>
@@ -1027,7 +1222,7 @@ export default function ReportCard() {
 
                 {/* Comments Section */}
                 <section>
-                  <h3 className="text-md font-bold text-[#2d3748] mb-2">Comments:</h3>
+                  <h3 className="text-md font-bold text-[#2d3748] mb-2">{editableText('high.comments', 'Comments:')}</h3>
                   <div className="border border-slate-300 p-4 rounded text-xs leading-relaxed min-h-[100px] bg-slate-50">
                     <span className="font-bold">{student.firstName}</span> <LiveEditable value={template.overallPerformanceTemplate} onSave={v => updateTemplate({ overallPerformanceTemplate: v })} isLiveEditing={isLiveEditing} />
                   </div>
@@ -1125,15 +1320,15 @@ export default function ReportCard() {
               {/* Student Details Grid */}
               <div className="grid grid-cols-2 gap-x-12 gap-y-4 mb-8">
                 {[
-                  { label: 'ID Number:', value: student.studentId || student.admissionNo },
-                  { label: 'Name:', value: `${student.firstName} ${student.lastName}` },
-                  { label: 'Age:', value: student.dob ? (new Date().getFullYear() - new Date(student.dob).getFullYear()) : 'N/A' },
-                  { label: 'Gender:', value: student.gender || 'N/A' },
-                  { label: 'School Year:', value: `${academicYear}-${Number(academicYear)+1}` },
-                  { label: 'Grade & Section:', value: className },
-                ].map(({ label, value }) => (
+                  { key: 'classic.idNumber', label: 'ID Number:', value: student.studentId || student.admissionNo },
+                  { key: 'classic.name', label: 'Name:', value: `${student.firstName} ${student.lastName}` },
+                  { key: 'classic.age', label: 'Age:', value: student.dob ? (new Date().getFullYear() - new Date(student.dob).getFullYear()) : 'N/A' },
+                  { key: 'classic.gender', label: 'Gender:', value: student.gender || 'N/A' },
+                  { key: 'classic.schoolYear', label: 'School Year:', value: `${academicYear}-${Number(academicYear)+1}` },
+                  { key: 'classic.gradeSection', label: 'Grade & Section:', value: className },
+                ].map(({ key, label, value }) => (
                   <div key={label} className="flex items-end gap-2">
-                    <span className="text-xs font-black uppercase w-32 shrink-0">{label}</span>
+                    <span className="text-xs font-black uppercase w-32 shrink-0">{editableText(key, label)}</span>
                     <span className="flex-1 border-b-2 border-[#1e3a5f] pb-0.5 text-sm font-bold text-center px-2">{value}</span>
                   </div>
                 ))}
@@ -1141,9 +1336,9 @@ export default function ReportCard() {
 
               {/* Message */}
               <div className="mb-8 space-y-4">
-                <p className="text-sm font-bold">Dear Parents,</p>
+                <p className="text-sm font-bold">{editableText('classic.dearParents', 'Dear Parents,')}</p>
                 <p className="text-xs leading-relaxed font-bold indent-12">
-                  This report card shows the ability and progress your child has made in the different learning areas as well as his/her core values.
+                  {editableText('classic.message', 'This report card shows the ability and progress your child has made in the different learning areas as well as his/her core values.')}
                 </p>
               </div>
 
@@ -1168,12 +1363,12 @@ export default function ReportCard() {
                 <table className="w-full text-xs border-2 border-[#1e3a5f]">
                   <thead>
                     <tr className="bg-[#1e3a5f] text-white">
-                      <th className="border border-white/20 px-3 py-2 text-left font-black uppercase">Subject</th>
-                      <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">1st Qtr</th>
-                      <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">2nd Qtr</th>
-                      <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">3rd Qtr</th>
-                      <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">4th Qtr</th>
-                      <th className="border border-white/20 px-3 py-2 text-center font-black uppercase">Remarks</th>
+                      <th className="border border-white/20 px-3 py-2 text-left font-black uppercase">{editableText('classic.subjectHeader', 'Subject')}</th>
+                      <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">{editableText('classic.q1Header', '1st Qtr')}</th>
+                      <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">{editableText('classic.q2Header', '2nd Qtr')}</th>
+                      <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">{editableText('classic.q3Header', '3rd Qtr')}</th>
+                      <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">{editableText('classic.q4Header', '4th Qtr')}</th>
+                      <th className="border border-white/20 px-3 py-2 text-center font-black uppercase">{editableText('classic.remarksHeader', 'Remarks')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1194,16 +1389,16 @@ export default function ReportCard() {
               {/* Grading Reference */}
               <div className="grid grid-cols-3 gap-8 mb-10 pt-4 border-t-2 border-[#1e3a5f]">
                 <div>
-                  <p className="text-[10px] font-black uppercase mb-2">Description</p>
+                  <p className="text-[10px] font-black uppercase mb-2">{editableText('classic.description', 'Description')}</p>
                   <div className="space-y-1 text-[10px] font-bold">
-                    <p>Excellent</p>
-                    <p>Good</p>
-                    <p>Satisfactory</p>
-                    <p>Below Average</p>
+                    <p>{editableText('classic.excellent', 'Excellent')}</p>
+                    <p>{editableText('classic.good', 'Good')}</p>
+                    <p>{editableText('classic.satisfactory', 'Satisfactory')}</p>
+                    <p>{editableText('classic.belowAverage', 'Below Average')}</p>
                   </div>
                 </div>
                 <div>
-                  <p className="text-[10px] font-black uppercase mb-2">Grading Scale</p>
+                  <p className="text-[10px] font-black uppercase mb-2">{editableText('classic.gradingScale', 'Grading Scale')}</p>
                   <div className="space-y-1 text-[10px] font-bold">
                     <p>(A) 90-100</p>
                     <p>(B) 80-89</p>
@@ -1212,12 +1407,12 @@ export default function ReportCard() {
                   </div>
                 </div>
                 <div>
-                  <p className="text-[10px] font-black uppercase mb-2">Remarks</p>
+                  <p className="text-[10px] font-black uppercase mb-2">{editableText('classic.remarks', 'Remarks')}</p>
                   <div className="space-y-1 text-[10px] font-bold">
-                    <p>Passed</p>
-                    <p>Passed</p>
-                    <p>Passed</p>
-                    <p>Failed</p>
+                    <p>{editableText('classic.passed1', 'Passed')}</p>
+                    <p>{editableText('classic.passed2', 'Passed')}</p>
+                    <p>{editableText('classic.passed3', 'Passed')}</p>
+                    <p>{editableText('classic.failed', 'Failed')}</p>
                   </div>
                 </div>
               </div>
@@ -1225,21 +1420,21 @@ export default function ReportCard() {
               {/* Performance Summary */}
               <div className="space-y-4 pt-4 border-t-2 border-[#1e3a5f]">
                 <div className="flex gap-4">
-                  <p className="text-xs font-black uppercase w-48 shrink-0">Overall Performance:</p>
+                  <p className="text-xs font-black uppercase w-48 shrink-0">{editableText('classic.overallPerformance', 'Overall Performance:')}</p>
                   <p className="text-xs font-bold leading-relaxed">
                     <span className="border-b border-[#1e3a5f] px-4 font-black">{student.firstName} {student.lastName}</span> {template.overallPerformanceTemplate}
                   </p>
                 </div>
                 <div className="flex gap-4">
-                  <p className="text-xs font-black uppercase w-48 shrink-0">Strengths:</p>
+                  <p className="text-xs font-black uppercase w-48 shrink-0">{editableText('classic.strengths', 'Strengths:')}</p>
                   <p className="text-xs font-bold leading-relaxed border-b border-slate-300 flex-1 min-h-[1.5rem]">
-                    {template.strengthsTemplate}
+                    <LiveEditable value={template.strengthsTemplate} onSave={v => updateTemplate({ strengthsTemplate: v })} isLiveEditing={isLiveEditing} />
                   </p>
                 </div>
                 <div className="flex gap-4">
-                  <p className="text-xs font-black uppercase w-48 shrink-0">Areas for Improvement:</p>
+                  <p className="text-xs font-black uppercase w-48 shrink-0">{editableText('classic.areasForImprovement', 'Areas for Improvement:')}</p>
                   <p className="text-xs font-bold leading-relaxed border-b border-slate-300 flex-1 min-h-[1.5rem]">
-                    {template.improvementsTemplate}
+                    <LiveEditable value={template.improvementsTemplate} onSave={v => updateTemplate({ improvementsTemplate: v })} isLiveEditing={isLiveEditing} />
                   </p>
                 </div>
               </div>
@@ -1251,6 +1446,7 @@ export default function ReportCard() {
           <div className="px-5 py-2 text-center text-[10px] text-slate-500 italic">{template.footerText}</div>
         )}
         <div className="h-6 mt-1" style={{ backgroundColor: acc }} />
+      </div>
       </div>
 
       {/* ΓöÇΓöÇ Template Editor Modal ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */}
@@ -1525,11 +1721,17 @@ export default function ReportCard() {
             {/* Footer buttons */}
             <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex gap-2 shrink-0 flex-wrap">
               <button onClick={() => setShowEditor(false)} className="btn btn-secondary">Cancel</button>
-              <button onClick={() => handleSave(false)} disabled={saving} className="btn btn-primary flex items-center gap-2 flex-1">
-                <Check size={16} /> Save for this device
+              <button onClick={() => handleSave('device')} disabled={saving} className="btn btn-secondary flex items-center gap-2 flex-1">
+                <Check size={16} /> Save Device
               </button>
-              <button onClick={() => handleSave(true)} disabled={saving} className="btn btn-primary flex items-center gap-2 flex-1" style={{ backgroundColor: '#059669', borderColor: '#059669' }}>
-                <Eye size={16} /> {saving ? 'Saving...' : 'Apply to All Classes'}
+              <button onClick={() => handleSave('class')} disabled={saving || !student?.classId} className="btn btn-primary flex items-center gap-2 flex-1">
+                <GraduationCap size={16} /> {saving ? 'Saving...' : 'Save Class'}
+              </button>
+              <button onClick={() => handleSave('schoolType')} disabled={saving} className="btn btn-primary flex items-center gap-2 flex-1" style={{ backgroundColor: '#0f766e', borderColor: '#0f766e' }}>
+                <Building size={16} /> {saving ? 'Saving...' : 'Save School Type'}
+              </button>
+              <button onClick={() => handleSave('all')} disabled={saving} className="btn btn-primary flex items-center gap-2 flex-1" style={{ backgroundColor: '#059669', borderColor: '#059669' }}>
+                <Eye size={16} /> {saving ? 'Saving...' : 'Save All'}
               </button>
             </div>
           </div>
@@ -1537,6 +1739,9 @@ export default function ReportCard() {
       , document.body)}
 
       <style>{`
+        #report-card-print .live-editable-text {
+          color: var(--report-template-text-color, inherit);
+        }
         @media print {
           @page { margin: 10mm; size: A4; }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }

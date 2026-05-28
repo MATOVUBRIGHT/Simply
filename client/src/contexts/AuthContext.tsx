@@ -11,6 +11,7 @@ import { store } from '../lib/store';
 import { getSubscriptionAccessState } from '../utils/plans';
 import { isDesktopApp, setCloudSyncEnabled } from '../utils/desktopSyncPreference';
 import { loginLocal, registerLocal } from '../lib/auth/LocalAuth';
+import { createVerifiedPlanProof, readVerifiedPlanProof, restoreVerifiedPlanProof } from '../utils/planProof';
 import {
   clearStorageEncryption,
   unlockStorageEncryption,
@@ -61,11 +62,7 @@ const SUBSCRIPTION_SESSION_KEYS = [
   'schofy_sub_tid',
 ];
 
-function verifiedPlanBackupKey(tenantId: string) {
-  return `schofy_verified_plan_backup_${tenantId}`;
-}
-
-function backupVerifiedPlan(tenantId: string | null | undefined) {
+async function backupVerifiedPlan(tenantId: string | null | undefined) {
   if (!tenantId) return;
   const status = localStorage.getItem('schofy_sub_status');
   const pending = localStorage.getItem('schofy_sub_pending') === '1';
@@ -76,32 +73,26 @@ function backupVerifiedPlan(tenantId: string | null | undefined) {
   const notExpired = expiry && !Number.isNaN(expiry.getTime()) && expiry.getTime() > Date.now();
   if (!active || pending || !plan || !notExpired) return;
 
-  const payload: Record<string, string> = {};
-  for (const key of SUBSCRIPTION_SESSION_KEYS) {
-    const value = localStorage.getItem(key);
-    if (value != null) payload[key] = value;
-  }
-  localStorage.setItem(verifiedPlanBackupKey(tenantId), JSON.stringify({
-    savedAt: Date.now(),
-    values: payload,
-  }));
+  await createVerifiedPlanProof({
+    tenantId,
+    schofy_sub_expiry: expiryIso!,
+    schofy_sub_status: status!,
+    schofy_sub_plan: plan!,
+    schofy_sub_pending: '0',
+    remoteVerifiedAt: localStorage.getItem('schofy_plan_remote_verified_at') || new Date().toISOString(),
+    verificationCodeHash: localStorage.getItem('schofy_plan_verification_code_hash') || undefined,
+    source: localStorage.getItem('schofy_plan_verification_code_hash') ? 'verification_code' : 'remote_subscription',
+  });
 }
 
-function restoreVerifiedPlan(tenantId: string | null | undefined) {
-  if (!tenantId) return;
-  try {
-    const parsed = JSON.parse(localStorage.getItem(verifiedPlanBackupKey(tenantId)) || 'null') as { values?: Record<string, string> } | null;
-    const values = parsed?.values || {};
-    const expiry = values.schofy_sub_expiry ? new Date(values.schofy_sub_expiry) : null;
-    const active = values.schofy_sub_status === 'active' || values.schofy_sub_status === 'expiring';
-    const notExpired = expiry && !Number.isNaN(expiry.getTime()) && expiry.getTime() > Date.now();
-    if (!active || !notExpired) return;
-    for (const [key, value] of Object.entries(values)) {
-      localStorage.setItem(key, value);
-    }
-  } catch {
-    localStorage.removeItem(verifiedPlanBackupKey(tenantId));
-  }
+async function restoreVerifiedPlan(tenantId: string | null | undefined) {
+  if (!tenantId) return false;
+  return restoreVerifiedPlanProof(tenantId);
+}
+
+async function hasUsableVerifiedPlanBackup(tenantId: string | null | undefined) {
+  if (!tenantId) return false;
+  return Boolean(await readVerifiedPlanProof(tenantId));
 }
 
 function saveSession(user: LocalUser) {
@@ -112,7 +103,7 @@ function saveSession(user: LocalUser) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
   localStorage.setItem('schofy_current_user_id', user.id);
   localStorage.setItem('schofy_current_school_id', user.schoolId || user.id);
-  restoreVerifiedPlan(user.schoolId || user.id);
+  void restoreVerifiedPlan(user.schoolId || user.id);
   void writeElectronBackup(SESSION_KEY, sessionUser);
 }
 
@@ -130,7 +121,7 @@ function getSession(): LocalUser | null {
 
 function clearSession() {
   const tenantId = localStorage.getItem('schofy_current_school_id') || localStorage.getItem('schofy_current_user_id');
-  backupVerifiedPlan(tenantId);
+  void backupVerifiedPlan(tenantId);
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem('schofy_current_user_id');
   localStorage.removeItem('schofy_current_school_id');
@@ -163,11 +154,6 @@ function isRecoverableCloudProblem(error: any): boolean {
 }
 
 function markLocalUnlimitedAccess(user: LocalUser) {
-  localStorage.setItem(LOCAL_ONLY_SESSION_KEY, 'true');
-  localStorage.setItem('schofy_sub_status', 'active');
-  localStorage.setItem('schofy_sub_plan', 'local_unlimited');
-  localStorage.setItem('schofy_sub_expiry', new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 20).toISOString());
-  localStorage.setItem('schofy_sub_pending', '0');
   localStorage.setItem(`schofy_local_backup_email_${user.schoolId}`, user.email.toLowerCase());
 }
 
@@ -493,6 +479,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const localResult = await loginLocal(email.toLowerCase().trim(), password, { syncToCloud: false });
         if (localResult.success && localResult.user) {
           const userData = mapLocalAccount(localResult.user);
+          if (!(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
+            return { success: false, error: 'Offline login requires an active Schofy plan already verified by code on this device. Connect to internet, send payment by WhatsApp, then enter your verification code on Plans.' };
+          }
           await unlockStorageEncryption({
             userId: userData.id,
             schoolId: userData.schoolId,
@@ -502,6 +491,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setCloudSyncEnabled(false);
           markLocalUnlimitedAccess(userData);
           saveSession(userData);
+          await restoreVerifiedPlan(userData.schoolId);
           setUser(userData);
           setSchoolId(userData.schoolId);
           initializeSyncForUser(userData);
@@ -704,18 +694,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured || !supabase) {
       return {
         success: false,
-        error: isDesktopApp() ? 'Cloud registration is unavailable. You can create a local desktop account.' : 'Cloud space is not configured. Cannot register.',
-        localFallback: isDesktopApp(),
-        fallbackMode: 'register',
+        error: isDesktopApp()
+          ? 'Cloud registration is unavailable. Connect to internet to create an account, then activate a plan with a Schofy verification code.'
+          : 'Cloud space is not configured. Cannot register.',
       };
     }
 
     if (!isOnline) {
       return {
         success: false,
-        error: isDesktopApp() ? 'You are offline. Create a local desktop account instead.' : 'You are offline. Please connect to the internet to create an account.',
-        localFallback: isDesktopApp(),
-        fallbackMode: 'register',
+        error: 'You are offline. Please connect to the internet to create an account and activate a plan with a Schofy verification code.',
       };
     }
 
@@ -735,9 +723,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isDesktopApp() && isRecoverableCloudProblem(authError)) {
           return {
             success: false,
-            error: 'Cloud space could not create the account right now. You can create it locally on this desktop.',
-            localFallback: true,
-            fallbackMode: 'register',
+            error: 'Cloud space could not create the account right now. Connect to internet before creating an account or activating a plan.',
           };
         }
         return { success: false, error: authError.message };
@@ -774,9 +760,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isDesktopApp() && isRecoverableCloudProblem(error)) {
           return {
             success: false,
-            error: 'Cloud space could not save the account profile right now. You can create it locally on this desktop.',
-            localFallback: true,
-            fallbackMode: 'register',
+            error: 'Cloud space could not save the account profile right now. Connect to internet before creating an account or activating a plan.',
           };
         }
         return { success: false, error: error.message };
@@ -829,9 +813,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isDesktopApp() && isRecoverableCloudProblem(error)) {
         return {
           success: false,
-          error: 'Cloud space could not be reached. You can create a local desktop account.',
-          localFallback: true,
-          fallbackMode: 'register',
+          error: 'Cloud space could not be reached. Connect to internet before creating an account or activating a plan.',
         };
       }
       return { success: false, error: error.message || 'Registration failed' };
@@ -840,11 +822,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function continueLocally(profile: { email: string; password?: string; firstName?: string; lastName?: string; mode?: 'login' | 'register' }): Promise<AuthResult> {
     if (!isDesktopApp()) {
-      return { success: false, error: 'Local unlimited sessions are available only in the desktop app.' };
+      return { success: false, error: 'Local sessions are available only in the desktop app.' };
     }
 
     const cleanEmail = profile.email.trim().toLowerCase();
     if (!cleanEmail) return { success: false, error: 'Enter an email first.' };
+
+    if (profile.mode === 'register') {
+      return { success: false, error: 'Internet is required to create an account. After payment, use your Schofy verification code to unlock offline access.' };
+    }
 
     const cleanPassword = profile.password || '';
     if (profile.mode === 'login' && !cleanPassword) {
@@ -858,6 +844,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const loginResult = await loginLocal(cleanEmail, cleanPassword, { syncToCloud: false });
       if (loginResult.success && loginResult.user) {
         const userData = mapLocalAccount(loginResult.user);
+        if (!(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
+          return { success: false, error: 'This local account has no active verified plan. Connect to internet, open Plans, send payment by WhatsApp, then enter your Schofy verification code for offline access.' };
+        }
         await unlockStorageEncryption({
           userId: userData.id,
           schoolId: userData.schoolId,
@@ -868,72 +857,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         markLocalUnlimitedAccess(userData);
         localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'cloud_unavailable');
         saveSession(userData);
+        await restoreVerifiedPlan(userData.schoolId);
         setUser(userData);
         setSchoolId(userData.schoolId);
         initializeSyncForUser(userData);
         return { success: true };
       }
 
-      if (profile.mode === 'register' || loginResult.error === 'Invalid email or password') {
-        const first = profile.firstName?.trim() || cleanEmail.split('@')[0] || 'Local';
-        const last = profile.lastName?.trim() || 'School';
-        const registerResult = await registerLocal(cleanEmail, cleanPassword, first, last, { syncToCloud: false });
-        if (registerResult.success && registerResult.user) {
-          const userData = mapLocalAccount(registerResult.user);
-          await unlockStorageEncryption({
-            userId: userData.id,
-            schoolId: userData.schoolId,
-            email: userData.email,
-            password: cleanPassword,
-          });
-          setCloudSyncEnabled(false);
-          markLocalUnlimitedAccess(userData);
-          localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'cloud_unavailable');
-          saveSession(userData);
-          setUser(userData);
-          setSchoolId(userData.schoolId);
-          initializeSyncForUser(userData);
-          return { success: true };
-        }
-
-        if (profile.mode === 'register') {
-          return { success: false, error: registerResult.error || 'Could not create local desktop account.' };
-        }
-      }
-
       if (profile.mode === 'login') {
-        return { success: false, error: 'No matching local account exists on this desktop. Choose New local account to create one.' };
+        return { success: false, error: 'No matching verified local account exists on this desktop. Connect to internet to sign in or create an account.' };
       }
     }
-
-    const cached = await getBackedUpSession();
-    const useCached = cached?.email?.toLowerCase() === cleanEmail;
-    const now = new Date().toISOString();
-    const userData: LocalUser = useCached
-      ? { ...cached, localOnly: true }
-      : {
-          id: generateUUID(),
-          schoolId: generateUUID(),
-          email: cleanEmail,
-          firstName: profile.firstName?.trim() || cleanEmail.split('@')[0] || 'Local',
-          lastName: profile.lastName?.trim() || 'School',
-          isActive: true,
-          createdAt: now,
-          localOnly: true,
-        };
-
-    setCloudSyncEnabled(false);
-    markLocalUnlimitedAccess(userData);
-    localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'cloud_unavailable');
-    localStorage.removeItem('schofy_local_merge_prompt_dismissed');
-    localStorage.removeItem('schofy_cloud_recovered');
-    localStorage.setItem('schofy_next_cloud_health_check_at', String(Date.now() + 30 * 60 * 1000));
-    saveSession(userData);
-    setUser(userData);
-    setSchoolId(userData.schoolId);
-    void userDBManager.openDatabase(userData.schoolId).catch(() => {});
-    initializeSyncForUser(userData);
-    return { success: true };
+    return { success: false, error: 'Local access requires an existing verified plan cache on this desktop. Connect to internet to activate with a verification code first.' };
   }
 
   async function loginOffline(email: string, password: string): Promise<AuthResult> {
@@ -952,6 +887,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const userData = mapLocalAccount(result.user);
+    if (!(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
+      return { success: false, error: 'This local account has no active verified plan. Connect to internet, open Plans, send payment by WhatsApp, then enter your Schofy verification code for offline access.' };
+    }
     await unlockStorageEncryption({
       userId: userData.id,
       schoolId: userData.schoolId,
@@ -962,6 +900,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     markLocalUnlimitedAccess(userData);
     localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'desktop_offline_auth');
     saveSession(userData);
+    await restoreVerifiedPlan(userData.schoolId);
     setUser(userData);
     setSchoolId(userData.schoolId);
     initializeSyncForUser(userData);
@@ -969,35 +908,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function registerOffline(email: string, password: string, firstName: string, lastName: string): Promise<AuthResult> {
-    if (!isDesktopApp()) {
-      return { success: false, error: 'Offline desktop registration is available only in the desktop app.' };
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || !password || !firstName.trim() || !lastName.trim()) {
-      return { success: false, error: 'Complete all required account fields.' };
-    }
-
-    const result = await registerLocal(cleanEmail, password, firstName.trim(), lastName.trim(), { syncToCloud: false });
-    if (!result.success || !result.user) {
-      return { success: false, error: result.error || 'Could not create local account' };
-    }
-
-    const userData = mapLocalAccount(result.user);
-    await unlockStorageEncryption({
-      userId: userData.id,
-      schoolId: userData.schoolId,
-      email: userData.email,
-      password,
-    });
-    setCloudSyncEnabled(false);
-    markLocalUnlimitedAccess(userData);
-    localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'desktop_offline_auth');
-    saveSession(userData);
-    setUser(userData);
-    setSchoolId(userData.schoolId);
-    initializeSyncForUser(userData);
-    return { success: true };
+    return { success: false, error: 'Internet is required to create an account. Pay through WhatsApp, receive a Schofy verification code, then activate the plan for offline use.' };
   }
 
   async function sendPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {

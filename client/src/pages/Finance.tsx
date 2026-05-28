@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 
-import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight, Building2, Plus, Trash2, Edit, Save, Award, Percent, Printer } from 'lucide-react';
+import { DollarSign, Receipt, FileText, Users, Download, Upload, X, Check, ChevronDown, Check as CheckIcon, CreditCard, Search, Filter, ArrowRight, ChevronRight, Building2, Plus, Trash2, Edit, Save, Award, Percent, Printer, Palette } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Fee, Payment, PaymentMethod } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,6 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { SuccessPopup } from '../components/SuccessPopup';
+import LiveEditable from '../components/LiveEditable';
 import { matchesStudentSearch } from '../utils/studentSearch';
 import { openPrintPreview } from '../utils/printPreview';
 import { matchesTextSearch } from '../utils/searchMatch';
@@ -37,12 +38,21 @@ function normalizeImportDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
 }
 
+type LedgerTemplate = {
+  textColor: string;
+  headerColor: string;
+  accentColor: string;
+  logo: string;
+  labels: Record<string, string>;
+};
+
 export default function Finance() {
   const { user, schoolId } = useAuth();
   const [activeTab, setActiveTab] = useState<'students' | 'ledger' | 'invoices' | 'payments' | 'accounts'>('students');
   const { addToast } = useToast();
   const { formatMoney } = useCurrency();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const ledgerLogoInputRef = useRef<HTMLInputElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const termFilterRef = useRef<HTMLDivElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -62,6 +72,14 @@ export default function Finance() {
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
   const [expandedPayments, setExpandedPayments] = useState<Set<string>>(new Set());
   const [selectedLedgerStudentId, setSelectedLedgerStudentId] = useState<string | null>(null);
+  const [isLedgerLiveEditing, setIsLedgerLiveEditing] = useState(false);
+  const [ledgerTemplate, setLedgerTemplate] = useState<LedgerTemplate>(() => {
+    try {
+      const saved = localStorage.getItem('schofy_ledger_template');
+      if (saved) return { textColor: '#0f172a', headerColor: '#4f46e5', accentColor: '#10b981', logo: '', labels: {}, ...JSON.parse(saved) };
+    } catch {}
+    return { textColor: '#0f172a', headerColor: '#4f46e5', accentColor: '#10b981', logo: '', labels: {} };
+  });
   // Payment modal state
   const [payModal, setPayModal] = useState<{ feeId: string; studentId: string; amount: number; studentName: string; description: string } | null>(null);
   const [payAmount, setPayAmount] = useState('');
@@ -100,6 +118,32 @@ export default function Finance() {
     email: String(settingsMap.schoolEmail || '').trim(),
     logo: String(settingsMap.schoolLogo || '').trim(),
   }), [settingsMap]);
+  function updateLedgerTemplate(next: Partial<typeof ledgerTemplate>) {
+    setLedgerTemplate(prev => {
+      const merged = { ...prev, ...next };
+      localStorage.setItem('schofy_ledger_template', JSON.stringify(merged));
+      return merged;
+    });
+  }
+  function handleLedgerLogoUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') updateLedgerTemplate({ logo: reader.result });
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  }
+  function ledgerText(key: string, fallback: string) {
+    return ledgerTemplate.labels?.[key] || fallback;
+  }
+  function updateLedgerText(key: string, value: string) {
+    updateLedgerTemplate({ labels: { ...(ledgerTemplate.labels || {}), [key]: value } });
+  }
+  function editableLedgerText(key: string, fallback: string) {
+    return <LiveEditable value={ledgerText(key, fallback)} onSave={value => updateLedgerText(key, value)} isLiveEditing={isLedgerLiveEditing} />;
+  }
 
   // Derive payment accounts from settings
   const bankAccounts = useMemo(() => {
@@ -642,11 +686,11 @@ export default function Finance() {
     <div className="mb-5 border-b border-slate-300 pb-4 text-slate-900 print:block">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
-          {schoolPrintInfo.logo && (
-            <img src={schoolPrintInfo.logo} alt="School logo" className="h-16 w-16 shrink-0 object-contain" />
+          {(ledgerTemplate.logo || schoolPrintInfo.logo) && (
+            <img src={ledgerTemplate.logo || schoolPrintInfo.logo} alt="School logo" className="h-16 w-16 shrink-0 object-contain" />
           )}
           <div>
-            <h2 className="text-2xl font-black uppercase tracking-tight">{schoolPrintInfo.name}</h2>
+            <h2 className="text-2xl font-black uppercase tracking-tight" style={{ color: ledgerTemplate.headerColor }}>{schoolPrintInfo.name}</h2>
             {schoolPrintInfo.address && <p className="text-sm text-slate-600">{schoolPrintInfo.address}</p>}
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
               {schoolPrintInfo.phone && <span>Tel: {schoolPrintInfo.phone}</span>}
@@ -655,8 +699,10 @@ export default function Finance() {
           </div>
         </div>
         <div className="text-left text-sm sm:text-right">
-          <p className="font-bold uppercase tracking-wide">{documentTitle}</p>
-          <p className="text-slate-500">Printed {new Date().toLocaleDateString()}</p>
+          <p className="font-bold uppercase tracking-wide" style={{ color: ledgerTemplate.headerColor }}>
+            {editableLedgerText(documentTitle.startsWith('Fee Ledger') ? 'print.feeLedgerTitle' : 'print.studentLedgerTitle', documentTitle)}
+          </p>
+          <p className="text-slate-500">{editableLedgerText('print.printedLabel', 'Printed')} {new Date().toLocaleDateString()}</p>
         </div>
       </div>
     </div>
@@ -805,11 +851,17 @@ export default function Finance() {
                   ))}
                 </select>
               )}
-              {activeTab === 'ledger' && (
-                <button onClick={handlePrintLedger} className="btn btn-secondary">
-                  <Printer size={16} /> Print
-                </button>
-              )}
+          {activeTab === 'ledger' && (
+            <button onClick={handlePrintLedger} className="btn btn-secondary">
+              <Printer size={16} /> Print
+            </button>
+          )}
+          {activeTab === 'ledger' && (
+            <button onClick={() => setIsLedgerLiveEditing(prev => !prev)} className={`btn flex items-center gap-2 ${isLedgerLiveEditing ? 'bg-yellow-500 text-white hover:bg-yellow-600' : 'btn-secondary'}`}>
+              {isLedgerLiveEditing ? <Check size={16} /> : <Palette size={16} />}
+              {isLedgerLiveEditing ? 'Finish Editing' : 'Live Edit'}
+            </button>
+          )}
               {!selectedLedgerRow && <div className="relative shrink-0">
                 <Search size={18} className="search-input-icon" />
                 <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search..." className="search-input w-48" />
@@ -855,31 +907,66 @@ export default function Finance() {
         {/* Ledger Tab - term statement with opening and closing balance */}
         {activeTab === 'ledger' && (
           <div className="space-y-3 print-area">
+            <div className={`grid gap-4 print:block ${isLedgerLiveEditing ? 'lg:grid-cols-[15rem_minmax(0,1fr)]' : ''}`}>
+              {isLedgerLiveEditing && (
+                <aside className="print:hidden h-fit rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800 lg:sticky lg:top-20">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Palette size={16} className="text-indigo-600" />
+                    <h3 className="text-sm font-black text-slate-800 dark:text-white">Ledger Tools</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {[
+                      ['Text', ledgerTemplate.textColor, (value: string) => updateLedgerTemplate({ textColor: value })],
+                      ['Header', ledgerTemplate.headerColor, (value: string) => updateLedgerTemplate({ headerColor: value })],
+                      ['Accent', ledgerTemplate.accentColor, (value: string) => updateLedgerTemplate({ accentColor: value })],
+                    ].map(([label, value, onChange]: any) => (
+                      <div key={label}>
+                        <label className="mb-1 block text-xs font-bold text-slate-500">{label}</label>
+                        <div className="flex items-center gap-2">
+                          <input type="color" value={value} onChange={e => onChange(e.target.value)} className="h-9 w-10 rounded border border-slate-200" />
+                          <input value={value} onChange={e => onChange(e.target.value)} className="form-input h-9 min-h-0 flex-1 px-2 py-1 font-mono text-xs" />
+                        </div>
+                      </div>
+                    ))}
+                    <div>
+                      <label className="mb-1 block text-xs font-bold text-slate-500">Logo</label>
+                      <div className="flex gap-2">
+                        <input value={ledgerTemplate.logo || schoolPrintInfo.logo || ''} onChange={e => updateLedgerTemplate({ logo: e.target.value })} className="form-input h-9 min-h-0 flex-1 px-2 py-1 text-xs" placeholder="Image URL" />
+                        <button type="button" onClick={() => ledgerLogoInputRef.current?.click()} className="rounded-lg border border-slate-200 px-2 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700" title="Upload logo">
+                          <Upload size={15} />
+                        </button>
+                      </div>
+                      <input ref={ledgerLogoInputRef} type="file" accept="image/*" onChange={handleLedgerLogoUpload} className="hidden" />
+                    </div>
+                  </div>
+                </aside>
+              )}
+              <div style={{ color: ledgerTemplate.textColor }}>
             {selectedLedgerRow ? (
               <div className="mx-auto max-w-5xl rounded-sm border border-slate-200 bg-white p-6 text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 print:border-0 print:bg-white print:p-0 print:text-black print:shadow-none">
                 {renderSchoolPrintHeader('Student Ledger Statement')}
                 <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between dark:border-slate-700">
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-400">Student Ledger Statement</p>
+                    <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-400">{editableLedgerText('student.statementTitle', 'Student Ledger Statement')}</p>
                     <h3 className="mt-1 text-2xl font-bold">{selectedLedgerRow.studentName}</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">ID: {selectedLedgerRow.admissionNo || '-'} | Term {ledgerTerm}, {ledgerYear}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{editableLedgerText('student.idLabel', 'ID')}: {selectedLedgerRow.admissionNo || '-'} | {editableLedgerText('student.termLabel', 'Term')} {ledgerTerm}, {ledgerYear}</p>
                   </div>
                   <div className="text-left text-sm sm:text-right">
                     <p className="font-semibold">{schoolPrintInfo.name}</p>
-                    <p className="text-slate-500 dark:text-slate-400">Printed {new Date().toLocaleDateString()}</p>
+                    <p className="text-slate-500 dark:text-slate-400">{editableLedgerText('print.printedLabel', 'Printed')} {new Date().toLocaleDateString()}</p>
                   </div>
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-slate-700 dark:bg-slate-700 sm:grid-cols-5">
                   {[
-                    { label: 'Opening Balance', value: selectedLedgerRow.openingBalance, color: selectedLedgerRow.openingBalance > 0 ? 'text-pink-600' : 'text-slate-700 dark:text-slate-200' },
-                    { label: 'Current Invoiced', value: selectedLedgerRow.invoiced, color: 'text-indigo-600 dark:text-indigo-300' },
-                    { label: 'Current Paid', value: selectedLedgerRow.paid, color: 'text-emerald-600 dark:text-emerald-300' },
-                    { label: 'Closing Balance', value: selectedLedgerRow.closingBalance, color: selectedLedgerRow.closingBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300' },
-                    { label: 'Upfront Credit', value: selectedLedgerRow.upfrontCredit, color: 'text-emerald-600 dark:text-emerald-300' },
+                    { key: 'summary.openingBalance', label: 'Opening Balance', value: selectedLedgerRow.openingBalance, color: selectedLedgerRow.openingBalance > 0 ? 'text-pink-600' : 'text-slate-700 dark:text-slate-200' },
+                    { key: 'summary.currentInvoiced', label: 'Current Invoiced', value: selectedLedgerRow.invoiced, color: 'text-indigo-600 dark:text-indigo-300' },
+                    { key: 'summary.currentPaid', label: 'Current Paid', value: selectedLedgerRow.paid, color: 'text-emerald-600 dark:text-emerald-300' },
+                    { key: 'summary.closingBalance', label: 'Closing Balance', value: selectedLedgerRow.closingBalance, color: selectedLedgerRow.closingBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300' },
+                    { key: 'summary.upfrontCredit', label: 'Upfront Credit', value: selectedLedgerRow.upfrontCredit, color: 'text-emerald-600 dark:text-emerald-300' },
                   ].map(item => (
                     <div key={item.label} className="bg-white p-3 dark:bg-slate-900 print:bg-white">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText(item.key, item.label)}</p>
                       <p className={`mt-1 text-lg font-bold tabular-nums ${item.color}`}>{formatMoney(item.value)}</p>
                     </div>
                   ))}
@@ -887,15 +974,15 @@ export default function Finance() {
 
                 <div className="mt-6 space-y-6">
                   <section>
-                    <h4 className="mb-2 text-sm font-bold uppercase tracking-wide text-pink-600 dark:text-pink-300">Previous Term Balance Details</h4>
+                    <h4 className="mb-2 text-sm font-bold uppercase tracking-wide text-pink-600 dark:text-pink-300">{editableLedgerText('section.previousTerm', 'Previous Term Balance Details')}</h4>
                     <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
                       <table className="w-full text-sm">
                         <thead className="bg-slate-50 dark:bg-slate-800">
-                          <tr><th>No.</th><th>Description</th><th>Term</th><th className="text-right">Amount</th><th className="text-right">Paid</th><th className="text-right">Balance</th></tr>
+                          <tr><th>{editableLedgerText('table.no', 'No.')}</th><th>{editableLedgerText('table.description', 'Description')}</th><th>{editableLedgerText('table.term', 'Term')}</th><th className="text-right">{editableLedgerText('table.amount', 'Amount')}</th><th className="text-right">{editableLedgerText('table.paid', 'Paid')}</th><th className="text-right">{editableLedgerText('table.balance', 'Balance')}</th></tr>
                         </thead>
                         <tbody>
                           {selectedLedgerPreviousFees.length === 0 ? (
-                            <tr><td colSpan={6} className="py-6 text-center text-slate-500">No previous term balance.</td></tr>
+                            <tr><td colSpan={6} className="py-6 text-center text-slate-500">{editableLedgerText('empty.noPrevious', 'No previous term balance.')}</td></tr>
                           ) : selectedLedgerPreviousFees.map((fee, index) => {
                             const paid = selectedLedgerPayments.filter(p => p.feeId === fee.id).reduce((sum, p) => sum + Number(p.amount || 0), 0);
                             const balance = Math.max(0, Number(fee.amount || 0) - paid);
@@ -916,15 +1003,15 @@ export default function Finance() {
                   </section>
 
                   <section>
-                    <h4 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Current Term Fees List</h4>
+                    <h4 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">{editableLedgerText('section.currentTerm', 'Current Term Fees List')}</h4>
                     <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
                       <table className="w-full text-sm">
                         <thead className="bg-slate-50 dark:bg-slate-800">
-                          <tr><th>No.</th><th>Fee</th><th>Term</th><th className="text-right">Amount</th><th className="text-right">Paid</th><th className="text-right">Balance</th></tr>
+                          <tr><th>{editableLedgerText('table.no', 'No.')}</th><th>{editableLedgerText('table.fee', 'Fee')}</th><th>{editableLedgerText('table.term', 'Term')}</th><th className="text-right">{editableLedgerText('table.amount', 'Amount')}</th><th className="text-right">{editableLedgerText('table.paid', 'Paid')}</th><th className="text-right">{editableLedgerText('table.balance', 'Balance')}</th></tr>
                         </thead>
                         <tbody>
                           {selectedLedgerCurrentFees.length === 0 ? (
-                            <tr><td colSpan={6} className="py-6 text-center text-slate-500">No current term fees yet.</td></tr>
+                            <tr><td colSpan={6} className="py-6 text-center text-slate-500">{editableLedgerText('empty.noCurrentFees', 'No current term fees yet.')}</td></tr>
                           ) : selectedLedgerCurrentFees.map((fee, index) => {
                             const paid = selectedLedgerPayments.filter(p => p.feeId === fee.id).reduce((sum, p) => sum + Number(p.amount || 0), 0);
                             const balance = Math.max(0, Number(fee.amount || 0) - paid);
@@ -945,15 +1032,15 @@ export default function Finance() {
                   </section>
 
                   <section>
-                    <h4 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Payment Activity</h4>
+                    <h4 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">{editableLedgerText('section.paymentActivity', 'Payment Activity')}</h4>
                     <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
                       <table className="w-full text-sm">
                         <thead className="bg-slate-50 dark:bg-slate-800">
-                          <tr><th>No.</th><th>Date</th><th>Method</th><th>Reference</th><th className="text-right">Amount</th></tr>
+                          <tr><th>{editableLedgerText('table.no', 'No.')}</th><th>{editableLedgerText('table.date', 'Date')}</th><th>{editableLedgerText('table.method', 'Method')}</th><th>{editableLedgerText('table.reference', 'Reference')}</th><th className="text-right">{editableLedgerText('table.amount', 'Amount')}</th></tr>
                         </thead>
                         <tbody>
                           {selectedLedgerPayments.length === 0 ? (
-                            <tr><td colSpan={5} className="py-6 text-center text-slate-500">No payment activity.</td></tr>
+                            <tr><td colSpan={5} className="py-6 text-center text-slate-500">{editableLedgerText('empty.noPayments', 'No payment activity.')}</td></tr>
                           ) : selectedLedgerPayments.map((payment, index) => (
                             <tr key={payment.id}>
                               <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
@@ -976,23 +1063,23 @@ export default function Finance() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
               <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Opening Balance</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.openingBalance', 'Opening Balance')}</p>
                 <p className="mt-1 text-lg font-bold tabular-nums text-slate-900 dark:text-white">{formatMoney(ledgerTotals.openingBalance)}</p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invoiced</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.invoiced', 'Invoiced')}</p>
                 <p className="mt-1 text-lg font-bold tabular-nums text-indigo-600 dark:text-indigo-300">{formatMoney(ledgerTotals.invoiced)}</p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Paid</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.paid', 'Paid')}</p>
                 <p className="mt-1 text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-300">{formatMoney(ledgerTotals.paid)}</p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Closing Balance</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.closingBalance', 'Closing Balance')}</p>
                 <p className={`mt-1 text-lg font-bold tabular-nums ${ledgerTotals.closingBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300'}`}>{formatMoney(ledgerTotals.closingBalance)}</p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Upfront Credit</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.upfrontCredit', 'Upfront Credit')}</p>
                 <p className="mt-1 text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-300">{formatMoney(ledgerTotals.upfrontCredit)}</p>
               </div>
             </div>
@@ -1001,19 +1088,19 @@ export default function Finance() {
               <table>
                 <thead>
                   <tr>
-                    <th>No.</th>
-                    <th>Student</th>
-                    <th>ID Number</th>
-                    <th className="text-right">Opening Balance</th>
-                    <th className="text-right">Invoiced</th>
-                    <th className="text-right">Payable</th>
-                    <th className="text-right">Paid</th>
-                    <th className="text-right">Closing Balance</th>
-                    <th className="text-right">Upfront Credit</th>
-                    <th>Invoices</th>
-                    <th>Tags</th>
-                    <th>Status</th>
-                    <th>Action</th>
+                    <th>{editableLedgerText('table.no', 'No.')}</th>
+                    <th>{editableLedgerText('table.student', 'Student')}</th>
+                    <th>{editableLedgerText('table.idNumber', 'ID Number')}</th>
+                    <th className="text-right">{editableLedgerText('summary.openingBalance', 'Opening Balance')}</th>
+                    <th className="text-right">{editableLedgerText('summary.invoiced', 'Invoiced')}</th>
+                    <th className="text-right">{editableLedgerText('table.payable', 'Payable')}</th>
+                    <th className="text-right">{editableLedgerText('summary.paid', 'Paid')}</th>
+                    <th className="text-right">{editableLedgerText('summary.closingBalance', 'Closing Balance')}</th>
+                    <th className="text-right">{editableLedgerText('summary.upfrontCredit', 'Upfront Credit')}</th>
+                    <th>{editableLedgerText('table.invoices', 'Invoices')}</th>
+                    <th>{editableLedgerText('table.tags', 'Tags')}</th>
+                    <th>{editableLedgerText('table.status', 'Status')}</th>
+                    <th>{editableLedgerText('table.action', 'Action')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1021,8 +1108,8 @@ export default function Finance() {
                     <tr><td colSpan={13} className="text-center py-12">
                       <div className="flex flex-col items-center gap-2">
                         <div className="w-12 h-12 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center"><FileText size={24} className="text-indigo-400" /></div>
-                        <p className="text-slate-500 font-medium">No ledger activity for Term {ledgerTerm} {ledgerYear}</p>
-                        <p className="text-sm text-slate-400">Invoices from previous terms appear here as opening balances.</p>
+                        <p className="text-slate-500 font-medium">{editableLedgerText('empty.noLedgerActivity', 'No ledger activity for Term')} {ledgerTerm} {ledgerYear}</p>
+                        <p className="text-sm text-slate-400">{editableLedgerText('empty.openingHint', 'Invoices from previous terms appear here as opening balances.')}</p>
                       </div>
                     </td></tr>
                   ) : ledgerRows.map((row, index) => (
@@ -1047,6 +1134,8 @@ export default function Finance() {
             </div>
               </>
             )}
+              </div>
+            </div>
           </div>
         )}
 

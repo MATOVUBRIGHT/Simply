@@ -232,6 +232,7 @@ export default function Reports() {
       salaryPayments,
       expenses,
       students,
+      classes,
       term: profitTerm,
       year: profitYear,
       classId: selectedClass,

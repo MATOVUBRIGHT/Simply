@@ -1901,18 +1901,20 @@ class SupabaseDataService {
     }
   }
 
-  async forcePull(schoolId: string): Promise<{ success: boolean; pulled: number; failed: number; error?: string }> {
+  async forcePull(schoolId: string, fullRefresh = false): Promise<{ success: boolean; pulled: number; failed: number; error?: string }> {
     if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return { success: false, pulled: 0, failed: 0, error: 'Cloud sync disabled or offline' };
     
     let pulled = 0;
+    let failed = 0;
     
-    await Promise.allSettled(ALL_SYNC_TABLES.map(async (t) => {
+    const results = await Promise.allSettled(ALL_SYNC_TABLES.map(async (t) => {
       if (!canUseRemoteTable(t)) return;
-      await this._fetchAndMerge(schoolId, t);
-      pulled++;
+      const records = await this._fetchAndMerge(schoolId, t, fullRefresh);
+      pulled += records.length;
     }));
 
-    return { success: true, pulled, failed: 0 };
+    failed = results.filter(result => result.status === 'rejected').length;
+    return { success: failed === 0, pulled, failed };
   }
 
   async getSyncStatus(schoolId: string): Promise<SyncHealthStatus> {

@@ -36,8 +36,7 @@
       }
     ],
     "icon": "../client/public/schofy.logo.ico",
-    "artifactName": "${productName}-${version}-${arch}.${ext}",
-    "signAndEditExecutable": false
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
   },
   "nsis": {
     "oneClick": false,

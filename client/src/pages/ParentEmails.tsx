@@ -122,7 +122,7 @@ export default function ParentEmails() {
   }
 
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div className="max-w-full space-y-5 overflow-x-hidden animate-fade-in">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Parents & Student Emails</h1>
@@ -133,8 +133,8 @@ export default function ParentEmails() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_22rem]">
-        <section className="card">
+      <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <section className="card min-w-0 overflow-hidden">
           <div className="card-header space-y-3">
             <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_160px_210px]">
               <div className="relative">
@@ -171,7 +171,7 @@ export default function ParentEmails() {
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="action-row">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <button onClick={toggleVisible} className="btn btn-secondary py-1.5 text-sm">
                   {allVisibleSelected ? <Check size={16} /> : <Square size={16} />}
                   {allVisibleSelected ? 'Deselect visible' : 'Select visible'}
@@ -183,20 +183,20 @@ export default function ParentEmails() {
                   <Copy size={16} /> Copy All Visible
                 </button>
               </div>
-              <span className="text-sm font-semibold text-slate-500">{selectedRows.length} student{selectedRows.length === 1 ? '' : 's'} selected - {selectedEmails.length} email{selectedEmails.length === 1 ? '' : 's'}</span>
+              <span className="min-w-0 text-sm font-semibold text-slate-500">{selectedRows.length} student{selectedRows.length === 1 ? '' : 's'} selected - {selectedEmails.length} email{selectedEmails.length === 1 ? '' : 's'}</span>
             </div>
           </div>
-          <div className="table-container">
-            <table>
+          <div className="table-container !overflow-x-hidden">
+            <table className="!min-w-0 table-fixed">
               <thead>
                 <tr>
-                  <th>Select</th>
-                  <th>Student Email</th>
-                  <th>Parent Email</th>
-                  <th>Parent</th>
-                  <th>Student</th>
-                  <th>Student ID</th>
-                  <th>Class</th>
+                  <th className="w-14">Select</th>
+                  <th className="w-[18%]">Student Email</th>
+                  <th className="w-[18%]">Parent Email</th>
+                  <th className="w-[15%]">Parent</th>
+                  <th className="w-[15%]">Student</th>
+                  <th className="w-[13%]">Student ID</th>
+                  <th className="w-[13%]">Class</th>
                 </tr>
               </thead>
               <tbody>
@@ -218,12 +218,12 @@ export default function ParentEmails() {
                           {checked && <Check size={13} />}
                         </span>
                       </td>
-                      <td className="font-semibold">{getStudentEmail(student) || '-'}</td>
-                      <td className="font-semibold">{getParentEmail(student) || '-'}</td>
-                      <td>{student.guardianName || '-'}</td>
-                      <td>{student.firstName} {student.lastName}</td>
-                      <td className="font-mono text-xs">{student.studentId || student.admissionNo || '-'}</td>
-                      <td>{getClassDisplayName(student.classId, classes)}</td>
+                      <td className="break-words font-semibold">{getStudentEmail(student) || '-'}</td>
+                      <td className="break-words font-semibold">{getParentEmail(student) || '-'}</td>
+                      <td className="break-words">{student.guardianName || '-'}</td>
+                      <td className="break-words">{student.firstName} {student.lastName}</td>
+                      <td className="break-words font-mono text-xs">{student.studentId || student.admissionNo || '-'}</td>
+                      <td className="break-words">{getClassDisplayName(student.classId, classes)}</td>
                     </tr>
                   );
                 })}
@@ -232,7 +232,7 @@ export default function ParentEmails() {
           </div>
         </section>
 
-        <aside className="card h-fit">
+        <aside className="card h-fit min-w-0">
           <div className="card-header">
             <h2 className="font-bold text-slate-800 dark:text-white">Compose Email</h2>
             <p className="mt-1 text-xs text-slate-500">Uses your device email app with selected recipients in BCC.</p>

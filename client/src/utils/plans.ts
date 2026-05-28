@@ -109,23 +109,10 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     popular: false,
     studentLimit: Number.MAX_SAFE_INTEGER,
     contactOnly: true,
-    priceLabel: 'Contact Schofy assistant',
+    priceLabel: 'Contact Us',
     limitLabel: 'Unlimited students',
   },
 ];
-
-const LOCAL_UNLIMITED_PLAN: PlanDefinition = {
-  id: 'local_unlimited',
-  name: 'Local Unlimited',
-  monthlyPrice: 0,
-  termPrice: 0,
-  yearlyPrice: 0,
-  period: 'local',
-  features: ['Desktop local-only access', 'Unlimited local records', 'Cloud sync paused'],
-  notIncluded: [],
-  popular: false,
-  studentLimit: Number.MAX_SAFE_INTEGER,
-};
 
 const DEFAULT_BILLING_CYCLE: BillingCycle = 'term';
 const PLAN_CACHE_PREFIX = 'schofy_plan_cache_';
@@ -261,7 +248,7 @@ function pendingPlanCacheKey(tenantId: string) {
 }
 
 export function cachePlanStateLocally(tenantId: string, state: SubscriptionAccessState, pending = false) {
-  if (!tenantId || !state.selectedPlanId || state.selectedPlanId === LOCAL_UNLIMITED_PLAN.id) return;
+  if (!tenantId || !state.selectedPlanId) return;
   const plan = getPlanById(state.selectedPlanId);
   if (!plan) return;
   const payload = {
@@ -324,7 +311,7 @@ function getCachedPlanState(tenantId: string, usedOverride?: number): Subscripti
 
 function hasAdminApproval(row: Record<string, unknown> | null | undefined): boolean {
   const meta = (row?.metadata || {}) as Record<string, unknown>;
-  return Boolean(meta.approvedByAdmin || meta.grantedByAdmin || meta.extendedByAdmin);
+  return Boolean(meta.approvedByAdmin || meta.grantedByAdmin || meta.extendedByAdmin || meta.approvedByCode);
 }
 
 /**
@@ -336,22 +323,6 @@ export async function getSubscriptionAccessState(
   planId?: string,
   opts?: { authUserId?: string }
 ): Promise<SubscriptionAccessState> {
-  if (localStorage.getItem('schofy_local_only_session') === 'true') {
-    const used = await getPlanStudentCount(tenantId);
-    const expiryDate = localStorage.getItem('schofy_sub_expiry') || new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 20).toISOString();
-    return {
-      plan: LOCAL_UNLIMITED_PLAN,
-      selectedPlanId: LOCAL_UNLIMITED_PLAN.id,
-      used,
-      remaining: Number.MAX_SAFE_INTEGER,
-      eligible: true,
-      expiryDate,
-      status: 'active',
-      daysRemaining: null,
-      requiresPlanAction: false,
-    };
-  }
-
   const authUserId = opts?.authUserId || tenantId;
   const subRow = await getLatestLocalSubscription(tenantId, authUserId);
   const subStatus = subRow?.status != null ? String(subRow.status) : '';

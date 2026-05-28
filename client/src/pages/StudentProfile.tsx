@@ -1041,7 +1041,7 @@ export default function StudentProfile() {
 
               {openingBalance > 0 && (
                 <div className="rounded-xl border border-pink-200 bg-pink-50 p-3 text-sm text-pink-700 dark:border-pink-900/50 dark:bg-pink-900/20 dark:text-pink-300">
-                  Opening balance top-up of <strong>{formatMoney(openingBalance)}</strong> is carried into Current Term {currentTerm}.
+                  Opening Bal of <strong>{formatMoney(openingBalance)}</strong> is carried into Current Term {currentTerm}.
                 </div>
               )}
 
@@ -1058,7 +1058,7 @@ export default function StudentProfile() {
                       {openingBalance > 0 && (
                         <tr className="bg-pink-50/80 dark:bg-pink-900/10">
                           <td>1</td>
-                          <td className="font-medium">Opening balance top-up</td>
+                          <td className="font-medium">Opening Bal</td>
                           <td><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">Current Term {currentTerm}</span></td>
                           <td>{formatMoney(openingBalance)}</td>
                           <td>{formatMoney(0)}</td>

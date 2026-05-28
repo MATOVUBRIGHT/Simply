@@ -38,7 +38,7 @@ const LiveEditable: React.FC<LiveEditableProps> = ({
             if (temp !== value) onSave(temp);
           }
         }}
-        className={`bg-white dark:bg-slate-800 border-2 border-indigo-500 rounded outline-none px-1 text-slate-900 dark:text-white ${className}`}
+        className={`live-editable-text bg-white dark:bg-slate-800 border-2 border-indigo-500 rounded outline-none px-1 text-slate-900 dark:text-white ${className}`}
         style={{ ...style, width: `${Math.max(value.length, temp.length, 5)}ch` }}
       />
     );
@@ -50,7 +50,7 @@ const LiveEditable: React.FC<LiveEditableProps> = ({
       className={`
         transition-all duration-200
         ${isLiveEditing ? 'cursor-pointer hover:bg-yellow-100/50 dark:hover:bg-yellow-900/20 ring-1 ring-transparent hover:ring-yellow-400/50 rounded px-1' : ''}
-        ${className}
+        live-editable-text ${className}
       `}
       style={style}
     >

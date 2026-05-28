@@ -55,6 +55,45 @@ const Plans = lazy(() => import('./pages/Plans'));
 const RecycleBin = lazy(() => import('./pages/RecycleBin'));
 const Roles = lazy(() => import('./pages/Roles'));
 
+const offlinePageWarmers = [
+  () => import('./pages/Dashboard'),
+  () => import('./pages/Students'),
+  () => import('./pages/Parents'),
+  () => import('./pages/ParentEmails'),
+  () => import('./pages/StudentForm'),
+  () => import('./pages/Admission'),
+  () => import('./pages/StudentProfile'),
+  () => import('./pages/Staff'),
+  () => import('./pages/StaffForm'),
+  () => import('./pages/StaffProfile'),
+  () => import('./pages/Payroll'),
+  () => import('./pages/Classes'),
+  () => import('./pages/ClassDetail'),
+  () => import('./pages/Timetable'),
+  () => import('./pages/Subjects'),
+  () => import('./pages/HomeworkTests'),
+  () => import('./pages/Attendance'),
+  () => import('./pages/DayBoarding'),
+  () => import('./pages/Finance'),
+  () => import('./pages/PaymentAccounts'),
+  () => import('./pages/Expenses'),
+  () => import('./pages/Invoices'),
+  () => import('./pages/Grades'),
+  () => import('./pages/CustomGrading'),
+  () => import('./pages/ExamMarks'),
+  () => import('./pages/ReportCard'),
+  () => import('./pages/Transport'),
+  () => import('./pages/Announcements'),
+  () => import('./pages/Notifications'),
+  () => import('./pages/Reports'),
+  () => import('./pages/Settings'),
+  () => import('./pages/Plans'),
+  () => import('./pages/RecycleBin'),
+  () => import('./pages/Roles'),
+  () => import('./pages/About'),
+  () => import('./pages/NotFound'),
+];
+
 function FullScreenLoader({ label = 'Loading Schofy...' }: { label?: string }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4">
@@ -86,6 +125,47 @@ function MainApp() {
       window.sessionStorage.setItem('lastRoute', fullPath);
     }
   }, [location.pathname, location.search, location.hash]);
+
+  useEffect(() => {
+    if (!user?.id || typeof navigator === 'undefined' || !navigator.onLine) return;
+    let cancelled = false;
+    let timeoutId = 0;
+    let idleId: number | null = null;
+
+    const warmOfflinePages = () => {
+      if (cancelled || !navigator.onLine) return;
+      void Promise.allSettled(offlinePageWarmers.map(load => load())).then(() => {
+        if (cancelled || !navigator.serviceWorker?.controller) return;
+        const sameOriginResources = performance.getEntriesByType('resource')
+          .map(entry => entry.name)
+          .filter(name => {
+            try {
+              return new URL(name).origin === window.location.origin;
+            } catch {
+              return false;
+            }
+          });
+        navigator.serviceWorker.controller.postMessage({
+          type: 'CACHE_URLS',
+          urls: sameOriginResources,
+        });
+      });
+    };
+
+    timeoutId = window.setTimeout(() => {
+      if (window.requestIdleCallback) {
+        idleId = window.requestIdleCallback(warmOfflinePages, { timeout: 5000 });
+      } else {
+        warmOfflinePages();
+      }
+    }, 3500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      if (idleId !== null && window.cancelIdleCallback) window.cancelIdleCallback(idleId);
+    };
+  }, [user?.id]);
 
   // Staff access guard — redirect to dashboard if page not allowed
   useEffect(() => {
@@ -263,7 +343,7 @@ function LocalMergePrompt() {
         </div>
         <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">Cloud space is reachable again</h2>
         <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">
-          This desktop is using a local-only backup. If this is the same school account, merge by enabling cloud sync and uploading your local data.
+          This desktop is using a local backup. If this is the same school account, merge by enabling cloud sync and uploading your local data.
         </p>
         <div className="mt-5 flex gap-3">
           <button
@@ -334,7 +414,7 @@ function CloudProblemPrompt() {
         <h2 className="text-center text-lg font-bold text-slate-900 dark:text-white">Cloud sync problem</h2>
         <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">{message}</p>
         <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-          Local mode stops cloud calls and keeps storing changes on this device. You can re-enable cloud sync in Settings later.
+          Local mode stops cloud calls and keeps storing changes on this device. Access still requires an active Schofy plan verified by code.
         </div>
         <div className="mt-5 flex gap-3">
           <button
@@ -348,14 +428,9 @@ function CloudProblemPrompt() {
             type="button"
             onClick={() => {
               disableSync();
-              const expiry = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 20).toISOString();
               localStorage.setItem('schofy_local_only_session', 'true');
               localStorage.setItem('schofy_next_cloud_health_check_at', String(Date.now() + 30 * 60 * 1000));
               localStorage.removeItem('schofy_cloud_recovered');
-              localStorage.setItem('schofy_sub_status', 'active');
-              localStorage.setItem('schofy_sub_plan', 'local_unlimited');
-              localStorage.setItem('schofy_sub_expiry', expiry);
-              localStorage.setItem('schofy_sub_pending', '0');
               localStorage.removeItem('schofy_local_merge_prompt_dismissed');
               if (user) {
                 const updatedUser = { ...user, localOnly: true };
@@ -368,7 +443,7 @@ function CloudProblemPrompt() {
             }}
             className="flex-1 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700"
           >
-            Use locally
+            Use local storage
           </button>
         </div>
       </div>

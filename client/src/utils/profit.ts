@@ -4,6 +4,7 @@ type ProfitArgs = {
   salaryPayments: any[];
   expenses: any[];
   students?: any[];
+  classes?: any[];
   term?: string;
   year?: string;
   classId?: string;
@@ -66,6 +67,7 @@ export function computeProfitSummary({
   salaryPayments,
   expenses,
   students = [],
+  classes = [],
   term = 'all',
   year = 'all',
   classId = 'all',
@@ -73,7 +75,10 @@ export function computeProfitSummary({
   dateTo = '',
 }: ProfitArgs): ProfitSummary {
   const getStudent = (studentId?: string) => students.find((student: any) => student.id === studentId);
+  const validClassIds = new Set(classes.map((classItem: any) => classItem.id).filter(Boolean));
+  const classWasDeleted = (row: any) => Boolean(row.classId && validClassIds.size > 0 && !validClassIds.has(row.classId));
   const matchesClass = (row: any) => {
+    if (classWasDeleted(row)) return false;
     if (classId === 'all') return true;
     const student = getStudent(row.studentId || row.entityId);
     return row.classId === classId || student?.classId === classId;

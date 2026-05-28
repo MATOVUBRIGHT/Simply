@@ -1468,7 +1468,7 @@ export default function Invoices() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="card-solid-indigo p-5">
+            <div className="card-solid-indigo invoice-stat-card p-5">
               <div className="flex items-center gap-4">
                 <div className="stat-icon stat-icon-violet text-white">
                   <FileText size={24} />
@@ -1481,7 +1481,7 @@ export default function Invoices() {
                 </div>
               </div>
             </div>
-            <div className="card-solid-emerald p-5">
+            <div className="card-solid-emerald invoice-stat-card p-5">
               <div className="flex items-center gap-4">
                 <div className="stat-icon stat-icon-green text-white">
                   <DollarSign size={24} />
@@ -1494,7 +1494,7 @@ export default function Invoices() {
                 </div>
               </div>
             </div>
-            <div className="card-solid-rose p-5">
+            <div className="card-solid-rose invoice-stat-card p-5">
               <div className="flex items-center gap-4">
                 <div className="stat-icon stat-icon-red text-white">
                   <Clock size={24} />
@@ -1507,7 +1507,7 @@ export default function Invoices() {
                 </div>
               </div>
             </div>
-            <div className="card-solid-amber p-5">
+            <div className="card-solid-amber invoice-stat-card p-5">
               <div className="flex items-center gap-4">
                 <div className="stat-icon text-white" style={{background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'}}>
                   <Award size={24} />
@@ -1520,7 +1520,7 @@ export default function Invoices() {
                 </div>
               </div>
             </div>
-            <div className="card-solid-cyan p-5">
+            <div className="card-solid-cyan invoice-stat-card p-5">
               <div className="flex items-center gap-4">
                 <div className="stat-icon stat-icon-blue text-white">
                   <Percent size={24} />
@@ -3442,7 +3442,7 @@ export default function Invoices() {
                           {opening > 0 && (
                             <tr className="bg-pink-50/80 dark:bg-pink-900/10">
                               <td className="px-5 py-3 text-xs font-semibold text-pink-500">{1}</td>
-                              <td className="px-5 py-3 font-medium text-slate-800 dark:text-white">Opening balance top-up</td>
+                              <td className="px-5 py-3 font-medium text-slate-800 dark:text-white">Opening Bal</td>
                               <td className="px-5 py-3"><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">Current Term {activeTerm}, {activeYear}</span></td>
                               <td className="px-5 py-3 text-right font-semibold">{formatMoney(opening)}</td>
                               <td className="px-5 py-3 text-right text-emerald-600">{formatMoney(0)}</td>

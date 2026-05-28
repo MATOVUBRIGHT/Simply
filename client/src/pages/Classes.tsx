@@ -16,6 +16,7 @@ import { SuccessPopup } from '../components/SuccessPopup';
 import { sortClassesBySectionThenLevel, groupClassesBySection } from '../utils/classroom';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
+import { cleanupDeletedClassReferences } from '../utils/classDeletionCleanup';
 
 const classColors = [
   { card: 'card-coral-light', gradient: 'from-orange-100 to-amber-100', text: 'text-orange-600' },
@@ -351,10 +352,11 @@ export default function Classes() {
         });
       });
       const deletedCount = await deleteInThirtyPercentBatches(id, 'classes', idsToDelete);
+      const cleanup = await cleanupDeletedClassReferences(id, idsToDelete);
       
       setSelectedClasses(new Set());
       setSelectMode(false);
-      addToast(`${deletedCount} classes moved to recycle bin`, 'success');
+      addToast(`${deletedCount} classes moved to recycle bin. ${cleanup.recordsDeleted} linked records removed and ${cleanup.studentsUnassigned} students set to No class.`, 'success');
     } catch (error) {
       console.error('Bulk delete error:', error);
       addToast('Failed to delete classes', 'error');
@@ -396,6 +398,7 @@ export default function Classes() {
     try {
       const classItem = classes.find(c => c.id === id);
       await dataService.delete(authId, 'classes', id);
+      const cleanup = await cleanupDeletedClassReferences(authId, [id]);
       if (classItem) {
         addToRecycleBin(authId, {
           id: `class-${Date.now()}`,
@@ -405,7 +408,7 @@ export default function Classes() {
           deletedAt: new Date().toISOString()
         });
       }
-      addToast('Class moved to recycle bin', 'success');
+      addToast(`Class moved to recycle bin. ${cleanup.recordsDeleted} linked records removed and ${cleanup.studentsUnassigned} students set to No class.`, 'success');
     } catch (error) {
       addToast('Failed to delete', 'error');
     }

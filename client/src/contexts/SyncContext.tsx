@@ -372,7 +372,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     setSyncEnabled(false);
     syncService.stopBackgroundSync();
     dataService.stopRealtimeSync();
-    addToast('Desktop local-only mode enabled', 'info');
+    addToast('Local storage enabled. Verified plan still required.', 'info');
   }, [addToast]);
 
   useEffect(() => {

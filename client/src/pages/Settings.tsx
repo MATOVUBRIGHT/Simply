@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard, Info, Shield, ScrollText, HelpCircle } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCurrency } from '../hooks/useCurrency';
@@ -10,8 +11,9 @@ import { supabase } from '../lib/supabase';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useConfirm } from '../components/ConfirmModal';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
-import { deleteInThirtyPercentBatches, processInThirtyPercentBatches } from '../utils/bulkDelete';
+import { deleteInThirtyPercentBatches, processInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { compressImageFile } from '../utils/imageCompression';
+import { cleanupDeletedClassReferences } from '../utils/classDeletionCleanup';
 
 const APP_VERSION_LABEL = 'Version1';
 
@@ -274,13 +276,8 @@ export default function Settings() {
     const toDeleteIds = new Set(toDelete.map((c: any) => c.id));
     const affectedStudents = existingStudents.filter((student: any) => student.classId && toDeleteIds.has(student.classId));
 
-    const now = new Date().toISOString();
     if (affectedStudents.length > 0) {
-      if (options.forceReplace) {
-        for (const student of affectedStudents) {
-          await dataService.update(sid, 'students', student.id, { classId: null, updatedAt: now } as any);
-        }
-      } else {
+      if (!options.forceReplace) {
         if (!options.confirmStudentClear) {
           addToast(`${affectedStudents.length} student class assignment${affectedStudents.length !== 1 ? 's' : ''} must be cleared before changing school type`, 'warning');
           return false;
@@ -288,39 +285,30 @@ export default function Settings() {
 
         const ok = await confirm({
           title: 'Clear Student Classes?',
-          description: `Changing to ${schoolType.replace(/_/g, ' ')} will remove ${toDelete.length} class${toDelete.length !== 1 ? 'es' : ''}. ${affectedStudents.length} student${affectedStudents.length !== 1 ? 's' : ''} assigned to those classes will be set to "Not assigned". Continue?`,
+          description: `Changing to ${schoolType.replace(/_/g, ' ')} will remove ${toDelete.length} class${toDelete.length !== 1 ? 'es' : ''}. ${affectedStudents.length} student${affectedStudents.length !== 1 ? 's' : ''} assigned to those classes will be set to "Not assigned", and linked class summaries, invoices, subjects, exams, assignments, and timetables will be cleaned. Continue?`,
           confirmLabel: 'Clear and Continue',
           variant: 'warning',
         });
         if (!ok) return false;
-
-        for (const student of affectedStudents) {
-          await dataService.update(sid, 'students', student.id, { classId: null, updatedAt: now } as any);
-        }
       }
     }
 
     // Delete duplicates first, then classes not in the selected category.
-    for (const cls of duplicatesToDelete) {
-      await dataService.delete(sid, 'classes', (cls as any).id);
-    }
-    for (const cls of toDelete) {
-      await dataService.delete(sid, 'classes', (cls as any).id);
-    }
-    if (toDelete.length > 0) {
-      addToast(`${toDelete.length} class${toDelete.length > 1 ? 'es' : ''} removed (not in ${schoolType.replace(/_/g, ' ')} category)`, 'info');
+    const classIdsToDelete = Array.from(new Set([...duplicatesToDelete, ...toDelete].map((cls: any) => cls.id).filter(Boolean)));
+    if (classIdsToDelete.length > 0) {
+      const cleanup = await cleanupDeletedClassReferences(sid, classIdsToDelete);
+      await deleteInThirtyPercentBatches(sid, 'classes', classIdsToDelete);
+      addToast(`${classIdsToDelete.length} class${classIdsToDelete.length > 1 ? 'es' : ''} removed. ${cleanup.recordsDeleted} linked records cleaned and ${cleanup.studentsUnassigned} students set to No class.`, 'info');
     }
 
-    // Re-fetch existing classes after deletions to avoid race conditions
-    const postExisting = await dataService.getAll(sid, 'classes');
-    const existingNames = new Set(postExisting.map((c: any) => c.name.toLowerCase().trim()));
-    let createdCount = 0;
-    for (const cls of classesToCreate) {
-      if (!existingNames.has(cls.name.toLowerCase().trim())) {
-        await dataService.create(sid, 'classes', { name: cls.name, level: cls.level, capacity: 40 } as any);
-        createdCount++;
-      }
-    }
+    const deletedIdSet = new Set(classIdsToDelete);
+    const remainingClasses = existingClasses.filter((classItem: any) => !deletedIdSet.has(classItem.id));
+    const existingNames = new Set(remainingClasses.map((c: any) => String(c.name || '').toLowerCase().trim()));
+    const classesToAdd = classesToCreate.filter(cls => !existingNames.has(cls.name.toLowerCase().trim()));
+    await runTasksInThirtyPercentBatches(
+      classesToAdd.map(cls => () => dataService.create(sid, 'classes', { name: cls.name, level: cls.level, capacity: 40 } as any))
+    );
+    const createdCount = classesToAdd.length;
 
     if (createdCount > 0) addToast(`${createdCount} classes auto-created`, 'info');
     else if (toDelete.length === 0 && schoolTypeOverride) addToast('All classes for this school category already exist', 'info');
@@ -1147,6 +1135,35 @@ export default function Settings() {
             </div>
           </div>
         )}
+
+        <div className="card border-slate-200 dark:border-slate-700">
+          <div className="card-header flex items-center gap-2">
+            <Info size={20} />
+            <h2 className="font-semibold">App Information</h2>
+          </div>
+          <div className="card-body">
+            <p className="mb-4 text-sm text-slate-600 dark:text-slate-400">
+              Review Schofy information, privacy, terms, and support guidance.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                { label: 'About App', path: '/about', icon: Info },
+                { label: 'Privacy Policy', path: '/about#privacy', icon: Shield },
+                { label: 'Terms of Use', path: '/about#terms', icon: ScrollText },
+                { label: 'Help & Support', path: '/about#support', icon: HelpCircle },
+              ].map(({ label, path, icon: Icon }) => (
+                <Link
+                  key={path}
+                  to={path}
+                  className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:border-emerald-800 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-300"
+                >
+                  <Icon size={18} className="shrink-0" />
+                  <span>{label}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
 
         <div className="card border-red-200 dark:border-red-800">
           <div className="card-header flex items-center gap-2 text-red-600 dark:text-red-400">

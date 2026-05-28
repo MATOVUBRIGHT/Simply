@@ -20,6 +20,7 @@ server/.env.local
 .credentials
 .secrets
 Verification codes.xlsx
+Bright power point/
 
 # Database files
 *.db

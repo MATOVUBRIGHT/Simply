@@ -1,5 +1,5 @@
-import React from 'react';
-import { Phone, Mail, MapPin, Printer, Download, X, Palette, Check, RefreshCw } from 'lucide-react';
+import React, { useRef } from 'react';
+import { Phone, Mail, MapPin, Printer, Download, X, Palette, Check, RefreshCw, Upload } from 'lucide-react';
 import { useCurrency } from '../hooks/useCurrency';
 import LiveEditable from './LiveEditable';
 import { openPrintPreview } from '../utils/printPreview';
@@ -37,6 +37,7 @@ export interface InvoiceLabels {
   accentColor: string;
   tableHeaderBg: string;
   tableHeaderTextColor: string;
+  logo: string;
 }
 
 export const DEFAULT_INVOICE_LABELS: InvoiceLabels = {
@@ -72,6 +73,7 @@ export const DEFAULT_INVOICE_LABELS: InvoiceLabels = {
   accentColor: '#6366f1',
   tableHeaderBg: '#0f172a',
   tableHeaderTextColor: '#ffffff',
+  logo: '',
 };
 
 interface InvoiceTemplateProps {
@@ -143,8 +145,19 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
   onClose
 }) => {
   const { formatMoney } = useCurrency();
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const updateLabel = (key: keyof InvoiceLabels, value: string) => {
     onUpdateLabels?.({ [key]: value });
+  };
+  const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') updateLabel('logo', reader.result);
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
   };
   const templateStudent = isLiveEditing
     ? {
@@ -186,6 +199,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
   const isCashPayment = String(bankInfo?.paymentMethod || '').toLowerCase().includes('cash');
   const textStyle = { color: labels.textColor };
   const mutedStyle = { color: labels.mutedTextColor };
+  const displayLogo = labels.logo || school.logo;
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-y-auto max-w-4xl w-full mx-auto my-4 animate-modal-in flex flex-col" style={{ maxHeight: 'calc(100vh - 2rem)' }}>
@@ -229,27 +243,6 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
               </div>
             )}
           </div>
-          {isLiveEditing && (
-            <div className="button-scroll flex items-center gap-2 border-l pl-4 dark:border-slate-700">
-              {[
-                ['textColor', 'Text'],
-                ['mutedTextColor', 'Muted'],
-                ['accentColor', 'Accent'],
-                ['tableHeaderBg', 'Table'],
-                ['tableHeaderTextColor', 'Header Text'],
-              ].map(([key, label]) => (
-                <label key={key} className="flex items-center gap-1 text-[11px] font-bold text-slate-500 dark:text-slate-300">
-                  {label}
-                  <input
-                    type="color"
-                    value={(labels[key as keyof InvoiceLabels] as string) || '#000000'}
-                    onChange={(event) => updateLabel(key as keyof InvoiceLabels, event.target.value)}
-                    className="h-7 w-8 cursor-pointer rounded border border-slate-200 bg-transparent p-0 dark:border-slate-700"
-                  />
-                </label>
-              ))}
-            </div>
-          )}
         </div>
         <div className="flex items-center gap-2">
           <button 
@@ -270,14 +263,51 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
         </div>
       </div>
 
+      <div className={`grid min-h-0 flex-1 gap-4 overflow-y-auto ${isLiveEditing ? 'lg:grid-cols-[15rem_minmax(0,1fr)]' : ''}`}>
+        {isLiveEditing && (
+          <aside className="print:hidden h-fit rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800 lg:sticky lg:top-2">
+            <div className="mb-3 flex items-center gap-2">
+              <Palette size={16} className="text-indigo-600" />
+              <h3 className="text-sm font-black text-slate-800 dark:text-white">Template Tools</h3>
+            </div>
+            <div className="space-y-3">
+              {[
+                ['textColor', 'Text'],
+                ['mutedTextColor', 'Muted'],
+                ['accentColor', 'Accent'],
+                ['tableHeaderBg', 'Table'],
+                ['tableHeaderTextColor', 'Header Text'],
+              ].map(([key, label]) => (
+                <div key={key}>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">{label}</label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={(labels[key as keyof InvoiceLabels] as string) || '#000000'} onChange={event => updateLabel(key as keyof InvoiceLabels, event.target.value)} className="h-9 w-10 rounded border border-slate-200" />
+                    <input value={(labels[key as keyof InvoiceLabels] as string) || ''} onChange={event => updateLabel(key as keyof InvoiceLabels, event.target.value)} className="form-input h-9 min-h-0 flex-1 px-2 py-1 font-mono text-xs" />
+                  </div>
+                </div>
+              ))}
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Logo</label>
+                <div className="flex gap-2">
+                  <input value={labels.logo || school.logo || ''} onChange={event => updateLabel('logo', event.target.value)} className="form-input h-9 min-h-0 flex-1 px-2 py-1 text-xs" placeholder="Image URL" />
+                  <button type="button" onClick={() => logoInputRef.current?.click()} className="rounded-lg border border-slate-200 px-2 text-slate-600 hover:bg-slate-50" title="Upload logo">
+                    <Upload size={15} />
+                  </button>
+                </div>
+                <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+              </div>
+            </div>
+          </aside>
+        )}
+
       {/* Invoice Content */}
       <div id="invoice-print" className="p-8 sm:p-12 bg-white print:p-0" style={{ fontFamily: 'Inter, system-ui, sans-serif', color: labels.textColor }}>
         {/* Top Section */}
         <div className="flex justify-between items-start mb-12">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-500/20 shrink-0" style={{ backgroundColor: labels.accentColor }}>
-              {school.logo ? (
-                <img src={school.logo} alt="School Logo" className="w-full h-full object-contain p-2" />
+              {displayLogo ? (
+                <img src={displayLogo} alt="School Logo" className="w-full h-full object-contain p-2" />
               ) : (
                 <span className="text-3xl font-black">S</span>
               )}
@@ -510,6 +540,7 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
       {/* Blue Design Element at Bottom */}
       <div className="h-6 relative mt-auto" style={{ backgroundColor: labels.tableHeaderBg }}>
         <div className="absolute right-0 top-0 bottom-0 w-1/3" style={{ backgroundColor: labels.accentColor, clipPath: 'polygon(20% 0, 100% 0, 100% 100%, 0% 100%)' }}></div>
+      </div>
       </div>
     </div>
   );

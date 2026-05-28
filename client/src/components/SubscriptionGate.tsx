@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { cachePlanStateLocally, getSubscriptionAccessState, SubscriptionAccessState, PLAN_DEFINITIONS } from '../utils/plans';
 import { supabase } from '../lib/supabase';
 import { cacheReady } from '../lib/database/SupabaseDataService';
+import { createVerifiedPlanProof, readVerifiedPlanProof, restoreVerifiedPlanProof } from '../utils/planProof';
 
 // Routes always accessible regardless of subscription
 const ALLOWED_ROUTES = ['/plans', '/subscribe', '/login'];
@@ -73,7 +74,7 @@ function classifyRemoteExpiry(expiryIso: string | null): Pick<SubscriptionAccess
 }
 
 function hasAdminApproval(meta: Record<string, any>) {
-  return Boolean(meta.approvedByAdmin || meta.grantedByAdmin || meta.extendedByAdmin);
+  return Boolean(meta.approvedByAdmin || meta.grantedByAdmin || meta.extendedByAdmin || meta.approvedByCode);
 }
 
 export default function SubscriptionGate({ children }: Props) {
@@ -95,17 +96,6 @@ export default function SubscriptionGate({ children }: Props) {
     setCheckProgress(18);
     if (!user) { setChecking(false); return; }
     if (isAllowedRoute) { setBlocked(false); setChecking(false); return; }
-    if (user.localOnly || localStorage.getItem('schofy_local_only_session') === 'true') {
-      setBlocked(false);
-      setBlockReason('incomplete');
-      setPlanName('Offline mode only');
-      setExpiryDate(localStorage.getItem(OFFLINE_EXPIRY_KEY));
-      setPendingTid(null);
-      setCheckProgress(100);
-      setChecking(false);
-      return;
-    }
-
     const online = typeof navigator === 'undefined' ? true : navigator.onLine;
 
     // Wait briefly for IndexedDB, but never let offline startup hang on secure access.
@@ -144,6 +134,18 @@ export default function SubscriptionGate({ children }: Props) {
     };
 
     if (!online) {
+      const proof = await readVerifiedPlanProof(tenantId);
+      if (!proof) {
+        setBlocked(true);
+        setBlockReason('incomplete');
+        setPlanName(null);
+        setExpiryDate(null);
+        setPendingTid(null);
+        setCheckProgress(100);
+        setChecking(false);
+        return;
+      }
+      await restoreVerifiedPlanProof(tenantId);
       applyLocalState();
       setCheckProgress(100);
       setChecking(false);
@@ -179,6 +181,19 @@ export default function SubscriptionGate({ children }: Props) {
             const remotePlan = PLAN_DEFINITIONS.find(p => p.id === sub.plan) || (isFreeTier || meta.grantedByAdmin || meta.approvedByAdmin ? PLAN_DEFINITIONS[0] : null);
             const remoteExpiry = classifyRemoteExpiry(sub.ends_at || null);
             if (remotePlan) {
+              if (remoteExpiry.expiryDate && (remoteExpiry.status === 'active' || remoteExpiry.status === 'expiring')) {
+                const verifiedAt = meta.activatedAt || meta.approvedAt || meta.grantedAt || meta.extendedAt || new Date().toISOString();
+                await createVerifiedPlanProof({
+                  tenantId,
+                  schofy_sub_expiry: remoteExpiry.expiryDate,
+                  schofy_sub_status: remoteExpiry.status,
+                  schofy_sub_plan: remotePlan.id,
+                  schofy_sub_pending: '0',
+                  remoteVerifiedAt: String(verifiedAt),
+                  verificationCodeHash: typeof meta.verificationCodeHash === 'string' ? meta.verificationCodeHash : undefined,
+                  source: meta.approvedByCode ? 'verification_code' : 'remote_subscription',
+                });
+              }
               state = {
                 ...state,
                 plan: remotePlan,
@@ -264,7 +279,7 @@ export default function SubscriptionGate({ children }: Props) {
     const plan = planName || 'Unknown';
     const tid  = pendingTid || 'N/A';
     const school = user?.email || 'Unknown school';
-    const msg = `Hello Schofy assistant,\n\nPayment submitted for verification:\nSchool: ${school}\nPlan: ${plan}\nTransaction ID: ${tid}\n\nPayment via Airtel Money (0750034304) or MTN MoMo (0775011029).\n\nPlease verify and activate my subscription.\n\nThank you.`;
+    const msg = `Hello Schofy Support,\n\nPayment submitted for verification:\nSchool: ${school}\nPlan: ${plan}\nTransaction ID: ${tid}\n\nPayment via Airtel Money (0750034304) or MTN MoMo (0775011029).\n\nPlease verify and activate my subscription.\n\nThank you.`;
     return `https://wa.me/256750034304?text=${encodeURIComponent(msg)}`;
   };
 

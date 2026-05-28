@@ -32,6 +32,9 @@ import {
   ExternalLink,
   Paperclip,
   WalletCards,
+  Info,
+  HelpCircle,
+  ScrollText,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
@@ -166,6 +169,25 @@ function Layout({ children }: LayoutProps) {
     checkSubscriptionStatus();
     loadDeletedItemsCount();
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!tenantId || !isOnline) return;
+    let cancelled = false;
+    const writeHeartbeat = async () => {
+      if (cancelled) return;
+      try {
+        await dataService.saveSettings(tenantId, { lastSeenAt: new Date().toISOString() });
+      } catch {
+        // Heartbeat is best-effort and should never interrupt school work.
+      }
+    };
+    void writeHeartbeat();
+    const timer = window.setInterval(writeHeartbeat, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [tenantId, isOnline]);
 
   useEffect(() => {
     if (!user?.id || !isOnline) return;
@@ -520,9 +542,9 @@ function Layout({ children }: LayoutProps) {
   };
 
   const isLocalOnlyAccount = Boolean(user?.localOnly || localStorage.getItem('schofy_local_only_session') === 'true');
-  const planLabel = isLocalOnlyAccount ? 'Offline mode only' : subscriptionState?.plan?.name ?? 'No subscription';
+  const planLabel = isLocalOnlyAccount ? (subscriptionState?.plan?.name ?? 'Verified offline plan required') : subscriptionState?.plan?.name ?? 'No subscription';
   const planStatusLabel = (() => {
-    if (isLocalOnlyAccount) return isOnline ? 'Local desktop account. Cloud sync is off.' : 'Local desktop account. Fully offline.';
+    if (isLocalOnlyAccount) return isOnline ? 'Local desktop account. Plan still required.' : 'Offline account. Verified plan code required.';
     if (!subscriptionState) return 'No plan selected';
     if (subscriptionState.status === 'incomplete') return 'Choose a plan';
     if (subscriptionState.status === 'active') return 'Active';
@@ -564,7 +586,7 @@ function Layout({ children }: LayoutProps) {
             <div className="px-5 py-4 text-white" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-white/70">Schofy assistant broadcast</p>
+                  <p className="text-xs font-bold uppercase tracking-wide text-white/70">Schofy support broadcast</p>
                   <h2 className="mt-1 text-lg font-bold">{broadcastPopup.title}</h2>
                 </div>
                 <button onClick={() => void closeBroadcastPopup(false)} className="rounded-lg p-1 hover:bg-white/15">
@@ -606,7 +628,7 @@ function Layout({ children }: LayoutProps) {
                   onChange={e => setBroadcastReply(e.target.value)}
                   rows={3}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  placeholder="Reply to Schofy assistant..."
+                  placeholder="Reply to Schofy support..."
                 />
               )}
               <div className="flex gap-2">
@@ -938,6 +960,10 @@ function Layout({ children }: LayoutProps) {
                     { label: 'Settings', icon: Settings, path: '/settings' },
                     { label: 'Notifications', icon: Bell, path: '/notifications' },
                     { label: 'Recycle Bin', icon: Trash2, path: '/recycle-bin' },
+                    { label: 'About App', icon: Info, path: '/about' },
+                    { label: 'Privacy Policy', icon: Shield, path: '/about#privacy' },
+                    { label: 'Terms of Use', icon: ScrollText, path: '/about#terms' },
+                    { label: 'Help & Support', icon: HelpCircle, path: '/about#support' },
                   ].map(({ label, icon: Icon, path }) => (
                     <button key={path} onClick={() => { setProfileOpen(false); navigate(path); }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
@@ -976,8 +1002,8 @@ function Layout({ children }: LayoutProps) {
             role="status"
           >
             {isLocalOnlyAccount
-              ? 'Offline mode only account - everything stays on this desktop and all features remain available locally.'
-              : 'Offline - you can keep working. Changes stay on this device and sync automatically when the connection returns.'}
+              ? 'Offline account - access remains available only while a verified Schofy plan is active on this device.'
+              : 'Offline - you can keep working if your verified plan is still active. Changes sync when the connection returns.'}
           </div>
         )}
 

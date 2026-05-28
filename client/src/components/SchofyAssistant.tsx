@@ -19,8 +19,16 @@ type ChatAction = {
 
 const CHAT_STORAGE_KEY = 'schofy_assistant_chat';
 const CHAT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-const assetBase = import.meta.env.BASE_URL || './';
-const ASSISTANT_ICON = `${assetBase}schofy-assistant-icon.png`;
+function publicAssetPath(fileName: string) {
+  const base = import.meta.env.BASE_URL || '/';
+  const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+  return `${normalizedBase}${fileName}`;
+}
+const ASSISTANT_ICON = publicAssetPath('chat icon.png');
+const ASSISTANT_ICON_FALLBACKS = [
+  publicAssetPath('schofy-assistant-icon.png'),
+  publicAssetPath('icon-192.png'),
+];
 
 const NATURAL_LADY_VOICE_HINTS = [
   'natural', 'neural', 'online', 'premium', 'female', 'woman', 'zira',
@@ -247,6 +255,7 @@ export default function SchofyAssistant() {
   const [messages, setMessages] = useState<ChatMessage[]>(loadStoredMessages);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [speechVoices, setSpeechVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [launcherImageFailed, setLauncherImageFailed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { isOnline } = useAuth();
@@ -367,7 +376,33 @@ export default function SchofyAssistant() {
         className={`fixed bottom-5 right-5 z-[9998] flex h-[70px] w-[70px] items-center justify-center rounded-[18px] bg-white text-white shadow-2xl transition-all hover:-translate-y-0.5 hover:shadow-[0_20px_45px_rgba(79,70,229,0.35)] ${open || launcherHidden ? 'scale-90 opacity-0 pointer-events-none' : 'scale-100 opacity-100'}`}
         aria-label="Open Schofy assistant"
       >
-        <img src={ASSISTANT_ICON} alt="" className="h-full w-full rounded-[18px] object-cover" draggable={false} />
+        {launcherImageFailed ? (
+          <span
+            className="flex h-full w-full items-center justify-center rounded-[18px] bg-gradient-to-br from-emerald-500 to-indigo-600 text-white"
+            aria-hidden="true"
+          >
+            <Bot size={30} />
+          </span>
+        ) : (
+          <img
+            src={ASSISTANT_ICON}
+            alt=""
+            className="h-full w-full rounded-[18px] object-cover"
+            draggable={false}
+            onLoad={() => setLauncherImageFailed(false)}
+            onError={(event) => {
+              const image = event.currentTarget;
+              const nextFallbackIndex = Number(image.dataset.fallbackIndex || 0);
+              const nextFallback = ASSISTANT_ICON_FALLBACKS[nextFallbackIndex];
+              if (!nextFallback) {
+                setLauncherImageFailed(true);
+                return;
+              }
+              image.dataset.fallbackIndex = String(nextFallbackIndex + 1);
+              image.src = nextFallback;
+            }}
+          />
+        )}
       </button>
       {!open && !launcherHidden && (
         <button

@@ -141,7 +141,22 @@ class SyncService {
     this.syncInProgress = true;
 
     try {
-      // Run the lightweight automatic sync cycle.
+      if (source === 'manual') {
+        const pushResult = await dataService.forcePush(schoolId);
+        if (!pushResult.success) {
+          return { success: false, pushed: pushResult.pushed, pulled: 0, failed: pushResult.failed, error: pushResult.error };
+        }
+        const pullResult = await dataService.forcePull(schoolId, true);
+        return {
+          success: pullResult.success,
+          pushed: pushResult.pushed,
+          pulled: pullResult.pulled,
+          failed: pushResult.failed + pullResult.failed,
+          error: pullResult.error || pushResult.error,
+        };
+      }
+
+      // Automatic sync stays lightweight.
       const result = await dataService.syncNow(schoolId);
       if (source === 'automatic') {
         this.lastAutomaticSyncAt = Date.now();

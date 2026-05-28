@@ -40,11 +40,11 @@ export function FitStatValue({ children, className = '' }: FitStatValueProps) {
   }, [children, isLongValue]);
 
   return (
-    <span className="fit-stat-wrap group relative inline-block max-w-full align-top">
+    <span className="fit-stat-wrap relative inline-block max-w-full align-top">
       <p
         ref={ref}
         tabIndex={isLongValue ? 0 : undefined}
-        className={`fit-stat-value font-bold leading-tight text-white whitespace-nowrap max-w-full overflow-visible outline-none transition-[font-size] duration-100 group-hover:!text-[24px] group-focus-within:!text-[24px] ${className}`}
+        className={`fit-stat-value font-bold leading-tight text-white whitespace-nowrap max-w-full overflow-visible outline-none ${className}`}
         style={{ fontSize }}
       >
         {children}

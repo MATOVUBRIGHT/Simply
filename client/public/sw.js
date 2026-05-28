@@ -10,8 +10,8 @@
  * - Cache is versioned — old caches are deleted on activate
  */
 
-const CACHE_VERSION = 'schofy-v11';
-const ASSET_CACHE = 'schofy-assets-v11';
+const CACHE_VERSION = 'schofy-v12';
+const ASSET_CACHE = 'schofy-assets-v12';
 
 // Core files to pre-cache on install
 const PRECACHE_URLS = [
@@ -24,6 +24,8 @@ const PRECACHE_URLS = [
   '/icon-512.png',
   '/cover.jpg',
   '/schofy.logo.png',
+  '/chat icon.png',
+  '/chat%20icon.png',
   '/schofy-assistant-icon.png',
   '/sound/success.mp3',
   '/sound/error.wav',
@@ -33,7 +35,7 @@ const PRECACHE_URLS = [
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_VERSION)
-      .then(cache => cache.addAll(PRECACHE_URLS))
+      .then(cache => Promise.allSettled(PRECACHE_URLS.map(url => cache.add(url))))
       .catch(() => {/* ignore — will be cached on first visit */})
       .then(() => self.skipWaiting())
   );

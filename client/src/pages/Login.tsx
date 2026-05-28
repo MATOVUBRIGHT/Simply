@@ -391,10 +391,10 @@ export default function Login() {
     setSecurityCheckPassed(true);
   };
 
-  const enterOfflineMode = (registerMode = false) => {
+  const enterOfflineMode = () => {
     setOfflineAuthMode(true);
     setShowOfflinePrompt(false);
-    setIsRegister(registerMode);
+    setIsRegister(false);
     setResetMode(false);
     setResetFromLink(false);
     setLocalFallback(null);
@@ -548,7 +548,7 @@ export default function Login() {
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{isRegister ? 'Create account' : 'Welcome back'}</h2>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    {offlineAuthMode ? 'Desktop offline mode. Sync is off.' : isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}
+                    {offlineAuthMode ? 'Verified offline login only. A plan code must already be active on this device.' : isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}
                   </p>
                 </div>
               </div>
@@ -685,7 +685,7 @@ export default function Login() {
 
               {offlineAuthMode && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-                  Offline mode only account. Accounts and school data stay on this computer, cloud sync is off, and you can use the app fully without internet.
+                  Offline login only works after this device has an active Schofy plan from a verification code. New accounts and first-time plan activation need internet.
                 </div>
               )}
 
@@ -843,7 +843,7 @@ export default function Login() {
 
             <div className="mt-6 flex items-center justify-center gap-2 border-t border-slate-200 pt-5 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <Cloud size={16} className={isOnline ? 'text-emerald-500' : 'text-amber-500'} />
-              <span>{offlineAuthMode ? 'Desktop offline mode - no cloud sync' : isOnline ? 'Connected to cloud' : 'Offline mode available on desktop'}</span>
+              <span>{offlineAuthMode ? 'Verified offline login - plan required' : isOnline ? 'Connected to cloud' : 'Offline access requires a previously verified plan code'}</span>
             </div>
           </section>
         </div>
@@ -880,12 +880,12 @@ export default function Login() {
             </div>
             <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">You're offline</h2>
             <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">
-              Sign in to an existing offline mode only account or create a new local account on this desktop. Cloud accounts need internet after logout.
+              New accounts cannot be created offline. Sign in only if this desktop already has an active Schofy plan verified by code.
             </p>
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              Offline accounts keep their own local database on this computer. You can use all app features locally, and cloud sync stays paused.
+              To unlock offline access, connect to internet, choose a plan, send payment through WhatsApp, then enter the one-time Schofy verification code.
             </div>
-            <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={() => setShowOfflinePrompt(false)}
@@ -895,17 +895,10 @@ export default function Login() {
               </button>
               <button
                 type="button"
-                onClick={() => enterOfflineMode(false)}
+                onClick={() => enterOfflineMode()}
                 className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
               >
-                Offline login
-              </button>
-              <button
-                type="button"
-                onClick={() => enterOfflineMode(true)}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-              >
-                New local account
+                Verified offline login
               </button>
             </div>
           </div>
@@ -918,10 +911,10 @@ export default function Login() {
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
               <CloudOff size={22} />
             </div>
-            <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">Use Schofy locally</h2>
+            <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">Plan required</h2>
             <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">{localFallback.message}</p>
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              Offline mode only accounts store data on this desktop with cloud sync paused. Existing cloud accounts must reconnect to internet after logout.
+              Local/offline access is available only after a paid plan is activated with a one-time Schofy verification code. Send payment through WhatsApp from the Plans page, then enter the code.
             </div>
             <div className="mt-5 flex gap-3">
               <button
@@ -937,7 +930,7 @@ export default function Login() {
                 disabled={loading}
                 className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
               >
-                {loading ? 'Starting...' : 'Use locally'}
+                {loading ? 'Checking...' : 'Continue only if verified'}
               </button>
             </div>
           </div>
@@ -947,7 +940,7 @@ export default function Login() {
       {showSuccess && (
         <SuccessPopup
           message={passwordResetComplete ? 'Password updated' : isRegister ? 'Account created' : 'Welcome back'}
-          subMessage={passwordResetComplete ? 'Password updated. Sign in again with your new password.' : offlineAuthMode ? 'Offline workspace is ready.' : 'Taking you to your dashboard...'}
+          subMessage={passwordResetComplete ? 'Password updated. Sign in again with your new password.' : offlineAuthMode ? 'Verified plan found. Opening workspace.' : 'Taking you to your dashboard...'}
         />
       )}
     </div>

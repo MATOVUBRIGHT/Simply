@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen, Pencil, SlidersHorizontal } from 'lucide-react';
+import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen, Pencil, SlidersHorizontal, Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
@@ -38,6 +38,17 @@ function getSubjectIdentity(subject: any, fallbackName?: string, fallbackId?: st
   return nameKey || codeKey || fallbackId || '';
 }
 
+const MIN_GRADE_LOADING_MS = 1000;
+
+function wait(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function keepLoadingVisible(startedAt: number, minMs = MIN_GRADE_LOADING_MS) {
+  const remaining = minMs - (Date.now() - startedAt);
+  if (remaining > 0) await wait(remaining);
+}
+
 export default function Grades() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
@@ -46,6 +57,7 @@ export default function Grades() {
   const [showForm, setShowForm] = useState(false);
   const [editGrade, setEditGrade] = useState<{ id: string; studentName: string; subjectName: string; score: string; maxScore: string } | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [deletingGradeId, setDeletingGradeId] = useState<string | null>(null);
   const [isImportingGrades, setIsImportingGrades] = useState(false);
   const [showImportSuccess, setShowImportSuccess] = useState(false);
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
@@ -182,6 +194,7 @@ export default function Grades() {
     }
     const entries = Object.entries(bulkScores).filter(([, v]) => v.trim() !== '');
     if (entries.length === 0) { addToast('Enter at least one score', 'error'); return; }
+    const loadingStarted = Date.now();
     setBulkSubmitting(true);
     try {
       const now = new Date().toISOString();
@@ -206,10 +219,9 @@ export default function Grades() {
       }
       const student = allStudents.find(s => s.id === bulkForm.studentId);
       const maxScore = parseFloat(bulkForm.maxScore) || 100;
-      let saved = 0;
-      for (const [subjectId, scoreStr] of entries) {
+      const tasks = entries.map(([subjectId, scoreStr]) => async () => {
         const score = parseFloat(scoreStr);
-        if (isNaN(score)) continue;
+        if (isNaN(score)) return false;
         const sub = subjectById.get(subjectId);
         const subjectKey = getSubjectIdentity(sub, sub?.name, subjectId);
         const pct = Math.round((score / maxScore) * 100);
@@ -239,8 +251,11 @@ export default function Grades() {
             createdAt: now,
           } as any);
         }
-        saved++;
-      }
+        return true;
+      });
+      const results = await runTasksInThirtyPercentBatches(tasks);
+      const saved = results.filter(Boolean).length;
+      await keepLoadingVisible(loadingStarted);
       addToast(`Saved ${saved} subject score${saved !== 1 ? 's' : ''} for ${student?.firstName}`, 'success');
       setBulkScores({});
       setBulkForm(p => ({ ...p, studentId: '' }));
@@ -249,7 +264,10 @@ export default function Grades() {
       if (bulkForm.classId) {
         setExpandedClasses(prev => { const n = new Set(prev); n.add(bulkForm.classId); return n; });
       }
-    } catch { addToast('Failed to save grades', 'error'); }
+    } catch {
+      await keepLoadingVisible(loadingStarted);
+      addToast('Failed to save grades', 'error');
+    }
     finally { setBulkSubmitting(false); }
   }
 
@@ -258,11 +276,17 @@ export default function Grades() {
     if (!id) return;
     const ok = await confirm({ title: 'Delete Grade', description: 'Remove this grade entry?', confirmLabel: 'Delete', variant: 'danger' });
     if (!ok) return;
+    const loadingStarted = Date.now();
+    setDeletingGradeId(idResult);
     try {
       await dataService.delete(id, 'examResults', idResult);
+      await keepLoadingVisible(loadingStarted);
       addToast('Grade deleted', 'success');
     } catch (error) {
+      await keepLoadingVisible(loadingStarted);
       addToast('Failed to delete grade', 'error');
+    } finally {
+      setDeletingGradeId(null);
     }
   }
 
@@ -275,14 +299,19 @@ export default function Grades() {
     if (isNaN(score) || isNaN(maxScore) || maxScore <= 0) { addToast('Enter valid score and max score', 'error'); return; }
     const pct = Math.round((score / maxScore) * 100);
     const gradeInfo = getGrade(pct);
+    const loadingStarted = Date.now();
     setIsSavingEdit(true);
     try {
       await dataService.update(id, 'examResults', editGrade.id, {
         score, maxScore, grade: gradeInfo.grade, remarks: gradeInfo.remark, updatedAt: new Date().toISOString(),
       } as any);
+      await keepLoadingVisible(loadingStarted);
       addToast('Grade updated', 'success');
       setEditGrade(null);
-    } catch { addToast('Failed to update grade', 'error'); }
+    } catch {
+      await keepLoadingVisible(loadingStarted);
+      addToast('Failed to update grade', 'error');
+    }
     finally { setIsSavingEdit(false); }
   }
 
@@ -298,6 +327,7 @@ export default function Grades() {
     const amount = parseFloat(invoiceAmount);
     if (isNaN(amount) || amount <= 0) { addToast('Please enter a valid amount', 'error'); return; }
     if (studentsWithGrades.length === 0) { addToast('No students with grades to invoice', 'error'); return; }
+    const loadingStarted = Date.now();
     setIsCreatingInvoice(true);
     try {
       const now = new Date().toISOString();
@@ -308,11 +338,13 @@ export default function Grades() {
         count++;
       }
       window.dispatchEvent(new CustomEvent('feesUpdated'));
+      await keepLoadingVisible(loadingStarted);
       addToast(`Created exam fee invoices for ${count} students`, 'success');
       setShowInvoiceModal(false);
       setInvoiceAmount('');
       setInvoiceDescription('Examination Fee');
     } catch (error) {
+      await keepLoadingVisible(loadingStarted);
       addToast('Failed to create exam fee invoices', 'error');
     } finally {
       setIsCreatingInvoice(false);
@@ -388,6 +420,7 @@ export default function Grades() {
     return '1';
   });
   const [importYear, setImportYear] = useState(new Date().getFullYear().toString());
+  const [templateMaxScore, setTemplateMaxScore] = useState('100');
 
   const studentsForTemplateClass = useMemo(() => {
     if (!templateClassId) return [];
@@ -406,25 +439,30 @@ export default function Grades() {
       templateStudentIds.size === 0 || templateStudentIds.has(s.id)
     );
     const classSubjects = subjectsForTemplateClass;
+    const outOf = parseFloat(templateMaxScore);
     if (classStudents.length === 0) { addToast('No students found for selected class', 'error'); return; }
     if (classSubjects.length === 0) { addToast('No subjects found for selected class. Add subjects first.', 'error'); return; }
+    if (isNaN(outOf) || outOf <= 0) { addToast('Enter a valid Out of score', 'error'); return; }
 
     import('xlsx').then((XLSX) => {
       const subjectHeaders = classSubjects.map((s: any) => `${s.name} (${getSubjectDisplayCode(s)})`);
-      const headers = ['Student Name', 'Student ID', ...subjectHeaders];
+      const cls = (allClassesData as any[]).find(c => c.id === templateClassId);
+      const headers = ['Student Name', 'Student ID', 'Class', 'Term', 'Out Of', ...subjectHeaders];
       const rows = classStudents.map(s => [
         `${s.firstName} ${s.lastName}`,
         s.studentId || s.admissionNo || s.id,
+        cls?.name || '',
+        `Term ${importTerm}`,
+        outOf,
         ...classSubjects.map(() => ''),
       ]);
       const wsData = [headers, ...rows];
       const ws = XLSX.utils.aoa_to_sheet(wsData);
-      ws['!cols'] = headers.map((h, i) => ({ wch: i < 2 ? 22 : Math.max(h.length + 2, 10) }));
+      ws['!cols'] = headers.map((h, i) => ({ wch: i < 2 ? 22 : i < 5 ? 12 : Math.max(h.length + 2, 10) }));
       const wb = XLSX.utils.book_new();
-      const cls = (allClassesData as any[]).find(c => c.id === templateClassId);
       XLSX.utils.book_append_sheet(wb, ws, cls?.name || 'Grades');
-      XLSX.writeFile(wb, `grades-template-${cls?.name || 'class'}.xlsx`);
-      addToast(`Template downloaded for ${classStudents.length} students, ${classSubjects.length} subjects`, 'success');
+      XLSX.writeFile(wb, `grades-template-${cls?.name || 'class'}-term-${importTerm}-out-of-${outOf}.xlsx`);
+      addToast(`Template downloaded for ${classStudents.length} students, ${classSubjects.length} subjects, out of ${outOf}`, 'success');
     });
   }
 
@@ -496,14 +534,22 @@ export default function Grades() {
   }
 
   function processMapping() {
-    // Smart template: "Student Name", "Student ID", "Subject1", "Subject2", ...
+    // Smart template: "Student Name", "Student ID", optional "Class", "Term", "Out Of", then subjects.
     const isSmartTemplate = csvHeaders.length >= 3 &&
       csvHeaders[0].toLowerCase().replace(/"/g, '').includes('student') &&
       csvHeaders[1].toLowerCase().replace(/"/g, '').includes('id');
 
     if (isSmartTemplate) {
-      const subjectCols = csvHeaders.slice(2);
+      const normalizedHeaders = csvHeaders.map(header => header.toLowerCase().replace(/"/g, '').trim());
+      const classIndex = normalizedHeaders.findIndex(header => header === 'class');
+      const termIndex = normalizedHeaders.findIndex(header => header === 'term');
+      const outOfIndex = normalizedHeaders.findIndex(header => header === 'out of' || header === 'outof' || header === 'max score');
+      const metaIndexes = new Set([0, 1, classIndex, termIndex, outOfIndex].filter(index => index >= 0));
+      const subjectCols = csvHeaders
+        .map((header, index) => ({ header, index }))
+        .filter(({ index }) => !metaIndexes.has(index));
       const mappedData: Partial<ExamResult>[] = [];
+      let detectedTerm = '';
 
       for (const row of csvData) {
         const studentIdVal = row[1]?.replace(/"/g, '').trim();
@@ -517,20 +563,25 @@ export default function Grades() {
         );
         if (!student) continue;
 
-        for (let i = 0; i < subjectCols.length; i++) {
-          const scoreStr = row[i + 2]?.replace(/"/g, '').trim();
+        const rowTerm = termIndex >= 0 ? row[termIndex]?.replace(/"/g, '').trim().replace(/^term\s*/i, '') : '';
+        if (rowTerm && !detectedTerm) detectedTerm = rowTerm;
+        const rowMaxScore = outOfIndex >= 0 ? parseFloat(row[outOfIndex]?.replace(/"/g, '').trim()) : parseFloat(templateMaxScore);
+        const maxScore = Number.isFinite(rowMaxScore) && rowMaxScore > 0 ? rowMaxScore : 100;
+
+        for (const subjectCol of subjectCols) {
+          const scoreStr = row[subjectCol.index]?.replace(/"/g, '').trim();
           if (!scoreStr) continue;
           const score = parseFloat(scoreStr);
           if (isNaN(score)) continue;
 
-          const colName = subjectCols[i].replace(/"/g, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+          const colName = subjectCol.header.replace(/"/g, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
           const subject = (subjects as any[]).find(s =>
             s.classId === student.classId &&
             s.name.toLowerCase() === colName.toLowerCase()
           );
           if (!subject) continue;
 
-          mappedData.push({ studentId: student.id, subjectId: subject.id, score, maxScore: 100 } as any);
+          mappedData.push({ studentId: student.id, subjectId: subject.id, score, maxScore } as any);
         }
       }
 
@@ -538,6 +589,7 @@ export default function Grades() {
         addToast('No matching students or subjects found. Check the CSV matches your class data.', 'error');
         return;
       }
+      if (detectedTerm) setImportTerm(detectedTerm);
       setImportPreview(mappedData);
       setImportStep('preview');
       return;
@@ -570,6 +622,7 @@ export default function Grades() {
     const id = schoolId || user?.id;
     if (importPreview.length === 0) { addToast('No valid grades to import', 'error'); return; }
     if (!id) return;
+    const loadingStarted = Date.now();
     setIsImportingGrades(true);
     try {
       const now = new Date().toISOString();
@@ -633,10 +686,12 @@ export default function Grades() {
         }
       });
       await runTasksInThirtyPercentBatches(tasks);
+      await keepLoadingVisible(loadingStarted);
       setIsImportingGrades(false);
       closeImportModal();
       setShowImportSuccess(true);
     } catch (error) {
+      await keepLoadingVisible(loadingStarted);
       setIsImportingGrades(false);
       addToast('Failed to import grades', 'error');
     }
@@ -1054,11 +1109,11 @@ export default function Grades() {
                                     <div className="flex items-center gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                       <button
                                         onClick={() => setEditGrade({ id: g.id, studentName: student.studentName, subjectName: sub.name, score: String(g.score), maxScore: String(g.maxScore) })}
-                                        className="text-indigo-400 hover:text-indigo-600" title="Edit">
+                                        className="text-indigo-400 hover:text-indigo-600 disabled:opacity-50" title="Edit" disabled={Boolean(deletingGradeId)}>
                                         <Pencil size={11} />
                                       </button>
-                                      <button onClick={() => handleDelete(g.id)} className="text-red-400 hover:text-red-600" title="Delete">
-                                        <Trash2 size={11} />
+                                      <button onClick={() => handleDelete(g.id)} className="text-red-400 hover:text-red-600 disabled:opacity-70" title="Delete" disabled={Boolean(deletingGradeId)}>
+                                        {deletingGradeId === g.id ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
                                       </button>
                                     </div>
                                   </div>
@@ -1217,7 +1272,7 @@ export default function Grades() {
                 <div className="flex gap-3">
                   <button type="button" onClick={() => setShowForm(false)} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]" style={{ background: '#F3F4F6' }} onMouseEnter={e => (e.currentTarget.style.background = '#E5E7EB')} onMouseLeave={e => (e.currentTarget.style.background = '#F3F4F6')}>Cancel</button>
                   <button type="submit" disabled={bulkSubmitting || !bulkForm.studentId} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 disabled:opacity-50" style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 2px 8px rgba(79,70,229,0.3)' }}>
-                    {bulkSubmitting ? 'Saving...' : 'Save Grades'}
+                    {bulkSubmitting ? <><Loader2 size={16} className="animate-spin" /> Saving...</> : 'Save Grades'}
                   </button>
                 </div>
               </div>
@@ -1396,7 +1451,7 @@ export default function Grades() {
                   </div>
 
                   {/* Exam config */}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                     <div>
                       <label className="form-label">Exam Type</label>
                       <select value={importExamType} onChange={e => setImportExamType(e.target.value)} className="form-input">
@@ -1417,6 +1472,10 @@ export default function Grades() {
                     <div>
                       <label className="form-label">Year</label>
                       <input type="number" value={importYear} onChange={e => setImportYear(e.target.value)} className="form-input" />
+                    </div>
+                    <div>
+                      <label className="form-label">Out of</label>
+                      <input type="number" value={templateMaxScore} onChange={e => setTemplateMaxScore(e.target.value)} className="form-input" min="1" step="1" />
                     </div>
                   </div>
 
@@ -1476,7 +1535,7 @@ export default function Grades() {
                       )}
                       {subjectsForTemplateClass.length > 0 && (
                         <p className="text-xs text-slate-500 mt-1.5">
-                          Template will include {subjectsForTemplateClass.length} subject{subjectsForTemplateClass.length !== 1 ? 's' : ''}: {subjectsForTemplateClass.map((s: any) => s.name).join(', ')}
+                          Template will include Term {importTerm}, Out of {templateMaxScore || '...'}, and {subjectsForTemplateClass.length} subject{subjectsForTemplateClass.length !== 1 ? 's' : ''}: {subjectsForTemplateClass.map((s: any) => s.name).join(', ')}
                         </p>
                       )}
                       {subjectsForTemplateClass.length === 0 && (
@@ -1492,7 +1551,7 @@ export default function Grades() {
                       className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium transition-colors"
                     >
                       <Download size={16} />
-                      Download Excel Template ({templateStudentIds.size > 0 ? templateStudentIds.size : studentsForTemplateClass.length} students - {subjectsForTemplateClass.length} subjects)
+                      Download Excel Template ({templateStudentIds.size > 0 ? templateStudentIds.size : studentsForTemplateClass.length} students - Term {importTerm} - Out of {templateMaxScore || '...'})
                     </button>
                   )}
 

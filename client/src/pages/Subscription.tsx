@@ -60,7 +60,7 @@ export default function Subscription() {
     const plan = PLAN_DEFINITIONS.find(p => p.id === planId);
     if (!plan) return;
     if (billingCycle === 'yearly' || plan.contactOnly) {
-      const message = encodeURIComponent(`Hello Schofy assistant,\n\nI want to buy the ${plan.name} plan for my school.`);
+      const message = encodeURIComponent(`Hello Schofy Support,\n\nI want to buy the ${plan.name} plan for my school.`);
       window.open(`https://wa.me/256750034304?text=${message}`, '_blank');
       return;
     }

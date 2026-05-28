@@ -61,6 +61,7 @@ export default function Dashboard() {
   const { data: expenses } = useTableData(sid, 'expenses');
   const { data: attendance } = useTableData(sid, 'attendance');
   const { data: settingsRows } = useTableData(sid, 'settings');
+  const { data: classes } = useTableData(sid, 'classes');
 
   useEffect(() => {
     const obj: Record<string, string> = {};
@@ -227,6 +228,7 @@ export default function Dashboard() {
       salaryPayments,
       expenses,
       students: activeStudents,
+      classes,
       term: currentTerm,
       year: currentYear,
     });
@@ -236,6 +238,7 @@ export default function Dashboard() {
       salaryPayments,
       expenses,
       students: activeStudents,
+      classes,
       term: previous.term,
       year: previous.year,
     });
@@ -249,7 +252,7 @@ export default function Dashboard() {
       collectionRate,
       staffGrowth: Math.round(((activeStaff - previousYearStaff) / previousYearStaff) * 100)
     };
-  }, [students, activeStaff, fees, payments, salaryPayments, expenses, activeStudents, termSettings]);
+  }, [students, activeStaff, fees, payments, salaryPayments, expenses, activeStudents, classes, termSettings]);
 
   const attendanceRate = dashboardStats.attendanceToday
     ? Math.round((dashboardStats.attendanceToday.present / Math.max(dashboardStats.attendanceToday.present + dashboardStats.attendanceToday.absent + dashboardStats.attendanceToday.late, 1)) * 100)

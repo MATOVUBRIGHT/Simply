@@ -135,6 +135,30 @@ html {
   }
 }
 
+@keyframes plansPageDropIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-18px);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes plansRevealDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out;
 }
@@ -178,6 +202,16 @@ html {
 
 .page-shell-enter {
   animation: pageEnter 300ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}
+
+.plans-page-enter {
+  animation: plansPageDropIn 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.plans-reveal {
+  opacity: 0;
+  animation: plansRevealDown 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
 }
 
 .page-shell-exit {
@@ -614,6 +648,7 @@ tbody tr:last-child td {
 }
 
 /* Select/Dropdown Styles */
+select,
 select.form-input,
 .form-select {
   @apply appearance-none bg-no-repeat cursor-pointer;
@@ -621,25 +656,50 @@ select.form-input,
   background-position: right 0.75rem center;
   background-size: 1.25rem;
   padding-right: 2.5rem;
+  min-height: 42px;
   border-color: #e2e8f0;
 }
 
+select:not(.form-input):not(.form-select):not([multiple]) {
+  @apply rounded-lg border bg-white px-4 py-2.5 text-sm text-slate-900 transition-colors dark:bg-slate-800 dark:text-slate-100;
+}
+
+select[multiple] {
+  @apply bg-none pr-4;
+}
+
+select:disabled,
+.form-select:disabled {
+  @apply cursor-not-allowed opacity-60;
+}
+
+select:hover:not(:disabled),
+.form-select:hover:not(:disabled) {
+  border-color: #cbd5e1;
+}
+
 select.form-input option,
+.form-input option,
+select option,
 .form-select option {
   @apply bg-white text-slate-900;
   padding: 0.65rem 0.85rem;
 }
 
 .dark select.form-input option,
+.dark .form-input option,
+.dark select option,
 .dark .form-select option {
   @apply bg-slate-800 text-slate-100;
 }
 
+.dark select,
 .dark select.form-input,
 .dark .form-select {
   border-color: #475569;
 }
 
+select:focus,
 select.form-input:focus,
 .form-select:focus {
   border-color: var(--primary-color);
@@ -647,6 +707,7 @@ select.form-input:focus,
   outline: none;
 }
 
+.dark select:focus,
 .dark select.form-input:focus,
 .dark .form-select:focus {
   border-color: var(--primary-color);
@@ -1165,6 +1226,21 @@ textarea.form-input {
   letter-spacing: 0;
 }
 
+.invoice-stat-card {
+  transform: none !important;
+  transition-property: box-shadow, background-color, border-color !important;
+}
+
+.invoice-stat-card:hover,
+.invoice-stat-card:focus-within,
+.invoice-stat-card:active {
+  transform: none !important;
+}
+
+.invoice-stat-card .fit-stat-value {
+  transition: none !important;
+}
+
 .card-solid-indigo.has-long-stat-value,
 .card-solid-emerald.has-long-stat-value,
 .card-solid-rose.has-long-stat-value,
@@ -1632,7 +1708,9 @@ textarea.form-input {
   .animate-backdrop-in,
   .animate-backdrop-out,
   .animate-notif-in,
-  .animate-notif-out {
+  .animate-notif-out,
+  .plans-page-enter,
+  .plans-reveal {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;

@@ -81,6 +81,7 @@ export default function GlobalSearch() {
   const navigate = useNavigate();
   const searchRequestId = useRef(0);
   const searchRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (query.length < 2) {
@@ -98,14 +99,25 @@ export default function GlobalSearch() {
   }, [query]);
 
   useEffect(() => {
+    const focusSearch = () => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        document.querySelector<HTMLInputElement>('.global-search-input')?.focus();
+        focusSearch();
       }
     };
+    const handleFocusRequest = () => focusSearch();
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('schofyFocusSearch', handleFocusRequest);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('schofyFocusSearch', handleFocusRequest);
+    };
   }, []);
 
   useEffect(() => {
@@ -291,6 +303,7 @@ export default function GlobalSearch() {
       <div className="relative flex items-center">
         <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         <input
+          ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}

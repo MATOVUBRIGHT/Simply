@@ -13,17 +13,23 @@ import { redeemPaymentVerificationCode } from '../utils/paymentVerification';
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
   { q: 'Can I switch plans?', a: 'Yes. Your current plan stays active while the new plan waits for admin approval.' },
-  { q: 'How do I buy Unlimited?', a: 'Contact Schofy assistant to arrange the one-time desktop version. It gives unlimited student access after approval.' },
+  { q: 'How do I buy Unlimited?', a: 'Contact Us to arrange the one-time desktop version. It gives unlimited student access after approval.' },
   { q: 'Payment methods?', a: 'Airtel Money only. Activation within 24 hours.' },
   { q: 'Refunds?', a: 'No, all payments are non-refundable.' },
 ];
 
 const UGX_RATE = 3800;
+const MIN_PLANS_LOADING_MS = 2000;
 type PlanCurrency = 'USD' | 'UGX';
 
+function getStoredPlanId() {
+  return localStorage.getItem('schofy_sub_plan') || localStorage.getItem('schofy_pending_plan') || null;
+}
+
 export default function Plans() {
-  const { user, schoolId } = useAuth();
+  const { user, schoolId, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const authId = schoolId || user?.id || '';
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'term' | 'yearly'>('term');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanDefinition | null>(null);
@@ -49,7 +55,7 @@ export default function Plans() {
     reason?: string;
     canProceed?: boolean;
   } | null>(null);
-  const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
+  const [currentPlanId, setCurrentPlanId] = useState<string | null>(() => getStoredPlanId());
   const [accessState, setAccessState] = useState<SubscriptionAccessState | null>(null);
   const [latestReceipt, setLatestReceipt] = useState<Awaited<ReturnType<typeof getLatestReceipt>>>(null);
   const [showTrialModal, setShowTrialModal] = useState(false);
@@ -58,10 +64,38 @@ export default function Plans() {
   const [renewPlan, setRenewPlan] = useState<typeof PLAN_DEFINITIONS[0] | null>(null);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [planCurrency, setPlanCurrency] = useState<PlanCurrency>(() => (localStorage.getItem('schofy_plan_currency') === 'UGX' ? 'UGX' : 'USD'));
+  const [initialPlansLoading, setInitialPlansLoading] = useState(() => authLoading || Boolean(authId));
 
   useEffect(() => {
-    if (user?.id || schoolId) void loadPlanState();
-  }, [user?.id, schoolId]);
+    if (authLoading) {
+      setInitialPlansLoading(true);
+      return;
+    }
+
+    if (!authId) {
+      setInitialPlansLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const startedAt = Date.now();
+
+    setInitialPlansLoading(true);
+    void (async () => {
+      await loadPlanState();
+      if (cancelled) return;
+
+      const remaining = Math.max(0, MIN_PLANS_LOADING_MS - (Date.now() - startedAt));
+      window.setTimeout(() => {
+        if (cancelled) return;
+        setInitialPlansLoading(false);
+      }, remaining);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authId, authLoading]);
 
   useEffect(() => {
     const updateOnline = () => setIsOnline(typeof navigator === 'undefined' ? true : navigator.onLine);
@@ -120,10 +154,11 @@ export default function Plans() {
         }
         const sub = rows?.[0];
         const meta = sub?.metadata || {};
-        const pending = sub?.status === 'pending' || (meta.source === 'client' && !meta.approvedByAdmin && !meta.grantedByAdmin && !meta.extendedByAdmin && sub?.status !== 'active');
+        const approved = Boolean(meta.approvedByAdmin || meta.grantedByAdmin || meta.extendedByAdmin || meta.approvedByCode);
+        const pending = sub?.status === 'pending' || (meta.source === 'client' && !approved && sub?.status !== 'active');
         const paused = sub?.status === 'paused' || meta.pausedByAdmin;
         const isFreeTier = meta.accessType === 'free_trial' || meta.requestType === 'trial' || sub?.plan === 'trial';
-        const plan = PLAN_DEFINITIONS.find(p => p.id === sub?.plan) || (isFreeTier || meta.grantedByAdmin || meta.approvedByAdmin ? PLAN_DEFINITIONS[0] : null);
+        const plan = PLAN_DEFINITIONS.find(p => p.id === sub?.plan) || (isFreeTier || approved ? PLAN_DEFINITIONS[0] : null);
         if (sub && pending) {
           const hasActiveCurrentPlan = usage.status === 'active' || usage.status === 'expiring';
           localStorage.setItem('schofy_sub_pending', '1');
@@ -156,7 +191,7 @@ export default function Plans() {
           localStorage.setItem('schofy_sub_pending', '0');
           setAccessNotice({
             type: 'paused',
-            message: 'Your access is paused. Contact Schofy assistant to restore it.',
+            message: 'Your access is paused. Contact Us to restore it.',
           });
           effectiveUsage = {
             ...usage,
@@ -345,6 +380,40 @@ export default function Plans() {
     }
   }
 
+  const renderVerificationCodeEntry = (compact = false) => (
+    <div className={`${compact ? '' : 'rounded-xl border border-emerald-200 bg-white p-3 dark:border-emerald-900/60 dark:bg-slate-900'} text-left`}>
+      <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+        <KeyRound size={16} className="text-emerald-600" />
+        Payment verification code
+      </h3>
+      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        Enter a one-time Schofy code to activate the matching plan online or offline.
+      </p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          type="text"
+          value={verificationCode}
+          onChange={(e) => setVerificationCode(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void handleVerifyCode(); }}
+          placeholder="Enter verification code"
+          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          onClick={() => void handleVerifyCode()}
+          disabled={verifyingCode}
+          className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          style={{ backgroundColor: 'var(--solid-emerald)' }}
+        >
+          {verifyingCode ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+          Verify
+        </button>
+      </div>
+    </div>
+  );
+
   const handleDownloadInvoice = () => {
     const receiptAmount = latestReceipt ? formatAmount(Number(latestReceipt.amount || 0)) : 'N/A';
     const invoice = `SCHOFY RECEIPT
@@ -376,33 +445,53 @@ Powered by Schofy`;
   const currentCycle = latestReceipt?.billingCycle || null;
   const currentCycleLabel = currentCycle === 'monthly' ? 'Current Monthly' : currentCycle === 'yearly' ? 'Current Yearly' : currentCycle === 'term' ? 'Current Term' : 'Current';
   const canProceedToApp = accessState?.status === 'active' || accessState?.status === 'expiring';
-  const isLocalUnlimitedPlan = currentPlanId === 'local_unlimited' || accessState?.selectedPlanId === 'local_unlimited';
   const receiptPlan = PLAN_DEFINITIONS.find(p => p.id === latestReceipt?.planId);
-  const cachedRealPlan = !isLocalUnlimitedPlan ? (accessState?.plan || PLAN_DEFINITIONS.find(p => p.id === currentPlanId)) : receiptPlan || null;
-  const displayPlanId = cachedRealPlan?.id || (!isLocalUnlimitedPlan ? currentPlanId : null);
-  const currentPlanName = cachedRealPlan?.name || (isLocalUnlimitedPlan ? 'Desktop Offline Plan' : 'selected');
+  const cachedRealPlan = accessState?.plan || PLAN_DEFINITIONS.find(p => p.id === currentPlanId) || receiptPlan || null;
+  const displayPlanId = cachedRealPlan?.id || currentPlanId;
+  const currentPlanName = cachedRealPlan?.name || 'selected';
   const currentPlanLimit = cachedRealPlan?.studentLimit || 0;
   const currentPlanLimitLabel = currentPlanLimit >= Number.MAX_SAFE_INTEGER ? 'Unlimited' : currentPlanLimit || 'N/A';
   const showBackToApp = Boolean(user && isDesktopApp());
-  const contactMessage = (plan: PlanDefinition) => encodeURIComponent(`Hello Schofy assistant,\n\nI want to buy the ${plan.name} plan.\nSchool: ${user?.email || ''}\nSchool ID: ${schoolId || user?.id || ''}\n\nPlease help me activate the one-time desktop version with unlimited students.`);
+  const contactMessage = (plan: PlanDefinition) => encodeURIComponent(`Hello,\n\nI want to buy the ${plan.name} plan.\nSchool: ${user?.email || ''}\nSchool ID: ${schoolId || user?.id || ''}\n\nPlease help me activate the one-time desktop version with unlimited students.`);
+
+  if (initialPlansLoading) {
+    return (
+      <div className="plans-page-enter relative mx-auto flex min-h-screen w-full max-w-7xl items-center justify-center px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-10">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div
+            className="flex h-14 w-14 items-center justify-center rounded-full border bg-white shadow-sm dark:bg-slate-900"
+            style={{ borderColor: 'var(--solid-emerald)', color: 'var(--solid-emerald)' }}
+          >
+            <Loader2 size={28} className="animate-spin" />
+          </div>
+          <p className="text-lg font-black" style={{ color: 'var(--solid-emerald)' }}>
+            Loading
+          </p>
+          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            Preparing your plan details...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative mx-auto min-h-screen w-full max-w-7xl space-y-5 px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-10">
+    <div className="plans-page-enter relative mx-auto min-h-screen w-full max-w-7xl space-y-5 px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-10">
       {(!currentPlanId || accessState?.status === 'expired') ? (
-        <div className="rounded-xl border p-4 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
+        <div className="plans-reveal rounded-xl border p-4 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
           <p className="text-sm font-semibold text-slate-900 dark:text-white">
             Your account is locked or expired. Please select a plan below to unlock all features and increase student limits.
           </p>
         </div>
       ) : (
-        <div className="rounded-xl border p-4 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800">
+        <div className="plans-reveal rounded-xl border p-4 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800">
           <p className="text-sm font-semibold text-slate-900 dark:text-white">
             Your account is unlocked! Current plan: {currentPlanName}. {isOnline ? 'Plan changes are available online.' : 'You are offline, so plan changes are paused until internet returns.'}
           </p>
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="plans-reveal flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" style={{ animationDelay: '70ms' }}>
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white">
             {currentPlanId ? 'Manage Your Subscription' : 'Plans & Subscription'}
@@ -524,7 +613,7 @@ Powered by Schofy`;
       </div>
 
       {accessNotice && (
-        <div className={`rounded-xl border p-4 text-sm font-semibold ${
+        <div className={`plans-reveal rounded-xl border p-4 text-sm font-semibold ${
           accessNotice.type === 'success'
             ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200'
             : accessNotice.type === 'info'
@@ -533,12 +622,17 @@ Powered by Schofy`;
               ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200'
               : 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200'
         }`}>
-          {accessNotice.message}
+          <div>{accessNotice.message}</div>
+          {accessNotice.type === 'pending' && (
+            <div className="mt-4">
+              {renderVerificationCodeEntry()}
+            </div>
+          )}
         </div>
       )}
 
       {!currentPlanId && (
-        <div className="rounded-xl border border-violet-200 bg-violet-50 dark:border-violet-800 dark:bg-violet-900/20 p-4">
+        <div className="plans-reveal rounded-xl border border-violet-200 bg-violet-50 dark:border-violet-800 dark:bg-violet-900/20 p-4" style={{ animationDelay: '120ms' }}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-violet-100 dark:bg-violet-900/50 flex items-center justify-center flex-shrink-0 text-xl">🎁</div>
             <div className="flex-1">
@@ -562,7 +656,7 @@ Powered by Schofy`;
 
       {/* Current Plan Status */}
       {currentPlanId && accessState && (
-        <div className={`rounded-xl border p-4 ${
+        <div className={`plans-reveal rounded-xl border p-4 ${
           accessState.status === 'expired' ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20' :
           accessState.status === 'expiring' ? 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20' :
           'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
@@ -617,19 +711,20 @@ Powered by Schofy`;
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
-        {PLAN_DEFINITIONS.map((plan) => {
+        {PLAN_DEFINITIONS.map((plan, planIndex) => {
           const isAtLimit = !checkPlanLimit(plan.id);
           const isCurrentPlan = plan.id === displayPlanId && (plan.contactOnly || billingCycle === currentCycle);
           const limitLabel = plan.limitLabel || `Up to ${plan.studentLimit} students`;
           return (
             <div
               key={plan.id}
-              className={`relative flex flex-col rounded-xl border-2 bg-white/95 transition-all dark:bg-slate-800/95 ${
+              className={`plans-reveal relative flex flex-col rounded-xl border-2 bg-white/95 transition-all dark:bg-slate-800/95 ${
                 plan.popular ? 'border-indigo-500 dark:border-indigo-400 shadow-lg shadow-indigo-500/10' :
                 isCurrentPlan ? 'border-green-500 dark:border-green-400' :
                 isAtLimit ? 'border-red-300 dark:border-red-700' :
                 'border-slate-200 dark:border-slate-700'
               }`}
+              style={{ animationDelay: `${150 + planIndex * 55}ms` }}
             >
               {plan.popular && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
@@ -706,7 +801,7 @@ Powered by Schofy`;
                       rel="noopener noreferrer"
                       className="w-full py-3 rounded-xl text-sm font-medium bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center gap-2"
                     >
-                      <MessageCircle size={16} /> Contact to Buy
+                      <MessageCircle size={16} /> Contact Us
                     </a>
                   ) : isAtLimit ? (
                     <button
@@ -736,7 +831,7 @@ Powered by Schofy`;
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="rounded-xl border border-slate-200 bg-white/95 p-4 dark:border-slate-700 dark:bg-slate-800/95">
+        <div className="plans-reveal rounded-xl border border-slate-200 bg-white/95 p-4 dark:border-slate-700 dark:bg-slate-800/95" style={{ animationDelay: '330ms' }}>
           <h2 className="text-sm font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
             <Shield className="text-indigo-500" size={16} />
             Subscription Details
@@ -780,11 +875,11 @@ Powered by Schofy`;
           )}
         </div>
 
-        <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-500 to-orange-500 p-4 text-white dark:border-amber-700 dark:from-slate-800 dark:via-slate-800 dark:to-amber-900">
+        <div className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-500 to-teal-500 p-4 text-white dark:border-emerald-700 dark:from-slate-800 dark:via-slate-800 dark:to-emerald-900">
           <h3 className="mb-1 text-sm font-bold">Need unlimited students?</h3>
-          <p className="mb-3 text-xs text-amber-100 dark:text-amber-200">Contact Schofy assistant to buy the one-time desktop version.</p>
+          <p className="mb-3 text-xs text-emerald-50 dark:text-emerald-200">Contact Us to buy the one-time desktop version.</p>
           <div className="flex gap-2 flex-wrap">
-            <a href="https://wa.me/256750034304" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-amber-600 hover:bg-amber-50 dark:bg-slate-100 dark:text-amber-700 dark:hover:bg-white">
+            <a href="https://wa.me/256750034304" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:bg-slate-100 dark:text-emerald-700 dark:hover:bg-white">
               <MessageCircle size={12} /> WhatsApp
             </a>
             <a href="tel:0750034304" className="flex items-center gap-1 rounded-lg bg-white/20 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/30 dark:bg-slate-700/80 dark:text-slate-100 dark:hover:bg-slate-600">
@@ -897,7 +992,7 @@ Powered by Schofy`;
                         }
 
                         // Cache pending request separately. The active/current plan must
-                        // remain unchanged until Schofy assistant approval.
+                        // remain unchanged until Schofy approval.
                         localStorage.setItem('schofy_sub_pending', '1');
                         localStorage.setItem('schofy_sub_tid', transactionId.trim());
                         localStorage.setItem('schofy_pending_plan', selectedPlan.id);
@@ -958,42 +1053,14 @@ Powered by Schofy`;
                   <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">Activation within 24 hours after verification.</p>
                 </div>
 
-                <div className="mb-4 rounded-xl border border-emerald-200 bg-white p-3 text-left dark:border-emerald-900/60 dark:bg-slate-900">
-                  <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
-                    <KeyRound size={16} className="text-emerald-600" />
-                    Payment verification code
-                  </h3>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    Enter a one-time Schofy code to activate the matching plan online or offline.
-                  </p>
-                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                    <input
-                      type="text"
-                      value={verificationCode}
-                      onChange={(e) => setVerificationCode(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') void handleVerifyCode(); }}
-                      placeholder="Enter verification code"
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void handleVerifyCode()}
-                      disabled={verifyingCode}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                      style={{ backgroundColor: 'var(--solid-emerald)' }}
-                    >
-                      {verifyingCode ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
-                      Verify
-                    </button>
-                  </div>
+                <div className="mb-4">
+                  {renderVerificationCodeEntry()}
                 </div>
 
                 <div className="space-y-2">
                   {/* WhatsApp with pre-filled message */}
                   <a
-                    href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nPayment submitted:\nSchool: ${user?.email}\nPlan: ${selectedPlan.name}\nBilling: ${billingCycle}\nAmount: ${formatAmount(getPlanAmount(selectedPlan))}\nTransaction ID: ${transactionId}\n\nPlease verify and activate. Thank you.`)}`}
+                    href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Support,\n\nPayment submitted:\nSchool: ${user?.email}\nPlan: ${selectedPlan.name}\nBilling: ${billingCycle}\nAmount: ${formatAmount(getPlanAmount(selectedPlan))}\nTransaction ID: ${transactionId}\n\nPlease verify and activate. Thank you.`)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl text-xs font-medium flex items-center justify-center gap-2"
@@ -1076,7 +1143,7 @@ Powered by Schofy`;
               </div>
 
               <a
-                href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nI would like to request a free trial for my school.\n\nSchool email: ${user?.email}\nSchool ID: ${schoolId || user?.id}\n\nPlease activate the 7-day free trial. Thank you.`)}`}
+                href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Support,\n\nI would like to request a free trial for my school.\n\nSchool email: ${user?.email}\nSchool ID: ${schoolId || user?.id}\n\nPlease activate the 7-day free trial. Thank you.`)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => { setTrialRequested(true); void requestTrialApproval(); }}
@@ -1176,7 +1243,7 @@ Powered by Schofy`;
                   <CreditCard size={18} /> Pay & Submit TID
                 </button>
                 <a
-                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nI want to renew my ${renewPlan.name} plan.\nSchool: ${user?.email}\nBilling: ${billingCycle}\nAmount: ${formatAmount(getPlanAmount(renewPlan))}\n\nPlease assist. Thank you.`)}`}
+                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Support,\n\nI want to renew my ${renewPlan.name} plan.\nSchool: ${user?.email}\nBilling: ${billingCycle}\nAmount: ${formatAmount(getPlanAmount(renewPlan))}\n\nPlease assist. Thank you.`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 text-sm"
@@ -1216,7 +1283,7 @@ Powered by Schofy`;
             <div className="mt-5 flex gap-2">
               {verificationPopup.status === 'failed' && (
                 <a
-                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy assistant,\n\nMy payment verification code failed.\nSchool: ${user?.email || ''}\nSchool ID: ${schoolId || user?.id || ''}\nCode entered: ${verificationCode}\n\nPlease help me verify.`)}`}
+                  href={`https://wa.me/256750034304?text=${encodeURIComponent(`Hello Schofy Support,\n\nMy payment verification code failed.\nSchool: ${user?.email || ''}\nSchool ID: ${schoolId || user?.id || ''}\nCode entered: ${verificationCode}\n\nPlease help me verify.`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 rounded-lg bg-green-500 px-4 py-2 text-sm font-semibold text-white hover:bg-green-600"

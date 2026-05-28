@@ -8,6 +8,7 @@ import {
   getPlanStudentCount,
 } from './plans';
 import { EMBEDDED_ACCESS_GRANTS, PAYMENT_ACCESS_HASH_SALT, EmbeddedAccessGrant } from './accessGrants';
+import { createVerifiedPlanProof } from './planProof';
 
 const USED_CODES_KEY = 'schofy_used_payment_verification_codes';
 const TERMINATED_CODES_KEY = 'schofy_terminated_payment_verification_codes';
@@ -114,18 +115,16 @@ export async function loadTerminatedVerificationCodeHashes() {
 }
 
 async function isCodeUsedRemotely(codeHash: string) {
-  if (!supabase || typeof navigator !== 'undefined' && !navigator.onLine) return false;
-  try {
-    const { data, error } = await supabase
-      .from('subscriptions')
-      .select('id')
-      .contains('metadata', { verificationCodeHash: codeHash })
-      .limit(1);
-    if (error) throw error;
-    return Boolean(data?.length);
-  } catch {
-    return false;
+  if (!supabase || typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Online verification is required.');
   }
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('id')
+    .contains('metadata', { verificationCodeHash: codeHash })
+    .limit(1);
+  if (error) throw error;
+  return Boolean(data?.length);
 }
 
 export async function redeemPaymentVerificationCode(
@@ -135,6 +134,9 @@ export async function redeemPaymentVerificationCode(
 ): Promise<VerificationCodeResult> {
   const code = normalizeVerificationCode(rawCode);
   if (!code) return { status: 'invalid', message: 'Enter a verification code.' };
+  if (!supabase || typeof navigator !== 'undefined' && !navigator.onLine) {
+    return { status: 'error', message: 'Connect to the internet to verify this code the first time. Offline access works after online verification succeeds.' };
+  }
 
   try {
     const codeHash = await hashVerificationCode(code);
@@ -173,47 +175,81 @@ export async function redeemPaymentVerificationCode(
     };
 
     const nextUsed = Array.from(new Set([...usedLocal, codeHash]));
-    writeHashList(USED_CODES_KEY, nextUsed);
-    cachePlanStateLocally(tenantId, state);
+    const remoteVerifiedAt = now.toISOString();
+    const metadata = {
+      source: 'verification_code',
+      approvedByCode: true,
+      approvedByAdmin: true,
+      verificationCodeHash: codeHash,
+      verificationCodeLabel: grant.label,
+      verificationTokenHash: grant.tokenHash,
+      billingCycle: grant.billingCycle,
+      amount: grant.amount,
+      planName: grant.planName,
+      activatedAt: remoteVerifiedAt,
+    };
 
-    await dataService.create(tenantId, 'subscriptions', {
-      schoolId: tenantId,
-      userId: authUserId || tenantId,
+    const { error: subError } = await supabase.from('subscriptions').insert({
+      id: crypto.randomUUID(),
+      school_id: tenantId,
+      user_id: authUserId || tenantId,
       plan: plan.id,
       status: 'active',
-      startsAt: now.toISOString(),
-      endsAt: expiry.toISOString(),
-      metadata: {
-        source: 'verification_code',
-        approvedByCode: true,
-        verificationCodeHash: codeHash,
-        verificationCodeLabel: grant.label,
-        verificationTokenHash: grant.tokenHash,
-        billingCycle: grant.billingCycle,
-        amount: grant.amount,
-        planName: grant.planName,
-        activatedAt: now.toISOString(),
-      },
-    } as any);
+      starts_at: remoteVerifiedAt,
+      ends_at: expiry.toISOString(),
+      metadata,
+      created_at: remoteVerifiedAt,
+      updated_at: remoteVerifiedAt,
+    });
+    if (subError) throw subError;
 
-    await dataService.saveSettings(tenantId, {
+    const receipt = {
+      planId: plan.id,
+      planName: plan.name,
+      billingCycle: grant.billingCycle,
+      amount: grant.amount,
+      paidAt: remoteVerifiedAt,
+      expiresAt: expiry.toISOString(),
+      source: 'verification_code',
+      verificationCodeLabel: grant.label,
+      verificationTokenHash: grant.tokenHash,
+    };
+    const settingsPayload = {
       subscriptionPlanId: plan.id,
       subscriptionPlanEligible: true,
       subscriptionExpiryDate: expiry.toISOString(),
       subscriptionBillingCycle: grant.billingCycle,
       usedPaymentVerificationCodes: nextUsed,
-      subscriptionReceipt: {
-        planId: plan.id,
-        planName: plan.name,
-        billingCycle: grant.billingCycle,
-        amount: grant.amount,
-        paidAt: now.toISOString(),
-        expiresAt: expiry.toISOString(),
-        source: 'verification_code',
-        verificationCodeLabel: grant.label,
-        verificationTokenHash: grant.tokenHash,
-      },
+      subscriptionReceipt: receipt,
+    };
+    const { error: settingsError } = await supabase.from('settings').upsert(
+      Object.entries(settingsPayload).map(([key, value]) => ({
+        school_id: tenantId,
+        key,
+        value,
+        created_at: remoteVerifiedAt,
+        updated_at: remoteVerifiedAt,
+      })),
+      { onConflict: 'school_id,key' }
+    );
+    if (settingsError) throw settingsError;
+
+    writeHashList(USED_CODES_KEY, nextUsed);
+    localStorage.setItem('schofy_plan_remote_verified_at', remoteVerifiedAt);
+    localStorage.setItem('schofy_plan_verification_code_hash', codeHash);
+    cachePlanStateLocally(tenantId, state);
+    await createVerifiedPlanProof({
+      tenantId,
+      schofy_sub_expiry: expiry.toISOString(),
+      schofy_sub_status: 'active',
+      schofy_sub_plan: plan.id,
+      schofy_sub_pending: '0',
+      remoteVerifiedAt,
+      verificationCodeHash: codeHash,
+      source: 'verification_code',
     });
+
+    void dataService.saveSettings(tenantId, settingsPayload);
 
     return {
       status: 'valid',

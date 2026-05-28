@@ -42,10 +42,12 @@ if (import.meta.env.PROD && !isFileProtocol && !isAdminPath && 'serviceWorker' i
         navigator.serviceWorker.ready.then(sw => {
           const appRoutes = [
             '/', '/students', '/admission', '/staff', '/classes',
-            '/subjects', '/attendance', '/day-boarding', '/finance', '/invoices',
+            '/parents', '/parent-emails', '/classes/timetable', '/subjects',
+            '/homework-tests', '/attendance', '/day-boarding', '/finance',
+            '/payment-accounts', '/expenses', '/invoices',
             '/grades', '/exam-marks', '/transport', '/announcements',
             '/notifications', '/settings', '/reports', '/plans',
-            '/recycle-bin', '/about',
+            '/recycle-bin', '/roles', '/about',
           ];
           const documentAssets = Array.from(document.querySelectorAll<HTMLLinkElement | HTMLScriptElement | HTMLImageElement>(
             'link[href], script[src], img[src]'
@@ -68,6 +70,8 @@ if (import.meta.env.PROD && !isFileProtocol && !isAdminPath && 'serviceWorker' i
             '/icon-512.png',
             '/cover.jpg',
             '/schofy.logo.png',
+            '/chat icon.png',
+            '/chat%20icon.png',
             '/schofy-assistant-icon.png',
             '/sound/success.mp3',
             '/sound/error.wav',
