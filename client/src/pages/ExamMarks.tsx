@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
@@ -297,7 +297,7 @@ export default function ExamMarks() {
               </tr>
               <tr className="bg-teal-700 text-white">
                 {classExams.map(exam => (
-                  <>
+                  <Fragment key={`exam-columns-${exam.id}`}>
                     {allSubjects.map((sub: any) => (
                       <th key={`${exam.id}-${sub.id}`}
                         className="px-2 py-1.5 text-center font-medium text-[11px] whitespace-nowrap border-l border-teal-600 min-w-[44px]">
@@ -308,7 +308,7 @@ export default function ExamMarks() {
                     <th className="px-2 py-1.5 text-center font-semibold text-xs border-l border-teal-500 bg-teal-600">Tot</th>
                     <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-600">Avg%</th>
                     <th className="px-2 py-1.5 text-center font-semibold text-xs bg-teal-600">Grd</th>
-                  </>
+                  </Fragment>
                 ))}
               </tr>
             </thead>
@@ -329,7 +329,7 @@ export default function ExamMarks() {
                     {row.student.firstName} {row.student.lastName}
                   </td>
                   {classExams.map((exam: any) => (
-                    <>
+                    <Fragment key={`exam-row-${row.student.id}-${exam.id}`}>
                       {allSubjects.map((sub: any) => {
                         const score = row[`${exam.id}::${sub.id}`];
                         return (
@@ -343,7 +343,7 @@ export default function ExamMarks() {
                       <td className="px-2 py-2 text-center font-semibold border-l border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30 text-xs">{row.examTotals[exam.id] ?? '-'}</td>
                       <td className="px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30">{row.examAvgs[exam.id] != null ? `${row.examAvgs[exam.id]}%` : '-'}</td>
                       <td className={`px-2 py-2 text-center text-xs bg-slate-50 dark:bg-slate-700/30 ${gradeColor(row.examGrades[exam.id] ?? '-')}`}>{row.examGrades[exam.id] ?? '-'}</td>
-                    </>
+                    </Fragment>
                   ))}
                 </tr>
               ))}

@@ -1173,8 +1173,16 @@ function getClassLevel(classId: string): string {
               const selectedInClass = classSubjectIds.filter((subjectId: string) => selectedSubjects.has(subjectId)).length;
               return (
                 <div key={cls.id}>
-                  <button
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => toggleClassAccordion(cls.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        toggleClassAccordion(cls.id);
+                      }
+                    }}
                     className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors text-left"
                   >
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: 'var(--primary-color)' }}>
@@ -1209,7 +1217,7 @@ function getClassLevel(classId: string): string {
                       )}
                     </div>
                     <ChevronRight size={18} className={`text-slate-400 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
-                  </button>
+                  </div>
 
                   {isOpen && (
                     <div className="border-t border-slate-100 dark:border-slate-700/50 overflow-x-auto">
