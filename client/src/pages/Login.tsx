@@ -21,6 +21,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
+import { isUnlockedRelease, releaseChannelLabel } from '../utils/releaseChannel';
 
 type PolicyModal = 'terms' | 'privacy' | null;
 
@@ -523,7 +524,9 @@ export default function Login() {
               </div>
               <h1 className="mt-8 max-w-lg text-4xl font-bold leading-tight">A calm, reliable workspace for modern schools.</h1>
               <p className="mt-4 max-w-md text-sm leading-6 text-slate-700">
-                Manage students, finance, attendance, reports, and school operations with offline support and cloud sync.
+                {isUnlockedRelease
+                  ? 'Unlocked release: unlimited local access, offline-first records, and no plan gate in this build.'
+                  : 'Manage students, finance, attendance, reports, and school operations with offline support and cloud sync.'}
               </p>
             </div>
             <div className="grid grid-cols-3 gap-3 text-xs font-semibold">
@@ -534,7 +537,7 @@ export default function Login() {
                 Realtime sync
               </span>
               <span className="inline-flex h-10 items-center justify-center rounded-md border px-3 shadow-sm" style={{ borderColor: 'rgba(45, 163, 45, 0.28)', backgroundColor: 'rgba(45, 163, 45, 0.12)', color: 'var(--solid-emerald)' }}>
-                Secure access
+                {isUnlockedRelease ? 'Unlocked' : 'Secure access'}
               </span>
             </div>
           </section>
@@ -548,7 +551,7 @@ export default function Login() {
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{isRegister ? 'Create account' : 'Welcome back'}</h2>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    {offlineAuthMode ? 'Verified offline login only. A plan code must already be active on this device.' : isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}
+                    {isUnlockedRelease ? `${releaseChannelLabel}: unlimited offline access.` : offlineAuthMode ? 'Verified offline login only. A plan code must already be active on this device.' : isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}
                   </p>
                 </div>
               </div>
@@ -843,7 +846,7 @@ export default function Login() {
 
             <div className="mt-6 flex items-center justify-center gap-2 border-t border-slate-200 pt-5 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <Cloud size={16} className={isOnline ? 'text-emerald-500' : 'text-amber-500'} />
-              <span>{offlineAuthMode ? 'Verified offline login - plan required' : isOnline ? 'Connected to cloud' : 'Offline access requires a previously verified plan code'}</span>
+              <span>{isUnlockedRelease ? 'Unlocked release - unlimited plan, works offline' : offlineAuthMode ? 'Verified offline login - plan required' : isOnline ? 'Connected to cloud' : 'Offline access requires a previously verified plan code'}</span>
             </div>
           </section>
         </div>

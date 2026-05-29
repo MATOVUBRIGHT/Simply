@@ -1,5 +1,6 @@
 import type { Notification, Student } from '@schofy/shared';
 import { dataService } from '../lib/database/SupabaseDataService';
+import { isUnlockedRelease, releaseChannelLabel } from './releaseChannel';
 
 export interface PlanDefinition {
   id: string;
@@ -199,6 +200,39 @@ export async function persistPlanEligibility(tenantId: string, eligible: boolean
 
 const EXPIRING_DAYS_THRESHOLD = 14;
 
+function getUnlockedPlanState(tenantId: string, used = 0): SubscriptionAccessState {
+  const plan = getPlanById('unlimited') || PLAN_DEFINITIONS[PLAN_DEFINITIONS.length - 1];
+  const expiryDate = '2099-12-31T23:59:59.999Z';
+  localStorage.setItem('schofy_release_channel', releaseChannelLabel);
+  localStorage.setItem('schofy_sub_plan', plan.id);
+  localStorage.setItem('schofy_sub_status', 'active');
+  localStorage.setItem('schofy_sub_pending', '0');
+  localStorage.setItem('schofy_sub_expiry', expiryDate);
+  if (tenantId) {
+    localStorage.setItem(planCacheKey(tenantId), JSON.stringify({
+      selectedPlanId: plan.id,
+      expiryDate,
+      status: 'active',
+      daysRemaining: 9999,
+      used,
+      pending: false,
+      unlockedRelease: true,
+      cachedAt: new Date().toISOString(),
+    }));
+  }
+  return {
+    plan,
+    selectedPlanId: plan.id,
+    used,
+    remaining: Number.MAX_SAFE_INTEGER,
+    eligible: true,
+    expiryDate,
+    status: 'active',
+    daysRemaining: 9999,
+    requiresPlanAction: false,
+  };
+}
+
 function pickEndsAt(row: Record<string, unknown> | null | undefined): string | null {
   if (!row) return null;
   const v = (row.endsAt ?? row.ends_at) as string | undefined;
@@ -323,6 +357,10 @@ export async function getSubscriptionAccessState(
   planId?: string,
   opts?: { authUserId?: string }
 ): Promise<SubscriptionAccessState> {
+  if (isUnlockedRelease) {
+    const used = await getPlanStudentCount(tenantId).catch(() => 0);
+    return getUnlockedPlanState(tenantId, used);
+  }
   const authUserId = opts?.authUserId || tenantId;
   const subRow = await getLatestLocalSubscription(tenantId, authUserId);
   const subStatus = subRow?.status != null ? String(subRow.status) : '';

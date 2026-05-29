@@ -17,6 +17,7 @@ import {
   unlockStorageEncryption,
   unlockStorageEncryptionFromDesktopBackup,
 } from '../lib/database/StorageCrypto';
+import { isUnlockedRelease } from '../utils/releaseChannel';
 
 export interface LocalUser {
   id: string;
@@ -479,7 +480,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const localResult = await loginLocal(email.toLowerCase().trim(), password, { syncToCloud: false });
         if (localResult.success && localResult.user) {
           const userData = mapLocalAccount(localResult.user);
-          if (!(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
+          if (!isUnlockedRelease && !(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
             return { success: false, error: 'Offline login requires an active Schofy plan already verified by code on this device. Connect to internet, send payment by WhatsApp, then enter your verification code on Plans.' };
           }
           await unlockStorageEncryption({
@@ -828,6 +829,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const cleanEmail = profile.email.trim().toLowerCase();
     if (!cleanEmail) return { success: false, error: 'Enter an email first.' };
 
+    if (profile.mode === 'register' && isUnlockedRelease) {
+      const result = await registerLocal(cleanEmail, profile.password || '', profile.firstName || 'School', profile.lastName || 'Admin', { syncToCloud: false });
+      if (!result.success || !result.user) return { success: false, error: result.error || 'Offline registration failed' };
+      const userData = mapLocalAccount(result.user);
+      await unlockStorageEncryption({
+        userId: userData.id,
+        schoolId: userData.schoolId,
+        email: userData.email,
+        password: profile.password || '',
+      });
+      setCloudSyncEnabled(false);
+      markLocalUnlimitedAccess(userData);
+      localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'unlocked_local_registration');
+      saveSession(userData);
+      setUser(userData);
+      setSchoolId(userData.schoolId);
+      initializeSyncForUser(userData);
+      return { success: true };
+    }
+
     if (profile.mode === 'register') {
       return { success: false, error: 'Internet is required to create an account. After payment, use your Schofy verification code to unlock offline access.' };
     }
@@ -844,7 +865,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const loginResult = await loginLocal(cleanEmail, cleanPassword, { syncToCloud: false });
       if (loginResult.success && loginResult.user) {
         const userData = mapLocalAccount(loginResult.user);
-        if (!(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
+        if (!isUnlockedRelease && !(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
           return { success: false, error: 'This local account has no active verified plan. Connect to internet, open Plans, send payment by WhatsApp, then enter your Schofy verification code for offline access.' };
         }
         await unlockStorageEncryption({
@@ -887,7 +908,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const userData = mapLocalAccount(result.user);
-    if (!(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
+    if (!isUnlockedRelease && !(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
       return { success: false, error: 'This local account has no active verified plan. Connect to internet, open Plans, send payment by WhatsApp, then enter your Schofy verification code for offline access.' };
     }
     await unlockStorageEncryption({
@@ -908,6 +929,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function registerOffline(email: string, password: string, firstName: string, lastName: string): Promise<AuthResult> {
+    if (isUnlockedRelease && isDesktopApp()) {
+      const cleanEmail = email.trim().toLowerCase();
+      const result = await registerLocal(cleanEmail, password, firstName || 'School', lastName || 'Admin', { syncToCloud: false });
+      if (!result.success || !result.user) return { success: false, error: result.error || 'Offline registration failed' };
+      const userData = mapLocalAccount(result.user);
+      await unlockStorageEncryption({
+        userId: userData.id,
+        schoolId: userData.schoolId,
+        email: userData.email,
+        password,
+      });
+      setCloudSyncEnabled(false);
+      markLocalUnlimitedAccess(userData);
+      localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'unlocked_offline_registration');
+      saveSession(userData);
+      setUser(userData);
+      setSchoolId(userData.schoolId);
+      initializeSyncForUser(userData);
+      return { success: true };
+    }
     return { success: false, error: 'Internet is required to create an account. Pay through WhatsApp, receive a Schofy verification code, then activate the plan for offline use.' };
   }
 

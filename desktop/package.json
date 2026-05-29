@@ -9,7 +9,8 @@
     "dev": "cross-env NODE_ENV=development electron .",
     "build": "electron-builder",
     "build:lite": "electron-builder --config electron-builder.lite.json",
-    "build:win7": "electron-builder --config electron-builder.win7.json"
+    "build:win7": "electron-builder --config electron-builder.win7.json",
+    "build:unlocked": "electron-builder --config electron-builder.unlocked.json"
   },
   "build": {
     "appId": "com.schofy.desktop",

@@ -140,9 +140,10 @@ function getDesktopIcon() {
 }
 
 function getAppUserModelId() {
-  return app.getName().toLowerCase().includes('lite')
-    ? 'com.schofy.desktop.lite'
-    : 'com.schofy.desktop';
+  const appName = app.getName().toLowerCase();
+  if (appName.includes('unlocked')) return 'com.schofy.desktop.unlocked';
+  if (appName.includes('lite')) return 'com.schofy.desktop.lite';
+  return 'com.schofy.desktop';
 }
 
 function getZoomFilePath() {

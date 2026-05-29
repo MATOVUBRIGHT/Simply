@@ -53,6 +53,7 @@ import { supabase } from '../lib/supabase';
 import { parseAdminMessageLink } from '../utils/adminMessageLinks';
 import { downloadAttachment, openExternalLink } from '../utils/externalActions';
 import { useConfirm } from './ConfirmModal';
+import { isUnlockedRelease, releaseChannelLabel } from '../utils/releaseChannel';
 
 const assetBase = import.meta.env.BASE_URL || './';
 const APP_VERSION = 'Version1.1';
@@ -540,8 +541,9 @@ function Layout({ children }: LayoutProps) {
   };
 
   const isLocalOnlyAccount = Boolean(user?.localOnly || localStorage.getItem('schofy_local_only_session') === 'true');
-  const planLabel = isLocalOnlyAccount ? (subscriptionState?.plan?.name ?? 'Verified offline plan required') : subscriptionState?.plan?.name ?? 'No subscription';
+  const planLabel = isUnlockedRelease ? 'Unlimited' : isLocalOnlyAccount ? (subscriptionState?.plan?.name ?? 'Verified offline plan required') : subscriptionState?.plan?.name ?? 'No subscription';
   const planStatusLabel = (() => {
+    if (isUnlockedRelease) return `${releaseChannelLabel} - works offline without plan checks`;
     if (isLocalOnlyAccount) return isOnline ? 'Local desktop account. Plan still required.' : 'Offline account. Verified plan code required.';
     if (!subscriptionState) return 'No plan selected';
     if (subscriptionState.status === 'incomplete') return 'Choose a plan';
@@ -946,7 +948,7 @@ function Layout({ children }: LayoutProps) {
                   <p className="font-bold text-slate-800 dark:text-white">{user?.firstName || user?.email?.split('@')[0] || 'User'}</p>
                   <p className="text-xs text-slate-500 mt-0.5 truncate">{user?.email || ''}</p>
                   <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5">
-                    <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${isLocalOnlyAccount ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700'}`}>{isLocalOnlyAccount ? planLabel : `Plan: ${planLabel}`}</span>
+                    <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${isUnlockedRelease ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : isLocalOnlyAccount ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700'}`}>{isUnlockedRelease ? 'Unlocked: Unlimited' : isLocalOnlyAccount ? planLabel : `Plan: ${planLabel}`}</span>
                     <span className="text-[10px] font-medium uppercase px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600">Admin</span>
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1">{planStatusLabel}</p>

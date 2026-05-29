@@ -1,0 +1,43 @@
+{
+  "appId": "com.schofy.desktop.unlocked",
+  "productName": "Schofy Unlocked",
+  "directories": {
+    "output": "../dist/unlocked-release-version"
+  },
+  "files": [
+    "main.js",
+    "preload.js",
+    "installer.nsh",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../client/dist",
+      "to": "client-dist",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "../client/public/schofy.logo.ico",
+    "artifactName": "Schofy-Unlocked-Setup-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Schofy Unlocked",
+    "include": "installer.nsh"
+  }
+}

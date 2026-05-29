@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import { cacheReady } from '../lib/database/SupabaseDataService';
 import { createVerifiedPlanProof, readVerifiedPlanProof, restoreVerifiedPlanProof } from '../utils/planProof';
 import { redeemPaymentVerificationCode } from '../utils/paymentVerification';
+import { isUnlockedRelease } from '../utils/releaseChannel';
 
 // Routes always accessible regardless of subscription
 const ALLOWED_ROUTES = ['/plans', '/subscribe', '/login'];
@@ -99,6 +100,18 @@ export default function SubscriptionGate({ children }: Props) {
   const checkSubscription = useCallback(async () => {
     setCheckProgress(18);
     if (!user) { setChecking(false); return; }
+    if (isUnlockedRelease) {
+      const state = await getSubscriptionAccessState(schoolId || user.id, undefined, { authUserId: user.id });
+      cacheSubscriptionLocally(state, false);
+      setPlanName(state.plan?.name || 'Unlimited');
+      setExpiryDate(state.expiryDate);
+      setPendingTid(null);
+      setBlocked(false);
+      setBlockReason('incomplete');
+      setCheckProgress(100);
+      setChecking(false);
+      return;
+    }
     if (isAllowedRoute) { setBlocked(false); setChecking(false); return; }
     const online = typeof navigator === 'undefined' ? true : navigator.onLine;
 
