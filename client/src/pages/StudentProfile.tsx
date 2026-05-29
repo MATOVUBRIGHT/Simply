@@ -304,6 +304,28 @@ export default function StudentProfile() {
     () => subjects.filter((subject: any) => subject.classId === student?.classId).sort((a: any, b: any) => String(a.name || '').localeCompare(String(b.name || ''))),
     [subjects, student?.classId]
   );
+  const classOptionalSubjectIds = useMemo(() => {
+    if (!student?.classId) return new Set<string>();
+    const raw = (settingsData as any[]).find((setting: any) => setting.key === `classOptionalSubjectIds:${student.classId}`)?.value;
+    const parsed = Array.isArray(raw)
+      ? raw
+      : typeof raw === 'string'
+        ? (() => {
+            try {
+              const json = JSON.parse(raw);
+              return Array.isArray(json) ? json : raw.split(',').map(part => part.trim());
+            } catch {
+              return raw.split(',').map(part => part.trim());
+            }
+          })()
+        : [];
+    return new Set(parsed.map(String).filter(Boolean));
+  }, [settingsData, student?.classId]);
+  const classOptionalSubjects = useMemo(
+    () => classSubjects.filter((subject: any) => classOptionalSubjectIds.has(String(subject.id))),
+    [classSubjects, classOptionalSubjectIds]
+  );
+  const optionalSubjectChoices = classOptionalSubjects.length > 0 ? classOptionalSubjects : classSubjects;
   const subjectProfile = useMemo(() => ((student as any)?.subjectProfile || {}) as any, [student]);
   const optionalSubjectIds = useMemo(() => new Set<string>(Array.isArray(subjectProfile.optionalSubjectIds) ? subjectProfile.optionalSubjectIds : []), [subjectProfile]);
   const combinationSubjects = useMemo(() => {
@@ -320,9 +342,9 @@ export default function StudentProfile() {
     return /\b(s\s*5|s\s*6|senior\s*5|senior\s*6|a[-\s]?level)\b/i.test(currentClass);
   }, [student?.classId, classesData]);
   const defaultCoreSubjects = useMemo(() => {
-    if (classSubjects.length > 0) return classSubjects;
+    if (classSubjects.length > 0) return classSubjects.filter((subject: any) => !classOptionalSubjectIds.has(String(subject.id)));
     return [];
-  }, [classSubjects]);
+  }, [classSubjects, classOptionalSubjectIds]);
 
   useEffect(() => {
     if (!student) return;
@@ -551,10 +573,16 @@ export default function StudentProfile() {
               </section>
 
               <section>
-                <h4 className="mb-2 text-sm font-bold text-slate-700 dark:text-slate-200">OPs / Optional Subjects</h4>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200">OPs / Optional Subjects</h4>
+                  {classOptionalSubjects.length > 0 && <span className="badge badge-success">{classOptionalSubjects.length} class OPs</span>}
+                </div>
                 {editingSubjects ? (
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {classSubjects.map((subject: any) => {
+                  optionalSubjectChoices.length === 0 ? (
+                    <p className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/50">No optional subjects are available for this class yet.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {optionalSubjectChoices.map((subject: any) => {
                       const selected = subjectDraft.optionalSubjectIds.includes(subject.id);
                       return (
                         <button
@@ -573,7 +601,8 @@ export default function StudentProfile() {
                         </button>
                       );
                     })}
-                  </div>
+                    </div>
+                  )
                 ) : optionalSubjectIds.size === 0 ? (
                   <p className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/50">No optional subjects assigned yet.</p>
                 ) : (

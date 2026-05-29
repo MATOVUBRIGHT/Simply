@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AlertTriangle, CreditCard, LogOut, RefreshCw, Clock, MessageCircle, Phone, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
@@ -79,6 +79,13 @@ function hasAdminApproval(meta: Record<string, any>) {
   return Boolean(meta.approvedByAdmin || meta.grantedByAdmin || meta.extendedByAdmin || meta.approvedByCode);
 }
 
+function isReloadNavigation() {
+  if (typeof performance === 'undefined') return false;
+  const navEntry = performance.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined;
+  if (navEntry?.type === 'reload') return true;
+  return Boolean((performance as any).navigation?.type === 1);
+}
+
 export default function SubscriptionGate({ children }: Props) {
   const { user, schoolId, logout } = useAuth();
   const navigate  = useNavigate();
@@ -94,10 +101,11 @@ export default function SubscriptionGate({ children }: Props) {
   const [verificationCode, setVerificationCode] = useState('');
   const [verifyingCode, setVerifyingCode] = useState(false);
   const [verificationNotice, setVerificationNotice] = useState<{ type: 'success' | 'error'; message: string; reason?: string } | null>(null);
+  const skipRemotePlanCheckOnRefresh = useRef(isReloadNavigation());
 
   const isAllowedRoute = ALLOWED_ROUTES.some(r => location.pathname.startsWith(r));
 
-  const checkSubscription = useCallback(async () => {
+  const checkSubscription = useCallback(async (options: { forceRemote?: boolean } = {}) => {
     setCheckProgress(18);
     if (!user) { setChecking(false); return; }
     if (isUnlockedRelease) {
@@ -153,6 +161,22 @@ export default function SubscriptionGate({ children }: Props) {
         setBlocked(false);
       }
     };
+
+    if (skipRemotePlanCheckOnRefresh.current && !options.forceRemote) {
+      const proof = await readVerifiedPlanProof(tenantId);
+      const hasSavedAccess = Boolean(proof) || state.status === 'active' || state.status === 'expiring';
+
+      if (hasSavedAccess) {
+        if (proof) {
+          await restoreVerifiedPlanProof(tenantId);
+          state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
+        }
+        applyLocalState(localStorage.getItem(OFFLINE_PENDING_KEY) === '1', { enforcePlanLimit: false });
+        setCheckProgress(100);
+        setChecking(false);
+        return;
+      }
+    }
 
     if (!online) {
       const proof = await readVerifiedPlanProof(tenantId);
@@ -315,7 +339,7 @@ export default function SubscriptionGate({ children }: Props) {
         setVerificationCode('');
         setVerificationNotice({ type: 'success', message: `${result.message} Redirecting to dashboard...` });
         setChecking(true);
-        await checkSubscription();
+        await checkSubscription({ forceRemote: true });
         window.setTimeout(() => navigate('/'), 900);
         return;
       }
@@ -544,7 +568,7 @@ export default function SubscriptionGate({ children }: Props) {
 
                 {/* Check again */}
                 <button
-                  onClick={() => { setChecking(true); checkSubscription(); }}
+                  onClick={() => { setChecking(true); void checkSubscription({ forceRemote: true }); }}
                   className="w-full py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl font-medium flex items-center justify-center gap-2 transition-all text-sm"
                 >
                   <RefreshCw size={15} />

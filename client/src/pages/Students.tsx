@@ -37,6 +37,10 @@ const avatarColors = [
   'bg-amber-500',
 ];
 
+const DEFAULT_STUDENTS_PAGE_SIZE = 10;
+const LARGE_SHOW_ALL_THRESHOLD = 500;
+const LARGE_SHOW_ALL_PAGE_FRACTION = 0.2;
+
 function getAvatarColor(name: string) {
   const index = name.charCodeAt(0) % avatarColors.length;
   return avatarColors[index];
@@ -167,7 +171,13 @@ export default function Students() {
   const [currentPage, setCurrentPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
   const [selectedClass, setSelectedClass] = useState('');
-  const itemsPerPage = showAll ? 100 : 10;
+  const effectiveListSize = totalCount || allStudents.length;
+  const isLargeShowAllList = showAll && effectiveListSize > LARGE_SHOW_ALL_THRESHOLD;
+  const itemsPerPage = showAll
+    ? isLargeShowAllList
+      ? Math.max(DEFAULT_STUDENTS_PAGE_SIZE, Math.ceil(effectiveListSize * LARGE_SHOW_ALL_PAGE_FRACTION))
+      : Math.max(effectiveListSize, DEFAULT_STUDENTS_PAGE_SIZE)
+    : DEFAULT_STUDENTS_PAGE_SIZE;
   const { addToast } = useToast();
   // ... rest of state stays same
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -290,7 +300,7 @@ export default function Students() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id, schoolId, debouncedSearch, selectedClass, viewFilter, currentPage, loadPage, searchStudents, loadClasses]);
+  }, [user?.id, schoolId, debouncedSearch, selectedClass, viewFilter, currentPage, itemsPerPage, loadPage, searchStudents, loadClasses]);
 
   useEffect(() => {
     loadData();
@@ -433,6 +443,11 @@ export default function Students() {
 
   const totalPages = Math.ceil(totalCount / itemsPerPage);
   const paginatedStudents = students;
+
+  useEffect(() => {
+    const lastPage = Math.max(1, totalPages);
+    setCurrentPage((page) => Math.min(Math.max(page, 1), lastPage));
+  }, [totalPages]);
 
   async function cleanupOrphanedRecords() {
     const id = schoolId || user?.id;
@@ -2048,21 +2063,24 @@ export default function Students() {
         {viewFilter !== 'completed' && (
           <div className="px-4 py-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
-              {showAll ? (
-                <><span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(totalCount, itemsPerPage)}</span> of <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students</>
+              {showAll && !isLargeShowAllList ? (
+                <><span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students shown</>
               ) : (
                 <><span className="font-medium text-slate-700 dark:text-slate-300">{Math.min((currentPage - 1) * itemsPerPage + 1, totalCount)}</span>{' - '}<span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span>{' of '}<span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span></>
+              )}
+              {isLargeShowAllList && (
+                <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">20% per page</span>
               )}
             </p>
             <button
               onClick={() => { setShowAll(v => !v); setCurrentPage(1); }}
               className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
             >
-              {showAll ? 'Show Pages' : 'Show More'}
+              {showAll ? 'Show Pages' : 'Show All'}
             </button>
           </div>
         )}
-        {viewFilter !== 'completed' && showAll === false && totalPages > 1 && (
+        {viewFilter !== 'completed' && (!showAll || isLargeShowAllList) && totalPages > 1 && (
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
               Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>-

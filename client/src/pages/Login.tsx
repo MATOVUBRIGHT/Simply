@@ -530,22 +530,22 @@ export default function Login() {
                   : 'Manage students, finance, attendance, reports, and school operations with offline support and cloud sync.'}
               </p>
               {isUnlockedRelease && (
-                <div className="mt-5 max-w-md rounded-lg border border-emerald-200 bg-emerald-50/90 px-4 py-3 text-sm text-emerald-900 shadow-sm">
-                  <p className="font-bold">{UNLIMITED_PLAN_LABEL} is free forever in this unlocked release.</p>
-                  <p className="mt-1 leading-5">
+                <div className="mt-6 max-w-md border-l-4 border-emerald-500 bg-white/58 px-4 py-3 text-sm text-slate-750 shadow-sm backdrop-blur-sm">
+                  <p className="font-bold text-slate-950">{UNLIMITED_PLAN_LABEL} stays free in this unlocked release.</p>
+                  <p className="mt-2 leading-6 text-slate-700">
                     Online accounts sync across devices when internet is available. Offline accounts work without internet on this device, but they stay separate from online accounts and do not sync until you create or use an online account.
                   </p>
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-3 text-xs font-semibold">
-              <span className="inline-flex h-10 items-center justify-center rounded-md border border-amber-200 bg-amber-100/90 px-3 text-amber-800 shadow-sm">
+            <div className="flex flex-wrap gap-2 text-xs font-semibold text-slate-700">
+              <span className="inline-flex h-9 items-center justify-center rounded-full border border-slate-300/70 bg-white/62 px-4 shadow-sm backdrop-blur-sm">
                 Offline ready
               </span>
-              <span className="inline-flex h-10 items-center justify-center rounded-md border border-sky-200 bg-sky-100/90 px-3 text-sky-800 shadow-sm">
+              <span className="inline-flex h-9 items-center justify-center rounded-full border border-slate-300/70 bg-white/62 px-4 shadow-sm backdrop-blur-sm">
                 Realtime sync
               </span>
-              <span className="inline-flex h-10 items-center justify-center rounded-md border px-3 shadow-sm" style={{ borderColor: 'rgba(45, 163, 45, 0.28)', backgroundColor: 'rgba(45, 163, 45, 0.12)', color: 'var(--solid-emerald)' }}>
+              <span className="inline-flex h-9 items-center justify-center rounded-full border border-slate-300/70 bg-white/62 px-4 shadow-sm backdrop-blur-sm">
                 {isUnlockedRelease ? 'Unlocked' : 'Secure access'}
               </span>
             </div>

@@ -487,7 +487,8 @@ function getClassLevel(classId: string): string {
     await deleteInThirtyPercentBatches(id, 'subjects', subjectIds);
   }
 
-  // Delete all entries for a subject group (all classes it's assigned to)
+  // Delete the subject entries supplied by the caller. Class rows pass only
+  // their own subject id so deleting from a selected class stays class-scoped.
   async function handleDeleteGroup(group: { name: string; ids: string[] }) {
     const id = schoolId || user?.id;
     if (!id) return;
@@ -1338,7 +1339,7 @@ function getClassLevel(classId: string): string {
                               onSelect={handleRowClick}
                               onEdit={openEditGroup}
                               onDelete={handleDeleteGroup}
-                              onDoubleClick={(group) => handleDeleteGroup(group)}
+                              onDoubleClick={() => handleDeleteGroup({ name: getSubjectName(sub) || 'Subject', ids: [sub.id] })}
                             />
                           ))}
                         </tbody>

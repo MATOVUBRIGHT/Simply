@@ -10,6 +10,7 @@
  */
 import { useSyncExternalStore, useCallback } from 'react';
 import { dataService } from './database/SupabaseDataService';
+import { decryptJson } from './database/StorageCrypto';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { sortStudentsForList } from '../utils/studentOrdering';
 
@@ -25,6 +26,7 @@ interface TableState {
 const STALE_MS = 4 * 60 * 60_000; // 4 hours — data loaded once stays loaded; realtime + manual refresh keeps it fresh
 const FALLBACK_REFRESH_MS = 15 * 60_000; // Safety net only; realtime handles normal updates
 const ACTIVE_CATCHUP_MS = 5 * 60_000; // Keep focus/online refreshes within the low-call sync protocol
+const MAX_SYNC_BOOTSTRAP_CACHE_BYTES = 1_500_000;
 
 class DataStore {
   private state = new Map<string, TableState>();
@@ -217,7 +219,7 @@ export const store = new DataStore();
     // Try localStorage cache first (synchronous, instant)
     const PERSIST_KEY = 'schofy_data_cache';
     const raw = localStorage.getItem(PERSIST_KEY);
-    if (raw) {
+    if (raw && raw.length <= MAX_SYNC_BOOTSTRAP_CACHE_BYTES && !raw.includes('__schofyEncrypted')) {
       const cache: Record<string, { data: any[]; ts: number }> = JSON.parse(raw);
       for (const [key, entry] of Object.entries(cache)) {
         if (!key.startsWith(sid + ':')) continue;
@@ -230,16 +232,28 @@ export const store = new DataStore();
     // Try IndexedDB (async — will update store when ready)
     const IDB_DB_NAME = 'schofy_cache';
     const IDB_STORE = 'data';
+    const sidPersistKey = `${PERSIST_KEY}:${sid}`;
     try {
-      const req = indexedDB.open(IDB_DB_NAME, 1);
+      const req = indexedDB.open(IDB_DB_NAME);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+      };
       req.onsuccess = () => {
         const db = req.result;
         const tx = db.transaction(IDB_STORE, 'readonly');
-        const getReq = tx.objectStore(IDB_STORE).get(PERSIST_KEY);
-        getReq.onsuccess = () => {
-          const cache = getReq.result;
+        const getReq = tx.objectStore(IDB_STORE).get(sidPersistKey);
+        getReq.onsuccess = async () => {
+          let cache = await decryptJson<Record<string, { data: any[]; ts: number }>>(getReq.result);
+          if (!cache) {
+            const legacyReq = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(PERSIST_KEY);
+            cache = await new Promise<Record<string, { data: any[]; ts: number }> | null>((resolve) => {
+              legacyReq.onsuccess = async () => resolve(await decryptJson<Record<string, { data: any[]; ts: number }>>(legacyReq.result));
+              legacyReq.onerror = () => resolve(null);
+            });
+          }
           if (!cache) return;
-          for (const [key, entry] of Object.entries(cache as Record<string, { data: any[]; ts: number }>)) {
+          for (const [key, entry] of Object.entries(cache)) {
             if (!key.startsWith(sid + ':')) continue;
             const table = key.slice(sid.length + 1);
             if ((entry as any).data?.length > 0) {

@@ -471,9 +471,68 @@ function filterDeleted(sid: string, tableName: string, records: any[]): any[] {
 
 // ── Persistent cache — IndexedDB primary, localStorage fallback ──────────────
 const PERSIST_KEY = 'schofy_data_cache';
+const SID_CACHE_PREFIX = `${PERSIST_KEY}:`;
+const MAX_LOCALSTORAGE_CACHE_BYTES = 1_500_000;
 
 interface CacheEntry { data: any[]; ts: number; }
 const memCache = new Map<string, CacheEntry>();
+
+function currentCacheSid(): string {
+  try {
+    return localStorage.getItem('schofy_current_school_id')
+      || localStorage.getItem('schofy_current_user_id')
+      || '';
+  } catch {
+    return '';
+  }
+}
+
+function sidCacheKey(sid: string) {
+  return `${SID_CACHE_PREFIX}${sid}`;
+}
+
+function sidFromCacheKey(key: string) {
+  const index = key.indexOf(':');
+  return index > 0 ? key.slice(0, index) : '';
+}
+
+function loadEntriesIntoMemory(parsed: Record<string, CacheEntry> | null | undefined, sid = currentCacheSid()) {
+  if (!parsed) return;
+  for (const [k, v] of Object.entries(parsed)) {
+    if (sid && !k.startsWith(`${sid}:`)) continue;
+    memCache.set(k, { ...(v as CacheEntry), data: removeSmokeRecords((v as CacheEntry).data) });
+  }
+}
+
+function groupCacheBySid(entries: Iterable<[string, CacheEntry]>) {
+  const groups: Record<string, Record<string, CacheEntry>> = {};
+  for (const [key, value] of entries) {
+    const sid = sidFromCacheKey(key);
+    if (!sid) continue;
+    if (!groups[sid]) groups[sid] = {};
+    groups[sid][key] = { ...value, data: removeSmokeRecords(value.data) };
+  }
+  return groups;
+}
+
+async function putCacheObject(db: IDBDatabase, key: string, obj: Record<string, CacheEntry>) {
+  const encrypted = await encryptJson(obj);
+  const tx = db.transaction('data', 'readwrite');
+  tx.objectStore('data').put(encrypted, key);
+  return encrypted;
+}
+
+async function migrateLegacyCacheToSidStores(parsed: Record<string, CacheEntry>) {
+  try {
+    const db = await getCacheDB();
+    const groups = groupCacheBySid(Object.entries(parsed));
+    await Promise.allSettled(Object.entries(groups).map(([sid, group]) => putCacheObject(db, sidCacheKey(sid), group)));
+    const tx = db.transaction('data', 'readwrite');
+    tx.objectStore('data').delete(PERSIST_KEY);
+  } catch {
+    // Best effort migration. The legacy cache can still be read if needed.
+  }
+}
 
 // ── IndexedDB cache database ──────────────────────────────────────────────────
 function getCacheDB(): Promise<IDBDatabase> {
@@ -489,24 +548,30 @@ async function loadPersistedCache() {
   try {
     const db = await getCacheDB();
     const tx = db.transaction('data', 'readonly');
-    const req = tx.objectStore('data').get(PERSIST_KEY);
+    const sid = currentCacheSid();
+    const req = tx.objectStore('data').get(sid ? sidCacheKey(sid) : PERSIST_KEY);
     req.onsuccess = async () => {
       let parsed = await decryptJson<Record<string, CacheEntry>>(req.result);
+      if (!parsed) {
+        const legacyReq = db.transaction('data', 'readonly').objectStore('data').get(PERSIST_KEY);
+        parsed = await new Promise<Record<string, CacheEntry> | null>((resolve) => {
+          legacyReq.onsuccess = async () => resolve(await decryptJson<Record<string, CacheEntry>>(legacyReq.result));
+          legacyReq.onerror = () => resolve(null);
+        });
+        if (parsed) void migrateLegacyCacheToSidStores(parsed);
+      }
       if (!parsed) {
         // Fallback to legacy localStorage cache
         const saved = localStorage.getItem(PERSIST_KEY);
         if (saved) {
           try { parsed = await decryptJson<Record<string, CacheEntry>>(JSON.parse(saved)); } catch {}
+          if (parsed) void migrateLegacyCacheToSidStores(parsed);
         }
       }
       if (!parsed) {
         parsed = await decryptJson<Record<string, CacheEntry>>(await readElectronBackup(PERSIST_KEY));
       }
-      if (parsed) {
-        for (const [k, v] of Object.entries(parsed)) {
-          memCache.set(k, { ...(v as CacheEntry), data: removeSmokeRecords((v as CacheEntry).data) });
-        }
-      }
+      loadEntriesIntoMemory(parsed);
       
       // Load critical fallbacks (ensures settings are always available)
       await _loadCriticalFallbacks();
@@ -514,21 +579,13 @@ async function loadPersistedCache() {
     };
     req.onerror = async () => { 
       const native = await decryptJson<Record<string, CacheEntry>>(await readElectronBackup(PERSIST_KEY));
-      if (native) {
-        for (const [k, v] of Object.entries(native)) {
-          memCache.set(k, { ...(v as CacheEntry), data: removeSmokeRecords((v as CacheEntry).data) });
-        }
-      }
+      loadEntriesIntoMemory(native);
       await _loadCriticalFallbacks();
       resolveCacheReady(); 
     };
   } catch {
     const native = await decryptJson<Record<string, CacheEntry>>(await readElectronBackup(PERSIST_KEY));
-    if (native) {
-      for (const [k, v] of Object.entries(native)) {
-        memCache.set(k, { ...(v as CacheEntry), data: removeSmokeRecords((v as CacheEntry).data) });
-      }
-    }
+    loadEntriesIntoMemory(native);
     await _loadCriticalFallbacks();
     resolveCacheReady();
   }
@@ -572,18 +629,28 @@ function _flushCache() {
   try {
     const obj: Record<string, CacheEntry> = {};
     for (const [k, v] of memCache) obj[k] = { ...v, data: removeSmokeRecords(v.data) };
+    const groups = groupCacheBySid(Object.entries(obj));
     
     getCacheDB().then(db => {
-      void encryptJson(obj).then(encrypted => {
+      void (async () => {
+        let currentEncrypted: any = null;
+        for (const [sid, group] of Object.entries(groups)) {
+          const encrypted = await putCacheObject(db, sidCacheKey(sid), group);
+          if (sid === currentCacheSid()) currentEncrypted = encrypted;
+        }
         const tx = db.transaction('data', 'readwrite');
-        tx.objectStore('data').put(encrypted, PERSIST_KEY);
-        try { localStorage.setItem(PERSIST_KEY, JSON.stringify(encrypted)); } catch {}
+        tx.objectStore('data').delete(PERSIST_KEY);
+        try { localStorage.removeItem(PERSIST_KEY); } catch {}
         // Also write Electron native backup (no-op in browser)
-        void writeElectronBackup('schofy_data_cache', encrypted);
-      });
+        if (currentEncrypted) void writeElectronBackup('schofy_data_cache', currentEncrypted);
+      })();
     }).catch(() => {
       void encryptJson(obj).then(encrypted => {
-        try { localStorage.setItem(PERSIST_KEY, JSON.stringify(encrypted)); } catch {}
+        try {
+          const payload = JSON.stringify(encrypted);
+          if (payload.length <= MAX_LOCALSTORAGE_CACHE_BYTES) localStorage.setItem(PERSIST_KEY, payload);
+          else localStorage.removeItem(PERSIST_KEY);
+        } catch {}
       });
     });
   } catch { /* error building obj */ }

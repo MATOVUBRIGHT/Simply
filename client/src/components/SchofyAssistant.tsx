@@ -24,10 +24,10 @@ function publicAssetPath(fileName: string) {
   const normalizedBase = base.endsWith('/') ? base : `${base}/`;
   return `${normalizedBase}${fileName}`;
 }
-const ASSISTANT_ICON = publicAssetPath('chat icon.png');
+const ASSISTANT_ICON = publicAssetPath('chat-icon.png');
 const ASSISTANT_ICON_FALLBACKS = [
+  publicAssetPath('chat icon.png'),
   publicAssetPath('schofy-assistant-icon.png'),
-  publicAssetPath('icon-192.png'),
 ];
 
 const NATURAL_LADY_VOICE_HINTS = [
@@ -422,7 +422,15 @@ export default function SchofyAssistant() {
           <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-800" style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--solid-emerald))' }}>
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20 text-white">
-                <Bot size={22} />
+                <img
+                  src={ASSISTANT_ICON}
+                  alt=""
+                  className="h-full w-full rounded-2xl object-cover"
+                  draggable={false}
+                  onError={(event) => {
+                    event.currentTarget.style.display = 'none';
+                  }}
+                />
               </div>
               <div>
                 <p className="text-sm font-bold text-white">Schofy assistant</p>

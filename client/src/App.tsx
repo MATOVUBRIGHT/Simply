@@ -94,7 +94,9 @@ const offlinePageWarmers = [
   () => import('./pages/NotFound'),
 ];
 
-function FullScreenLoader({ label = 'Loading Schofy...' }: { label?: string }) {
+const REFRESH_LOADER_MS = 2000;
+
+function FullScreenLoader({ label = 'Loading...' }: { label?: string }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4">
       <div className="flex flex-col items-center gap-3 text-center">
@@ -188,7 +190,7 @@ function MainApp() {
           {/* SubscriptionGate wraps all content — shows blocking modal if expired/incomplete */}
           <SubscriptionGate>
             <Layout>
-              <Suspense fallback={null}>
+              <Suspense fallback={<FullScreenLoader label="Loading..." />}>
                 <div className="page-shell page-shell-enter">
                   <Routes location={location}>
                     <Route path="/" element={<ErrorBoundary inline><Dashboard /></ErrorBoundary>} />
@@ -251,13 +253,23 @@ function MainApp() {
 function App() {
   const { user, loading } = useAuth();
   const hasSession = !!localStorage.getItem('schofy_session');
+  const [showRefreshLoader, setShowRefreshLoader] = useState(true);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShowRefreshLoader(false), REFRESH_LOADER_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  if (showRefreshLoader) {
+    return <FullScreenLoader label="Loading..." />;
+  }
 
   // No session at all — show login
   if (!hasSession && !user) {
-    if (loading) return <FullScreenLoader label="Loading Schofy..." />;
+    if (loading) return <FullScreenLoader label="Loading..." />;
     return (
       <>
-        <Suspense fallback={<FullScreenLoader />}>
+        <Suspense fallback={<FullScreenLoader label="Loading..." />}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="*" element={<Navigate to="/login" replace />} />
@@ -271,7 +283,7 @@ function App() {
   // Has session or user — render app
   return (
     <>
-      <Suspense fallback={<FullScreenLoader />}>
+      <Suspense fallback={<FullScreenLoader label="Loading..." />}>
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
           <Route path="/plans" element={<Plans />} />

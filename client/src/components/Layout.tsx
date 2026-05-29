@@ -956,11 +956,10 @@ function Layout({ children }: LayoutProps) {
                 </div>
                 <div className="p-2">
                   {[
-                    { label: 'Plans & Billing', icon: CreditCard, path: '/plans' },
-                    { label: 'Settings', icon: Settings, path: '/settings' },
-                    { label: 'Notifications', icon: Bell, path: '/notifications' },
-                    { label: 'Recycle Bin', icon: Trash2, path: '/recycle-bin' },
-                    { label: 'About App', description: 'Privacy, terms, and help', icon: Info, path: '/about' },
+                    { label: 'Plans & Billing', description: '', icon: CreditCard, path: '/plans' },
+                    { label: 'Settings', description: '', icon: Settings, path: '/settings' },
+                    { label: 'Notifications', description: '', icon: Bell, path: '/notifications' },
+                    { label: 'Recycle Bin', description: '', icon: Trash2, path: '/recycle-bin' },
                   ].map(({ label, description, icon: Icon, path }) => (
                     <button key={path} onClick={() => { setProfileOpen(false); navigate(path); }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left">
@@ -975,6 +974,14 @@ function Layout({ children }: LayoutProps) {
                     className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                     <ClipboardList size={16} className="text-slate-400 shrink-0" />
                     <span className="font-medium text-sm">{organizedSidebar ? 'Default Sidebar' : 'Organize Sidebar'}</span>
+                  </button>
+                  <button onClick={() => { setProfileOpen(false); navigate('/about'); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left">
+                    <Info size={16} className="text-slate-400 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block font-medium text-sm">About App</span>
+                      <span className="block truncate text-[11px] text-slate-400">Privacy, terms, and help</span>
+                    </span>
                   </button>
                   <div className="border-t border-slate-100 dark:border-slate-700 my-1 mx-3" />
                   {isStaffMode && (

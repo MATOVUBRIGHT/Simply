@@ -202,7 +202,7 @@ function applyZoom(options = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.setZoomFactor(zoomFactor);
   saveZoomFactor();
-  showZoomPercent();
+  if (options.showIndicator !== false) showZoomPercent();
   if (options.rebuildMenu !== false) createMenu();
 }
 
@@ -313,8 +313,12 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     desktopLog('[startup] Main window ready to show');
-    applyZoom({ rebuildMenu: false });
+    applyZoom({ rebuildMenu: false, showIndicator: false });
     mainWindow.show();
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    applyZoom({ rebuildMenu: false, showIndicator: false });
   });
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {

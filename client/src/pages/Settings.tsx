@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { Save, Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard, Info, Shield, ScrollText, HelpCircle } from 'lucide-react';
+import { Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard, Info, Shield, ScrollText, HelpCircle } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCurrency } from '../hooks/useCurrency';
@@ -154,16 +154,26 @@ export default function Settings() {
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const schoolLogoInputRef = useRef<HTMLInputElement>(null);
 
+  const applySettingsLocally = useCallback((newSettings: typeof settings) => {
+    const sid = schoolId || user?.id;
+    if (!sid) return;
+    const normalized = {
+      ...newSettings,
+      schoolType: normalizeSchoolType(newSettings.schoolType),
+      schoolCategory: normalizeSchoolCategory(newSettings.schoolCategory),
+    };
+    localStorage.setItem(`schofy_settings_${sid}`, JSON.stringify(normalized));
+    localStorage.setItem('schofy_currency', normalized.currency || 'USD');
+    window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: normalized }));
+    window.dispatchEvent(new Event('currencyChanged'));
+  }, [schoolId, user?.id]);
+
   // Auto-save to Supabase 1s after last change
   const autoSave = useCallback(async (newSettings: typeof settings) => {
     const sid = schoolId || user?.id;
     if (!sid || !newSettings.schoolName?.trim()) return;
     setIsSaving(true);
     try {
-      localStorage.setItem('schofy_currency', newSettings.currency || 'USD');
-      // Persist to localStorage immediately for next login
-      localStorage.setItem(`schofy_settings_${sid}`, JSON.stringify(newSettings));
-      window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: newSettings }));
       await dataService.saveSettings(sid, newSettings);
       window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
       setAutoSaved(true);
@@ -186,8 +196,7 @@ export default function Settings() {
     setIsSaving(true);
     try {
       const settingsToSave = { ...settings, schoolType: normalizeSchoolType(settings.schoolType), schoolCategory: normalizeSchoolCategory(settings.schoolCategory) };
-      localStorage.setItem('schofy_currency', settingsToSave.currency || 'USD');
-      window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settingsToSave }));
+      applySettingsLocally(settingsToSave);
       const classesOk = await autoCreateClasses(sid, settingsToSave.schoolType, { confirmStudentClear: true, forceReplace: false });
       if (!classesOk) return;
 
@@ -332,6 +341,7 @@ export default function Settings() {
       if (!ok) return;
     }
     setSettings(newSettings);
+    applySettingsLocally(newSettings);
     window.dispatchEvent(new CustomEvent('classesUpdated'));
     window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
@@ -347,6 +357,7 @@ export default function Settings() {
 
     const newSettings = { ...settings, [name]: value };
     setSettings(newSettings);
+    applySettingsLocally(newSettings);
 
     if (name === 'currency') {
       setCurrency(value as any);
@@ -646,14 +657,11 @@ export default function Settings() {
           </span>
           {autoSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle size={14} /> Auto-saved</span>}
           {isSaving && <span className="text-sm text-slate-400 flex items-center gap-1"><div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> Saving...</span>}
-          <button onClick={handleSave} disabled={isSaving} className="btn btn-primary flex items-center gap-2 disabled:opacity-70">
-            {isSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={18} />}
-            {isSaving ? 'Saving...' : 'Save'}
-          </button>
+          <span className="hidden text-sm text-slate-500 dark:text-slate-400 sm:inline-flex">Changes apply automatically</span>
         </div>
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
+      <form onSubmit={(event) => event.preventDefault()} className="space-y-6">
         <div className="card">
           <div className="card-header flex items-center gap-2">
             <Building size={20} />

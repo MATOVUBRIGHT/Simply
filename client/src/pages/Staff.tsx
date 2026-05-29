@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
@@ -19,6 +19,7 @@ import { PortalDropdown } from '../components/PortalDropdown';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
+import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
 
 const avatarColors = [
   'bg-violet-500',
@@ -325,6 +326,12 @@ export default function StaffPage() {
 
   const getStaffSubjects = useMemo(() => {
     const byStaffId = new Map<string, Subject[]>();
+    const subjectKey = (subject: Subject) => {
+      const code = String((subject as any).code || (subject as any).subjectCode || '').trim().toLowerCase();
+      const name = String((subject as any).name || (subject as any).subjectName || '').trim().toLowerCase();
+      return code || name || String(subject.id);
+    };
+
     for (const subject of subjects) {
       const teacherId = (subject as any).teacherId;
       if (!teacherId) continue;
@@ -336,24 +343,27 @@ export default function StaffPage() {
     return (staffMember: Staff) => {
       const assignedSubjectIds = new Set((staffMember.subjects || []).map(String));
       const merged = new Map<string, Subject>();
-      (byStaffId.get(staffMember.id) || []).forEach(subject => merged.set(subject.id, subject));
+      (byStaffId.get(staffMember.id) || []).forEach(subject => merged.set(subjectKey(subject), subject));
       subjects
         .filter(subject => assignedSubjectIds.has(String(subject.id)))
-        .forEach(subject => merged.set(subject.id, subject));
+        .forEach(subject => merged.set(subjectKey(subject), subject));
       return Array.from(merged.values()).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
     };
   }, [subjects]);
 
-  function getStaffSubjectSummary(staffMember: Staff) {
+  const getStaffSubjectSummary = useCallback((staffMember: Staff) => {
     const names = getStaffSubjects(staffMember).map(subject => subject.name).filter(Boolean);
     if (names.length === 0) return 'No subjects assigned';
     if (names.length <= 3) return names.join(', ');
     return `${names.slice(0, 3).join(', ')} +${names.length - 3} more`;
-  }
+  }, [getStaffSubjects]);
 
-  const filteredStaff = staff.filter((s) =>
+  const filteredStaff = useMemo(() => staff.filter((s) =>
     matchesTextSearch([s.firstName, s.lastName, `${s.firstName} ${s.lastName}`, `${s.lastName} ${s.firstName}`, s.employeeId, s.email, s.phone, getStaffSubjectSummary(s)], search)
-  );
+  ), [staff, search, getStaffSubjectSummary]);
+  const filteredTeachers = useMemo(() => filteredStaff.filter(s => s.role === StaffRole.TEACHER), [filteredStaff]);
+  const staffProgress = useProgressiveList(filteredStaff, { initialCount: 120, step: 120, delayMs: 2000 });
+  const visibleStaff = staffProgress.visibleItems;
 
   async function handleDelete(id: string) {
     const authId = schoolId || user?.id;
@@ -740,14 +750,14 @@ export default function StaffPage() {
             </div>
           </div>
           <div className="card-body">
-            {filteredStaff.filter(s => s.role === StaffRole.TEACHER).length === 0 ? (
+            {filteredTeachers.length === 0 ? (
               <div className="text-center py-8">
                 <Briefcase size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
                 <p className="text-slate-500 font-medium">No teachers found</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {filteredStaff.filter(s => s.role === StaffRole.TEACHER).map((teacher) => (
+                {filteredTeachers.map((teacher) => (
                   <div key={teacher.id} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
                     <div className="flex items-center gap-3">
                       <div className={`w-8 h-8 rounded-lg ${getAvatarColor(teacher.firstName)} flex items-center justify-center`}>
@@ -869,7 +879,7 @@ export default function StaffPage() {
                   </td>
                 </tr>
               ) : (
-                filteredStaff.map((s, index) => (
+                visibleStaff.map((s, index) => (
                   <tr 
                     key={s.id}
                     className={`group cursor-pointer transition-colors ${selectedStaff.has(s.id) ? 'bg-violet-50 dark:bg-violet-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
@@ -967,6 +977,7 @@ export default function StaffPage() {
               )}
             </tbody>
           </table>
+          <ProgressiveListLoader hasMore={staffProgress.hasMore} loadingMore={staffProgress.loadingMore} onVisible={staffProgress.loadMore} />
         </div>
       </div>
       {previewImage && (

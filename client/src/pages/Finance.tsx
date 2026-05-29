@@ -20,8 +20,7 @@ import { openPrintPreview } from '../utils/printPreview';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { FitStatValue } from '../components/FitStatValue';
-
-const LARGE_TABLE_RENDER_LIMIT = 300;
+import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
 
 function termRank(term: string) {
   const n = Number(String(term).replace(/[^0-9]/g, ''));
@@ -574,7 +573,7 @@ export default function Finance() {
     };
   };
 
-  const studentFinanceSummary = students.map(student => {
+  const studentFinanceSummary = useMemo(() => students.map(student => {
     const breakdown = getStudentTermBreakdown(student.id);
     const hasActivity = breakdown.currentFees.length > 0 || breakdown.openingBalance > 0 || breakdown.currentPaid > 0;
     return {
@@ -595,9 +594,9 @@ export default function Finance() {
       discount: breakdown.discount,
       hasFullBursary: breakdown.hasFullBursary,
     };
-  }).filter(s => s.invoiceCount > 0 || s.openingBalance > 0 || s.totalPaid > 0);
+  }).filter(s => s.invoiceCount > 0 || s.openingBalance > 0 || s.totalPaid > 0), [students, feesByStudent, paymentsByFee, bursaryByStudent, discountByStudent, ledgerTerm, ledgerYear]);
 
-  const totalPending = studentFinanceSummary.reduce((sum, s) => sum + s.balance, 0);
+  const totalPending = useMemo(() => studentFinanceSummary.reduce((sum, s) => sum + s.balance, 0), [studentFinanceSummary]);
 
   const studentById = useMemo(() => new Map(students.map(student => [student.id, student])), [students]);
 
@@ -718,10 +717,14 @@ export default function Finance() {
         .filter(p => p.studentId === selectedLedgerStudentId || selectedLedgerFees.some(f => f.id === p.feeId))
         .sort((a, b) => new Date(a.date || '').getTime() - new Date(b.date || '').getTime())
     : [];
-  const visibleFilteredStudentFinance = filteredStudentFinance.slice(0, LARGE_TABLE_RENDER_LIMIT);
-  const visibleLedgerRows = ledgerRows.slice(0, LARGE_TABLE_RENDER_LIMIT);
-  const visibleInvoicesByStudent = invoicesByStudent.slice(0, LARGE_TABLE_RENDER_LIMIT);
-  const visiblePaymentsByStudent = paymentsByStudent.slice(0, LARGE_TABLE_RENDER_LIMIT);
+  const studentFinanceProgress = useProgressiveList(filteredStudentFinance, { initialCount: 120, step: 120, delayMs: 2000 });
+  const ledgerProgress = useProgressiveList(ledgerRows, { initialCount: 120, step: 120, delayMs: 2000 });
+  const invoiceProgress = useProgressiveList(invoicesByStudent, { initialCount: 80, step: 80, delayMs: 2000 });
+  const paymentProgress = useProgressiveList(paymentsByStudent, { initialCount: 80, step: 80, delayMs: 2000 });
+  const visibleFilteredStudentFinance = studentFinanceProgress.visibleItems;
+  const visibleLedgerRows = ledgerProgress.visibleItems;
+  const visibleInvoicesByStudent = invoiceProgress.visibleItems;
+  const visiblePaymentsByStudent = paymentProgress.visibleItems;
 
   const tabs = [
     { id: 'students', label: 'Students', icon: Users },
@@ -950,11 +953,7 @@ export default function Finance() {
                 ))}
               </tbody>
             </table>
-            {filteredStudentFinance.length > visibleFilteredStudentFinance.length && (
-              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-                Showing first {visibleFilteredStudentFinance.length.toLocaleString()} of {filteredStudentFinance.length.toLocaleString()} rows to keep scrolling fast. Use search or filters to narrow the list; exports still use all matching records.
-              </div>
-            )}
+            <ProgressiveListLoader hasMore={studentFinanceProgress.hasMore} loadingMore={studentFinanceProgress.loadingMore} onVisible={studentFinanceProgress.loadMore} />
           </div>
         )}
 
@@ -1138,7 +1137,7 @@ export default function Finance() {
               </div>
             </div>
 
-            <div className="table-container">
+            <div className="table-container mt-5">
               <table>
                 <thead>
                   <tr>
@@ -1185,11 +1184,7 @@ export default function Finance() {
                   ))}
                 </tbody>
               </table>
-              {ledgerRows.length > visibleLedgerRows.length && (
-                <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-                  Showing first {visibleLedgerRows.length.toLocaleString()} of {ledgerRows.length.toLocaleString()} ledger rows to prevent lag. Search or filter to narrow the list before opening a student.
-                </div>
-              )}
+              <ProgressiveListLoader hasMore={ledgerProgress.hasMore} loadingMore={ledgerProgress.loadingMore} onVisible={ledgerProgress.loadMore} />
             </div>
               </>
             )}
@@ -1272,11 +1267,7 @@ export default function Finance() {
                 })}
               </tbody>
             </table>
-            {invoicesByStudent.length > visibleInvoicesByStudent.length && (
-              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-                Showing first {visibleInvoicesByStudent.length.toLocaleString()} of {invoicesByStudent.length.toLocaleString()} students to keep the invoice list responsive.
-              </div>
-            )}
+            <ProgressiveListLoader hasMore={invoiceProgress.hasMore} loadingMore={invoiceProgress.loadingMore} onVisible={invoiceProgress.loadMore} />
           </div>
         )}
 
@@ -1297,7 +1288,7 @@ export default function Finance() {
                   const isExpanded = expandedPayments.has(student.id);
                   const last = sp[0];
                   return (
-                    <>
+                    <React.Fragment key={student.id}>
                       <tr key={student.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40" onClick={() => togglePayment(student.id)}>
                         <td><ChevronRight size={16} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} /></td>
                         <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
@@ -1324,16 +1315,12 @@ export default function Finance() {
                           </tr>
                         );
                       })}
-                    </>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
             </table>
-            {paymentsByStudent.length > visiblePaymentsByStudent.length && (
-              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-                Showing first {visiblePaymentsByStudent.length.toLocaleString()} of {paymentsByStudent.length.toLocaleString()} payment groups to keep the page responsive.
-              </div>
-            )}
+            <ProgressiveListLoader hasMore={paymentProgress.hasMore} loadingMore={paymentProgress.loadingMore} onVisible={paymentProgress.loadMore} />
           </div>
         )}
 

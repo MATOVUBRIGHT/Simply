@@ -1,14 +1,18 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, GraduationCap, Users, BookOpen, Calendar,
-  Receipt, FileText, Award, Clock, User, ChevronRight,
+  Receipt, FileText, Award, Clock, User, ChevronRight, X,
+  Edit, Save, CheckSquare, Square, Loader2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
 import { useBackOrFallback } from '../utils/navigation';
 import { getSubjectDisplayCode } from '../utils/subjects';
+import { dataService } from '../lib/database/SupabaseDataService';
+import { useToast } from '../contexts/ToastContext';
 
 export default function ClassDetail() {
   const { id: classId } = useParams<{ id: string }>();
@@ -17,6 +21,7 @@ export default function ClassDetail() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
   const { formatMoney } = useCurrency();
+  const { addToast } = useToast();
 
   const { data: classesData } = useTableData(sid, 'classes');
   const { data: studentsData } = useTableData(sid, 'students');
@@ -28,6 +33,7 @@ export default function ClassDetail() {
   const { data: examResultsData } = useTableData(sid, 'examResults');
   const { data: timetableData } = useTableData(sid, 'timetable');
   const { data: attendanceData } = useTableData(sid, 'attendance');
+  const { data: settingsData } = useTableData(sid, 'settings');
 
   const cls = useMemo(() => (classesData as any[]).find(c => c.id === classId), [classesData, classId]);
 
@@ -40,6 +46,25 @@ export default function ClassDetail() {
     () => (subjectsData as any[]).filter(s => s.classId === classId),
     [subjectsData, classId]
   );
+  const optionalSubjectsKey = `classOptionalSubjectIds:${classId}`;
+  const classOptionalSubjectIds = useMemo(() => {
+    const raw = (settingsData as any[]).find((setting: any) => setting.key === optionalSubjectsKey)?.value;
+    const parsed = Array.isArray(raw)
+      ? raw
+      : typeof raw === 'string'
+        ? (() => {
+            try {
+              const json = JSON.parse(raw);
+              return Array.isArray(json) ? json : raw.split(',').map(part => part.trim());
+            } catch {
+              return raw.split(',').map(part => part.trim());
+            }
+          })()
+        : [];
+    return new Set(parsed.map(String).filter(Boolean));
+  }, [settingsData, optionalSubjectsKey]);
+  const coreSubjects = useMemo(() => subjects.filter((subject: any) => !classOptionalSubjectIds.has(String(subject.id))), [subjects, classOptionalSubjectIds]);
+  const optionalSubjects = useMemo(() => subjects.filter((subject: any) => classOptionalSubjectIds.has(String(subject.id))), [subjects, classOptionalSubjectIds]);
 
   // Teachers assigned directly to this class or through subjects
   const teachers = useMemo(() => {
@@ -78,6 +103,52 @@ export default function ClassDetail() {
   }, [attendanceData, studentIds]);
 
   const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
+  const [showOptionalModal, setShowOptionalModal] = useState(false);
+  const [optionalDraft, setOptionalDraft] = useState<Set<string>>(new Set());
+  const [savingOptionals, setSavingOptionals] = useState(false);
+
+  function openOptionalModal() {
+    setOptionalDraft(new Set(Array.from(classOptionalSubjectIds)));
+    setShowOptionalModal(true);
+  }
+
+  function toggleOptionalDraft(subjectId: string) {
+    setOptionalDraft(prev => {
+      const next = new Set(prev);
+      if (next.has(subjectId)) next.delete(subjectId);
+      else next.add(subjectId);
+      return next;
+    });
+  }
+
+  async function saveClassOptionals() {
+    if (!sid || !classId || savingOptionals) return;
+    setSavingOptionals(true);
+    try {
+      const validIds = new Set(subjects.map((subject: any) => String(subject.id)));
+      const optionalIds = Array.from(optionalDraft).filter(subjectId => validIds.has(subjectId));
+      await dataService.saveSettings(sid, { [optionalSubjectsKey]: optionalIds });
+      setShowOptionalModal(false);
+      addToast('Class optional subjects updated', 'success');
+    } catch {
+      addToast('Failed to save optional subjects', 'error');
+    } finally {
+      setSavingOptionals(false);
+    }
+  }
+
+  const selectedStudentResults = useMemo(() => {
+    if (!selectedStudent) return [];
+    return (examResultsData as any[])
+      .filter(result => result.studentId === selectedStudent.id && (!result.classId || result.classId === classId))
+      .map(result => ({
+        ...result,
+        examName: (examsData as any[]).find(exam => exam.id === result.examId)?.name || result.examName || 'Exam',
+        subjectName: result.subjectName || subjects.find((subject: any) => subject.id === result.subjectId)?.name || 'Subject',
+      }))
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  }, [selectedStudent, examResultsData, examsData, subjects, classId]);
 
   if (!cls) {
     return (
@@ -114,7 +185,7 @@ export default function ClassDetail() {
         {[
           { label: 'Students', value: enrolled, sub: `of ${cls.capacity} capacity`, icon: <Users size={20} />, color: 'bg-sky-500' },
           { label: 'Teachers', value: teachers.length, sub: 'assigned', icon: <User size={20} />, color: 'bg-violet-500' },
-          { label: 'Subjects', value: subjects.length, sub: 'subjects', icon: <BookOpen size={20} />, color: 'bg-emerald-500' },
+          { label: 'Subjects', value: subjects.length, sub: `${optionalSubjects.length} optional`, icon: <BookOpen size={20} />, color: 'bg-emerald-500' },
           { label: 'Attendance', value: `${attendanceSummary.rate}%`, sub: `${attendanceSummary.present}/${attendanceSummary.total} present`, icon: <Calendar size={20} />, color: 'bg-amber-500' },
         ].map(stat => (
           <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
@@ -163,7 +234,12 @@ export default function ClassDetail() {
             {students.length === 0 ? (
               <p className="text-center text-slate-400 py-8 text-sm">No students enrolled</p>
             ) : students.slice(0, 20).map((s: any, index: number) => (
-              <Link key={s.id} to={`/students/${s.id}`} className="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSelectedStudent(s)}
+                className="flex w-full items-center gap-3 px-5 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
+              >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500 dark:bg-slate-700 dark:text-slate-300">{index + 1}</span>
                 <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center shrink-0">
                   <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{s.firstName?.[0]}{s.lastName?.[0]}</span>
@@ -173,7 +249,7 @@ export default function ClassDetail() {
                   <p className="text-xs text-slate-400 truncate">{s.admissionNo || s.studentId}</p>
                 </div>
                 <span className={`badge text-[10px] ${s.gender === 'female' ? 'badge-violet' : 'badge-info'}`}>{s.gender}</span>
-              </Link>
+              </button>
             ))}
             {students.length > 20 && (
               <div className="px-5 py-2 text-xs text-slate-400 text-center">+{students.length - 20} more</div>
@@ -188,10 +264,21 @@ export default function ClassDetail() {
               <BookOpen size={18} className="text-emerald-500" />
               <h2 className="font-bold text-slate-800 dark:text-white">Subjects ({subjects.length})</h2>
             </div>
-            <Link to="/subjects" className="text-xs text-indigo-500 hover:underline flex items-center gap-1">
-              Manage <ChevronRight size={12} />
-            </Link>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={openOptionalModal} className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-900/20">
+                <Edit size={12} /> Assign OPs
+              </button>
+              <Link to="/subjects" className="text-xs text-indigo-500 hover:underline flex items-center gap-1">
+                Manage <ChevronRight size={12} />
+              </Link>
+            </div>
           </div>
+          {subjects.length > 0 && (
+            <div className="flex flex-wrap gap-2 border-b border-slate-100 px-5 py-3 text-xs dark:border-slate-700">
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200">Core: {coreSubjects.length}</span>
+              <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Optional: {optionalSubjects.length}</span>
+            </div>
+          )}
           <div className="divide-y divide-slate-50 dark:divide-slate-700/50 max-h-64 overflow-y-auto">
             {subjects.length === 0 ? (
               <p className="text-center text-slate-400 py-8 text-sm">No subjects assigned</p>
@@ -203,6 +290,7 @@ export default function ClassDetail() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-800 dark:text-white truncate">{s.name}</p>
                 </div>
+                {classOptionalSubjectIds.has(String(s.id)) && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">OP</span>}
                 <span className="font-mono text-xs text-slate-400">{getSubjectDisplayCode(s)}</span>
               </div>
             ))}
@@ -372,6 +460,142 @@ export default function ClassDetail() {
           )}
         </div>
       </div>
+
+      {showOptionalModal && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm" onClick={() => !savingOptionals && setShowOptionalModal(false)}>
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-900" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Assign Optional Subjects</h3>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{cls.name} · choose subjects students may select as OPs</p>
+              </div>
+              <button type="button" onClick={() => !savingOptionals && setShowOptionalModal(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="max-h-[55vh] overflow-y-auto p-4">
+              {subjects.length === 0 ? (
+                <p className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/50">Add subjects to this class first, then mark the optional ones here.</p>
+              ) : (
+                <div className="grid gap-2">
+                  {subjects.map((subject: any) => {
+                    const selected = optionalDraft.has(String(subject.id));
+                    return (
+                      <button
+                        key={subject.id}
+                        type="button"
+                        onClick={() => toggleOptionalDraft(String(subject.id))}
+                        className={`flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${
+                          selected
+                            ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-900/20'
+                            : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {selected ? <CheckSquare size={18} className="text-emerald-600" /> : <Square size={18} className="text-slate-400" />}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">{subject.name}</p>
+                          <p className="font-mono text-xs text-slate-400">{getSubjectDisplayCode(subject)}</p>
+                        </div>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${selected ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>
+                          {selected ? 'OP' : 'Core'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 dark:border-slate-800">
+              <p className="text-xs text-slate-500 dark:text-slate-400">{optionalDraft.size} optional selected</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setOptionalDraft(new Set())} disabled={savingOptionals || optionalDraft.size === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+                  Clear
+                </button>
+                <button type="button" onClick={saveClassOptionals} disabled={savingOptionals || subjects.length === 0} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
+                  {savingOptionals ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {selectedStudent && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm animate-backdrop-in"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setSelectedStudent(null);
+          }}
+        >
+          <div className="w-full max-w-[min(92vw,36rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 animate-modal-in">
+            <div className="flex items-center justify-between gap-4 px-5 py-4" style={{ backgroundColor: 'var(--primary-color)' }}>
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/20 text-white">
+                  <Award size={21} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-base font-bold leading-tight text-white">{selectedStudent.firstName} {selectedStudent.lastName}</p>
+                  <p className="mt-0.5 text-xs font-medium text-white/75">{selectedStudent.admissionNo || selectedStudent.studentId || 'No ID'} · {cls.name} grades</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStudent(null)}
+                className="rounded-lg p-1.5 text-white transition-colors hover:bg-white/20"
+                aria-label="Close student grades"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="max-h-[68vh] overflow-y-auto px-5 py-4">
+              {selectedStudentResults.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center dark:border-slate-700">
+                  <Award size={28} className="mx-auto text-slate-300" />
+                  <p className="mt-2 text-sm font-semibold text-slate-600 dark:text-slate-300">No grades recorded for this student yet.</p>
+                </div>
+              ) : (
+                <div className="table-container min-h-0">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Exam</th>
+                        <th>Subject</th>
+                        <th className="text-right">Score</th>
+                        <th>Grade</th>
+                        <th>Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedStudentResults.map((result: any) => (
+                        <tr key={result.id}>
+                          <td className="font-semibold">{result.examName}</td>
+                          <td>{result.subjectName}</td>
+                          <td className="text-right tabular-nums">{Number(result.score || 0)} / {Number(result.maxScore || result.max_score || 100)}</td>
+                          <td><span className="badge badge-info">{result.grade || '-'}</span></td>
+                          <td className="max-w-40 truncate" title={result.remarks || ''}>{result.remarks || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 dark:border-slate-800">
+              <button type="button" onClick={() => navigate(`/students/${selectedStudent.id}`)} className="btn btn-secondary">
+                Open Profile
+              </button>
+              <button type="button" onClick={() => setSelectedStudent(null)} className="btn btn-primary">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

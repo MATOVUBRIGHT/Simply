@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Sparkles, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle, Sparkles, X } from 'lucide-react';
+import { appLogoFileName, releaseChannelLabel } from '../utils/releaseChannel';
 
 // Bump this version string whenever you deploy new features.
-// The banner shows once per version, then is dismissed forever.
+// The popup shows once per version and release channel.
 const APP_VERSION = 'Version1.1';
-const STORAGE_KEY = `schofy_seen_update_${APP_VERSION}`;
+const STORAGE_KEY = `schofy_seen_update_popup_${releaseChannelLabel}_${APP_VERSION}`;
+const assetBase = import.meta.env.BASE_URL || '/';
+const APP_LOGO = `${assetBase.endsWith('/') ? assetBase : `${assetBase}/`}${appLogoFileName}`;
 
 const CHANGELOG = [
   { text: 'New report card templates with school logo watermark and PDF export.' },
@@ -17,17 +20,15 @@ const CHANGELOG = [
 
 export default function UpdateBanner() {
   const [visible, setVisible] = useState(false);
-  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    // Small delay so it doesn't flash on first paint
-    const t = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       if (!localStorage.getItem(STORAGE_KEY)) {
         localStorage.setItem(STORAGE_KEY, '1');
         setVisible(true);
       }
     }, 1200);
-    return () => clearTimeout(t);
+    return () => window.clearTimeout(timer);
   }, []);
 
   function dismiss() {
@@ -38,50 +39,48 @@ export default function UpdateBanner() {
   if (!visible) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9998] w-[calc(100vw-2rem)] max-w-md animate-slide-up">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-3" style={{ backgroundColor: 'var(--primary-color)' }}>
-          <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
-            <Sparkles size={16} className="text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-bold text-white text-sm leading-tight">Schofy updated to {APP_VERSION}</p>
-            <p className="text-white/70 text-xs">New features & improvements</p>
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm animate-backdrop-in">
+      <div className="w-full max-w-[min(92vw,34rem)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 animate-modal-in">
+        <div className="flex items-center justify-between gap-4 px-5 py-4" style={{ backgroundColor: 'var(--primary-color)' }}>
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/90 p-1.5 shadow-sm ring-1 ring-white/40">
+              <img src={APP_LOGO} alt="Schofy" className="h-full w-full object-contain" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-base font-bold leading-tight text-white">Schofy updated to {APP_VERSION}</p>
+                <Sparkles size={15} className="text-white/85" />
+              </div>
+              <p className="mt-0.5 text-xs font-medium text-white/75">{releaseChannelLabel} updates and improvements</p>
+            </div>
           </div>
           <button
-            onClick={() => setExpanded(v => !v)}
-            className="p-1.5 hover:bg-white/20 rounded-lg transition-colors text-white"
-            title={expanded ? 'Collapse' : 'See what\'s new'}
-          >
-            {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-          </button>
-          <button
+            type="button"
             onClick={dismiss}
-            className="p-1.5 hover:bg-white/20 rounded-lg transition-colors text-white"
+            className="rounded-lg p-1.5 text-white transition-colors hover:bg-white/20"
             title="Dismiss"
+            aria-label="Dismiss update notes"
           >
-            <X size={16} />
+            <X size={18} />
           </button>
         </div>
 
-        {/* Changelog — collapsible */}
-        {expanded && (
-          <div className="px-4 py-3 space-y-2">
-            {CHANGELOG.map((item, i) => (
-              <div key={i} className="flex items-start gap-2.5 text-sm">
-                <span className="text-slate-700 dark:text-slate-200 leading-snug">- {item.text}</span>
+        <div className="max-h-[68vh] overflow-y-auto px-5 py-4">
+          <div className="space-y-3">
+            {CHANGELOG.map((item) => (
+              <div key={item.text} className="flex gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/70">
+                <CheckCircle size={16} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <p className="text-sm leading-5 text-slate-600 dark:text-slate-300">{item.text}</p>
               </div>
             ))}
-            <button
-              onClick={dismiss}
-              className="w-full mt-2 py-2 rounded-xl text-sm font-medium text-white transition-colors"
-              style={{ backgroundColor: 'var(--primary-color)' }}
-            >
-              Got it
-            </button>
           </div>
-        )}
+        </div>
+
+        <div className="border-t border-slate-100 px-5 py-4 dark:border-slate-800">
+          <button type="button" onClick={dismiss} className="btn btn-primary w-full justify-center">
+            Got it
+          </button>
+        </div>
       </div>
     </div>
   );
