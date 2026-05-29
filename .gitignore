@@ -21,6 +21,7 @@ server/.env.local
 .secrets
 Verification codes.xlsx
 Bright power point/
+Version released/
 
 # Database files
 *.db
