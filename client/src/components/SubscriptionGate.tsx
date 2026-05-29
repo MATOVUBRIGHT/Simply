@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AlertTriangle, CreditCard, LogOut, RefreshCw, Clock, MessageCircle, Phone, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { cachePlanStateLocally, getSubscriptionAccessState, SubscriptionAccessState, PLAN_DEFINITIONS } from '../utils/plans';
+import { cachePlanStateLocally, getSubscriptionAccessState, SubscriptionAccessState, PLAN_DEFINITIONS, UNLIMITED_PLAN_LABEL } from '../utils/plans';
 import { supabase } from '../lib/supabase';
 import { cacheReady } from '../lib/database/SupabaseDataService';
 import { createVerifiedPlanProof, readVerifiedPlanProof, restoreVerifiedPlanProof } from '../utils/planProof';
@@ -103,7 +103,7 @@ export default function SubscriptionGate({ children }: Props) {
     if (isUnlockedRelease) {
       const state = await getSubscriptionAccessState(schoolId || user.id, undefined, { authUserId: user.id });
       cacheSubscriptionLocally(state, false);
-      setPlanName(state.plan?.name || 'Unlimited');
+      setPlanName(state.plan?.name || UNLIMITED_PLAN_LABEL);
       setExpiryDate(state.expiryDate);
       setPendingTid(null);
       setBlocked(false);

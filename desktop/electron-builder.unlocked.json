@@ -28,7 +28,7 @@
         ]
       }
     ],
-    "icon": "../client/public/schofy.logo.ico",
+    "icon": "../client/public/Schofy.logo_unlocked.ico",
     "artifactName": "Schofy-Unlocked-Setup-${version}-${arch}.${ext}"
   },
   "nsis": {

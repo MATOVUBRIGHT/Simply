@@ -21,12 +21,13 @@ import { useTheme } from '../contexts/ThemeContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
-import { isUnlockedRelease, releaseChannelLabel } from '../utils/releaseChannel';
+import { appLogoFileName, isUnlockedRelease, releaseChannelLabel } from '../utils/releaseChannel';
+import { UNLIMITED_PLAN_LABEL } from '../utils/plans';
 
 type PolicyModal = 'terms' | 'privacy' | null;
 
 const assetBase = import.meta.env.BASE_URL || './';
-const APP_LOGO = `${assetBase}schofy.logo.png`;
+const APP_LOGO = `${assetBase}${appLogoFileName}`;
 const AUTH_COVER = `${assetBase}cover.jpg`;
 
 const policyCopy = {
@@ -692,6 +693,15 @@ export default function Login() {
                 </div>
               )}
 
+              {isUnlockedRelease && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
+                  <p className="font-bold">{UNLIMITED_PLAN_LABEL} is free forever in this unlocked release.</p>
+                  <p className="mt-1 leading-5">
+                    Online accounts sync across devices when internet is available. Offline accounts work without internet on this device, but they stay separate from online accounts and do not sync until you create or use an online account.
+                  </p>
+                </div>
+              )}
+
               {isRegister && (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
@@ -846,7 +856,7 @@ export default function Login() {
 
             <div className="mt-6 flex items-center justify-center gap-2 border-t border-slate-200 pt-5 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <Cloud size={16} className={isOnline ? 'text-emerald-500' : 'text-amber-500'} />
-              <span>{isUnlockedRelease ? 'Unlocked release - unlimited plan, works offline' : offlineAuthMode ? 'Verified offline login - plan required' : isOnline ? 'Connected to cloud' : 'Offline access requires a previously verified plan code'}</span>
+              <span>{isUnlockedRelease ? `Unlocked release - ${UNLIMITED_PLAN_LABEL} plan, works offline` : offlineAuthMode ? 'Verified offline login - plan required' : isOnline ? 'Connected to cloud' : 'Offline access requires a previously verified plan code'}</span>
             </div>
           </section>
         </div>

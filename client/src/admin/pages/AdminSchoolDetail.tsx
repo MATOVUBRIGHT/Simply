@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../lib/supabase';
-import { PLAN_DEFINITIONS } from '../../utils/plans';
+import { PLAN_DEFINITIONS, UNLIMITED_PLAN_LABEL } from '../../utils/plans';
 import { useAdminTheme } from '../AdminThemeContext';
 
 const DEFAULT_GRANT_PLAN = 'starter';
@@ -123,7 +123,7 @@ export default function AdminSchoolDetail() {
         endsAt.setMonth(endsAt.getMonth() + grantAmount);
       }
 
-      const label = isUnlimitedGrant ? 'Unlimited one-time desktop access' : grantUnit === 'free' ? 'Free Trial (7 days)' : `${grantAmount} ${grantUnit}`;
+      const label = isUnlimitedGrant ? `${UNLIMITED_PLAN_LABEL} one-time desktop access` : grantUnit === 'free' ? 'Free Trial (7 days)' : `${grantAmount} ${grantUnit}`;
 
       const subData = {
         school_id: schoolId,
@@ -441,7 +441,7 @@ export default function AdminSchoolDetail() {
 
               {grantPlan === UNLIMITED_PLAN_ID && (
                 <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800 text-emerald-300' : 'bg-emerald-50 border border-emerald-200 text-emerald-700'}`}>
-                  <p className="font-semibold mb-1">Unlimited plan</p>
+                  <p className="font-semibold mb-1">{UNLIMITED_PLAN_LABEL} plan</p>
                   <p>Grants unlimited student access for the one-time desktop version and stores the unlimited limit for this school.</p>
                 </div>
               )}
@@ -466,7 +466,7 @@ export default function AdminSchoolDetail() {
                 <button onClick={() => setShowGrantModal(false)} className={`flex-1 py-2.5 rounded-xl text-sm font-medium ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>Cancel</button>
                 <button onClick={grantAccess} disabled={saving} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
                   {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
-                  {grantPlan === UNLIMITED_PLAN_ID ? 'Grant Unlimited' : grantUnit === 'free' ? 'Grant Free Trial' : 'Grant Access'}
+                  {grantPlan === UNLIMITED_PLAN_ID ? `Grant ${UNLIMITED_PLAN_LABEL}` : grantUnit === 'free' ? 'Grant Free Trial' : 'Grant Access'}
                 </button>
               </div>
             </div>

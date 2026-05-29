@@ -4,7 +4,19 @@ import path from 'path';
 
 export default defineConfig(({ mode }) => ({
   base: mode.startsWith('desktop') ? './' : '/',
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'schofy-release-icons',
+      transformIndexHtml(html) {
+        if (!mode.includes('unlocked')) return html;
+        return html
+          .replace(/(href=["'][^"']*)favicon\.png/g, '$1favicon-unlocked.png')
+          .replace(/(href=["'][^"']*)icon-192\.png/g, '$1icon-192-unlocked.png')
+          .replace(/(href=["'][^"']*)icon-512\.png/g, '$1icon-512-unlocked.png');
+      },
+    },
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

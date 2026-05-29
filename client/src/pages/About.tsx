@@ -1,4 +1,5 @@
 import { BookOpen, CheckCircle2, HelpCircle, LockKeyhole, Mail, MessageCircle, Phone, ScrollText, ShieldCheck, WifiOff } from 'lucide-react';
+import { appLogoFileName } from '../utils/releaseChannel';
 
 function publicAssetPath(fileName: string) {
   const base = import.meta.env.BASE_URL || '/';
@@ -6,7 +7,7 @@ function publicAssetPath(fileName: string) {
   return `${normalizedBase}${fileName}`;
 }
 
-const APP_LOGO = publicAssetPath('schofy.logo.png');
+const APP_LOGO = publicAssetPath(appLogoFileName);
 
 const appHighlights = [
   'Offline-first school records for students, staff, attendance, grades, finance, invoices, reports, and settings.',

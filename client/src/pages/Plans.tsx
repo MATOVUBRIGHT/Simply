@@ -4,16 +4,17 @@ import { useNavigate } from 'react-router-dom';
 
 import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2, Clock, ArrowLeft, KeyRound, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, cachePlanStateLocally, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen } from '../utils/plans';
+import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, UNLIMITED_PLAN_LABEL, cachePlanStateLocally, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { supabase } from '../lib/supabase';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
 import { redeemPaymentVerificationCode } from '../utils/paymentVerification';
+import { isUnlockedRelease } from '../utils/releaseChannel';
 
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
   { q: 'Can I switch plans?', a: 'Yes. Your current plan stays active while the new plan waits for admin approval.' },
-  { q: 'How do I buy Unlimited?', a: 'Contact Us to arrange the one-time desktop version. It gives unlimited student access after approval.' },
+  { q: `How do I buy ${UNLIMITED_PLAN_LABEL}?`, a: 'Contact Us to arrange the one-time desktop version. It gives unlimited student access after approval.' },
   { q: 'Payment methods?', a: 'Airtel Money only. Activation within 24 hours.' },
   { q: 'Refunds?', a: 'No, all payments are non-refundable.' },
 ];
@@ -590,6 +591,35 @@ Powered by Schofy`;
       </div>
 
       {/* First-time user — no plan yet: show trial request */}
+      {isUnlockedRelease && (
+        <div className="plans-reveal rounded-xl border border-emerald-200 bg-white/95 p-4 dark:border-emerald-800 dark:bg-slate-800/95" style={{ animationDelay: '95ms' }}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-xl">
+              <h2 className="text-sm font-black text-slate-900 dark:text-white">
+                {UNLIMITED_PLAN_LABEL} access is free forever in this unlocked release
+              </h2>
+              <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                You can keep using the app without internet or plan payments. Choose the account type that matches how your school wants to store and share data.
+              </p>
+            </div>
+            <div className="grid flex-1 gap-3 md:grid-cols-2">
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 dark:border-sky-800 dark:bg-sky-900/20">
+                <p className="text-xs font-black uppercase text-sky-700 dark:text-sky-300">Online account</p>
+                <p className="mt-1 text-xs leading-5 text-slate-700 dark:text-slate-300">
+                  Best for sync, backup, multiple devices, broadcasts, and support access. It needs internet for sign-in, first setup, and syncing changes.
+                </p>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                <p className="text-xs font-black uppercase text-amber-700 dark:text-amber-300">Offline account</p>
+                <p className="mt-1 text-xs leading-5 text-slate-700 dark:text-slate-300">
+                  Best for one computer and no internet. It opens fast locally, but data stays on that device and is separate from online accounts.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="hidden">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>

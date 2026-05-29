@@ -133,8 +133,10 @@ function getClientAssetPath(fileName) {
 }
 
 function getDesktopIcon() {
-  const icoPath = getClientAssetPath('schofy.logo.ico');
-  const pngPath = getClientAssetPath('schofy.logo.png');
+  const appName = app.getName().toLowerCase();
+  const isUnlocked = appName.includes('unlocked');
+  const icoPath = getClientAssetPath(isUnlocked ? 'Schofy.logo_unlocked.ico' : 'schofy.logo.ico');
+  const pngPath = getClientAssetPath(isUnlocked ? 'Schofy.logo_unlocked.png' : 'schofy.logo.png');
   const icon = nativeImage.createFromPath(icoPath);
   return icon.isEmpty() ? nativeImage.createFromPath(pngPath) : icon;
 }

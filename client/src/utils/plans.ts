@@ -20,6 +20,7 @@ export interface PlanDefinition {
 
 export type BillingCycle = 'monthly' | 'term' | 'yearly';
 export type SubscriptionStatus = 'incomplete' | 'active' | 'expiring' | 'expired';
+export const UNLIMITED_PLAN_LABEL = '⭐ Unlimited';
 
 export interface SubscriptionAccessState {
   plan: PlanDefinition | null;
@@ -93,7 +94,7 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
   },
   {
     id: 'unlimited',
-    name: 'Unlimited',
+    name: UNLIMITED_PLAN_LABEL,
     monthlyPrice: 0,
     termPrice: 0,
     yearlyPrice: 0,

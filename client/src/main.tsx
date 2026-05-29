@@ -11,11 +11,20 @@ import { SyncProvider } from './contexts/SyncContext';
 import { getQueryClient } from './lib/queryClient';
 import { ConfirmProvider } from './components/ConfirmModal';
 import { isCloudSyncEnabled } from './utils/desktopSyncPreference';
+import { appIconFileName, isUnlockedRelease } from './utils/releaseChannel';
 import './index.css';
 
 const queryClient = getQueryClient();
 const isFileProtocol = window.location.protocol === 'file:';
 const AppRouter = isFileProtocol ? HashRouter : BrowserRouter;
+const assetBase = import.meta.env.BASE_URL || '/';
+const publicAssetPath = (fileName: string) => `${assetBase.endsWith('/') ? assetBase : `${assetBase}/`}${fileName}`;
+
+if (isUnlockedRelease) {
+  document.querySelectorAll<HTMLLinkElement>('link[rel="icon"], link[rel="apple-touch-icon"]').forEach(link => {
+    link.href = publicAssetPath(appIconFileName);
+  });
+}
 
 // Detect if we're on the admin portal path
 const isAdminPath = isFileProtocol
@@ -66,10 +75,14 @@ if (import.meta.env.PROD && !isFileProtocol && 'serviceWorker' in navigator) {
           const publicAssets = [
             '/manifest.json',
             '/favicon.png',
+            '/favicon-unlocked.png',
             '/icon-192.png',
+            '/icon-192-unlocked.png',
             '/icon-512.png',
+            '/icon-512-unlocked.png',
             '/cover.jpg',
             '/schofy.logo.png',
+            '/Schofy.logo_unlocked.png',
             '/chat icon.png',
             '/chat%20icon.png',
             '/schofy-assistant-icon.png',

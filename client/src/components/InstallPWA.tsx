@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Download, X, Smartphone } from 'lucide-react';
+import { appIconFileName } from '../utils/releaseChannel';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -7,7 +8,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function InstallPWA() {
-  const iconSrc = `${import.meta.env.BASE_URL || './'}icon-192.png`;
+  const iconSrc = `${import.meta.env.BASE_URL || './'}${appIconFileName}`;
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);

@@ -6,7 +6,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { PLAN_DEFINITIONS } from '../../utils/plans';
+import { PLAN_DEFINITIONS, UNLIMITED_PLAN_LABEL } from '../../utils/plans';
 import {
   VERIFICATION_CONTROL_TENANT,
   VERIFICATION_TERMINATED_SETTING,
@@ -202,7 +202,7 @@ export default function AdminVerifications() {
         updated_at: now.toISOString(),
       }).eq('id', item.schoolId);
 
-      setSuccess(`Approved: ${item.schoolName} - ${isUnlimitedApproval ? 'unlimited one-time desktop access' : `access granted for ${grantMonths} months`}`);
+      setSuccess(`Approved: ${item.schoolName} - ${isUnlimitedApproval ? `${UNLIMITED_PLAN_LABEL} one-time desktop access` : `access granted for ${grantMonths} months`}`);
       setSelected(null);
       await load();
     } catch (err: any) {
@@ -596,7 +596,7 @@ export default function AdminVerifications() {
               )}
               {selected.status === 'pending' && selected.plan === UNLIMITED_PLAN_ID && (
                 <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-emerald-900/20 border border-emerald-800 text-emerald-300' : 'bg-emerald-50 border border-emerald-200 text-emerald-700'}`}>
-                  Approving this request grants Unlimited one-time desktop access and stores the unlimited student limit for the school.
+                  Approving this request grants {UNLIMITED_PLAN_LABEL} one-time desktop access and stores the unlimited student limit for the school.
                 </div>
               )}
 
