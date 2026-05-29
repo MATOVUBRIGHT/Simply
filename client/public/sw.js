@@ -10,8 +10,8 @@
  * - Cache is versioned — old caches are deleted on activate
  */
 
-const CACHE_VERSION = 'schofy-v12';
-const ASSET_CACHE = 'schofy-assets-v12';
+const CACHE_VERSION = 'schofy-v13';
+const ASSET_CACHE = 'schofy-assets-v13';
 
 // Core files to pre-cache on install
 const PRECACHE_URLS = [
@@ -29,7 +29,51 @@ const PRECACHE_URLS = [
   '/schofy-assistant-icon.png',
   '/sound/success.mp3',
   '/sound/error.wav',
+  '/sounds/success.mp3',
+  '/sounds/error.wav',
 ];
+
+function sameOriginUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl, self.location.origin);
+    return url.origin === self.location.origin ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractAssetUrlsFromHtml(html) {
+  const urls = [];
+  const pattern = /(?:src|href)=["']([^"']+)["']/g;
+  let match;
+  while ((match = pattern.exec(html))) {
+    const url = sameOriginUrl(match[1]);
+    if (url) urls.push(url.toString());
+  }
+  return Array.from(new Set(urls));
+}
+
+async function cacheAppShell() {
+  const shellCache = await caches.open(CACHE_VERSION);
+  const assetCache = await caches.open(ASSET_CACHE);
+  await Promise.allSettled(PRECACHE_URLS.map(url => shellCache.add(url)));
+
+  try {
+    const response = await fetch('/index.html', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) return;
+    const clone = response.clone();
+    await shellCache.put('/index.html', clone);
+    await shellCache.put('/', response.clone());
+    const html = await response.text();
+    const assetUrls = extractAssetUrlsFromHtml(html);
+    await Promise.allSettled(assetUrls.map(async url => {
+      const assetResponse = await fetch(url, { credentials: 'same-origin', cache: 'reload' });
+      if (assetResponse.ok && assetResponse.status === 200) await assetCache.put(url, assetResponse);
+    }));
+  } catch {
+    // The app will cache more resources after the first online launch.
+  }
+}
 
 // ── Install: pre-cache shell ──────────────────────────────────────────────────
 self.addEventListener('install', event => {
@@ -85,11 +129,10 @@ self.addEventListener('fetch', event => {
   // Skip chrome-extension and other non-http(s) protocols
   if (!url.protocol.startsWith('http')) return;
 
-  // Admin and dev-server module paths must stay network-owned.
+  // Dev-server module paths must stay network-owned.
   if (
     url.origin === self.location.origin &&
     (
-      url.pathname.startsWith('/admin') ||
       url.pathname.startsWith('/src/') ||
       url.pathname.startsWith('/@vite') ||
       url.pathname.includes('/node_modules/.vite/')
@@ -115,10 +158,10 @@ self.addEventListener('fetch', event => {
         })
         .catch(() =>
           // Offline: serve cached index.html so the SPA still loads
-          caches.match('/index.html').then(r => r || new Response('App is loading...', {
+          caches.match('/index.html').then(r => r || caches.match('/').then(home => home || new Response('App is loading...', {
             status: 200,
             headers: { 'Content-Type': 'text/html' }
-          }))
+          })))
         )
     );
     return;
@@ -223,25 +266,29 @@ self.addEventListener('message', event => {
       '/icon-512.png',
       '/cover.jpg',
       '/schofy.logo.png',
+      '/chat icon.png',
+      '/chat%20icon.png',
+      '/schofy-assistant-icon.png',
       '/sound/success.mp3',
       '/sound/error.wav',
+      '/sounds/success.mp3',
+      '/sounds/error.wav',
       ...urls,
     ];
 
     event.waitUntil(
-      caches.open(ASSET_CACHE).then(cache =>
-        Promise.allSettled(shellUrls.map(rawUrl => {
-          try {
-            const url = new URL(rawUrl, self.location.origin);
-            if (url.origin !== self.location.origin) return Promise.resolve();
+      Promise.all([
+        cacheAppShell(),
+        caches.open(ASSET_CACHE).then(cache =>
+          Promise.allSettled(shellUrls.map(rawUrl => {
+            const url = sameOriginUrl(rawUrl);
+            if (!url) return Promise.resolve();
             return fetch(url.toString(), { credentials: 'same-origin' }).then(res => {
               if (res.ok && res.status === 200) return cache.put(url.toString(), res);
             }).catch(() => {});
-          } catch {
-            return Promise.resolve();
-          }
-        }))
-      )
+          }))
+        )
+      ])
     );
   }
 });
@@ -257,4 +304,9 @@ self.addEventListener('periodicsync', event => {
       ))
     )
   );
+});
+
+// Extra install pass: cache index.html plus the current Vite JS/CSS chunks.
+self.addEventListener('install', event => {
+  event.waitUntil(cacheAppShell().catch(() => {}));
 });

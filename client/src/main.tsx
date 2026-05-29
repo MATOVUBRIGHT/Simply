@@ -29,8 +29,8 @@ if (import.meta.env.DEV && 'serviceWorker' in navigator) {
     .catch(() => {/* ignore */});
 }
 
-// Register service worker for offline support in production only (main app only).
-if (import.meta.env.PROD && !isFileProtocol && !isAdminPath && 'serviceWorker' in navigator) {
+// Register service worker for offline support in production only.
+if (import.meta.env.PROD && !isFileProtocol && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(reg => {
@@ -75,6 +75,8 @@ if (import.meta.env.PROD && !isFileProtocol && !isAdminPath && 'serviceWorker' i
             '/schofy-assistant-icon.png',
             '/sound/success.mp3',
             '/sound/error.wav',
+            '/sounds/success.mp3',
+            '/sounds/error.wav',
           ];
           sw.active?.postMessage({
             type: 'CACHE_APP_SHELL',
