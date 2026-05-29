@@ -1,5 +1,6 @@
 ﻿﻿import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, Settings, Edit } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -132,21 +133,24 @@ export default function Students() {
   const { data: paymentsData } = useTableData(sid, 'payments');
   const { formatMoney } = useCurrency();
 
-  const paidByFee = new Map<string, number>();
-  (paymentsData as any[]).forEach((payment) => {
-    if (!payment.feeId) return;
-    paidByFee.set(payment.feeId, (paidByFee.get(payment.feeId) || 0) + Number(payment.amount || 0));
-  });
-  const financeByStudent = new Map<string, { status: string; balance: number; invoiced: number; paid: number }>();
-  (feesData as any[]).forEach((fee) => {
-    if (!fee.studentId) return;
-    const current = financeByStudent.get(fee.studentId) || { status: 'none', balance: 0, invoiced: 0, paid: 0 };
-    current.invoiced += Number(fee.amount || 0);
-    current.paid += paidByFee.get(fee.id) || 0;
-    current.balance = current.invoiced - current.paid;
-    current.status = current.balance <= 0 ? 'paid' : current.paid > 0 ? 'partial' : 'pending';
-    financeByStudent.set(fee.studentId, current);
-  });
+  const financeByStudent = useMemo(() => {
+    const paidByFee = new Map<string, number>();
+    (paymentsData as any[]).forEach((payment) => {
+      if (!payment.feeId) return;
+      paidByFee.set(payment.feeId, (paidByFee.get(payment.feeId) || 0) + Number(payment.amount || 0));
+    });
+    const next = new Map<string, { status: string; balance: number; invoiced: number; paid: number }>();
+    (feesData as any[]).forEach((fee) => {
+      if (!fee.studentId) return;
+      const current = next.get(fee.studentId) || { status: 'none', balance: 0, invoiced: 0, paid: 0 };
+      current.invoiced += Number(fee.amount || 0);
+      current.paid += paidByFee.get(fee.id) || 0;
+      current.balance = current.invoiced - current.paid;
+      current.status = current.balance <= 0 ? 'paid' : current.paid > 0 ? 'partial' : 'pending';
+      next.set(fee.studentId, current);
+    });
+    return next;
+  }, [feesData, paymentsData]);
 
   // Compute invoice status and balance per student
   function getStudentFinance(studentId: string) {

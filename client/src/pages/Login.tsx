@@ -529,6 +529,14 @@ export default function Login() {
                   ? 'Unlocked release: unlimited local access, offline-first records, and no plan gate in this build.'
                   : 'Manage students, finance, attendance, reports, and school operations with offline support and cloud sync.'}
               </p>
+              {isUnlockedRelease && (
+                <div className="mt-5 max-w-md rounded-lg border border-emerald-200 bg-emerald-50/90 px-4 py-3 text-sm text-emerald-900 shadow-sm">
+                  <p className="font-bold">{UNLIMITED_PLAN_LABEL} is free forever in this unlocked release.</p>
+                  <p className="mt-1 leading-5">
+                    Online accounts sync across devices when internet is available. Offline accounts work without internet on this device, but they stay separate from online accounts and do not sync until you create or use an online account.
+                  </p>
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-3 gap-3 text-xs font-semibold">
               <span className="inline-flex h-10 items-center justify-center rounded-md border border-amber-200 bg-amber-100/90 px-3 text-amber-800 shadow-sm">
@@ -690,15 +698,6 @@ export default function Login() {
               {offlineAuthMode && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
                   Offline login only works after this device has an active Schofy plan from a verification code. New accounts and first-time plan activation need internet.
-                </div>
-              )}
-
-              {isUnlockedRelease && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
-                  <p className="font-bold">{UNLIMITED_PLAN_LABEL} is free forever in this unlocked release.</p>
-                  <p className="mt-1 leading-5">
-                    Online accounts sync across devices when internet is available. Offline accounts work without internet on this device, but they stay separate from online accounts and do not sync until you create or use an online account.
-                  </p>
                 </div>
               )}
 

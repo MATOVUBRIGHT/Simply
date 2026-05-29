@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useDeferredValue, useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 
@@ -20,6 +20,8 @@ import { openPrintPreview } from '../utils/printPreview';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { FitStatValue } from '../components/FitStatValue';
+
+const LARGE_TABLE_RENDER_LIMIT = 300;
 
 function termRank(term: string) {
   const n = Number(String(term).replace(/[^0-9]/g, ''));
@@ -66,6 +68,7 @@ export default function Finance() {
   const [duplicateImportRows, setDuplicateImportRows] = useState<Set<number>>(new Set());
   const [isImporting, setIsImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [filterTerm, setFilterTerm] = useState('all');
   const [filterYear, setFilterYear] = useState('all');
   const [showTermFilter, setShowTermFilter] = useState(false);
@@ -162,9 +165,9 @@ export default function Finance() {
   }, [settingsMap]);
   const filteredBankAccounts = useMemo(() => {
     return bankAccounts.filter(acc =>
-      matchesTextSearch([acc.accountName, acc.accountNumber, acc.bankName, acc.paymentMethod], searchTerm)
+      matchesTextSearch([acc.accountName, acc.accountNumber, acc.bankName, acc.paymentMethod], deferredSearchTerm)
     );
-  }, [bankAccounts, searchTerm]);
+  }, [bankAccounts, deferredSearchTerm]);
 
   function toggleInvoice(id: string) {
     setExpandedInvoices(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -426,20 +429,52 @@ export default function Finance() {
   }, []);
 
   // -- Derived data ------------------------------------------------------------
-  const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
-  const totalInvoiced = fees.reduce((s, f) => s + f.amount, 0);
+  const feeRows = fees as Fee[];
+  const paymentRows = payments as Payment[];
+  const totalCollected = useMemo(() => paymentRows.reduce((s, p) => s + Number(p.amount || 0), 0), [paymentRows]);
+  const totalInvoiced = useMemo(() => feeRows.reduce((s, f) => s + Number(f.amount || 0), 0), [feeRows]);
+  const feesByStudent = useMemo(() => {
+    const map = new Map<string, Fee[]>();
+    feeRows.forEach(fee => {
+      if (!fee.studentId) return;
+      const list = map.get(fee.studentId) || [];
+      list.push(fee);
+      map.set(fee.studentId, list);
+    });
+    return map;
+  }, [feeRows]);
+  const paymentsByFee = useMemo(() => {
+    const map = new Map<string, Payment[]>();
+    paymentRows.forEach(payment => {
+      if (!payment.feeId) return;
+      const list = map.get(payment.feeId) || [];
+      list.push(payment);
+      map.set(payment.feeId, list);
+    });
+    return map;
+  }, [paymentRows]);
+  const paymentsByStudentId = useMemo(() => {
+    const map = new Map<string, Payment[]>();
+    paymentRows.forEach(payment => {
+      if (!payment.studentId) return;
+      const list = map.get(payment.studentId) || [];
+      list.push(payment);
+      map.set(payment.studentId, list);
+    });
+    return map;
+  }, [paymentRows]);
   const termOptions = useMemo(() => {
-    const values = Array.from(new Set([settingsMap.currentTerm || '1', ...(fees as Fee[]).map(f => f.term)]
+    const values = Array.from(new Set([settingsMap.currentTerm || '1', ...feeRows.map(f => f.term)]
       .map(value => String(value || '').trim())
       .filter(Boolean)));
     return values.sort((a, b) => termRank(a) - termRank(b) || a.localeCompare(b));
-  }, [fees, settingsMap.currentTerm]);
+  }, [feeRows, settingsMap.currentTerm]);
   const yearOptions = useMemo(() => {
-    const values = Array.from(new Set([settingsMap.academicYear || String(new Date().getFullYear()), ...(fees as Fee[]).map(f => f.year)]
+    const values = Array.from(new Set([settingsMap.academicYear || String(new Date().getFullYear()), ...feeRows.map(f => f.year)]
       .map(value => String(value || '').trim())
       .filter(Boolean)));
     return values.sort((a, b) => Number(b) - Number(a) || b.localeCompare(a));
-  }, [fees, settingsMap.academicYear]);
+  }, [feeRows, settingsMap.academicYear]);
   const ledgerTerm = String(filterTerm === 'all' ? (settingsMap.currentTerm || termOptions[termOptions.length - 1] || String(new Date().getMonth() < 4 ? 1 : new Date().getMonth() < 8 ? 2 : 3)) : filterTerm);
   const ledgerYear = String(filterYear === 'all' ? (settingsMap.academicYear || yearOptions[0] || String(new Date().getFullYear())) : filterYear);
   const bursaryByStudent = useMemo(() => {
@@ -498,18 +533,18 @@ export default function Finance() {
   };
 
   const getStudentTermBreakdown = (studentId: string) => {
-    const studentFees = (fees as Fee[]).filter(f => f.studentId === studentId);
+    const studentFees = feesByStudent.get(studentId) || [];
     const previousFees = studentFees.filter(f => isBeforeTerm(f, ledgerTerm, ledgerYear));
     const currentFees = studentFees.filter(f => String(f.term) === String(ledgerTerm) && String(f.year) === String(ledgerYear));
     const previousFeeIds = new Set(previousFees.map(f => f.id));
     const currentFeeIds = new Set(currentFees.map(f => f.id));
     const previousInvoiced = previousFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
-    const previousPaid = (payments as Payment[])
-      .filter(p => previousFeeIds.has(p.feeId))
+    const previousPaid = previousFees
+      .flatMap(f => paymentsByFee.get(f.id) || [])
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
     const currentInvoiced = currentFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
-    const currentPaid = (payments as Payment[])
-      .filter(p => currentFeeIds.has(p.feeId))
+    const currentPaid = currentFees
+      .flatMap(f => paymentsByFee.get(f.id) || [])
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
     const bursary = bursaryByStudent.get(studentId);
     const discount = discountByStudent.get(studentId);
@@ -564,16 +599,18 @@ export default function Finance() {
 
   const totalPending = studentFinanceSummary.reduce((sum, s) => sum + s.balance, 0);
 
-  const filteredStudentFinance = studentFinanceSummary.filter(s => {
-    const student = students.find(x => x.id === s.id);
-    return !student || matchesStudentSearch(student, searchTerm);
-  });
+  const studentById = useMemo(() => new Map(students.map(student => [student.id, student])), [students]);
+
+  const filteredStudentFinance = useMemo(() => studentFinanceSummary.filter(s => {
+    const student = studentById.get(s.id);
+    return !student || matchesStudentSearch(student, deferredSearchTerm);
+  }), [studentFinanceSummary, studentById, deferredSearchTerm]);
 
   // Group fees by student for Invoices tab
-  const invoicesByStudent = students.map(student => {
+  const invoicesByStudent = useMemo(() => students.map(student => {
     const breakdown = getStudentTermBreakdown(student.id);
-    const sf = breakdown.currentFees.filter(f => matchesStudentSearch(student, searchTerm) || matchesTextSearch([f.description, f.term, f.year], searchTerm));
-    const matchStudent = matchesStudentSearch(student, searchTerm);
+    const sf = breakdown.currentFees.filter(f => matchesStudentSearch(student, deferredSearchTerm) || matchesTextSearch([f.description, f.term, f.year], deferredSearchTerm));
+    const matchStudent = matchesStudentSearch(student, deferredSearchTerm);
     if (sf.length === 0 && !breakdown.openingBalance && !matchStudent) return null;
     if (sf.length === 0 && breakdown.openingBalance <= 0) return null;
     return {
@@ -591,34 +628,34 @@ export default function Finance() {
       hasFullBursary: breakdown.hasFullBursary,
       hasCurrentInvoice: breakdown.currentFees.length > 0,
     };
-  }).filter(Boolean) as { student: any; fees: Fee[]; openingBalance: number; totalInv: number; payable: number; totalPaid: number; actualPaid: number; balance: number; upfrontCredit: number; bursary?: { amount: number; isFull: boolean; count: number }; discount?: { amount: number; percentage: number; count: number }; hasFullBursary: boolean; hasCurrentInvoice: boolean }[];
+  }).filter(Boolean) as { student: any; fees: Fee[]; openingBalance: number; totalInv: number; payable: number; totalPaid: number; actualPaid: number; balance: number; upfrontCredit: number; bursary?: { amount: number; isFull: boolean; count: number }; discount?: { amount: number; percentage: number; count: number }; hasFullBursary: boolean; hasCurrentInvoice: boolean }[], [students, deferredSearchTerm, feesByStudent, paymentsByFee, bursaryByStudent, discountByStudent, ledgerTerm, ledgerYear]);
 
   // Group payments by student for Payments tab
-  const paymentsByStudent = students.map(student => {
-    const sp = payments.filter(p => {
-      const matchSearch = matchesStudentSearch(student, searchTerm) || matchesTextSearch([p.method, p.reference, p.notes, p.date], searchTerm);
-      return p.studentId === student.id && matchSearch;
+  const paymentsByStudent = useMemo(() => students.map(student => {
+    const sp = (paymentsByStudentId.get(student.id) || []).filter(p => {
+      const matchSearch = matchesStudentSearch(student, deferredSearchTerm) || matchesTextSearch([p.method, (p as any).reference, (p as any).notes, p.date], deferredSearchTerm);
+      return matchSearch;
     });
     if (sp.length === 0) return null;
     const total = sp.reduce((a, p) => a + p.amount, 0);
     const sorted = [...sp].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return { student, payments: sorted, total };
-  }).filter(Boolean) as { student: any; payments: Payment[]; total: number }[];
+  }).filter(Boolean) as { student: any; payments: Payment[]; total: number }[], [students, paymentsByStudentId, deferredSearchTerm]);
 
   const ledgerRows = useMemo(() => {
     return students.map(student => {
-      const studentFees = (fees as Fee[]).filter(f => f.studentId === student.id);
+      const studentFees = feesByStudent.get(student.id) || [];
       const previousFees = studentFees.filter(f => isBeforeTerm(f, ledgerTerm, ledgerYear));
       const currentFees = studentFees.filter(f => String(f.term) === String(ledgerTerm) && String(f.year) === String(ledgerYear));
       const previousFeeIds = new Set(previousFees.map(f => f.id));
       const currentFeeIds = new Set(currentFees.map(f => f.id));
       const openingInvoiced = previousFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
-      const openingPaid = (payments as Payment[])
-        .filter(p => previousFeeIds.has(p.feeId))
+      const openingPaid = previousFees
+        .flatMap(f => paymentsByFee.get(f.id) || [])
         .reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const invoiced = currentFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
-      const paid = (payments as Payment[])
-        .filter(p => currentFeeIds.has(p.feeId))
+      const paid = currentFees
+        .flatMap(f => paymentsByFee.get(f.id) || [])
         .reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const bursary = bursaryByStudent.get(student.id);
       const discount = discountByStudent.get(student.id);
@@ -650,11 +687,11 @@ export default function Finance() {
         hasFullBursary,
       };
     }).filter(row => {
-      const matchesSearch = matchesStudentSearch(row.student, searchTerm);
+      const matchesSearch = matchesStudentSearch(row.student, deferredSearchTerm);
       const hasLedgerActivity = row.openingBalance > 0 || row.invoiced > 0 || row.paid > 0 || row.closingBalance > 0;
       return matchesSearch && hasLedgerActivity;
     });
-  }, [students, fees, payments, ledgerTerm, ledgerYear, bursaryByStudent, discountByStudent, searchTerm]);
+  }, [students, feesByStudent, paymentsByFee, ledgerTerm, ledgerYear, bursaryByStudent, discountByStudent, deferredSearchTerm]);
 
   const ledgerTotals = useMemo(() => ledgerRows.reduce((acc, row) => ({
     openingBalance: acc.openingBalance + row.openingBalance,
@@ -677,10 +714,14 @@ export default function Finance() {
     : [];
   const selectedLedgerFees = [...selectedLedgerPreviousFees, ...selectedLedgerCurrentFees];
   const selectedLedgerPayments = selectedLedgerStudentId
-    ? (payments as Payment[])
+    ? (paymentsByStudentId.get(selectedLedgerStudentId) || paymentRows)
         .filter(p => p.studentId === selectedLedgerStudentId || selectedLedgerFees.some(f => f.id === p.feeId))
         .sort((a, b) => new Date(a.date || '').getTime() - new Date(b.date || '').getTime())
     : [];
+  const visibleFilteredStudentFinance = filteredStudentFinance.slice(0, LARGE_TABLE_RENDER_LIMIT);
+  const visibleLedgerRows = ledgerRows.slice(0, LARGE_TABLE_RENDER_LIMIT);
+  const visibleInvoicesByStudent = invoicesByStudent.slice(0, LARGE_TABLE_RENDER_LIMIT);
+  const visiblePaymentsByStudent = paymentsByStudent.slice(0, LARGE_TABLE_RENDER_LIMIT);
 
   const tabs = [
     { id: 'students', label: 'Students', icon: Users },
@@ -891,7 +932,7 @@ export default function Finance() {
                       <p className="text-slate-500 font-medium">No invoiced students</p>
                     </div>
                   </td></tr>
-                ) : filteredStudentFinance.map((s, index) => (
+                ) : visibleFilteredStudentFinance.map((s, index) => (
                   <tr key={s.id}>
                     <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                     <td className="font-medium">{s.studentName}</td>
@@ -909,6 +950,11 @@ export default function Finance() {
                 ))}
               </tbody>
             </table>
+            {filteredStudentFinance.length > visibleFilteredStudentFinance.length && (
+              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                Showing first {visibleFilteredStudentFinance.length.toLocaleString()} of {filteredStudentFinance.length.toLocaleString()} rows to keep scrolling fast. Use search or filters to narrow the list; exports still use all matching records.
+              </div>
+            )}
           </div>
         )}
 
@@ -1120,7 +1166,7 @@ export default function Finance() {
                         <p className="text-sm text-slate-400">{editableLedgerText('empty.openingHint', 'Invoices from previous terms appear here as opening balances.')}</p>
                       </div>
                     </td></tr>
-                  ) : ledgerRows.map((row, index) => (
+                  ) : visibleLedgerRows.map((row, index) => (
                     <tr key={row.student.id} onClick={() => setSelectedLedgerStudentId(row.student.id)} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40">
                       <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                       <td className="font-medium">{row.studentName}</td>
@@ -1139,6 +1185,11 @@ export default function Finance() {
                   ))}
                 </tbody>
               </table>
+              {ledgerRows.length > visibleLedgerRows.length && (
+                <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                  Showing first {visibleLedgerRows.length.toLocaleString()} of {ledgerRows.length.toLocaleString()} ledger rows to prevent lag. Search or filter to narrow the list before opening a student.
+                </div>
+              )}
             </div>
               </>
             )}
@@ -1160,7 +1211,7 @@ export default function Finance() {
                       <p className="text-slate-500 font-medium">No invoices yet</p>
                     </div>
                   </td></tr>
-                ) : invoicesByStudent.map(({ student, fees: sf, openingBalance, totalInv, payable, totalPaid, upfrontCredit, balance, bursary, discount, hasFullBursary, hasCurrentInvoice }, index) => {
+                ) : visibleInvoicesByStudent.map(({ student, fees: sf, openingBalance, totalInv, payable, totalPaid, upfrontCredit, balance, bursary, discount, hasFullBursary, hasCurrentInvoice }, index) => {
                   const isExpanded = expandedInvoices.has(student.id);
                   const status = !hasCurrentInvoice && openingBalance > 0 ? 'Last term' : balance <= 0 ? 'Paid' : totalPaid > 0 ? 'Partial' : 'Pending';
                   const badge: Record<string, string> = { Paid: 'badge-success', Partial: 'badge-warning', Pending: 'badge-danger' };
@@ -1221,6 +1272,11 @@ export default function Finance() {
                 })}
               </tbody>
             </table>
+            {invoicesByStudent.length > visibleInvoicesByStudent.length && (
+              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                Showing first {visibleInvoicesByStudent.length.toLocaleString()} of {invoicesByStudent.length.toLocaleString()} students to keep the invoice list responsive.
+              </div>
+            )}
           </div>
         )}
 
@@ -1237,7 +1293,7 @@ export default function Finance() {
                       <p className="text-slate-500 font-medium">No payments recorded</p>
                     </div>
                   </td></tr>
-                ) : paymentsByStudent.map(({ student, payments: sp, total }, index) => {
+                ) : visiblePaymentsByStudent.map(({ student, payments: sp, total }, index) => {
                   const isExpanded = expandedPayments.has(student.id);
                   const last = sp[0];
                   return (
@@ -1251,7 +1307,7 @@ export default function Finance() {
                         <td className="text-slate-500 text-sm">{last ? new Date(last.date).toLocaleDateString() : '-'}</td>
                       </tr>
                       {isExpanded && sp.map(p => {
-                        const fee = fees.find(f => f.id === p.feeId);
+                        const fee = feeRows.find(f => f.id === p.feeId);
                         const dt = new Date(p.date);
                         return (
                           <tr key={p.id} className="bg-slate-50/70 dark:bg-slate-800/30">
@@ -1273,6 +1329,11 @@ export default function Finance() {
                 })}
               </tbody>
             </table>
+            {paymentsByStudent.length > visiblePaymentsByStudent.length && (
+              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                Showing first {visiblePaymentsByStudent.length.toLocaleString()} of {paymentsByStudent.length.toLocaleString()} payment groups to keep the page responsive.
+              </div>
+            )}
           </div>
         )}
 

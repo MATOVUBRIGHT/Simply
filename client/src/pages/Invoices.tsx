@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { useDeferredValue, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, CreditCard, Pencil } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
@@ -21,6 +21,8 @@ import InvoiceTemplate, { DEFAULT_INVOICE_LABELS, InvoiceLabels } from '../compo
 import { FullscreenButton } from '../components/FullscreenButton';
 import { FitStatValue } from '../components/FitStatValue';
 import { shouldSaveOnEnter } from '../utils/keyboard';
+
+const LARGE_TABLE_RENDER_LIMIT = 300;
 
 interface Invoice {
   id: string;
@@ -80,6 +82,7 @@ export default function Invoices() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterTerm, setFilterTerm] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [showStatusFilter, setShowStatusFilter] = useState(false);
   const [showTermFilter, setShowTermFilter] = useState(false);
   const { addToast } = useToast();
@@ -162,18 +165,39 @@ export default function Invoices() {
   const fees = feesData as any[];
   const payments = paymentsData as any[];
   const allFeeStructures = feeStructuresData as FeeStructure[];
+  const classById = useMemo(() => new Map(classes.map(cls => [cls.id, cls])), [classes]);
+  const feesByStudent = useMemo(() => {
+    const map = new Map<string, any[]>();
+    fees.forEach(fee => {
+      if (!fee.studentId) return;
+      const list = map.get(fee.studentId) || [];
+      list.push(fee);
+      map.set(fee.studentId, list);
+    });
+    return map;
+  }, [fees]);
+  const paymentsByFee = useMemo(() => {
+    const map = new Map<string, any[]>();
+    payments.forEach(payment => {
+      if (!payment.feeId) return;
+      const list = map.get(payment.feeId) || [];
+      list.push(payment);
+      map.set(payment.feeId, list);
+    });
+    return map;
+  }, [payments]);
   const filteredBursaryStudents = useMemo(() => {
     return students.filter((student: any) => {
       if (filterBursaryClass !== 'all' && student.classId !== filterBursaryClass) return false;
-      return matchesStudentSearch(student, searchStudent, [classes.find(c => c.id === student.classId)?.name || '']);
+      return matchesStudentSearch(student, searchStudent, [classById.get(student.classId)?.name || '']);
     });
-  }, [students, filterBursaryClass, searchStudent, classes]);
+  }, [students, filterBursaryClass, searchStudent, classById]);
   const filteredDiscountStudents = useMemo(() => {
     return students.filter((student: any) => {
       if (filterDiscountClass !== 'all' && student.classId !== filterDiscountClass) return false;
-      return matchesStudentSearch(student, searchDiscountStudent, [classes.find(c => c.id === student.classId)?.name || '']);
+      return matchesStudentSearch(student, searchDiscountStudent, [classById.get(student.classId)?.name || '']);
     });
-  }, [students, filterDiscountClass, searchDiscountStudent, classes]);
+  }, [students, filterDiscountClass, searchDiscountStudent, classById]);
   const feeStructureGroups = useMemo(() => {
     const order = [
       FeeCategory.TUITION,
@@ -443,19 +467,18 @@ export default function Invoices() {
     if (!allStudents || !fees || !payments) return [];
     
     return allStudents.map(student => {
-      const studentFees = fees.filter(f => f.studentId === student.id);
+      const studentFees = feesByStudent.get(student.id) || [];
       const previousFees = studentFees.filter(f => isBeforeTerm(f, activeInvoiceTerm, activeInvoiceYear));
       const currentFees = studentFees.filter(f => String(f.term) === String(activeInvoiceTerm) && String(f.year) === String(activeInvoiceYear));
-      const previousIds = new Set(previousFees.map(f => f.id));
       const openingInvoiced = previousFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
-      const openingPaid = payments
-        .filter(p => previousIds.has(p.feeId))
+      const openingPaid = previousFees
+        .flatMap(f => paymentsByFee.get(f.id) || [])
         .reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const openingBalance = Math.max(0, openingInvoiced - openingPaid);
       const totalInvoiced = currentFees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
       const currentTermTotal = openingBalance + totalInvoiced;
       const totalPaid = currentFees.reduce((sum, f) => {
-        const feePayments = payments.filter(p => p.feeId === f.id);
+        const feePayments = paymentsByFee.get(f.id) || [];
         return sum + feePayments.reduce((s, p) => s + Number(p.amount || 0), 0);
       }, 0);
       const balance = Math.max(0, openingBalance + totalInvoiced - totalPaid);
@@ -477,7 +500,7 @@ export default function Invoices() {
         status,
       };
     });
-  }, [allStudents, fees, payments, activeInvoiceTerm, activeInvoiceYear]);
+  }, [allStudents, feesByStudent, paymentsByFee, activeInvoiceTerm, activeInvoiceYear]);
 
   useEffect(() => {
     if (deepLinkedStudentRef.current || studentInvoiceSummary.length === 0) return;
@@ -490,14 +513,14 @@ export default function Invoices() {
     setSelectedStudentForView(summary);
   }, [studentInvoiceSummary]);
 
-  const filteredStudentSummary = studentInvoiceSummary.filter(s => {
-    if (!matchesTextSearch([s.studentName, s.admissionNo], searchTerm)) return false;
+  const filteredStudentSummary = useMemo(() => studentInvoiceSummary.filter(s => {
+    if (!matchesTextSearch([s.studentName, s.admissionNo], deferredSearchTerm)) return false;
     if (filterStatus === 'invoiced' && !s.isInvoiced) return false;
     if (filterStatus === 'not_invoiced' && s.isInvoiced) return false;
     if (filterStatus === 'paid' && s.status !== 'paid') return false;
     if (filterStatus === 'pending' && s.balance <= 0) return false;
     return true;
-  });
+  }), [studentInvoiceSummary, deferredSearchTerm, filterStatus]);
 
   // Realtime: fee structures reload when class selection changes
   useEffect(() => {
@@ -1336,19 +1359,21 @@ export default function Invoices() {
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [invoices, allFeeStructures]);
 
-  const filteredInvoices = invoices.filter(inv => {
+  const filteredInvoices = useMemo(() => invoices.filter(inv => {
     if (filterStatus !== 'all' && inv.status !== filterStatus) return false;
     if (filterTerm !== 'all' && inv.term !== filterTerm) return false;
     if (filterClassId !== 'all' && inv.classId !== filterClassId) return false;
     if (filterStructure !== 'all' && inv.description !== filterStructure) return false;
-    if (searchTerm) {
-      const className = classes.find(c => c.id === inv.classId)?.name || '';
-      if (!matchesTextSearch([inv.studentName, inv.description, inv.status, inv.term, inv.year, className], searchTerm)) {
+    if (deferredSearchTerm) {
+      const className = classById.get(inv.classId || '')?.name || '';
+      if (!matchesTextSearch([inv.studentName, inv.description, inv.status, inv.term, inv.year, className], deferredSearchTerm)) {
         return false;
       }
     }
     return true;
-  });
+  }), [invoices, filterStatus, filterTerm, filterClassId, filterStructure, deferredSearchTerm, classById]);
+  const visibleFilteredStudentSummary = filteredStudentSummary.slice(0, LARGE_TABLE_RENDER_LIMIT);
+  const visibleFilteredInvoices = filteredInvoices.slice(0, LARGE_TABLE_RENDER_LIMIT);
 
   const currentTermBursaries = useMemo(() => {
     return bursaries.filter(b => String(b.term) === String(selectedTerm) && String(b.year) === String(selectedYear));
@@ -1929,6 +1954,7 @@ export default function Invoices() {
         </div>
         <div className="table-container">
           {viewMode === 'students' ? (
+            <>
             <table>
               <thead>
                 <tr>
@@ -1967,7 +1993,7 @@ export default function Invoices() {
                       </div>
                     </td>
                   </tr>
-                ) : filteredStudentSummary.map((student, index) => (
+                ) : visibleFilteredStudentSummary.map((student, index) => (
                   <tr
                     key={student.id}
                     className="cursor-pointer hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10 transition-colors"
@@ -2033,7 +2059,14 @@ export default function Invoices() {
                 ))}
               </tbody>
             </table>
+            {filteredStudentSummary.length > visibleFilteredStudentSummary.length && (
+              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                Showing first {visibleFilteredStudentSummary.length.toLocaleString()} of {filteredStudentSummary.length.toLocaleString()} students to keep the page responsive. Use search or filters to narrow the list.
+              </div>
+            )}
+            </>
           ) : (
+            <>
             <table>
               <thead>
                 <tr>
@@ -2071,7 +2104,7 @@ export default function Invoices() {
                       </div>
                     </td>
                   </tr>
-                ) : filteredInvoices.map((invoice, index) => {
+                ) : visibleFilteredInvoices.map((invoice, index) => {
                   const StatusIcon = statusConfig[invoice.status].icon;
                   const isSelected = selectedInvoiceIds.includes(invoice.id);
                   return (
@@ -2097,7 +2130,7 @@ export default function Invoices() {
                       )}
                       <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                       <td className="font-medium">{invoice.studentName}</td>
-                      <td>{classes.find(c => c.id === invoice.classId)?.name || '-'}</td>
+                    <td>{classById.get(invoice.classId || '')?.name || '-'}</td>
                       <td>{invoice.description}</td>
                       <td className="font-semibold">{formatMoney(invoice.amount)}</td>
                       <td className="text-emerald-600 font-semibold">{formatMoney(invoice.paidAmount)}</td>
@@ -2148,6 +2181,12 @@ export default function Invoices() {
                 })}
               </tbody>
             </table>
+            {filteredInvoices.length > visibleFilteredInvoices.length && (
+              <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                Showing first {visibleFilteredInvoices.length.toLocaleString()} of {filteredInvoices.length.toLocaleString()} invoices to prevent lag. Export still uses all matching invoices.
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>}
