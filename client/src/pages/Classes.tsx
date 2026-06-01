@@ -622,27 +622,40 @@ export default function Classes() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {[
-          { label: 'Total Classes', value: classes.length, note: 'Created class groups', icon: GraduationCap },
-          { label: 'Students Enrolled', value: totalEnrolled, note: 'Active students in classes', icon: Users },
-          { label: 'Total Capacity', value: totalCapacity, note: `${Math.max(0, totalCapacity - totalEnrolled)} spaces left`, icon: BookOpen },
-        ].map(({ label, value, note, icon: Icon }) => (
-          <section key={label} className="card overflow-hidden">
-            <div className="card-header flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
-                <Icon size={18} />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-sm font-bold text-slate-800 dark:text-white">{label}</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{note}</p>
-              </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="card-solid-purple p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <GraduationCap size={24} className="text-white" />
             </div>
-            <div className="card-body">
-              <p className="text-3xl font-bold tabular-nums text-slate-900 dark:text-white">{value}</p>
+            <div>
+              <p className="text-sm font-medium text-white/80">Total Classes</p>
+              <p className="text-2xl font-bold text-white">{classes.length}</p>
             </div>
-          </section>
-        ))}
+          </div>
+        </div>
+        <div className="card-solid-emerald p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <Users size={24} className="text-white" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-white/80">Students Enrolled</p>
+              <p className="text-2xl font-bold text-white">{totalEnrolled}</p>
+            </div>
+          </div>
+        </div>
+        <div className="card-solid-indigo p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <BookOpen size={24} className="text-white" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-white/80">Total Capacity</p>
+              <p className="text-2xl font-bold text-white">{totalCapacity}</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {showForm && createPortal(

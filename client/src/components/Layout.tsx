@@ -132,6 +132,10 @@ function Layout({ children }: LayoutProps) {
   const confirm = useConfirm();
   const headerRef = useRef<HTMLDivElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarTypeaheadTimerRef = useRef<number | null>(null);
+  const [sidebarTypeaheadPath, setSidebarTypeaheadPath] = useState<string | null>(null);
+  const [sidebarTypeaheadLetter, setSidebarTypeaheadLetter] = useState('');
 
   // Reactive school name + logo from settings store - updates instantly when settings change
   const { data: settings } = useTableData(schoolId || user?.id || '', 'settings');
@@ -254,6 +258,12 @@ function Layout({ children }: LayoutProps) {
 
     window.addEventListener('keydown', handleSidebarShortcut);
     return () => window.removeEventListener('keydown', handleSidebarShortcut);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (sidebarTypeaheadTimerRef.current !== null) window.clearTimeout(sidebarTypeaheadTimerRef.current);
+    };
   }, []);
 
   function loadDeletedItemsCount() {
@@ -570,6 +580,70 @@ function Layout({ children }: LayoutProps) {
   const moreMenuItems = filteredMenuItems.filter(item => item.path !== '/' && !assignedSidebarPaths.has(item.path));
   const showSidebarText = sidebarOpen || sidebarHovered || mobileSidebarOpen;
   const broadcastLinkMeta = parseAdminMessageLink(broadcastPopup?.link);
+  const visibleSidebarItems = useMemo(() => {
+    if (!organizedSidebar) return filteredMenuItems;
+    return [
+      ...(dashboardItem ? [dashboardItem] : []),
+      ...organizedMenuSections.flatMap(section => section.items),
+      ...moreMenuItems,
+    ];
+  }, [dashboardItem, filteredMenuItems, moreMenuItems, organizedMenuSections, organizedSidebar]);
+
+  const clearSidebarTypeahead = useCallback(() => {
+    setSidebarTypeaheadPath(null);
+    setSidebarTypeaheadLetter('');
+    if (sidebarTypeaheadTimerRef.current !== null) {
+      window.clearTimeout(sidebarTypeaheadTimerRef.current);
+      sidebarTypeaheadTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleSidebarTypeaheadClear = useCallback(() => {
+    if (sidebarTypeaheadTimerRef.current !== null) window.clearTimeout(sidebarTypeaheadTimerRef.current);
+    sidebarTypeaheadTimerRef.current = window.setTimeout(clearSidebarTypeahead, 4000);
+  }, [clearSidebarTypeahead]);
+
+  const focusSidebarPath = useCallback((path: string, letter: string) => {
+    setSidebarTypeaheadPath(path);
+    setSidebarTypeaheadLetter(letter.toUpperCase());
+    scheduleSidebarTypeaheadClear();
+    window.setTimeout(() => {
+      document.getElementById(`sidebar-link-${path === '/' ? 'dashboard' : path.replace(/[^a-z0-9]+/gi, '-')}`)?.scrollIntoView({
+        block: 'nearest',
+        inline: 'nearest',
+      });
+    }, 0);
+  }, [scheduleSidebarTypeaheadClear]);
+
+  const handleSidebarKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
+    if (isTypingTarget(event.target) || event.altKey || event.ctrlKey || event.metaKey) return;
+
+    if (event.key === 'Enter' && sidebarTypeaheadPath) {
+      event.preventDefault();
+      navigate(sidebarTypeaheadPath);
+      setMobileSidebarOpen(false);
+      clearSidebarTypeahead();
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      clearSidebarTypeahead();
+      return;
+    }
+
+    if (event.key.length !== 1 || !/^[a-z0-9]$/i.test(event.key)) return;
+    event.preventDefault();
+    const letter = event.key.toLowerCase();
+    const matches = visibleSidebarItems.filter(item => item.label.toLowerCase().startsWith(letter));
+    if (matches.length === 0) return;
+    const currentIndex = matches.findIndex(item => item.path === sidebarTypeaheadPath);
+    const next = matches[(currentIndex + 1) % matches.length];
+    focusSidebarPath(next.path, letter);
+  }, [clearSidebarTypeahead, focusSidebarPath, navigate, sidebarTypeaheadPath, visibleSidebarItems]);
+
+  function sidebarLinkId(path: string) {
+    return `sidebar-link-${path === '/' ? 'dashboard' : path.replace(/[^a-z0-9]+/gi, '-')}`;
+  }
 
   return (
     <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950 overflow-x-hidden">
@@ -653,9 +727,15 @@ function Layout({ children }: LayoutProps) {
 
       {/* Sidebar -- always fixed, never scrolls away */}
       <aside
+        ref={sidebarRef}
+        tabIndex={0}
+        onKeyDown={handleSidebarKeyDown}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) clearSidebarTypeahead();
+        }}
         onMouseEnter={() => !sidebarOpen && setSidebarHovered(true)}
         onMouseLeave={() => setSidebarHovered(false)}
-        className={`fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl transition-[width,transform] duration-150 ${
+        className={`fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl outline-none transition-[width,transform] duration-150 ${
           mobileSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
         } ${!mobileSidebarOpen && (sidebarOpen || sidebarHovered ? 'w-64' : 'lg:w-20')}`}
       >
@@ -694,22 +774,31 @@ function Layout({ children }: LayoutProps) {
             <div className="space-y-1" style={{ direction: 'ltr' }}>
               {(organizedSidebar && dashboardItem ? [dashboardItem] : filteredMenuItems).map(item => {
                 const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
+                const isTypeahead = sidebarTypeaheadPath === item.path;
                 const Icon = item.icon;
                 return (
                   <Link
                     key={item.path}
+                    id={sidebarLinkId(item.path)}
                     to={item.path}
-                    onClick={() => setMobileSidebarOpen(false)}
+                    onClick={() => { setMobileSidebarOpen(false); clearSidebarTypeahead(); }}
                     className={`flex items-center rounded-lg group relative h-11 ${
                       isActive 
                         ? 'text-white shadow-sm' 
-                        : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                        : isTypeahead
+                          ? 'bg-primary-50 text-primary-700 ring-2 ring-primary-500/25 dark:bg-primary-900/25 dark:text-primary-200'
+                          : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
                     }`}
                     style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
                   >
                     {/* Simple nav item — no complex hover expand */}
+                    {isTypeahead && !isActive && (
+                      <span className="absolute -right-2 top-1/2 hidden -translate-y-1/2 rounded-full bg-primary-600 px-1.5 py-0.5 text-[10px] font-black text-white shadow-lg lg:inline-flex">
+                        {sidebarTypeaheadLetter || '>'}
+                      </span>
+                    )}
                     <div className="flex items-center gap-3 h-full w-full px-4">
-                      <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
+                      <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : isTypeahead ? 'text-primary-600 dark:text-primary-300' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
                       <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0'}`}>
                         {item.label}
                       </span>
@@ -725,21 +814,30 @@ function Layout({ children }: LayoutProps) {
                   <div className="space-y-1">
                     {section.items.map(item => {
                       const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
+                      const isTypeahead = sidebarTypeaheadPath === item.path;
                       const Icon = item.icon;
                       return (
                         <Link
                           key={item.path}
+                          id={sidebarLinkId(item.path)}
                           to={item.path}
-                          onClick={() => setMobileSidebarOpen(false)}
+                          onClick={() => { setMobileSidebarOpen(false); clearSidebarTypeahead(); }}
                           className={`flex items-center rounded-lg group relative h-11 ${
                             isActive
                               ? 'text-white shadow-sm'
-                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                              : isTypeahead
+                                ? 'bg-primary-50 text-primary-700 ring-2 ring-primary-500/25 dark:bg-primary-900/25 dark:text-primary-200'
+                                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
                           }`}
                           style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
                         >
+                          {isTypeahead && !isActive && (
+                            <span className="absolute -right-2 top-1/2 hidden -translate-y-1/2 rounded-full bg-primary-600 px-1.5 py-0.5 text-[10px] font-black text-white shadow-lg lg:inline-flex">
+                              {sidebarTypeaheadLetter || '>'}
+                            </span>
+                          )}
                           <div className="flex items-center gap-3 h-full w-full px-4">
-                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
+                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : isTypeahead ? 'text-primary-600 dark:text-primary-300' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
                             <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0'}`}>
                               {item.label}
                             </span>
@@ -758,21 +856,30 @@ function Layout({ children }: LayoutProps) {
                   <div className="space-y-1">
                     {moreMenuItems.map(item => {
                       const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
+                      const isTypeahead = sidebarTypeaheadPath === item.path;
                       const Icon = item.icon;
                       return (
                         <Link
                           key={item.path}
+                          id={sidebarLinkId(item.path)}
                           to={item.path}
-                          onClick={() => setMobileSidebarOpen(false)}
+                          onClick={() => { setMobileSidebarOpen(false); clearSidebarTypeahead(); }}
                           className={`flex items-center rounded-lg group relative h-11 ${
                             isActive
                               ? 'text-white shadow-sm'
-                              : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                              : isTypeahead
+                                ? 'bg-primary-50 text-primary-700 ring-2 ring-primary-500/25 dark:bg-primary-900/25 dark:text-primary-200'
+                                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
                           }`}
                           style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
                         >
+                          {isTypeahead && !isActive && (
+                            <span className="absolute -right-2 top-1/2 hidden -translate-y-1/2 rounded-full bg-primary-600 px-1.5 py-0.5 text-[10px] font-black text-white shadow-lg lg:inline-flex">
+                              {sidebarTypeaheadLetter || '>'}
+                            </span>
+                          )}
                           <div className="flex items-center gap-3 h-full w-full px-4">
-                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
+                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : isTypeahead ? 'text-primary-600 dark:text-primary-300' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
                             <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0'}`}>
                               {item.label}
                             </span>
@@ -960,7 +1067,7 @@ function Layout({ children }: LayoutProps) {
                     { label: 'Settings', description: '', icon: Settings, path: '/settings' },
                     { label: 'Notifications', description: '', icon: Bell, path: '/notifications' },
                     { label: 'Recycle Bin', description: '', icon: Trash2, path: '/recycle-bin' },
-                  ].map(({ label, description, icon: Icon, path }) => (
+                  ].filter(item => !isStaffMode || item.path !== '/plans').map(({ label, description, icon: Icon, path }) => (
                     <button key={path} onClick={() => { setProfileOpen(false); navigate(path); }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left">
                       <Icon size={16} className="text-slate-400 shrink-0" />
@@ -988,14 +1095,23 @@ function Layout({ children }: LayoutProps) {
                     <button onClick={() => { setProfileOpen(false); staffLogout(); }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
                       <Shield size={16} className="shrink-0" />
-                      <span className="font-medium text-sm">Exit Staff Mode ({staffSession?.staffMember.staffId})</span>
+                      <span className="font-medium text-sm">Sign Out Staff Login ({staffSession?.staffMember.staffId})</span>
                     </button>
                   )}
-                  <button onClick={() => { setProfileOpen(false); logout(); }}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
-                    <LogOut size={16} className="shrink-0" />
-                    <span className="font-medium text-sm">Sign Out</span>
-                  </button>
+                  {!isStaffMode && (
+                    <>
+                      <button onClick={() => { setProfileOpen(false); window.dispatchEvent(new CustomEvent('schofyReturnToStaffLogin')); }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
+                        <Shield size={16} className="shrink-0" />
+                        <span className="font-medium text-sm">Sign Out to Staff Login</span>
+                      </button>
+                      <button onClick={() => { setProfileOpen(false); logout(); }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                        <LogOut size={16} className="shrink-0" />
+                        <span className="font-medium text-sm">Full Admin Sign Out</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

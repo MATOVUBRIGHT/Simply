@@ -21,11 +21,32 @@ const StudentsContext = createContext<StudentsContextType | undefined>(undefined
 export function StudentsProvider({ children }: { children: React.ReactNode }) {
   const { user, schoolId } = useAuth();
   const tenantId = schoolId || user?.id || '';
+  const searchCacheRef = useRef(new Map<string, Student[]>());
 
   // Use the global store — all students, always fresh, works offline
   const { data: allStudentsData, loading, error, refresh } = useTableData(tenantId, 'students');
   const students = useMemo(() => sortStudentsForList(allStudentsData as Student[]), [allStudentsData]);
   const totalCount = students.length;
+  const searchableStudents = useMemo(
+    () => students.map(student => ({
+      student,
+      haystack: [
+        student.firstName,
+        student.lastName,
+        `${student.firstName || ''} ${student.lastName || ''}`,
+        `${student.lastName || ''} ${student.firstName || ''}`,
+        student.admissionNo,
+        student.studentId,
+        student.guardianName,
+        student.guardianPhone,
+      ].filter(Boolean).join(' ').toLowerCase(),
+    })),
+    [students]
+  );
+
+  useEffect(() => {
+    searchCacheRef.current.clear();
+  }, [students]);
 
   const loadPage = useCallback(
     async (page: number, pageSize: number, filter?: (item: any) => boolean) => {
@@ -43,11 +64,19 @@ export function StudentsProvider({ children }: { children: React.ReactNode }) {
     async (query: string) => {
       const id = schoolId || user?.id;
       if (!id) return [];
-      const localMatches = sortStudentsForList(students.filter(student => matchesStudentSearch(student, query)));
+      const normalizedQuery = query.trim().toLowerCase();
+      if (!normalizedQuery) return students;
+      const cached = searchCacheRef.current.get(normalizedQuery);
+      if (cached) return cached;
+      const parts = normalizedQuery.split(/\s+/).filter(Boolean);
+      const localMatches = searchableStudents
+        .filter(({ haystack, student }) => parts.every(part => haystack.includes(part)) || matchesStudentSearch(student, normalizedQuery))
+        .map(({ student }) => student);
+      searchCacheRef.current.set(normalizedQuery, localMatches);
       if (localMatches.length > 0) return localMatches;
       return sortStudentsForList(await dataService.search(id, 'students', query, ['firstName', 'lastName', 'admissionNo', 'studentId']));
     },
-    [user, schoolId, students]
+    [user, schoolId, students, searchableStudents]
   );
 
   return (

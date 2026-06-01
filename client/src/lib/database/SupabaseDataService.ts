@@ -18,6 +18,7 @@ import { isCloudSyncEnabled, isDesktopApp } from '../../utils/desktopSyncPrefere
 import {
   getStorageDB,
   enqueueItem,
+  enqueueItems,
   dequeueItem,
   loadQueue,
   markDeleted as _markDeleted,
@@ -693,6 +694,17 @@ function enqueue(item: Omit<QueueItem, 'id' | 'ts'>) {
   q.push(queued);
   saveQueueSync(q);
 }
+function enqueueMany(items: Array<Omit<QueueItem, 'id' | 'ts'>>) {
+  if (items.length === 0) return;
+  const now = Date.now();
+  const queued = items.map(item => ({ ...item, id: generateUUID(), ts: now } as QueueItem));
+  void enqueueItems(queued);
+  try {
+    const q = loadQueueSync();
+    q.push(...queued);
+    saveQueueSync(q);
+  } catch {}
+}
 function dequeue(id: string) {
   // Primary: async IDB delete
   void dequeueItem(id);
@@ -751,6 +763,13 @@ function notifyCloudProblem(error: any) {
   }));
 }
 // ── Cache helpers ─────────────────────────────────────────────────────────────
+function yieldToUI(): Promise<void> {
+  return new Promise(resolve => {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(() => resolve(), { timeout: 120 });
+    else setTimeout(resolve, 0);
+  });
+}
+
 function cacheKey(sid: string, table: string) { return `${sid}:${table}`; }
 
 function recordBelongsToSchool(record: any, schoolId: string, tableName: string): boolean {
@@ -953,6 +972,7 @@ class SupabaseDataService {
   private _syncInProgress = false;
   private _lastSyncAttempt = 0;
   private _backoffDelay = 1000;
+  private _backgroundSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     if (SupabaseDataService.instance) return SupabaseDataService.instance;
@@ -976,6 +996,25 @@ class SupabaseDataService {
 
   private get db() { return supabase!; }
   private get ok() { return isSupabaseConfigured && !!supabase; }
+
+  private queueWrite(item: Omit<QueueItem, 'id' | 'ts'>) {
+    enqueue(item);
+    this.scheduleBackgroundSync(this.sid(item.userId));
+  }
+
+  private queueWrites(items: Array<Omit<QueueItem, 'id' | 'ts'>>, sid: string) {
+    enqueueMany(items);
+    this.scheduleBackgroundSync(sid);
+  }
+
+  private scheduleBackgroundSync(sid: string) {
+    if (!sid || !isCloudSyncEnabled() || !isOnline() || !this.ok) return;
+    if (this._backgroundSyncTimer) return;
+    this._backgroundSyncTimer = setTimeout(() => {
+      this._backgroundSyncTimer = null;
+      void this.flushOfflineQueue();
+    }, 350);
+  }
 
   /**
    * Returns an auth session when Supabase Auth is in use.
@@ -1559,6 +1598,75 @@ class SupabaseDataService {
 
   // ── writes ────────────────────────────────────────────────────────────────
 
+  async bulkImportStudents(
+    userId: string,
+    creates: any[],
+    updates: Array<{ id: string; data: Partial<any> }>
+  ): Promise<SyncResult & { imported: number; replaced: number; records: any[] }> {
+    const sid = this.sid(userId);
+    const now = new Date().toISOString();
+    const existing = cacheGet(sid, 'students') || [];
+    const byId = new Map<string, any>();
+
+    existing.forEach(student => {
+      if (student?.id) byId.set(String(student.id), student);
+    });
+
+    const createdRecords = creates.map(raw => {
+      const requestedId = typeof raw?.id === 'string' ? raw.id : '';
+      const id = isUUID(requestedId) && !byId.has(requestedId) ? requestedId : generateUUID();
+      const displayId = raw?.studentId || raw?.admissionNo || requestedId || id;
+      const record = {
+        ...raw,
+        id,
+        schoolId: raw?.schoolId || sid,
+        studentId: raw?.studentId || displayId,
+        admissionNo: raw?.admissionNo || displayId,
+        createdAt: raw?.createdAt || now,
+        updatedAt: now,
+        syncStatus: 'pending',
+      };
+      byId.set(id, record);
+      return record;
+    });
+
+    const updatedRecords = updates
+      .map(({ id, data }) => {
+        const current = byId.get(String(id));
+        if (!current) return null;
+        const record = {
+          ...current,
+          ...data,
+          id: current.id,
+          schoolId: current.schoolId || sid,
+          updatedAt: now,
+          syncStatus: 'pending',
+        };
+        byId.set(String(current.id), record);
+        return record;
+      })
+      .filter(Boolean) as any[];
+
+    cacheSet(sid, 'students', Array.from(byId.values()));
+    notifyUI('students');
+
+    if (isCloudSyncEnabled() && canUseRemoteTable('students')) {
+      enqueueMany([
+        ...createdRecords.map(record => ({ op: 'create' as const, userId, tableName: 'students', data: record })),
+        ...updatedRecords.map(record => ({ op: 'update' as const, userId, tableName: 'students', recordId: record.id, data: record })),
+      ]);
+    }
+
+    return {
+      success: true,
+      syncedRemotely: false,
+      savedLocally: true,
+      imported: createdRecords.length,
+      replaced: updatedRecords.length,
+      records: [...createdRecords, ...updatedRecords],
+    };
+  }
+
   async create(userId: string, tableName: string, data: any): Promise<SyncResult> {
     const sid = this.sid(userId);
     const now = new Date().toISOString();
@@ -1593,6 +1701,9 @@ class SupabaseDataService {
       return { success: true, syncedRemotely: false, savedLocally: true, record };
     }
 
+    this.queueWrite({ op: 'create', userId, tableName, data: record });
+    return { success: true, syncedRemotely: false, savedLocally: true, record };
+
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'create', userId, tableName, data: record });
       return { success: true, syncedRemotely: false, savedLocally: true, record };
@@ -1613,7 +1724,7 @@ class SupabaseDataService {
       const { error: upsertError } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
       
       if (upsertError) {
-        console.error(`[create] ${rt} upsert failed:`, upsertError.code, upsertError.message);
+        console.error(`[create] ${rt} upsert failed:`, upsertError?.code, upsertError?.message);
         enqueue({ op: 'create', userId, tableName, data: record });
         return { success: true, syncedRemotely: false, savedLocally: true, record };
       }
@@ -1650,6 +1761,9 @@ class SupabaseDataService {
     if (!canUseRemoteTable(tableName)) {
       return { success: true, syncedRemotely: false, savedLocally: true, record };
     }
+
+    this.queueWrite({ op: 'update', userId, tableName, recordId: id, data: record });
+    return { success: true, syncedRemotely: false, savedLocally: true, record };
 
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'update', userId, tableName, recordId: id, data: record });
@@ -1722,6 +1836,9 @@ class SupabaseDataService {
       return { success: true, syncedRemotely: false, savedLocally: true };
     }
 
+    this.queueWrite({ op: 'delete', userId, tableName, recordId: id });
+    return { success: true, syncedRemotely: false, savedLocally: true };
+
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'delete', userId, tableName, recordId: id });
       return { success: true, syncedRemotely: false, savedLocally: true };
@@ -1773,6 +1890,9 @@ class SupabaseDataService {
       return { success: true, syncedRemotely: false, savedLocally: true };
     }
 
+    this.queueWrites(ids.map(id => ({ op: 'delete' as const, userId, tableName, recordId: id })), sid);
+    return { success: true, syncedRemotely: false, savedLocally: true };
+
     if (!isOnline() || !this.ok) {
       // Queue each delete individually
       for (const id of ids) {
@@ -1823,6 +1943,9 @@ class SupabaseDataService {
       return { success: true, syncedRemotely: false, savedLocally: true };
     }
 
+    this.queueWrite({ op: 'saveSettings', userId, tableName: 'settings', settings });
+    return { success: true, syncedRemotely: false, savedLocally: true };
+
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'saveSettings', userId, tableName: 'settings', settings });
       return { success: true, syncedRemotely: false, savedLocally: true };
@@ -1853,8 +1976,9 @@ class SupabaseDataService {
 
       if (error) throw error;
       
-      if (data && data.length > 0) {
-        const results = data.map(mapToLocal);
+      const savedSettingsRows: any[] = Array.isArray(data) ? (data as any[]) : [];
+      if (savedSettingsRows.length > 0) {
+        const results = savedSettingsRows.map(mapToLocal);
         const current = cacheGet(sid, 'settings') || [];
         const merged = [...current];
         for (const res of results) {
@@ -2081,7 +2205,9 @@ class SupabaseDataService {
       // to save API calls and prevent race conditions.
       const dedupedQueue = this._deduplicateQueue(queue);
 
-      for (const item of dedupedQueue) {
+      for (let queueIndex = 0; queueIndex < dedupedQueue.length; queueIndex++) {
+        const item = dedupedQueue[queueIndex];
+        if (queueIndex > 0 && queueIndex % 8 === 0) await yieldToUI();
         if (!canUseRemoteTable(item.tableName)) {
           dequeue(item.id);
           continue;

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard, Info, Shield, ScrollText, HelpCircle } from 'lucide-react';
+import { Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard, Info, Shield, ScrollText, HelpCircle, Save } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCurrency } from '../hooks/useCurrency';
@@ -658,6 +658,10 @@ export default function Settings() {
           {autoSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle size={14} /> Auto-saved</span>}
           {isSaving && <span className="text-sm text-slate-400 flex items-center gap-1"><div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> Saving...</span>}
           <span className="hidden text-sm text-slate-500 dark:text-slate-400 sm:inline-flex">Changes apply automatically</span>
+          <button type="button" onClick={handleSave} disabled={isSaving} className="btn btn-primary shadow-lg shadow-primary-500/20 disabled:opacity-70">
+            <Save size={16} />
+            {isSaving ? 'Saving...' : 'Save'}
+          </button>
         </div>
       </div>
 
@@ -903,6 +907,10 @@ export default function Settings() {
               <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Save active popup or form</span>
                 <kbd className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">Enter</kbd>
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Find page from focused sidebar</span>
+                <kbd className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">Letter, Enter</kbd>
               </div>
             </div>
           </div>

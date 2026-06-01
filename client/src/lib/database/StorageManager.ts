@@ -259,6 +259,40 @@ export async function enqueueItem(item: Omit<QueueItem, 'id' | 'ts'> | QueueItem
   void loadQueue().then(backupQueue);
 }
 
+export async function enqueueItems(items: Array<Omit<QueueItem, 'id' | 'ts'> | QueueItem>): Promise<void> {
+  if (items.length === 0) return;
+  const fullItems = items.map((item) => {
+    const incoming = item as Partial<QueueItem>;
+    return {
+      ...(item as Omit<QueueItem, 'id' | 'ts'>),
+      id: incoming.id || _uuid(),
+      ts: incoming.ts || Date.now(),
+    } as QueueItem;
+  });
+
+  try {
+    const db = await getStorageDB();
+    const encryptedItems = await Promise.all(fullItems.map(async (full) => {
+      const encrypted: any = await encryptJson(full);
+      if (encrypted?.__schofyEncrypted) {
+        encrypted.id = full.id;
+        encrypted.tableName = full.tableName;
+        encrypted.ts = full.ts;
+        encrypted.userId = full.userId;
+      }
+      return encrypted;
+    }));
+    const tx = db.transaction(QUEUE_STORE, 'readwrite');
+    const store = tx.objectStore(QUEUE_STORE);
+    encryptedItems.forEach((encrypted) => store.put(encrypted));
+  } catch {
+    const q = _loadQueueLS();
+    q.push(...fullItems);
+    try { localStorage.setItem(QUEUE_LS_KEY, JSON.stringify(q)); } catch {}
+  }
+  void loadQueue().then(backupQueue);
+}
+
 /** Remove item from queue by id */
 export async function dequeueItem(id: string): Promise<void> {
   try {

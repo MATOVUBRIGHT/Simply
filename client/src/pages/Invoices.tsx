@@ -2016,7 +2016,7 @@ export default function Invoices() {
                       <span className="font-semibold">{formatMoney(student.currentTermTotal)}</span>
                       {student.openingBalance > 0 && (
                         <span className="ml-2 badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300 text-[10px]">
-                          top-up
+                          bal
                         </span>
                       )}
                     </td>
@@ -3471,7 +3471,7 @@ export default function Invoices() {
                     <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
                       <div className="bg-slate-50 px-4 py-2 dark:bg-slate-800/70">
                         <p className="text-sm font-semibold text-slate-800 dark:text-white">Current Term {activeTerm}, {activeYear}</p>
-                        {opening > 0 && <p className="text-xs font-medium text-pink-600 dark:text-pink-300">Includes opening top-up of {formatMoney(opening)} carried into the current term.</p>}
+                        {opening > 0 && <p className="text-xs font-medium text-pink-600 dark:text-pink-300">Includes opening balance of {formatMoney(opening)} carried into the current term.</p>}
                       </div>
                       <table className="w-full text-sm">
                         <thead className="bg-slate-50 dark:bg-slate-700/50">
@@ -3494,7 +3494,7 @@ export default function Invoices() {
                               <td className="px-5 py-3 text-right font-semibold">{formatMoney(opening)}</td>
                               <td className="px-5 py-3 text-right text-emerald-600">{formatMoney(0)}</td>
                               <td className="px-5 py-3 text-right font-semibold text-pink-600 dark:text-pink-300">{formatMoney(opening)}</td>
-                              <td className="px-5 py-3 text-center"><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300 text-xs">current top-up</span></td>
+                              <td className="px-5 py-3 text-center"><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300 text-xs">current bal</span></td>
                             </tr>
                           )}
                           {currentFees.length === 0 && opening <= 0 ? (

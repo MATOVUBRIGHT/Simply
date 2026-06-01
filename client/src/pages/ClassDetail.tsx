@@ -188,8 +188,9 @@ export default function ClassDetail() {
           { label: 'Subjects', value: subjects.length, sub: `${optionalSubjects.length} optional`, icon: <BookOpen size={20} />, color: 'bg-emerald-500' },
           { label: 'Attendance', value: `${attendanceSummary.rate}%`, sub: `${attendanceSummary.present}/${attendanceSummary.total} present`, icon: <Calendar size={20} />, color: 'bg-amber-500' },
         ].map(stat => (
-          <div key={stat.label} className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm">
-            <div className="flex items-center gap-3">
+          <section key={stat.label} className="card overflow-hidden">
+            <div className="card-body">
+              <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-xl ${stat.color} flex items-center justify-center text-white shrink-0`}>
                 {stat.icon}
               </div>
@@ -198,13 +199,15 @@ export default function ClassDetail() {
                 <p className="text-xs text-slate-400 mt-0.5 truncate">{stat.label}</p>
               </div>
             </div>
-          </div>
+            </div>
+          </section>
         ))}
       </div>
 
       {/* Enrollment bar */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-200 dark:border-slate-700">
-        <div className="flex items-center justify-between mb-2">
+      <section className="card overflow-hidden">
+        <div className="card-body">
+          <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Enrollment</span>
           <span className="text-sm text-slate-500">{enrolled}/{cls.capacity} ({pct}%)</span>
         </div>
@@ -216,12 +219,13 @@ export default function ClassDetail() {
             This class is over capacity. Increase capacity or ignore; all enrolled students are still counted.
           </p>
         )}
-      </div>
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Students */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+        <section className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Users size={18} className="text-sky-500" />
               <h2 className="font-bold text-slate-800 dark:text-white">Students ({enrolled})</h2>
@@ -255,11 +259,11 @@ export default function ClassDetail() {
               <div className="px-5 py-2 text-xs text-slate-400 text-center">+{students.length - 20} more</div>
             )}
           </div>
-        </div>
+        </section>
 
         {/* Subjects */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+        <section className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <BookOpen size={18} className="text-emerald-500" />
               <h2 className="font-bold text-slate-800 dark:text-white">Subjects ({subjects.length})</h2>
@@ -295,11 +299,11 @@ export default function ClassDetail() {
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
         {/* Teachers */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+        <section className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <User size={18} className="text-violet-500" />
               <h2 className="font-bold text-slate-800 dark:text-white">Teachers ({teachers.length})</h2>
@@ -323,11 +327,11 @@ export default function ClassDetail() {
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
         {/* Finance summary */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+        <section className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Receipt size={18} className="text-amber-500" />
               <h2 className="font-bold text-slate-800 dark:text-white">Fees & Finance</h2>
@@ -356,11 +360,11 @@ export default function ClassDetail() {
               </div>
             )}
           </div>
-        </div>
+        </section>
 
         {/* Exams */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+        <section className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Award size={18} className="text-rose-500" />
               <h2 className="font-bold text-slate-800 dark:text-white">Exams ({classExams.length})</h2>
@@ -388,11 +392,11 @@ export default function ClassDetail() {
               );
             })}
           </div>
-        </div>
+        </section>
 
         {/* Timetable */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+        <section className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Clock size={18} className="text-indigo-500" />
               <h2 className="font-bold text-slate-800 dark:text-white">Timetable ({classTimetable.length} periods)</h2>
@@ -433,11 +437,12 @@ export default function ClassDetail() {
               );
             })}
           </div>
-        </div>
+        </section>
       </div>
 
       {/* Report cards quick link */}
-      <div className="bg-gradient-to-r from-indigo-50 to-violet-50 dark:from-indigo-900/20 dark:to-violet-900/20 rounded-2xl p-5 border border-indigo-100 dark:border-indigo-800 flex items-center justify-between gap-4">
+      <section className="card overflow-hidden">
+        <div className="card-body flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center">
             <FileText size={20} className="text-white" />
@@ -459,7 +464,8 @@ export default function ClassDetail() {
             </Link>
           )}
         </div>
-      </div>
+        </div>
+      </section>
 
       {showOptionalModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm" onClick={() => !savingOptionals && setShowOptionalModal(false)}>

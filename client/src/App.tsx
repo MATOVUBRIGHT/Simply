@@ -1,5 +1,5 @@
-import { lazy, useEffect, useState, Suspense, useMemo } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { lazy, useEffect, useState, Suspense, useMemo, useRef, useLayoutEffect } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { StudentsProvider } from './contexts/StudentsContext';
 import { RealtimeSyncProvider } from './realtime/RealtimeSync';
@@ -10,11 +10,13 @@ import DesktopUpdatePrompt from './components/DesktopUpdatePrompt';
 import StorageWarning from './components/StorageWarning';
 import SubscriptionGate from './components/SubscriptionGate';
 import StaffSessionBanner from './components/StaffSessionBanner';
+import { StaffRoleGate } from './components/StaffRoleGate';
 import { useStaffAuth } from './contexts/StaffAuthContext';
 import { useToast } from './contexts/ToastContext';
 import { useSync } from './contexts/SyncContext';
 import { initErrorInterceptor } from './lib/errorInterceptor';
 import { supabaseAnonKey, supabaseUrl } from './lib/supabase';
+import { useConfirm } from './components/ConfirmModal';
 
 // Lazy load pages for performance
 const Login = lazy(() => import('./pages/Login'));
@@ -94,7 +96,52 @@ const offlinePageWarmers = [
   () => import('./pages/NotFound'),
 ];
 
-const REFRESH_LOADER_MS = 2000;
+const REFRESH_LOADER_MS = 300;
+const STAFF_ADMIN_ONLY_PATHS = ['/plans', '/subscribe'];
+const ROUTE_LABELS: Array<[string, string]> = [
+  ['/plans', 'Plans & Billing'],
+  ['/subscribe', 'Plans & Billing'],
+  ['/students', 'Students'],
+  ['/parents', 'Parents & Emails'],
+  ['/parent-emails', 'Parent Emails'],
+  ['/admission', 'Admission'],
+  ['/staff', 'Teachers & Staff'],
+  ['/teachers', 'Teachers & Staff'],
+  ['/payroll', 'Payroll'],
+  ['/classes', 'Classes & Timetables'],
+  ['/subjects', 'Subjects'],
+  ['/homework-tests', 'Assignments & Tests'],
+  ['/attendance', 'Attendance'],
+  ['/day-boarding', 'Day & Boarding'],
+  ['/finance', 'Fees & Finance'],
+  ['/payment-accounts', 'Payment Accounts'],
+  ['/expenses', 'Expenses'],
+  ['/invoices', 'Invoices'],
+  ['/grades', 'Exams & Grades'],
+  ['/exam-marks', 'Exam Marks'],
+  ['/report-card', 'Report Card'],
+  ['/transport', 'Transport'],
+  ['/announcements', 'Announcements'],
+  ['/notifications', 'Notifications'],
+  ['/settings', 'Settings'],
+  ['/recycle-bin', 'Recycle Bin'],
+  ['/reports', 'Reports'],
+  ['/about', 'About App'],
+  ['/roles', 'Roles'],
+];
+
+function getRouteLabel(pathname: string) {
+  const match = ROUTE_LABELS
+    .filter(([path]) => pathname === path || pathname.startsWith(path + '/'))
+    .sort((a, b) => b[0].length - a[0].length)[0];
+  if (match) return match[1];
+  return pathname
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(part => part.replace(/-/g, ' ').replace(/\b\w/g, char => char.toUpperCase()))
+    .join(' / ') || 'Dashboard';
+}
 
 function FullScreenLoader({ label = 'Loading...' }: { label?: string }) {
   return (
@@ -114,7 +161,13 @@ function MainApp() {
   const { user, loading } = useAuth();
   const { canAccessPage, isStaffMode } = useStaffAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const { addToast } = useToast();
+  const confirm = useConfirm();
+  const restrictedPathRef = useRef('');
+  const restrictedPageNameRef = useRef('this page');
+  const lastAllowedPathRef = useRef('/');
+  const pendingRestrictedNoticeRef = useRef(false);
 
   // Wire global error interceptor
   useEffect(() => {
@@ -171,13 +224,42 @@ function MainApp() {
 
   // Staff access guard — redirect to dashboard if page not allowed
   useEffect(() => {
-    if (isStaffMode && !canAccessPage(location.pathname)) {
+    if (false && isStaffMode && !canAccessPage(location.pathname)) {
       // Don't redirect from /roles — staff can always see their own access info
       if (location.pathname !== '/roles') {
         window.location.replace('/');
       }
     }
   }, [location.pathname, isStaffMode, canAccessPage]);
+
+  useLayoutEffect(() => {
+    const currentPath = `${location.pathname}${location.search}${location.hash}`;
+    const adminOnlyForStaff = STAFF_ADMIN_ONLY_PATHS.some(path => location.pathname === path || location.pathname.startsWith(path + '/'));
+    const isAllowed = !isStaffMode || location.pathname === '/roles' || (!adminOnlyForStaff && canAccessPage(location.pathname));
+    if (isAllowed) {
+      lastAllowedPathRef.current = currentPath;
+      restrictedPathRef.current = '';
+      return;
+    }
+    if (restrictedPathRef.current === currentPath) return;
+    restrictedPathRef.current = currentPath;
+    restrictedPageNameRef.current = getRouteLabel(location.pathname);
+    pendingRestrictedNoticeRef.current = true;
+    navigate(lastAllowedPathRef.current || '/', { replace: true });
+  }, [location.pathname, location.search, location.hash, isStaffMode, canAccessPage, navigate]);
+
+  useEffect(() => {
+    if (!pendingRestrictedNoticeRef.current) return;
+    pendingRestrictedNoticeRef.current = false;
+
+    void confirm({
+      title: 'Access restricted',
+      description: `You can't access ${restrictedPageNameRef.current} with the current staff role. You have been returned to an allowed page.`,
+      confirmLabel: 'Back',
+      cancelLabel: 'Close',
+      variant: 'warning',
+    });
+  }, [location.pathname, confirm]);
 
   if (!user && !localStorage.getItem('schofy_session')) {
     return <Navigate to="/login" replace />;
@@ -188,10 +270,11 @@ function MainApp() {
       <StudentsProvider>
         <RealtimeSyncProvider>
           {/* SubscriptionGate wraps all content — shows blocking modal if expired/incomplete */}
-          <SubscriptionGate>
+          <StaffRoleGate>
+            <SubscriptionGate>
             <Layout>
               <Suspense fallback={<FullScreenLoader label="Loading..." />}>
-                <div className="page-shell page-shell-enter">
+                <div key={`${location.pathname}${location.search}`} className="page-shell page-shell-enter">
                   <Routes location={location}>
                     <Route path="/" element={<ErrorBoundary inline><Dashboard /></ErrorBoundary>} />
                     <Route path="/dashboard" element={<Navigate to="/" replace />} />
@@ -231,6 +314,8 @@ function MainApp() {
                     <Route path="/settings" element={<ErrorBoundary inline><Settings /></ErrorBoundary>} />
                     <Route path="/recycle-bin" element={<ErrorBoundary inline><RecycleBin /></ErrorBoundary>} />
                     <Route path="/reports" element={<ErrorBoundary inline><Reports /></ErrorBoundary>} />
+                    <Route path="/plans" element={<ErrorBoundary inline><Plans /></ErrorBoundary>} />
+                    <Route path="/subscribe" element={<Navigate to="/plans" replace />} />
                     <Route path="/about" element={<ErrorBoundary inline><About /></ErrorBoundary>} />
                     <Route path="/roles" element={<ErrorBoundary inline><Roles /></ErrorBoundary>} />
                     <Route path="*" element={<NotFound />} />
@@ -238,12 +323,13 @@ function MainApp() {
                 </div>
               </Suspense>
             </Layout>
-          </SubscriptionGate>
+            </SubscriptionGate>
           <UpdateBanner />
           <StorageWarning />
           <StaffSessionBanner />
           <LocalMergePrompt />
           <CloudProblemPrompt />
+          </StaffRoleGate>
         </RealtimeSyncProvider>
       </StudentsProvider>
     </ErrorBoundary>
@@ -252,6 +338,7 @@ function MainApp() {
 
 function App() {
   const { user, loading } = useAuth();
+  const location = useLocation();
   const hasSession = !!localStorage.getItem('schofy_session');
   const [showRefreshLoader, setShowRefreshLoader] = useState(true);
 
@@ -270,10 +357,12 @@ function App() {
     return (
       <>
         <Suspense fallback={<FullScreenLoader label="Loading..." />}>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="*" element={<Navigate to="/login" replace />} />
-          </Routes>
+          <div key={`${location.pathname}${location.search}`} className="page-shell page-shell-enter">
+            <Routes location={location}>
+              <Route path="/login" element={<Login />} />
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+          </div>
         </Suspense>
         <DesktopUpdatePrompt />
       </>
@@ -286,8 +375,6 @@ function App() {
       <Suspense fallback={<FullScreenLoader label="Loading..." />}>
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-          <Route path="/plans" element={<Plans />} />
-          <Route path="/subscribe" element={<Navigate to="/plans" replace />} />
           <Route path="/*" element={<MainApp />} />
         </Routes>
       </Suspense>

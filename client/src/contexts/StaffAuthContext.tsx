@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
+import { checkRateLimit, clearFailedAttempts, recordFailedAttempt, verifyPassword } from '../lib/security';
 
 export type StaffRole = 'teacher' | 'accountant' | 'librarian' | 'receptionist' | 'custom';
 
@@ -23,11 +24,13 @@ interface StaffAuthContextType {
   staffSession: StaffSession | null; staffLoading: boolean;
   staffLogout: () => void; isStaffMode: boolean; isReadOnly: boolean;
   canAccessPage: (path: string) => boolean;
+  staffLogin: (schoolId: string, staffName: string, password: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const StaffAuthContext = createContext<StaffAuthContextType>({
   staffSession: null, staffLoading: false,
   staffLogout: () => {}, isStaffMode: false, isReadOnly: false, canAccessPage: () => true,
+  staffLogin: async () => ({ success: false, error: 'Staff sign-in is unavailable.' }),
 });
 
 export function StaffAuthProvider({ children }: { children: ReactNode }) {
@@ -35,15 +38,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   const [staffLoading, setStaffLoading] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STAFF_SESSION_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as StaffSession;
-        if (Date.now() - new Date(parsed.loginAt).getTime() < 12 * 60 * 60 * 1000) {
-          setStaffSession(parsed);
-        } else { localStorage.removeItem(STAFF_SESSION_KEY); }
-      } catch { localStorage.removeItem(STAFF_SESSION_KEY); }
-    }
+    localStorage.removeItem(STAFF_SESSION_KEY);
     setStaffLoading(false);
   }, []);
 
@@ -63,17 +58,68 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   function staffLogout() {
     if (staffSession) void logActivity(staffSession.staffMember.schoolId, staffSession.staffMember.id, staffSession.staffMember.staffId, 'logout', staffSession.staffMember.firstName + ' ' + staffSession.staffMember.lastName + ' logged out');
     setStaffSession(null);
-    // Remove staff session and also clear the main user session so regular users don't see admin data
     try {
       localStorage.removeItem(STAFF_SESSION_KEY);
-      localStorage.removeItem('schofy_session');
     } catch {}
-    // Notify the app and other tabs
     try {
       window.dispatchEvent(new CustomEvent('staffSignedOut'));
-      window.dispatchEvent(new CustomEvent('forceSignOutAllUsers'));
       window.dispatchEvent(new CustomEvent('dataRefresh'));
     } catch {}
+  }
+
+  async function staffLogin(schoolId: string, staffName: string, password: string): Promise<{ success: boolean; error?: string }> {
+    const cleanStaffName = staffName.trim().replace(/\s+/g, ' ');
+    const normalizedName = cleanStaffName.toLowerCase();
+    if (!schoolId || !normalizedName || !password) return { success: false, error: 'Enter staff name and password.' };
+    if (!supabase) return { success: false, error: 'Role sign-in needs cloud access to start this shift.' };
+
+    const rateKey = `${schoolId}:${normalizedName}`;
+    const rate = checkRateLimit(rateKey);
+    if (!rate.allowed) {
+      const minutes = Math.max(1, Math.ceil((rate.remainingMs || 0) / 60000));
+      return { success: false, error: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.` };
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('school_staff_users')
+        .select('*')
+        .eq('school_id', schoolId)
+        .eq('is_active', true);
+
+      const matches = (data || []).filter((staff: any) => {
+        const fullName = `${staff.first_name || ''} ${staff.last_name || ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
+        const reverseName = `${staff.last_name || ''} ${staff.first_name || ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
+        return normalizedName === fullName || normalizedName === reverseName;
+      });
+
+      if (error || matches.length === 0) {
+        recordFailedAttempt(rateKey);
+        return { success: false, error: 'Invalid staff name or password.' };
+      }
+      if (matches.length > 1) {
+        return { success: false, error: 'More than one staff member has that name. Use the full first and last name exactly.' };
+      }
+
+      const staffRow = matches[0];
+      if (!staffRow.is_active) return { success: false, error: 'This staff role is inactive. Contact the admin.' };
+
+      const verified = await verifyPassword(password, staffRow.password_hash || '');
+      if (!verified) {
+        recordFailedAttempt(rateKey);
+        return { success: false, error: 'Invalid staff name or password.' };
+      }
+
+      clearFailedAttempts(rateKey);
+      const now = new Date().toISOString();
+      const member = mapRow({ ...staffRow, last_login_at: now });
+      setStaffSession({ staffMember: member, loginAt: now });
+      void supabase.from('school_staff_users').update({ last_login_at: now, updated_at: now }).eq('id', staffRow.id);
+      void logActivity(schoolId, staffRow.id, staffRow.staff_id, 'login', `${staffRow.first_name} ${staffRow.last_name} started shift`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error?.message || 'Could not start role shift.' };
+    }
   }
 
   function canAccessPage(path: string): boolean {
@@ -84,7 +130,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <StaffAuthContext.Provider value={{ staffSession, staffLoading, staffLogout, isStaffMode: staffSession !== null, isReadOnly: staffSession?.staffMember.isReadOnly ?? false, canAccessPage }}>
+    <StaffAuthContext.Provider value={{ staffSession, staffLoading, staffLogout, staffLogin, isStaffMode: staffSession !== null, isReadOnly: staffSession?.staffMember.isReadOnly ?? false, canAccessPage }}>
       {children}
     </StaffAuthContext.Provider>
   );

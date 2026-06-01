@@ -857,7 +857,7 @@ export default function StudentProfile() {
             <div className="card p-4">
               <p className="text-xs text-slate-500 mb-1">Current Term {currentTerm}</p>
               <p className="text-xl font-bold text-indigo-600 dark:text-indigo-300">{formatMoney(currentTermTotal)}</p>
-              {openingBalance > 0 && <p className="mt-1 text-[11px] font-semibold text-pink-600 dark:text-pink-300">Includes {formatMoney(openingBalance)} opening top-up</p>}
+              {openingBalance > 0 && <p className="mt-1 text-[11px] font-semibold text-pink-600 dark:text-pink-300">Includes {formatMoney(openingBalance)} opening balance</p>}
             </div>
             <div className="card p-4">
               <p className="text-xs text-slate-500 mb-1">All Invoiced</p>
@@ -1095,7 +1095,7 @@ export default function StudentProfile() {
                           <td>{formatMoney(openingBalance)}</td>
                           <td>{formatMoney(0)}</td>
                           <td className="font-semibold text-pink-600 dark:text-pink-300">{formatMoney(openingBalance)}</td>
-                          <td><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">top-up</span></td>
+                          <td><span className="badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300">bal</span></td>
                         </tr>
                       )}
                       {currentTermFees.length === 0 && openingBalance <= 0 ? (

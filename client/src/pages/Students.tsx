@@ -1044,18 +1044,25 @@ export default function Students() {
   function processMapping() {
     const mappedData: Partial<Student>[] = [];
     const newFlaggedItems: Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }> = {};
+    const headerIndexByName = new Map(csvHeaders.map((header, index) => [header, index]));
+    const fieldIndexes = expectedFields.map(field => ({
+      key: field.key,
+      index: fieldMapping[field.key] ? headerIndexByName.get(fieldMapping[field.key]) ?? -1 : -1,
+    }));
+    const existingByName = new Map(
+      allStudents.map(student => [
+        `${student.firstName || ''}|${student.lastName || ''}`.toLowerCase(),
+        student,
+      ])
+    );
     
     for (let i = 0; i < csvData.length; i++) {
       const row = csvData[i];
       const student: Partial<Student> = {};
       
-      expectedFields.forEach(field => {
-        const csvHeader = fieldMapping[field.key];
-        if (csvHeader) {
-          const headerIndex = csvHeaders.indexOf(csvHeader);
-          if (headerIndex !== -1 && row[headerIndex]) {
-            (student as any)[field.key] = row[headerIndex];
-          }
+      fieldIndexes.forEach(field => {
+        if (field.index !== -1 && row[field.index]) {
+          (student as any)[field.key] = row[field.index];
         }
       });
       
@@ -1066,10 +1073,7 @@ export default function Students() {
         
         (student as any).id = generatedId;
         
-        const existingStudent = students.find(s => 
-          s.firstName.toLowerCase() === fn.toLowerCase() && 
-          s.lastName.toLowerCase() === ln.toLowerCase()
-        );
+        const existingStudent = existingByName.get(`${fn}|${ln}`.toLowerCase());
         
         if (existingStudent) {
           newFlaggedItems[i] = {
@@ -1113,25 +1117,31 @@ export default function Students() {
 
     try {
       const now = new Date().toISOString();
-      let successCount = 0;
       let skippedCount = 0;
+      let successCount = 0;
       let replacedCount = 0;
 
       const importStatus = getImportStatus();
       const newEnrolledCount = countNewEnrolledImports();
 
-      const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
-      if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
-        addToast('Choose an active plan before importing students.', 'error');
-        setPlanLimitMessage('Choose an active plan before importing students.');
-        navigate('/plans');
-        setIsImporting(false);
-        return;
+      let remaining = importRemaining;
+      let activePlanName = 'your plan';
+      if (remaining === null) {
+        const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
+        if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
+          addToast('Choose an active plan before importing students.', 'error');
+          setPlanLimitMessage('Choose an active plan before importing students.');
+          navigate('/plans');
+          setIsImporting(false);
+          return;
+        }
+        remaining = access.remaining;
+        activePlanName = access.plan.name;
       }
-      if (newEnrolledCount > access.remaining) {
-        const available = Math.max(0, access.remaining);
+      if (newEnrolledCount > remaining) {
+        const available = Math.max(0, remaining);
         if (!importAvailableOnly || available <= 0) {
-          const message = `Plan limit reached. You can add ${available} more enrolled student${available === 1 ? '' : 's'} on ${access.plan.name}, but this import adds ${newEnrolledCount}. Use Import Available or upgrade your plan.`;
+          const message = `Plan limit reached. You can add ${available} more enrolled student${available === 1 ? '' : 's'} on ${activePlanName}, but this import adds ${newEnrolledCount}. Use Import Available or upgrade your plan.`;
           setPlanLimitMessage(message);
           addToast(message, 'error');
           setIsImporting(false);
@@ -1140,10 +1150,59 @@ export default function Students() {
         setPlanLimitMessage(`Importing ${available} available student${available === 1 ? '' : 's'} now. ${newEnrolledCount - available} extra student${newEnrolledCount - available === 1 ? '' : 's'} will be skipped until you upgrade.`);
       }
 
-      type ImportResult = 'imported' | 'replaced' | 'skipped';
-      const importTasks: Array<{ index: number; run: () => Promise<ImportResult> }> = [];
+      setImportProgress(20);
+      const creates: Student[] = [];
+      const updates: Array<{ id: string; data: Partial<Student> }> = [];
       let newEnrolledReserved = 0;
-      const reservedIds = new Set(students.map(s => s.id));
+      const availableSlots = Math.max(0, remaining);
+      const reservedIds = new Set(allStudents.map(s => s.id));
+
+      const toStudentPayload = (data: Partial<Student>, displayId: string): Student => {
+        const genderValue = ((data as any).gender as string)?.toLowerCase();
+        const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
+
+        return {
+          id: generateUUID(),
+          schoolId: id,
+          studentId: (data as any).studentId || displayId,
+          admissionNo: (data as any).admissionNo || displayId,
+          firstName: (data.firstName as string) || 'Unknown',
+          lastName: (data.lastName as string) || 'Unknown',
+          dob: (data.dob as string) || '2000-01-01',
+          gender: validGender,
+          classId: (data.classId as string) || 'primary-1',
+          address: (data.address as string) || '',
+          guardianName: (data.guardianName as string) || '',
+          guardianPhone: (data.guardianPhone as string) || '',
+          guardianEmail: data.guardianEmail as string | undefined,
+          status: importStatus as any,
+          completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
+          completedTerm: importStatus === 'completed' ? 'Final' : undefined,
+          createdAt: now,
+          updatedAt: now,
+        };
+      };
+
+      const toUpdatePayload = (data: Partial<Student>): Partial<Student> => {
+        const genderValue = ((data as any).gender as string)?.toLowerCase();
+        const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
+
+        return {
+          firstName: (data.firstName as string) || 'Unknown',
+          lastName: (data.lastName as string) || 'Unknown',
+          dob: (data.dob as string) || '2000-01-01',
+          gender: validGender,
+          classId: (data.classId as string) || 'primary-1',
+          address: (data.address as string) || '',
+          guardianName: (data.guardianName as string) || '',
+          guardianPhone: (data.guardianPhone as string) || '',
+          guardianEmail: data.guardianEmail as string | undefined,
+          status: importStatus as any,
+          completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
+          completedTerm: importStatus === 'completed' ? 'Final' : undefined,
+          updatedAt: now,
+        };
+      };
 
       for (let i = 0; i < importPreview.length; i++) {
         const data = importPreview[i];
@@ -1151,15 +1210,15 @@ export default function Students() {
         const flagged = flaggedItems[i];
         const countsAsNewEnrolled = countsAsNewEnrolledImport(i);
 
-        if (importAvailableOnly && countsAsNewEnrolled && newEnrolledReserved >= Math.max(0, access.remaining)) {
-          importTasks.push({ index: i, run: async () => 'skipped' });
+        if (importAvailableOnly && countsAsNewEnrolled && newEnrolledReserved >= availableSlots) {
+          skippedCount++;
           continue;
         }
         if (countsAsNewEnrolled) newEnrolledReserved++;
 
         if (flagged) {
           if (flagged.action === 'skip') {
-            importTasks.push({ index: i, run: async () => 'skipped' });
+            skippedCount++;
             continue;
           } else if (flagged.action === 'duplicate') {
             let newId = studentId;
@@ -1171,116 +1230,23 @@ export default function Students() {
               counter++;
             }
             reservedIds.add(newId);
-            
-            const genderValue = ((data as any).gender as string)?.toLowerCase();
-            const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-            
-            const student: Student = {
-              id: newId,
-              schoolId: id,
-              studentId: newId,
-              admissionNo: newId,
-              firstName: ((data as any).firstName as string) || 'Unknown',
-              lastName: ((data as any).lastName as string) || 'Unknown',
-              dob: ((data as any).dob as string) || '2000-01-01',
-              gender: validGender,
-              classId: ((data as any).classId as string) || 'primary-1',
-              address: ((data as any).address as string) || '',
-              guardianName: ((data as any).guardianName as string) || '',
-              guardianPhone: ((data as any).guardianPhone as string) || '',
-              guardianEmail: (data as any).guardianEmail as string | undefined,
-              status: importStatus as any,
-              completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
-              completedTerm: importStatus === 'completed' ? 'Final' : undefined,
-              createdAt: now,
-              updatedAt: now,
-            };
-            
-            importTasks.push({
-              index: i,
-              run: async () => {
-                await dataService.create(id, 'students', student);
-                return 'imported';
-              },
-            });
+            creates.push(toStudentPayload(data, newId));
           } else if (flagged.action === 'replace' && flagged.existingId) {
-            const genderValue = ((data as any).gender as string)?.toLowerCase();
-            const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-            
-            importTasks.push({
-              index: i,
-              run: async () => {
-                await dataService.update(id, 'students', flagged.existingId!, {
-                  firstName: ((data as any).firstName as string) || 'Unknown',
-                  lastName: ((data as any).lastName as string) || 'Unknown',
-                  dob: ((data as any).dob as string) || '2000-01-01',
-                  gender: validGender,
-                  classId: ((data as any).classId as string) || 'primary-1',
-                  address: ((data as any).address as string) || '',
-                  guardianName: ((data as any).guardianName as string) || '',
-                  guardianPhone: ((data as any).guardianPhone as string) || '',
-                  guardianEmail: (data as any).guardianEmail as string | undefined,
-                  status: importStatus as any,
-                  completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
-                  completedTerm: importStatus === 'completed' ? 'Final' : undefined,
-                  updatedAt: now,
-                } as any);
-                return 'replaced';
-              },
-            });
+            updates.push({ id: flagged.existingId, data: toUpdatePayload(data) });
           }
         } else {
-          // Regular new student
-          const genderValue = ((data as any).gender as string)?.toLowerCase();
-          const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-
-          let studentIdLocal = (data as any).id || generateUUID();
+          let studentIdLocal = (data as any).id || generateStudentId((data.firstName as string) || '', (data.lastName as string) || '');
           while (reservedIds.has(studentIdLocal)) studentIdLocal = generateUUID();
           reservedIds.add(studentIdLocal);
-
-          const student: Student = {
-            id: studentIdLocal,
-            schoolId: id,
-            studentId: (data as any).studentId || generateStudentId((data.firstName as string) || '', (data.lastName as string) || ''),
-            admissionNo: (data as any).admissionNo || studentIdLocal,
-            firstName: (data.firstName as string) || 'Unknown',
-            lastName: (data.lastName as string) || 'Unknown',
-            gender: validGender,
-            dob: (data.dob as string) || '2000-01-01',
-            classId: (data.classId as string) || 'primary-1',
-            address: (data.address as string) || '',
-            guardianName: (data.guardianName as string) || '',
-            guardianPhone: (data.guardianPhone as string) || '',
-            guardianEmail: data.guardianEmail as string | undefined,
-            status: importStatus as any,
-            completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
-            completedTerm: importStatus === 'completed' ? 'Final' : undefined,
-            createdAt: now,
-            updatedAt: now,
-          };
-          
-          importTasks.push({
-            index: i,
-            run: async () => {
-              await dataService.create(id, 'students', student as any);
-              return 'imported';
-            },
-          });
+          creates.push(toStudentPayload(data, studentIdLocal));
         }
       }
-      const batchSize = Math.max(1, Math.ceil(importTasks.length * 0.3));
-      let processedCount = 0;
-      for (let start = 0; start < importTasks.length; start += batchSize) {
-        const batch = importTasks.slice(start, start + batchSize);
-        const results = await Promise.all(batch.map(task => task.run()));
-        results.forEach(result => {
-          if (result === 'imported') successCount++;
-          else if (result === 'replaced') replacedCount++;
-          else skippedCount++;
-        });
-        processedCount += batch.length;
-        setImportProgress(Math.round((processedCount / Math.max(1, importTasks.length)) * 100));
-      }
+
+      setImportProgress(70);
+      const result = await dataService.bulkImportStudents(id, creates, updates);
+      successCount = result.imported;
+      replacedCount = result.replaced;
+      setImportProgress(100);
 
       const parts: string[] = [];
       if (successCount > 0) parts.push(`${successCount} imported`);

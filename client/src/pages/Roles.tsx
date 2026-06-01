@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Users, Plus, Eye, EyeOff, Trash2, Edit2, Shield, History, CheckCircle, XCircle, Copy, RefreshCw, Key, Lock, ChevronDown, ChevronUp, AlertTriangle, UserCheck, UserX, Gauge } from 'lucide-react';
+import { Users, Plus, Eye, EyeOff, Trash2, Edit2, History, CheckCircle, XCircle, RefreshCw, Key, Lock, ChevronDown, ChevronUp, AlertTriangle, UserCheck, UserX, Gauge } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { hashPassword } from '../lib/security';
@@ -68,14 +68,12 @@ export default function Roles() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [copiedId, setCopiedId] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   // Credential change modal
   const [showCredModal, setShowCredModal] = useState(false);
   const [credTarget, setCredTarget] = useState<StaffUser | null>(null);
-  const [newStaffId, setNewStaffId] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [credSaving, setCredSaving] = useState(false);
@@ -133,15 +131,15 @@ export default function Roles() {
     setEditingStaff(s); setShowAddModal(true); setError('');
   }
   function openCredModal(s: StaffUser) {
-    setCredTarget(s); setNewStaffId(s.staffId); setNewPassword(''); setCredError(''); setShowCredModal(true);
+    setCredTarget(s); setNewPassword(''); setCredError(''); setShowCredModal(true);
   }
 
   async function saveStaff() {
     if (!form.firstName.trim() || !form.lastName.trim()) { setError('First and last name required'); return; }
     const cleanStaffId = form.staffId.trim().toUpperCase();
-    if (!cleanStaffId) { setError('Staff ID required'); return; }
+    if (!cleanStaffId) { setError('Staff account reference could not be created. Try selecting the role again.'); return; }
     const duplicate = staffList.find(s => s.staffId.toUpperCase() === cleanStaffId && s.id !== editingStaff?.id);
-    if (duplicate) { setError('That Staff ID is already in use'); return; }
+    if (duplicate) { setError('That staff account reference is already in use. Try saving again.'); return; }
     if (!editingStaff && form.password.length < 6) { setError('Password must be at least 6 characters'); return; }
     if (!supabase) return;
     setSaving(true); setError('');
@@ -173,7 +171,8 @@ export default function Roles() {
           is_active: true, created_at: now, updated_at: now,
         });
         await logStaffActivity(tenantId, user?.id || '', 'admin', 'create_staff', 'Created: ' + cleanStaffId);
-        setSuccess('Account created. Staff ID: ' + cleanStaffId);
+        localStorage.setItem(`schofy_staff_gate_enabled_${tenantId}`, '1');
+        setSuccess('Staff account created. Login with: ' + form.firstName.trim() + ' ' + form.lastName.trim() + ' + password');
       }
       setShowAddModal(false); await loadData();
     } catch (e: any) { setError(e.message || 'Failed to save'); }
@@ -182,18 +181,14 @@ export default function Roles() {
 
   async function saveCredentials() {
     if (!credTarget || !supabase) return;
-    const cleanId = newStaffId.trim().toUpperCase();
-    if (!cleanId) { setCredError('Staff ID cannot be empty'); return; }
-    if (newPassword && newPassword.length < 6) { setCredError('Password must be at least 6 characters'); return; }
+    if (!newPassword || newPassword.length < 6) { setCredError('Enter a new password with at least 6 characters'); return; }
     setCredSaving(true); setCredError('');
     try {
       const now = new Date().toISOString();
-      const update: any = { staff_id: cleanId, updated_at: now };
-      if (newPassword.length >= 6) update.password_hash = await hashPassword(newPassword);
-      update.generated_email = null;
+      const update: any = { password_hash: await hashPassword(newPassword), updated_at: now };
       await supabase.from('school_staff_users').update(update).eq('id', credTarget.id);
-      await logStaffActivity(tenantId, user?.id || '', 'admin', 'change_credentials', 'Changed credentials for: ' + credTarget.staffId + (cleanId !== credTarget.staffId ? ' -> ' + cleanId : ''));
-      setSuccess('Credentials updated for ' + credTarget.firstName + ' ' + credTarget.lastName);
+      await logStaffActivity(tenantId, user?.id || '', 'admin', 'change_password', 'Changed staff password for: ' + credTarget.firstName + ' ' + credTarget.lastName);
+      setSuccess('Password updated for ' + credTarget.firstName + ' ' + credTarget.lastName);
       setShowCredModal(false); await loadData();
     } catch (e: any) { setCredError(e.message || 'Failed to update'); }
     finally { setCredSaving(false); }
@@ -211,11 +206,6 @@ export default function Roles() {
     await supabase.from('school_staff_users').delete().eq('id', s.id);
     await logStaffActivity(tenantId, user?.id || '', 'admin', 'delete_staff', 'Deleted: ' + s.staffId);
     await loadData();
-  }
-
-  function copyText(text: string) {
-    navigator.clipboard.writeText(text).catch(() => {});
-    setCopiedId(text); setTimeout(() => setCopiedId(''), 2000);
   }
 
   function timeAgo(iso: string | null) {
@@ -255,16 +245,19 @@ export default function Roles() {
       {success && <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 rounded-xl p-3 text-sm flex items-center gap-2"><CheckCircle size={16} />{success}</div>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="card p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-300">
+        <section className="card overflow-hidden">
+          <div className="card-body flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-primary-600 dark:text-primary-300">
             <Gauge size={20} />
           </div>
           <div>
             <p className="text-xs text-slate-500 dark:text-slate-400">Total Staff</p>
             <p className="text-xl font-bold text-slate-900 dark:text-white">{staffList.length}</p>
           </div>
-        </div>
-        <div className="card p-4 flex items-center gap-3">
+          </div>
+        </section>
+        <section className="card overflow-hidden">
+          <div className="card-body flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-300">
             <UserCheck size={20} />
           </div>
@@ -272,8 +265,10 @@ export default function Roles() {
             <p className="text-xs text-slate-500 dark:text-slate-400">Active</p>
             <p className="text-xl font-bold text-slate-900 dark:text-white">{activeStaffCount}</p>
           </div>
-        </div>
-        <div className="card p-4 flex items-center gap-3">
+          </div>
+        </section>
+        <section className="card overflow-hidden">
+          <div className="card-body flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 dark:text-red-300">
             <UserX size={20} />
           </div>
@@ -281,8 +276,10 @@ export default function Roles() {
             <p className="text-xs text-slate-500 dark:text-slate-400">Inactive</p>
             <p className="text-xl font-bold text-slate-900 dark:text-white">{inactiveStaffCount}</p>
           </div>
-        </div>
-        <div className="card p-4 flex items-center gap-3">
+          </div>
+        </section>
+        <section className="card overflow-hidden">
+          <div className="card-body flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-300">
             <Eye size={20} />
           </div>
@@ -290,7 +287,8 @@ export default function Roles() {
             <p className="text-xs text-slate-500 dark:text-slate-400">Read Only / Today</p>
             <p className="text-xl font-bold text-slate-900 dark:text-white">{readOnlyStaffCount} / {recentLoginCount}</p>
           </div>
-        </div>
+          </div>
+        </section>
       </div>
 
       {/* Tabs */}
@@ -326,7 +324,7 @@ export default function Roles() {
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Staff</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Staff ID</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Login</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide hidden md:table-cell">Role</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide hidden lg:table-cell">Last Login</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide hidden lg:table-cell">Pages</th>
@@ -350,13 +348,10 @@ export default function Roles() {
                             </div>
                           </div>
                         </td>
-                        {/* Staff ID */}
+                        {/* Login */}
                         <td className="px-4 py-3">
-                          <button onClick={() => copyText(s.staffId)} className="flex items-center gap-1 text-xs font-mono font-semibold text-slate-700 dark:text-slate-200 hover:text-primary-600 dark:hover:text-primary-400 mb-0.5">
-                            <Shield size={11} />{s.staffId}
-                            {copiedId === s.staffId ? <CheckCircle size={10} className="text-green-500" /> : <Copy size={10} className="opacity-50" />}
-                          </button>
-                          <p className="text-[11px] text-slate-400">Use this ID with the staff password</p>
+                          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{s.firstName} {s.lastName}</p>
+                          <p className="text-[11px] text-slate-400">Use this name with the staff password</p>
                         </td>
                         {/* Role */}
                         <td className="px-4 py-3 hidden md:table-cell">
@@ -390,8 +385,8 @@ export default function Roles() {
                         {!isStaffMode && (
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-1">
-                              {/* Change credentials */}
-                              <button onClick={() => openCredModal(s)} title="Change ID / Password" className="p-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                              {/* Change password */}
+                              <button onClick={() => openCredModal(s)} title="Change Password" className="p-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
                                 <Key size={14} />
                               </button>
                               {/* Edit */}
@@ -498,18 +493,13 @@ export default function Roles() {
             </div>
             <div className="p-5 space-y-4">
               {error && <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl p-3 text-sm">{error}</div>}
-              <div>
-                <label className="form-label">Staff ID *</label>
-                <input
-                  className="form-input font-mono uppercase"
-                  value={form.staffId}
-                  onChange={e => setForm(f => ({ ...f, staffId: e.target.value.toUpperCase() }))}
-                  placeholder="e.g. TCH-001"
-                />
-              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="form-label">First Name *</label><input className="form-input" value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} placeholder="John" /></div>
                 <div><label className="form-label">Last Name *</label><input className="form-input" value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} placeholder="Doe" /></div>
+              </div>
+              <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 text-xs text-primary-700 dark:border-primary-800 dark:bg-primary-900/20 dark:text-primary-300">
+                <p className="font-semibold">Staff login name</p>
+                <p className="mt-1">{`${form.firstName || 'First'} ${form.lastName || 'Last'}`.trim()} + password</p>
               </div>
               <div>
                 <label className="form-label">Role</label>
@@ -563,7 +553,7 @@ export default function Roles() {
         </div>, document.body
       )}
 
-      {/* Change Credentials Modal */}
+      {/* Change Password Modal */}
       {showCredModal && credTarget && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-modal-in">
@@ -571,20 +561,19 @@ export default function Roles() {
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><Key size={20} /></div>
                 <div>
-                  <h2 className="text-base font-bold">Change Credentials</h2>
+                  <h2 className="text-base font-bold">Change Password</h2>
                   <p className="text-indigo-100 text-xs">{credTarget.firstName} {credTarget.lastName}</p>
                 </div>
               </div>
             </div>
             <div className="p-5 space-y-4">
               {credError && <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl p-3 text-sm flex items-center gap-2"><AlertTriangle size={14} />{credError}</div>}
-              <div>
-                <label className="form-label">Staff ID</label>
-                <input className="form-input font-mono uppercase" value={newStaffId} onChange={e => setNewStaffId(e.target.value.toUpperCase())} placeholder="e.g. TCH-001" />
-                <p className="text-xs text-slate-400 mt-1">Current: <span className="font-mono font-semibold">{credTarget.staffId}</span></p>
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-700 dark:border-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-300">
+                <p className="font-semibold">Staff login uses name + password</p>
+                <p className="mt-1 font-bold">{credTarget.firstName} {credTarget.lastName}</p>
               </div>
               <div>
-                <label className="form-label">New Password <span className="text-slate-400 font-normal">(blank = keep current)</span></label>
+                <label className="form-label">New Password</label>
                 <div className="relative">
                   <input className="form-input pr-10" type={showNewPassword ? 'text' : 'password'} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min 6 characters" />
                   <button type="button" onClick={() => setShowNewPassword(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
@@ -592,13 +581,13 @@ export default function Roles() {
               </div>
               <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl p-3 text-xs text-indigo-700 dark:text-indigo-300">
                 <p className="font-semibold mb-1">Staff login will use:</p>
-                <p className="font-mono break-all">{newStaffId || credTarget.staffId}</p>
+                <p className="font-bold">{credTarget.firstName} {credTarget.lastName} + password</p>
               </div>
               <div className="flex gap-3 pt-1">
                 <button onClick={() => setShowCredModal(false)} className="flex-1 btn btn-secondary">Cancel</button>
                 <button onClick={saveCredentials} disabled={credSaving} className="flex-1 btn btn-primary flex items-center justify-center gap-2">
                   {credSaving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Lock size={15} />}
-                  Save Credentials
+                  Save Password
                 </button>
               </div>
             </div>

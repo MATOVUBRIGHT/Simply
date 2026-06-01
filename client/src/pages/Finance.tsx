@@ -805,7 +805,7 @@ export default function Finance() {
       </div>
 
       {/* Stats */}
-      {activeTab === 'students' && <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
+      {activeTab === 'students' && <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
         <div className="card-solid-emerald p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Receipt size={24} className="text-white" /></div>
@@ -822,12 +822,6 @@ export default function Finance() {
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><FileText size={24} className="text-white" /></div>
             <div className="min-w-0"><p className="text-sm font-medium text-white/80">Invoiced</p><FitStatValue>{formatMoney(totalInvoiced)}</FitStatValue></div>
-          </div>
-        </div>
-        <div className="card-solid-violet p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center"><Receipt size={24} className="text-white" /></div>
-            <div className="min-w-0"><p className="text-sm font-medium text-white/80">Transactions</p><FitStatValue>{payments.length}</FitStatValue></div>
           </div>
         </div>
         <div className="card-solid-amber p-5 rounded-2xl shadow-lg hover:shadow-xl transition-all">
@@ -1223,7 +1217,7 @@ export default function Finance() {
                           <span className="font-semibold">{formatMoney(openingBalance + totalInv)}</span>
                           {openingBalance > 0 && (
                             <span className="ml-2 badge bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300 text-[10px]">
-                              top-up
+                              bal
                             </span>
                           )}
                         </td>
