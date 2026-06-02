@@ -735,7 +735,7 @@ function Layout({ children }: LayoutProps) {
         }}
         onMouseEnter={() => !sidebarOpen && setSidebarHovered(true)}
         onMouseLeave={() => setSidebarHovered(false)}
-        className={`fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none transition-[width,transform] duration-150 ${
+        className={`app-sidebar fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none transition-[width,transform] duration-150 ${
           mobileSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
         } ${!mobileSidebarOpen && (sidebarOpen || sidebarHovered ? 'w-64' : 'lg:w-20')}`}
       >

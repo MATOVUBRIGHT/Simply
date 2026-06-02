@@ -102,6 +102,20 @@ body {
   transition: background-color 0.2s, color 0.2s;
 }
 
+body,
+body * {
+  text-shadow: none !important;
+}
+
+body :where(p, span, label, a, button, input, select, textarea, th, td, li, h1, h2, h3, h4, h5, h6) {
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+
+body :where(.text-\[10px\], .text-xs, small) {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
 button,
 input,
 select,
@@ -147,6 +161,18 @@ textarea {
 .light .placeholder-neutral-400::placeholder {
   color: #8a9bb5 !important;
   opacity: 1;
+}
+
+.light .app-sidebar .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+.light .app-sidebar .text-slate-500 {
+  color: #64748b !important;
+}
+
+.light .app-sidebar .text-slate-600 {
+  color: #64748b !important;
 }
 
 .app-image-no-shadow {
@@ -1588,6 +1614,12 @@ textarea.form-input {
 .badge-info { @apply bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/40 dark:text-indigo-300 dark:border-indigo-800; }
 .badge-gray { @apply bg-slate-50 text-slate-600 border-slate-100 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600; }
 .badge-violet { @apply bg-violet-50 text-violet-700 border-violet-100 dark:bg-violet-900/40 dark:text-violet-300 dark:border-violet-800; }
+
+.profile-active-badge {
+  background-color: var(--solid-emerald);
+  border-color: var(--solid-emerald);
+  color: #ffffff !important;
+}
 
 /* Modal Styles */
 .modal-overlay {

@@ -470,7 +470,7 @@ export default function StudentProfile() {
                 )}
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white">{student.firstName} {student.lastName}</h2>
                 <p className="text-slate-500 capitalize">{student.gender}</p>
-                <span className={`badge mt-3 ${student.status === 'active' ? 'badge-success' : 'badge-gray'}`}>{student.status}</span>
+                <span className={`badge mt-3 ${student.status === 'active' ? 'profile-active-badge' : 'badge-gray'}`}>{student.status}</span>
               </div>
             </div>
             <div className="card">
@@ -501,7 +501,7 @@ export default function StudentProfile() {
                     {!studentBursaries.length && !studentDiscounts.length && <span className="text-sm text-slate-400">None</span>}
                   </div>
                 </div>
-                <div><p className="text-xs text-slate-500 mb-1">Status</p><span className={`badge ${student.status === 'active' ? 'badge-success' : 'badge-gray'}`}>{student.status}</span></div>
+                <div><p className="text-xs text-slate-500 mb-1">Status</p><span className={`badge ${student.status === 'active' ? 'profile-active-badge' : 'badge-gray'}`}>{student.status}</span></div>
               </div>
             </div>
             <div className="card">
