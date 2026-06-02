@@ -461,7 +461,7 @@ export default function StudentProfile() {
                 {student.photoUrl ? (
                   <button onClick={() => setPreviewImage({ src: student.photoUrl!, alt: `${student.firstName} ${student.lastName}` })} className="mx-auto mb-4 block">
                     <img src={student.photoUrl} alt={`${student.firstName} ${student.lastName}`}
-                      className="w-24 h-24 rounded-full object-cover object-top shadow-lg hover:ring-4 hover:ring-primary-500/30 transition-all cursor-pointer mx-auto" />
+                      className="w-24 h-24 rounded-full object-cover object-top hover:ring-4 hover:ring-primary-500/30 transition-all cursor-pointer mx-auto" />
                   </button>
                 ) : (
                   <div className="w-24 h-24 mx-auto rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center mb-4">

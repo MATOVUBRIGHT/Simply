@@ -735,16 +735,16 @@ function Layout({ children }: LayoutProps) {
         }}
         onMouseEnter={() => !sidebarOpen && setSidebarHovered(true)}
         onMouseLeave={() => setSidebarHovered(false)}
-        className={`fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white shadow-xl outline-none transition-[width,transform] duration-150 ${
+        className={`fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none transition-[width,transform] duration-150 ${
           mobileSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
         } ${!mobileSidebarOpen && (sidebarOpen || sidebarHovered ? 'w-64' : 'lg:w-20')}`}
       >
         <div className="h-full flex flex-col">
           {/* School Header */}
           <div className="flex items-center gap-3 h-20 px-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
-            <label className="relative w-10 h-10 rounded-lg flex items-center justify-center shadow-lg shrink-0 cursor-pointer group overflow-hidden" style={{ backgroundColor: schoolLogo ? 'transparent' : 'var(--primary-color)' }} title="Click to change school logo">
+            <label className="relative w-10 h-10 rounded-lg flex items-center justify-center shrink-0 cursor-pointer group overflow-hidden" style={{ backgroundColor: schoolLogo ? 'transparent' : 'var(--primary-color)' }} title="Click to change school logo">
               {schoolLogo ? (
-                <img src={schoolLogo} alt="School Logo" className="w-10 h-10 rounded-lg object-cover" />
+                <img src={schoolLogo} alt="School Logo" className="app-image-no-shadow w-10 h-10 rounded-lg object-cover" />
               ) : (
                 <GraduationCap size={22} className="text-white" />
               )}
@@ -1046,7 +1046,7 @@ function Layout({ children }: LayoutProps) {
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[80vh] overflow-y-auto">
                 <div className="p-5 text-center border-b border-slate-100 dark:border-slate-700">
                   <div className="relative w-16 h-16 mx-auto mb-2">
-                    <img src={profileImage} alt="Profile" className="w-16 h-16 rounded-full object-cover border-4 border-white dark:border-slate-700 shadow-lg" />
+                    <img src={profileImage} alt="Profile" className="w-16 h-16 rounded-full object-cover border-4 border-white dark:border-slate-700" />
                     <label className="absolute bottom-0 right-0 w-7 h-7 rounded-full flex items-center justify-center cursor-pointer shadow-lg hover:scale-110 transition-transform" style={{ backgroundColor: 'var(--primary-color)' }}>
                       <Camera size={14} className="text-white" />
                       <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />

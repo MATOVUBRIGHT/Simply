@@ -114,6 +114,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [savedEmailNotice, setSavedEmailNotice] = useState(false);
+  const [saveAdminLogin, setSaveAdminLogin] = useState(false);
   const [accessDeniedPopup, setAccessDeniedPopup] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [securingAccount, setSecuringAccount] = useState(false);
@@ -143,6 +144,12 @@ export default function Login() {
 
   useEffect(() => {
     const explicitlySavedEmail = localStorage.getItem('schofy_saved_login_email') || '';
+    try {
+      const savedSession = JSON.parse(localStorage.getItem('schofy_session') || 'null');
+      setSaveAdminLogin(Boolean(savedSession?.adminLoginSaved));
+    } catch {
+      setSaveAdminLogin(false);
+    }
     localStorage.removeItem('schofy_saved_login_password');
     setEmail(explicitlySavedEmail);
     setPassword('');
@@ -276,7 +283,7 @@ export default function Login() {
         setSyncStatus({ step: 'syncing', message: 'Checking your secure access...', progress: 45 });
         const result = offlineAuthMode
           ? await loginOffline(email.trim(), password)
-          : await login(email.trim(), password);
+          : await login(email.trim(), password, { rememberAdmin: saveAdminLogin });
         if (!result.success) {
           if (result.localFallback) {
             setLocalFallback({ mode: result.fallbackMode || 'login', message: result.error || 'Cloud is unavailable. You can continue locally.' });
@@ -304,7 +311,7 @@ export default function Login() {
     }
   };
 
-  const handleSaveEmail = () => {
+  const handleSaveAdminLogin = () => {
     const cleanEmail = email.trim().toLowerCase();
     setError('');
     setSavedEmailNotice(false);
@@ -314,12 +321,12 @@ export default function Login() {
       setEmail('');
       setPassword('');
       setConfirmPassword('');
-      setError('Email cleared. Enter an email before saving it.');
+      setError('Enter the admin email before saving this login.');
       return;
     }
     localStorage.setItem('schofy_saved_login_email', cleanEmail);
+    setSaveAdminLogin(true);
     setEmail(cleanEmail);
-    setPassword('');
     setConfirmPassword('');
     setSavedEmailNotice(true);
   };
@@ -327,6 +334,10 @@ export default function Login() {
   const handleClearLoginFields = () => {
     localStorage.removeItem('schofy_saved_login_email');
     localStorage.removeItem('schofy_saved_login_password');
+    localStorage.removeItem('schofy_session');
+    localStorage.removeItem('schofy_current_user_id');
+    localStorage.removeItem('schofy_current_school_id');
+    setSaveAdminLogin(false);
     setEmail('');
     setPassword('');
     setConfirmPassword('');
@@ -685,7 +696,7 @@ export default function Login() {
 
               {savedEmailNotice && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
-                  Email saved for this device.
+                  Admin login will be saved after the next successful sign in.
                 </div>
               )}
 
@@ -800,10 +811,10 @@ export default function Login() {
                   {!isRegister && <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={handleSaveEmail}
+                      onClick={handleSaveAdminLogin}
                       className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                     >
-                      Save
+                      {saveAdminLogin ? 'Admin saved' : 'Save admin'}
                     </button>
                     <button
                       type="button"
@@ -812,6 +823,15 @@ export default function Login() {
                     >
                       Clear
                     </button>
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={saveAdminLogin}
+                        onChange={(event) => setSaveAdminLogin(event.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600"
+                      />
+                      Keep signed in
+                    </label>
                   </div>}
                   {!offlineAuthMode && <button
                     type="button"

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
-import { checkRateLimit, clearFailedAttempts, recordFailedAttempt, verifyPassword } from '../lib/security';
+import { checkRateLimit, clearFailedAttempts, hashPassword, recordFailedAttempt, verifyPassword } from '../lib/security';
 
 export type StaffRole = 'teacher' | 'accountant' | 'librarian' | 'receptionist' | 'custom';
 
@@ -12,8 +12,16 @@ export interface StaffMember {
   lastLoginAt: string | null; createdAt: string;
 }
 export interface StaffSession { staffMember: StaffMember; loginAt: string; }
+interface SavedStaffLogin {
+  schoolId: string;
+  normalizedName: string;
+  passwordHash: string;
+  staffMember: StaffMember;
+  savedAt: string;
+}
 
 const STAFF_SESSION_KEY = 'schofy_staff_session';
+const STAFF_SAVED_LOGIN_PREFIX = 'schofy_saved_staff_login_';
 
 export function buildGeneratedEmail(firstName: string, lastName: string, staffId: string): string {
   const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -24,23 +32,65 @@ interface StaffAuthContextType {
   staffSession: StaffSession | null; staffLoading: boolean;
   staffLogout: () => void; isStaffMode: boolean; isReadOnly: boolean;
   canAccessPage: (path: string) => boolean;
-  staffLogin: (schoolId: string, staffName: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  hasSavedStaffLogin: (schoolId: string) => boolean;
+  clearSavedStaffLogin: (schoolId: string) => void;
+  staffLogin: (schoolId: string, staffName: string, password: string, options?: { remember?: boolean }) => Promise<{ success: boolean; error?: string }>;
 }
 
 const StaffAuthContext = createContext<StaffAuthContextType>({
   staffSession: null, staffLoading: false,
   staffLogout: () => {}, isStaffMode: false, isReadOnly: false, canAccessPage: () => true,
+  hasSavedStaffLogin: () => false,
+  clearSavedStaffLogin: () => {},
   staffLogin: async () => ({ success: false, error: 'Staff sign-in is unavailable.' }),
 });
+
+function savedStaffLoginKey(schoolId: string) {
+  return `${STAFF_SAVED_LOGIN_PREFIX}${schoolId}`;
+}
 
 export function StaffAuthProvider({ children }: { children: ReactNode }) {
   const [staffSession, setStaffSession] = useState<StaffSession | null>(null);
   const [staffLoading, setStaffLoading] = useState(true);
 
   useEffect(() => {
-    localStorage.removeItem(STAFF_SESSION_KEY);
+    try {
+      const saved = JSON.parse(localStorage.getItem(STAFF_SESSION_KEY) || 'null') as StaffSession | null;
+      if (saved?.staffMember?.id && saved?.staffMember?.schoolId) {
+        setStaffSession(saved);
+      }
+    } catch {
+      localStorage.removeItem(STAFF_SESSION_KEY);
+    }
     setStaffLoading(false);
   }, []);
+
+  function readSavedStaffLogin(schoolId: string): SavedStaffLogin | null {
+    if (!schoolId) return null;
+    try {
+      const saved = JSON.parse(localStorage.getItem(savedStaffLoginKey(schoolId)) || 'null') as SavedStaffLogin | null;
+      if (!saved?.staffMember?.id || !saved.passwordHash || saved.schoolId !== schoolId) return null;
+      return saved;
+    } catch {
+      localStorage.removeItem(savedStaffLoginKey(schoolId));
+      return null;
+    }
+  }
+
+  function hasSavedStaffLogin(schoolId: string): boolean {
+    return !!readSavedStaffLogin(schoolId);
+  }
+
+  function clearSavedStaffLogin(schoolId: string) {
+    try {
+      localStorage.removeItem(savedStaffLoginKey(schoolId));
+      if (staffSession?.staffMember.schoolId === schoolId) {
+        localStorage.removeItem(STAFF_SESSION_KEY);
+        setStaffSession(null);
+      }
+      window.dispatchEvent(new CustomEvent('schofySavedStaffLoginChanged'));
+    } catch {}
+  }
 
   function mapRow(data: any): StaffMember {
     return {
@@ -67,11 +117,10 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     } catch {}
   }
 
-  async function staffLogin(schoolId: string, staffName: string, password: string): Promise<{ success: boolean; error?: string }> {
+  async function staffLogin(schoolId: string, staffName: string, password: string, options?: { remember?: boolean }): Promise<{ success: boolean; error?: string }> {
     const cleanStaffName = staffName.trim().replace(/\s+/g, ' ');
     const normalizedName = cleanStaffName.toLowerCase();
     if (!schoolId || !normalizedName || !password) return { success: false, error: 'Enter staff name and password.' };
-    if (!supabase) return { success: false, error: 'Role sign-in needs cloud access to start this shift.' };
 
     const rateKey = `${schoolId}:${normalizedName}`;
     const rate = checkRateLimit(rateKey);
@@ -79,6 +128,27 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       const minutes = Math.max(1, Math.ceil((rate.remainingMs || 0) / 60000));
       return { success: false, error: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.` };
     }
+
+    async function trySavedOfflineLogin(): Promise<{ success: boolean; error?: string }> {
+      const saved = readSavedStaffLogin(schoolId);
+      if (!saved) return { success: false, error: 'Connect to the internet to start this shift, or save this staff login first.' };
+      if (saved.normalizedName !== normalizedName) {
+        recordFailedAttempt(rateKey);
+        return { success: false, error: 'This saved offline login is for a different staff member.' };
+      }
+      const enteredHash = await hashPassword(password);
+      if (enteredHash !== saved.passwordHash) {
+        recordFailedAttempt(rateKey);
+        return { success: false, error: 'Invalid staff name or password.' };
+      }
+      clearFailedAttempts(rateKey);
+      const session = { staffMember: saved.staffMember, loginAt: new Date().toISOString() };
+      setStaffSession(session);
+      localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session));
+      return { success: true };
+    }
+
+    if (!supabase || !navigator.onLine) return trySavedOfflineLogin();
 
     try {
       const { data, error } = await supabase
@@ -113,12 +183,24 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       clearFailedAttempts(rateKey);
       const now = new Date().toISOString();
       const member = mapRow({ ...staffRow, last_login_at: now });
-      setStaffSession({ staffMember: member, loginAt: now });
+      const session = { staffMember: member, loginAt: now };
+      setStaffSession(session);
+      if (options?.remember) {
+        const passwordHash = staffRow.password_hash || await hashPassword(password);
+        const saved: SavedStaffLogin = { schoolId, normalizedName, passwordHash, staffMember: member, savedAt: now };
+        localStorage.setItem(savedStaffLoginKey(schoolId), JSON.stringify(saved));
+        localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session));
+        window.dispatchEvent(new CustomEvent('schofySavedStaffLoginChanged'));
+      } else {
+        localStorage.removeItem(STAFF_SESSION_KEY);
+      }
       void supabase.from('school_staff_users').update({ last_login_at: now, updated_at: now }).eq('id', staffRow.id);
       void logActivity(schoolId, staffRow.id, staffRow.staff_id, 'login', `${staffRow.first_name} ${staffRow.last_name} started shift`);
       return { success: true };
     } catch (error: any) {
-      return { success: false, error: error?.message || 'Could not start role shift.' };
+      const offlineResult = await trySavedOfflineLogin();
+      if (offlineResult.success) return offlineResult;
+      return { success: false, error: error?.message || offlineResult.error || 'Could not start role shift.' };
     }
   }
 
@@ -130,7 +212,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <StaffAuthContext.Provider value={{ staffSession, staffLoading, staffLogout, staffLogin, isStaffMode: staffSession !== null, isReadOnly: staffSession?.staffMember.isReadOnly ?? false, canAccessPage }}>
+    <StaffAuthContext.Provider value={{ staffSession, staffLoading, staffLogout, staffLogin, hasSavedStaffLogin, clearSavedStaffLogin, isStaffMode: staffSession !== null, isReadOnly: staffSession?.staffMember.isReadOnly ?? false, canAccessPage }}>
       {children}
     </StaffAuthContext.Provider>
   );

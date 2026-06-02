@@ -28,6 +28,7 @@ export interface LocalUser {
   isActive: boolean;
   createdAt: string;
   localOnly?: boolean;
+  adminLoginSaved?: boolean;
 }
 
 type AuthResult = { success: boolean; error?: string; localFallback?: boolean; fallbackMode?: 'login' | 'register' };
@@ -35,7 +36,7 @@ type AuthResult = { success: boolean; error?: string; localFallback?: boolean; f
 interface AuthContextType {
   user: LocalUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<AuthResult>;
+  login: (email: string, password: string, options?: { rememberAdmin?: boolean }) => Promise<AuthResult>;
   register: (email: string, password: string, firstName: string, lastName: string, phone?: string) => Promise<AuthResult & { user?: { id: string }; needsVerification?: boolean }>;
   loginOffline: (email: string, password: string) => Promise<AuthResult>;
   registerOffline: (email: string, password: string, firstName: string, lastName: string) => Promise<AuthResult>;
@@ -96,10 +97,11 @@ async function hasUsableVerifiedPlanBackup(tenantId: string | null | undefined) 
   return Boolean(await readVerifiedPlanProof(tenantId));
 }
 
-function saveSession(user: LocalUser) {
+function saveSession(user: LocalUser, options: { persistentAdmin?: boolean } = {}) {
   const now = Date.now();
+  const shouldPersist = options.persistentAdmin || user.adminLoginSaved;
   const sessionUser = isDesktopApp()
-    ? { ...user, sessionSavedAt: now, offlineExpiresAt: now + DESKTOP_OFFLINE_SESSION_MS }
+    ? { ...user, adminLoginSaved: shouldPersist, sessionSavedAt: now, offlineExpiresAt: shouldPersist ? 0 : now + DESKTOP_OFFLINE_SESSION_MS }
     : user;
   localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
   localStorage.setItem('schofy_current_user_id', user.id);
@@ -173,6 +175,7 @@ function mapLocalAccount(user: any): LocalUser {
 
 function isDesktopSessionExpired(user: any): boolean {
   if (!isDesktopApp()) return false;
+  if (user?.adminLoginSaved) return false;
   const expiresAt = Number(user?.offlineExpiresAt || 0);
   return Boolean(expiresAt && Date.now() > expiresAt);
 }
@@ -374,8 +377,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             lastName: data.last_name,
             isActive: data.is_active,
             createdAt: data.created_at,
+            adminLoginSaved: savedUser.adminLoginSaved,
           };
-          saveSession(userData);
+          saveSession(userData, { persistentAdmin: savedUser.adminLoginSaved });
           setUser(userData);
           setSchoolId(userData.schoolId);
           initializeSyncForUser(userData);
@@ -421,8 +425,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               email: data.email, firstName: data.first_name,
               lastName: data.last_name, isActive: data.is_active,
               createdAt: data.created_at,
+              adminLoginSaved: savedUser.adminLoginSaved,
             };
-            saveSession(userData);
+            saveSession(userData, { persistentAdmin: savedUser.adminLoginSaved });
             if (!stale()) { setUser(userData); setSchoolId(userData.schoolId); }
           }
         }).catch(() => {});
@@ -465,7 +470,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!stale()) setLoading(false);
   }
 
-  async function login(email: string, password: string): Promise<AuthResult> {
+  async function login(email: string, password: string, options: { rememberAdmin?: boolean } = {}): Promise<AuthResult> {
     if (!isSupabaseConfigured || !supabase) {
       return {
         success: false,
@@ -491,7 +496,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
           setCloudSyncEnabled(false);
           markLocalUnlimitedAccess(userData);
-          saveSession(userData);
+          saveSession({ ...userData, adminLoginSaved: options.rememberAdmin }, { persistentAdmin: options.rememberAdmin });
           await restoreVerifiedPlan(userData.schoolId);
           setUser(userData);
           setSchoolId(userData.schoolId);
@@ -639,7 +644,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       setUser(userData);
       setSchoolId(userData.schoolId);
-      saveSession(userData);
+      saveSession({ ...userData, adminLoginSaved: options.rememberAdmin }, { persistentAdmin: options.rememberAdmin });
 
       void userDBManager.openDatabase(userData.schoolId).catch(() => {});
       
