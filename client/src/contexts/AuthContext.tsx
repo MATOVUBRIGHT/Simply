@@ -215,24 +215,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
-  // Ensure loading is false only after auth state is resolved
-  useEffect(() => {
-    let active = true;
-
-    // Get initial session state
-    if (isSupabaseConfigured && supabase) {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (active) setLoading(false);
-      }).catch(() => {
-        if (active) setLoading(false);
-      });
-    } else {
-      setLoading(false);
-    }
-
-    return () => { active = false; };
-  }, []);
-
   useEffect(() => {
     const handleForceSignOut = () => {
       clearSession();
@@ -255,11 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase
       ? supabase.auth.onAuthStateChange((event) => {
       if (active) {
-        if (event === 'INITIAL_SESSION') {
-          setLoading(false);
-        }
-
-        if (event === 'SIGNED_OUT') {
+        if (event === 'SIGNED_OUT' && !localStorage.getItem(SESSION_KEY)) {
           setUser(null);
           setSchoolId(null);
           clearSession();

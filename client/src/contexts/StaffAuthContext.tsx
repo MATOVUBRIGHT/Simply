@@ -45,7 +45,19 @@ const StaffAuthContext = createContext<StaffAuthContextType>({
   staffLogin: async () => ({ success: false, error: 'Staff sign-in is unavailable.' }),
 });
 
-function savedStaffLoginKey(schoolId: string) {
+function normalizeStaffName(staffName: string) {
+  return staffName.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function savedStaffLoginPrefix(schoolId: string) {
+  return `${STAFF_SAVED_LOGIN_PREFIX}${schoolId}_`;
+}
+
+function savedStaffLoginKey(schoolId: string, normalizedName: string) {
+  return `${savedStaffLoginPrefix(schoolId)}${encodeURIComponent(normalizedName)}`;
+}
+
+function legacySavedStaffLoginKey(schoolId: string) {
   return `${STAFF_SAVED_LOGIN_PREFIX}${schoolId}`;
 }
 
@@ -65,25 +77,48 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     setStaffLoading(false);
   }, []);
 
-  function readSavedStaffLogin(schoolId: string): SavedStaffLogin | null {
-    if (!schoolId) return null;
+  function readSavedStaffLogin(schoolId: string, normalizedName: string): SavedStaffLogin | null {
+    if (!schoolId || !normalizedName) return null;
     try {
-      const saved = JSON.parse(localStorage.getItem(savedStaffLoginKey(schoolId)) || 'null') as SavedStaffLogin | null;
+      const exactKey = savedStaffLoginKey(schoolId, normalizedName);
+      let saved = JSON.parse(localStorage.getItem(exactKey) || 'null') as SavedStaffLogin | null;
+      if (!saved) {
+        const legacy = JSON.parse(localStorage.getItem(legacySavedStaffLoginKey(schoolId)) || 'null') as SavedStaffLogin | null;
+        if (legacy?.normalizedName === normalizedName) {
+          saved = legacy;
+          localStorage.setItem(exactKey, JSON.stringify(legacy));
+          localStorage.removeItem(legacySavedStaffLoginKey(schoolId));
+        }
+      }
       if (!saved?.staffMember?.id || !saved.passwordHash || saved.schoolId !== schoolId) return null;
       return saved;
     } catch {
-      localStorage.removeItem(savedStaffLoginKey(schoolId));
+      localStorage.removeItem(savedStaffLoginKey(schoolId, normalizedName));
       return null;
     }
   }
 
   function hasSavedStaffLogin(schoolId: string): boolean {
-    return !!readSavedStaffLogin(schoolId);
+    if (!schoolId) return false;
+    const prefix = savedStaffLoginPrefix(schoolId);
+    if (localStorage.getItem(legacySavedStaffLoginKey(schoolId))) return true;
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) return true;
+    }
+    return false;
   }
 
   function clearSavedStaffLogin(schoolId: string) {
     try {
-      localStorage.removeItem(savedStaffLoginKey(schoolId));
+      const prefix = savedStaffLoginPrefix(schoolId);
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key?.startsWith(prefix)) keysToRemove.push(key);
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+      localStorage.removeItem(legacySavedStaffLoginKey(schoolId));
       if (staffSession?.staffMember.schoolId === schoolId) {
         localStorage.removeItem(STAFF_SESSION_KEY);
         setStaffSession(null);
@@ -119,7 +154,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
 
   async function staffLogin(schoolId: string, staffName: string, password: string, options?: { remember?: boolean }): Promise<{ success: boolean; error?: string }> {
     const cleanStaffName = staffName.trim().replace(/\s+/g, ' ');
-    const normalizedName = cleanStaffName.toLowerCase();
+    const normalizedName = normalizeStaffName(cleanStaffName);
     if (!schoolId || !normalizedName || !password) return { success: false, error: 'Enter staff name and password.' };
 
     const rateKey = `${schoolId}:${normalizedName}`;
@@ -130,12 +165,8 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     }
 
     async function trySavedOfflineLogin(): Promise<{ success: boolean; error?: string }> {
-      const saved = readSavedStaffLogin(schoolId);
+      const saved = readSavedStaffLogin(schoolId, normalizedName);
       if (!saved) return { success: false, error: 'Connect to the internet to start this shift, or save this staff login first.' };
-      if (saved.normalizedName !== normalizedName) {
-        recordFailedAttempt(rateKey);
-        return { success: false, error: 'This saved offline login is for a different staff member.' };
-      }
       const enteredHash = await hashPassword(password);
       if (enteredHash !== saved.passwordHash) {
         recordFailedAttempt(rateKey);
@@ -185,12 +216,12 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       const member = mapRow({ ...staffRow, last_login_at: now });
       const session = { staffMember: member, loginAt: now };
       setStaffSession(session);
+      const passwordHash = staffRow.password_hash || await hashPassword(password);
+      const saved: SavedStaffLogin = { schoolId, normalizedName, passwordHash, staffMember: member, savedAt: now };
+      localStorage.setItem(savedStaffLoginKey(schoolId, normalizedName), JSON.stringify(saved));
+      window.dispatchEvent(new CustomEvent('schofySavedStaffLoginChanged'));
       if (options?.remember) {
-        const passwordHash = staffRow.password_hash || await hashPassword(password);
-        const saved: SavedStaffLogin = { schoolId, normalizedName, passwordHash, staffMember: member, savedAt: now };
-        localStorage.setItem(savedStaffLoginKey(schoolId), JSON.stringify(saved));
         localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session));
-        window.dispatchEvent(new CustomEvent('schofySavedStaffLoginChanged'));
       } else {
         localStorage.removeItem(STAFF_SESSION_KEY);
       }
