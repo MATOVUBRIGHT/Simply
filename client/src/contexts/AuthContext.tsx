@@ -132,6 +132,7 @@ function clearSession() {
   localStorage.removeItem(LOCAL_ONLY_SESSION_KEY);
   localStorage.removeItem(LOCAL_FALLBACK_REASON_KEY);
   sessionStorage.removeItem('lastRoute');
+  localStorage.removeItem('schofy_last_route');
   store.clearAll();
   void writeElectronBackup(SESSION_KEY, null);
 }

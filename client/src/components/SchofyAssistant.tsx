@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { Bot, Send, Sparkles, Square, Trash2, Volume2, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { searchInformationCatalog } from '../help/appInformationCatalog';
+import { searchSchofyManual } from '../help/schofyManualKnowledge';
 
 type ChatMessage = {
   id: string;
@@ -162,9 +164,24 @@ function findPageActions(text: string) {
     .map(page => ({ label: page.label, path: page.path }));
 }
 
+function makeManualGuidance(input: string, path: string): { text: string; actions?: ChatAction[] } | null {
+  const matches = searchSchofyManual(input, path);
+  if (matches.length === 0) return null;
+
+  const top = matches[0];
+  const route = top.route.includes('/:') ? top.route.split('/:')[0] : top.route;
+  const nextStep = top.steps?.[0] || top.summary;
+  return {
+    text: `${nextStep} Reference: ${top.title}.`,
+    actions: [{ label: `Open ${top.title}`, path: route }],
+  };
+}
+
 function answerFor(input: string, path: string): { text: string; actions?: ChatAction[] } {
   const text = input.toLowerCase();
   const pageActions = findPageActions(text);
+  const catalogMatches = searchInformationCatalog(input, path);
+  const isHelpQuery = includesAny(text, ['how', 'what', 'where', 'button', 'page', 'explain', 'help', 'search', 'find', 'use', 'open', 'do', 'manual', 'guide', 'steps']);
 
   if (pageActions.length > 0 && includesAny(text, ['page', 'open', 'go to', 'where', 'find', 'search', 'show', 'take me', 'navigate'])) {
     const labels = pageActions.map(action => action.label).join(', ');
@@ -176,6 +193,14 @@ function answerFor(input: string, path: string): { text: string; actions?: ChatA
 
   if (includesAny(text, ['hello', 'hi ', 'hey', 'good morning', 'good afternoon', 'good evening'])) {
     return { text: 'Hello. I am Schofy assistant. Ask me where something is, how to use a feature, or what to do when sync, login, plans, imports, finance, or reports need attention.' };
+  }
+
+  if (catalogMatches.length > 0 && isHelpQuery && includesAny(text, ['manual', 'book', 'catalog', 'guide'])) {
+    const top = catalogMatches[0];
+    return {
+      text: `${top.summary} Reference: ${top.title}.`,
+      actions: [{ label: `Open ${top.title}`, path: top.route.includes(':id') ? top.route.split('/:')[0] : top.route }],
+    };
   }
   if (includesAny(text, ['dashboard', 'home', 'overview', 'stats', 'calendar'])) {
     return { text: 'Dashboard shows your school overview: students, staff, attendance, finance, upcoming announcements, and the current-month calendar.', actions: [{ label: 'Open Dashboard', path: '/' }] };
@@ -242,6 +267,11 @@ function answerFor(input: string, path: string): { text: string; actions?: ChatA
     if (path.includes('finance') || path.includes('invoice')) return { text: 'You are in the finance area. Use the page tabs/buttons to move between ledger, invoices, payments, and accounts.', actions: [{ label: 'Ledger', path: '/finance?tab=ledger' }, { label: 'Payments', path: '/finance?tab=payments' }, { label: 'Invoices', path: '/invoices' }] };
     if (path.includes('reports')) return { text: 'You are on Reports. Choose a report type, term, and year, then print or export.', actions: [{ label: 'Open Reports', path: '/reports' }] };
     return { text: 'Use the sidebar or main search for pages. Here are common pages:', actions: [{ label: 'Students', path: '/students' }, { label: 'Finance', path: '/finance' }, { label: 'Reports', path: '/reports' }, { label: 'Settings', path: '/settings' }] };
+  }
+
+  if (isHelpQuery) {
+    const manualGuidance = makeManualGuidance(input, path);
+    if (manualGuidance) return manualGuidance;
   }
 
   return { text: 'I can help with imports, students, finance, invoices, ledger, reports, plans, sync, offline mode, desktop updates, login, and settings. Mention a page name and I can show an open button too.', actions: pageActions };

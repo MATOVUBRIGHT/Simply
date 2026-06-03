@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { getClassDisplayName } from '../utils/classroom';
 import { matchesStudentSearch } from '../utils/studentSearch';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
 
 export default function Parents() {
   const { user, schoolId } = useAuth();
@@ -15,6 +16,7 @@ export default function Parents() {
   const students = studentsData as Student[];
   const classes = classesData as Class[];
   const [search, setSearch] = useState('');
+  const listLoading = useMinimumLoading(loading, 2000);
 
   const parentRows = students
     .filter((student: any) => student.guardianName || student.guardianPhone || student.guardianEmail)
@@ -69,8 +71,13 @@ export default function Parents() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr><td colSpan={8} className="py-12 text-center text-slate-400">Loading parents...</td></tr>
+              {listLoading ? (
+                <tr>
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                    <span className="mx-auto mb-2 block h-7 w-7 rounded-full border-2 border-slate-300 border-t-transparent animate-spin" />
+                    Loading parents...
+                  </td>
+                </tr>
               ) : parentRows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center">

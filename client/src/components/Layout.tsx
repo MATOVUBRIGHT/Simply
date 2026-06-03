@@ -33,6 +33,8 @@ import {
   Paperclip,
   WalletCards,
   Info,
+  Gauge,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
@@ -57,6 +59,7 @@ import { isUnlockedRelease, releaseChannelLabel } from '../utils/releaseChannel'
 
 const assetBase = import.meta.env.BASE_URL || './';
 const APP_VERSION = 'Version1.1';
+const APP_STATUS_AUTO_POPUP_KEY = 'schofy_app_status_auto_popup';
 const DEFAULT_PROFILE_IMAGE =
   "data:image/svg+xml,%3Csvg width='96' height='96' viewBox='0 0 96 96' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='96' height='96' rx='48' fill='%23E0F2FE'/%3E%3Ccircle cx='48' cy='36' r='16' fill='%230F4C81'/%3E%3Cpath d='M22 82c4.8-17.5 15.1-26 26-26s21.2 8.5 26 26' fill='%232DA32D'/%3E%3C/svg%3E";
 
@@ -68,6 +71,32 @@ function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
   return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
+
+type AppPerformanceStatus = {
+  score: number | null;
+  loadPercent: number | null;
+  fps: number | null;
+  eventLagMs: number | null;
+  longTasks: number;
+  memoryPercent: number | null;
+  slowPage: string;
+  lastChecked: Date;
+  samples: number;
+};
+
+function getInitialAppPerformanceStatus(pathname = '/') : AppPerformanceStatus {
+  return {
+    score: null,
+    loadPercent: null,
+    fps: null,
+    eventLagMs: null,
+    longTasks: 0,
+    memoryPercent: null,
+    slowPage: pathname,
+    lastChecked: new Date(),
+    samples: 0,
+  };
 }
 
 const menuItems = [
@@ -122,6 +151,13 @@ function Layout({ children }: LayoutProps) {
   const [broadcastPopup, setBroadcastPopup] = useState<NotificationType | null>(null);
   const [broadcastReply, setBroadcastReply] = useState('');
   const [sendingBroadcastReply, setSendingBroadcastReply] = useState(false);
+  const [appStatusOpen, setAppStatusOpen] = useState(false);
+  const [appStatusRefreshing, setAppStatusRefreshing] = useState(false);
+  const [appPerformance, setAppPerformance] = useState<AppPerformanceStatus>(() => getInitialAppPerformanceStatus(window.location.pathname));
+  const appStatusAutoOpenedRef = useRef(0);
+  const appStatusMutedUntilRefreshRef = useRef(true);
+  const appStatusAutoPopupMutedRef = useRef(localStorage.getItem(APP_STATUS_AUTO_POPUP_KEY) !== '0');
+  const longTaskCountRef = useRef(0);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, schoolId, logout, isOnline } = useAuth();
@@ -145,6 +181,42 @@ function Layout({ children }: LayoutProps) {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  const refreshAppPerformance = useCallback((options: { open?: boolean } = {}) => {
+    const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+    const loadMs = nav?.loadEventEnd && nav.startTime !== undefined ? Math.max(0, nav.loadEventEnd - nav.startTime) : performance.now();
+    const readyLoad = document.readyState === 'complete' ? 100 : document.readyState === 'interactive' ? 78 : 35;
+    const timingLoad = loadMs > 0 ? Math.max(30, Math.min(100, Math.round(100 - Math.min(loadMs, 5000) / 80))) : readyLoad;
+    const loadPercent = document.readyState === 'complete' ? 100 : Math.max(readyLoad, timingLoad);
+    const memory = (performance as any).memory;
+    const memoryPercent = memory?.jsHeapSizeLimit
+      ? Math.min(100, Math.round((memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100))
+      : null;
+
+    setAppPerformance((prev) => {
+      const recentLongTasks = longTaskCountRef.current;
+      longTaskCountRef.current = 0;
+      const canScore = prev.fps != null && prev.eventLagMs != null;
+      const fpsPenalty = canScore ? Math.max(0, 60 - prev.fps!) * 1.2 : 0;
+      const lagPenalty = canScore ? Math.min(30, prev.eventLagMs! / 4) : 0;
+      const longTaskPenalty = Math.min(25, recentLongTasks * 4);
+      const memoryPenalty = memoryPercent == null ? 0 : Math.max(0, memoryPercent - 65) * 0.6;
+      const nextScore = canScore
+        ? Math.max(0, Math.min(100, Math.round(100 - fpsPenalty - lagPenalty - longTaskPenalty - memoryPenalty)))
+        : null;
+      return {
+        ...prev,
+        score: nextScore,
+        loadPercent,
+        longTasks: recentLongTasks,
+        memoryPercent,
+        slowPage: nextScore != null && nextScore < 70 ? location.pathname : prev.slowPage || location.pathname,
+        lastChecked: new Date(),
+        samples: canScore ? prev.samples + 1 : prev.samples,
+      };
+    });
+    if (options.open) setAppStatusOpen(true);
+  }, [location.pathname]);
+
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
     if (!isOnline) {
@@ -165,6 +237,42 @@ function Layout({ children }: LayoutProps) {
       setTimeout(() => setIsRefreshing(false), 500);
     }
   }, [addToast, isOnline, isRefreshing, isSyncEnabled, syncNow]);
+
+  const handleAppStatusRefresh = useCallback(() => {
+    appStatusMutedUntilRefreshRef.current = false;
+    setAppStatusRefreshing(true);
+    refreshAppPerformance();
+    window.setTimeout(() => {
+      refreshAppPerformance();
+      setAppStatusRefreshing(false);
+    }, 350);
+    addToast('App status refreshed locally. No cloud sync was used.', 'info');
+  }, [addToast, refreshAppPerformance]);
+
+  const handleCloseAppStatusUntilRefresh = useCallback(() => {
+    appStatusMutedUntilRefreshRef.current = true;
+    setAppStatusOpen(false);
+  }, []);
+
+  const handleDontShowAppStatus = useCallback(() => {
+    appStatusMutedUntilRefreshRef.current = true;
+    appStatusAutoPopupMutedRef.current = true;
+    localStorage.setItem(APP_STATUS_AUTO_POPUP_KEY, '1');
+    setAppStatusOpen(false);
+    addToast('App Status will keep monitoring in the background.', 'info');
+  }, [addToast]);
+
+  const handleAppStatusReload = useCallback(() => {
+    const currentRoute = `${location.pathname}${location.search}${location.hash}`;
+    sessionStorage.setItem('lastRoute', currentRoute);
+    localStorage.setItem('schofy_last_performance_reload_at', new Date().toISOString());
+    window.location.reload();
+  }, [location.hash, location.pathname, location.search]);
+
+  useEffect(() => {
+    longTaskCountRef.current = 0;
+    setAppPerformance(getInitialAppPerformanceStatus(location.pathname));
+  }, [location.pathname]);
 
   useEffect(() => {
     loadNotifications();
@@ -259,6 +367,89 @@ function Layout({ children }: LayoutProps) {
     window.addEventListener('keydown', handleSidebarShortcut);
     return () => window.removeEventListener('keydown', handleSidebarShortcut);
   }, []);
+
+  useEffect(() => {
+    function handleAppStatusShortcut(event: KeyboardEvent) {
+      if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || isTypingTarget(event.target)) return;
+      if (event.key.toLowerCase() !== 's') return;
+
+      event.preventDefault();
+      setProfileOpen(false);
+      refreshAppPerformance({ open: true });
+    }
+
+    window.addEventListener('keydown', handleAppStatusShortcut);
+    return () => window.removeEventListener('keydown', handleAppStatusShortcut);
+  }, [refreshAppPerformance]);
+
+  useEffect(() => {
+    let lastLagCheck = performance.now();
+    let cancelled = false;
+    let observer: PerformanceObserver | null = null;
+    let frame = 0;
+
+    const sampleFps = () => {
+      if (cancelled || document.hidden) return;
+      let frames = 0;
+      const startedAt = performance.now();
+      const collect = (now: number) => {
+        if (cancelled) return;
+        frames += 1;
+        if (now - startedAt >= 1200) {
+          const fps = Math.round((frames * 1000) / Math.max(1, now - startedAt));
+          setAppPerformance((prev) => ({ ...prev, fps: Math.min(60, fps), lastChecked: new Date() }));
+          return;
+        }
+        frame = window.requestAnimationFrame(collect);
+      };
+      frame = window.requestAnimationFrame(collect);
+    };
+
+    sampleFps();
+    const fpsTimer = window.setInterval(sampleFps, 4000);
+    const lagTimer = window.setInterval(() => {
+      if (document.hidden) return;
+      const now = performance.now();
+      const drift = Math.max(0, now - lastLagCheck - 2000);
+      lastLagCheck = now;
+      setAppPerformance((prev) => {
+        const nextLag = prev.eventLagMs == null ? Math.round(drift) : Math.round((prev.eventLagMs * 0.65) + (drift * 0.35));
+        return { ...prev, eventLagMs: nextLag, lastChecked: new Date() };
+      });
+      refreshAppPerformance();
+    }, 2000);
+
+    try {
+      observer = new PerformanceObserver((list) => {
+        longTaskCountRef.current += list.getEntries().length;
+      });
+      observer.observe({ entryTypes: ['longtask'] });
+    } catch {
+      observer = null;
+    }
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(fpsTimer);
+      window.clearInterval(lagTimer);
+      observer?.disconnect();
+    };
+  }, [refreshAppPerformance]);
+
+  useEffect(() => {
+    const hasRealSamples = appPerformance.samples >= 2 && appPerformance.score != null && appPerformance.fps != null && appPerformance.eventLagMs != null;
+    if (!hasRealSamples) return;
+    const isSlow = appPerformance.score! < 60 || appPerformance.eventLagMs! > 90 || appPerformance.fps! < 38 || appPerformance.longTasks > 3 || (appPerformance.memoryPercent ?? 0) > 82;
+    if (!isSlow) return;
+    const now = Date.now();
+    setAppPerformance((prev) => prev.slowPage === location.pathname ? prev : { ...prev, slowPage: location.pathname });
+    if (appStatusAutoPopupMutedRef.current) return;
+    if (appStatusMutedUntilRefreshRef.current) return;
+    if (appStatusOpen || now - appStatusAutoOpenedRef.current < 45_000) return;
+    appStatusAutoOpenedRef.current = now;
+    setAppStatusOpen(true);
+  }, [appPerformance, appStatusOpen, location.pathname]);
 
   useEffect(() => {
     return () => {
@@ -644,6 +835,33 @@ function Layout({ children }: LayoutProps) {
   function sidebarLinkId(path: string) {
     return `sidebar-link-${path === '/' ? 'dashboard' : path.replace(/[^a-z0-9]+/gi, '-')}`;
   }
+
+  const speedLabel = appPerformance.score == null ? 'Measuring' : appPerformance.score >= 80 ? 'Fast' : appPerformance.score >= 55 ? 'Stable' : appPerformance.score >= 35 ? 'Slow' : 'Needs refresh';
+  const speedDescription = appPerformance.score == null
+    ? 'Collecting live browser speed data from this page.'
+    : appPerformance.score >= 80
+    ? 'The app is responding well.'
+    : appPerformance.score >= 55
+      ? 'The app is usable, with some heavier work detected.'
+      : 'This page is slowing down. Refresh data or reload if controls feel stuck.';
+  const appStatusSolutions = [
+    appPerformance.score == null ? 'Wait a moment while Schofy measures this page. No demo speed values are shown.' : null,
+    appPerformance.fps != null && appPerformance.fps < 38 ? 'Close heavy popups or lists, then reopen this page so Schofy can render fewer items at once.' : null,
+    appPerformance.eventLagMs != null && appPerformance.eventLagMs > 90 ? 'Use Refresh to release pending work and reload cached data without leaving offline mode.' : null,
+    appPerformance.longTasks > 3 ? 'A large import, report, print, or sync task may be running. Wait a moment or refresh local data.' : null,
+    (appPerformance.memoryPercent ?? 0) > 82 ? 'Memory is high. Reload app if refresh does not improve speed; your session and route are kept.' : null,
+    !isOnline ? 'You are offline. Refresh still reloads local data, and sync will continue later when internet returns.' : null,
+  ].filter(Boolean) as string[];
+  const appStatusColor = appPerformance.score == null
+    ? 'var(--solid-emerald)'
+    : appPerformance.score >= 70
+    ? 'var(--solid-emerald)'
+    : appPerformance.score >= 45
+      ? '#f59e0b'
+      : '#ef4444';
+  const gaugePercent = Math.max(0, Math.min(100, appPerformance.score ?? 0));
+  const gaugeCircumference = 339.292;
+  const gaugeOffset = gaugeCircumference - (gaugePercent / 100) * gaugeCircumference;
 
   return (
     <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950 overflow-x-hidden">
@@ -1082,6 +1300,14 @@ function Layout({ children }: LayoutProps) {
                     <ClipboardList size={16} className="text-slate-400 shrink-0" />
                     <span className="font-medium text-sm">{organizedSidebar ? 'Default Sidebar' : 'Organize Sidebar'}</span>
                   </button>
+                  <button onClick={() => { setProfileOpen(false); refreshAppPerformance({ open: true }); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left">
+                    <Gauge size={16} className="text-slate-400 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block font-medium text-sm">App Status</span>
+                      <span className="block truncate text-[11px] text-slate-400">Speed, load, and refresh</span>
+                    </span>
+                  </button>
                   <button onClick={() => { setProfileOpen(false); navigate('/about'); }}
                     className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left">
                     <Info size={16} className="text-slate-400 shrink-0" />
@@ -1146,6 +1372,153 @@ function Layout({ children }: LayoutProps) {
           className="fixed inset-0 bg-black/60 z-30 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
+      )}
+
+      {appStatusOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+          onClick={(event) => { if (event.target === event.currentTarget) setAppStatusOpen(false); }}
+        >
+          <div className="animate-modal-in w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl text-white" style={{ backgroundColor: 'var(--solid-emerald)' }}>
+                  <Gauge size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">App Status</h2>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Shortcut: Ctrl+S</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAppStatusOpen(false)}
+                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                aria-label="Close app status"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-5 p-5">
+              <div className="grid gap-4 sm:grid-cols-[180px_1fr] sm:items-center">
+                <div className="relative mx-auto flex h-40 w-40 items-center justify-center rounded-full">
+                  <svg className="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 128 128" aria-hidden="true">
+                    <circle cx="64" cy="64" r="54" fill="none" stroke="currentColor" strokeWidth="10" className="text-slate-200 dark:text-slate-800" />
+                    <circle
+                      cx="64"
+                      cy="64"
+                      r="54"
+                      fill="none"
+                      stroke={appStatusColor}
+                      strokeWidth="10"
+                      strokeLinecap="round"
+                      strokeDasharray={gaugeCircumference}
+                      strokeDashoffset={gaugeOffset}
+                      style={{ transition: 'stroke-dashoffset 700ms ease, stroke 700ms ease' }}
+                    />
+                  </svg>
+                  <div className="relative flex h-[7.2rem] w-[7.2rem] flex-col items-center justify-center rounded-full bg-white text-center dark:bg-slate-900">
+                    <Zap size={20} style={{ color: appStatusColor }} />
+                    <span className="mt-1 text-4xl font-black text-slate-900 dark:text-white">{appPerformance.score ?? '--'}</span>
+                    <span className="text-xs font-bold uppercase tracking-wide" style={{ color: appStatusColor }}>{speedLabel}</span>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{speedDescription}</p>
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <span>Load</span>
+                      <span>{appPerformance.loadPercent == null ? 'Measuring' : `${appPerformance.loadPercent}%`}</span>
+                    </div>
+                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{ width: `${appPerformance.loadPercent ?? 8}%`, backgroundColor: 'var(--solid-emerald)' }}
+                      />
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                    <p className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">Slowing page</p>
+                    <p className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{appPerformance.slowPage || location.pathname}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {[
+                  { label: 'Frames', value: appPerformance.fps == null ? 'Measuring' : `${appPerformance.fps} fps` },
+                  { label: 'Lag', value: appPerformance.eventLagMs == null ? 'Measuring' : `${appPerformance.eventLagMs} ms` },
+                  { label: 'Long tasks', value: String(appPerformance.longTasks) },
+                  { label: 'Memory', value: appPerformance.memoryPercent == null ? 'N/A' : `${appPerformance.memoryPercent}%` },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                    <p className="text-[11px] font-bold uppercase text-slate-400">{item.label}</p>
+                    <p className="mt-1 text-sm font-black text-slate-900 dark:text-white">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-900/20 dark:text-emerald-200">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span>Last checked {appPerformance.lastChecked.toLocaleTimeString()}.</span>
+                  <span className="inline-flex items-center gap-1.5 font-black uppercase tracking-wide">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: 'var(--solid-emerald)' }} />
+                    Always in background
+                  </span>
+                </div>
+                <p className="mt-1">App Status uses local browser measurements only and does not call Supabase.</p>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                <p className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400">Suggested solution</p>
+                <ul className="mt-2 space-y-1.5 text-xs font-medium leading-5 text-slate-600 dark:text-slate-300">
+                  {(appStatusSolutions.length ? appStatusSolutions : ['Everything looks healthy. Keep working, or press Refresh to recheck local data.']).map((solution) => (
+                    <li key={solution} className="flex gap-2">
+                      <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: 'var(--solid-emerald)' }} />
+                      <span>{solution}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={handleDontShowAppStatus}
+                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/35"
+                >
+                  Don't show, continue in background
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloseAppStatusUntilRefresh}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  Close until refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAppStatusReload}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  Reload app
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleAppStatusRefresh()}
+                  disabled={appStatusRefreshing}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+                  style={{ backgroundColor: 'var(--solid-emerald)' }}
+                >
+                  <RefreshCw size={15} className={appStatusRefreshing ? 'animate-spin' : ''} />
+                  {appStatusRefreshing ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       <InstallPWA />

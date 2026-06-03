@@ -650,10 +650,17 @@ export default function Grades() {
         examId = res.record?.id || newExam.id;
       }
 
-      const tasks = importPreview.map((data) => async () => {
+      const resultCreates: any[] = [];
+      const resultUpdates: Array<{ id: string; data: any }> = [];
+      let importedCount = 0;
+      let skippedCount = 0;
+      importPreview.forEach((data) => {
         const student = studentById.get((data as any).studentId);
         const subject = subjectById.get((data as any).subjectId);
-        if (!student || !subject) return 'skipped' as const;
+        if (!student || !subject) {
+          skippedCount++;
+          return;
+        }
         const subjectKey = getSubjectIdentity(subject, subject?.name, (data as any).subjectId);
         const score = (data as any).score as number;
         const maxScore = (data as any).maxScore as number || 100;
@@ -668,12 +675,14 @@ export default function Grades() {
         );
 
         if (existing) {
-          await dataService.update(id, 'examResults', existing.id, {
+          resultUpdates.push({
+            id: existing.id,
+            data: {
             ...existing, score, maxScore, grade: gradeInfo.grade, remarks: gradeInfo.remark, updatedAt: now,
-          } as any);
-          return 'imported' as const;
+            },
+          });
         } else {
-          await dataService.create(id, 'examResults', {
+          resultCreates.push({
             id: uuidv4(),
             examId,
             studentId: (data as any).studentId,
@@ -687,17 +696,14 @@ export default function Grades() {
             remarks: gradeInfo.remark,
             examType: importExamType,
             createdAt: now,
-          } as any);
-          return 'imported' as const;
+          });
         }
+        importedCount++;
       });
-      let importedCount = 0;
-      let skippedCount = 0;
-      await runTasksInThirtyPercentBatches(tasks.map(task => async () => {
-        const result = await task();
-        if (result === 'skipped') skippedCount++;
-        else importedCount++;
-      }));
+      if (resultCreates.length) await dataService.bulkCreate(id, 'examResults', resultCreates);
+      if (resultUpdates.length) {
+        await runTasksInThirtyPercentBatches(resultUpdates.map(item => () => dataService.update(id, 'examResults', item.id, item.data as any)));
+      }
       await keepLoadingVisible(loadingStarted);
       setIsImportingGrades(false);
       closeImportModal();

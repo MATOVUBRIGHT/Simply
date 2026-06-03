@@ -1746,6 +1746,67 @@ class SupabaseDataService {
     }
   }
 
+  async bulkCreate(userId: string, tableName: string, records: any[]): Promise<SyncResult & { imported: number; records: any[] }> {
+    const sid = this.sid(userId);
+    const now = new Date().toISOString();
+    const existing = cacheGet(sid, tableName) || [];
+    const byId = new Map<string, any>();
+
+    existing.forEach(record => {
+      if (record?.id) byId.set(String(record.id), record);
+    });
+
+    const preparedRecords = records.map(raw => {
+      const requestedId = typeof raw?.id === 'string' ? raw.id : '';
+      const id = isUUID(requestedId) && !byId.has(requestedId) ? requestedId : generateUUID();
+      let safeData = { ...raw };
+
+      if (tableName === 'fees') {
+        if (!safeData.dueDate && !safeData.due_date) {
+          const d = new Date();
+          d.setMonth(d.getMonth() + 1);
+          safeData.dueDate = d.toISOString().split('T')[0];
+        }
+        if (!safeData.year) safeData.year = new Date().getFullYear();
+      }
+      if (tableName === 'exams') {
+        if (!safeData.startDate && !safeData.start_date) safeData.startDate = now.split('T')[0];
+        if (!safeData.endDate && !safeData.end_date) safeData.endDate = now.split('T')[0];
+      }
+
+      const record = {
+        ...safeData,
+        id,
+        schoolId: safeData.schoolId || sid,
+        createdAt: safeData.createdAt || now,
+        updatedAt: now,
+        syncStatus: 'pending',
+      };
+      byId.set(String(id), record);
+      return record;
+    });
+
+    cacheSet(sid, tableName, Array.from(byId.values()));
+    notifyUI(tableName);
+
+    if (isCloudSyncEnabled() && canUseRemoteTable(tableName)) {
+      enqueueMany(preparedRecords.map(record => ({
+        op: 'create' as const,
+        userId,
+        tableName,
+        data: record,
+      })));
+    }
+
+    return {
+      success: true,
+      syncedRemotely: false,
+      savedLocally: true,
+      imported: preparedRecords.length,
+      records: preparedRecords,
+    };
+  }
+
   async update(userId: string, tableName: string, id: string, data: Partial<any>): Promise<SyncResult> {
     const sid = this.sid(userId);
     const record = { ...data, updatedAt: new Date().toISOString() };

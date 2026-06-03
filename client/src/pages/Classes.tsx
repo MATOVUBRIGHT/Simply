@@ -18,6 +18,7 @@ import { PortalDropdown } from '../components/PortalDropdown';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { cleanupDeletedClassReferences } from '../utils/classDeletionCleanup';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
 
 const ClassActions = ({ 
   classItem, 
@@ -162,6 +163,7 @@ export default function Classes() {
     () => sortClassesBySectionThenLevel([...classesData]) as any[],
     [classesData]
   );
+  const listLoading = useMinimumLoading(loading, 2000);
 
   // Compute enrollment counts from store data
   const classEnrollmentCounts = useMemo(() => {
@@ -552,8 +554,7 @@ export default function Classes() {
     try {
       const now = new Date().toISOString();
       const snap = [...importPreview];
-      const tasks = snap.map((data) => async () => {
-        const classItem: Class = {
+      const classItems: Class[] = snap.map((data) => ({
           id: crypto.randomUUID(),
           schoolId: id,
           name: (data.name as string) || 'Unknown',
@@ -561,10 +562,10 @@ export default function Classes() {
           stream: (data.stream as string) || '',
           capacity: (data.capacity as number) || 40,
           createdAt: now,
-        };
-        await dataService.create(id, 'classes', classItem);
-      });
-      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
+        }));
+      setImportProgress(50);
+      await dataService.bulkCreate(id, 'classes', classItems);
+      setImportProgress(100);
       setIsImporting(false);
       closeImportModal();
       setShowImportSuccess(true);
@@ -737,7 +738,7 @@ export default function Classes() {
       , document.body)}
 
       <div className="card overflow-hidden">
-        {loading ? (
+        {listLoading ? (
           <div className="p-12 text-center">
             <div className="w-12 h-12 border-4 border-primary-200 border-t-primary-500 rounded-full animate-spin mx-auto"></div>
             <p className="text-slate-500 mt-4">Loading classes...</p>

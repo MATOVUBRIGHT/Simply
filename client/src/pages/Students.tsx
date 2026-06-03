@@ -26,6 +26,7 @@ import { deleteInThirtyPercentBatches } from '../utils/bulkDelete';
 import { FitStatValue } from '../components/FitStatValue';
 import { LargeDataSpinner } from '../components/LargeDataSpinner';
 import { sortStudentsForList } from '../utils/studentOrdering';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
 
 const avatarColors = [
   'bg-rose-500',
@@ -170,6 +171,7 @@ export default function Students() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [showAll, setShowAll] = useState(false);
+  const [showAllTransitioning, setShowAllTransitioning] = useState(false);
   const [selectedClass, setSelectedClass] = useState('');
   const effectiveListSize = totalCount || allStudents.length;
   const isLargeShowAllList = showAll && effectiveListSize > LARGE_SHOW_ALL_THRESHOLD;
@@ -210,6 +212,7 @@ export default function Students() {
   const classFilterButtonRef = useRef<HTMLButtonElement>(null);
   const [statusDropdownPos, setStatusDropdownPos] = useState({ top: 0, left: 0 });
   const [classDropdownPos, setClassDropdownPos] = useState({ top: 0, left: 0 });
+  const listLoading = useMinimumLoading(loading || studentsStoreLoading || showAllTransitioning, 2000);
 
   const getImportStatus = () => {
     switch (viewFilter) {
@@ -305,6 +308,13 @@ export default function Students() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  function handleToggleShowAll() {
+    setShowAllTransitioning(true);
+    setCurrentPage(1);
+    setShowAll(value => !value);
+    window.setTimeout(() => setShowAllTransitioning(false), 2000);
+  }
 
   useEffect(() => {
     const handleStudentsUpdated = (event?: Event) => {
@@ -1787,7 +1797,7 @@ export default function Students() {
                 </tr>
               </thead>
               <tbody>
-                {loading ? (
+                {listLoading ? (
                   <tr>
                     <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
                       <LargeDataSpinner
@@ -1815,7 +1825,8 @@ export default function Students() {
                   paginatedStudents.map((student, index) => (
                     <tr 
                       key={student.id} 
-                      className={`group cursor-pointer transition-colors ${selectedStudents.has(student.id) ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+                      className={`group animate-slide-down cursor-pointer transition-colors ${selectedStudents.has(student.id) ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+                      style={{ animationDelay: `${Math.min(index, 18) * 18}ms` }}
                       onClick={() => handleRowSingleClick(student.id)}
                       onDoubleClick={() => handleRowDoubleClick(student.id)}
                     >
@@ -1925,7 +1936,7 @@ export default function Students() {
             </table>
           ) : (
             <div className="p-4">
-              {loading ? (
+              {listLoading ? (
                 <LargeDataSpinner label="Loading school records..." detail="Preparing archived students for browsing." />
               ) : getGroupedCompletedStudents().length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-12">
@@ -1938,7 +1949,7 @@ export default function Students() {
               ) : (
                 <div className="space-y-6">
                   {getGroupedCompletedStudents().map((group, groupIndex) => (
-                    <div key={groupIndex} className="border border-violet-200 dark:border-violet-800 rounded-xl overflow-hidden">
+                    <div key={groupIndex} className="animate-slide-down border border-violet-200 dark:border-violet-800 rounded-xl overflow-hidden" style={{ animationDelay: `${Math.min(groupIndex, 10) * 35}ms` }}>
                       <div className="bg-violet-100 dark:bg-violet-900/30 px-4 py-3 flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-violet-500 flex items-center justify-center">
@@ -2039,10 +2050,12 @@ export default function Students() {
               )}
             </p>
             <button
-              onClick={() => { setShowAll(v => !v); setCurrentPage(1); }}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              onClick={handleToggleShowAll}
+              disabled={showAllTransitioning}
+              className="inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors disabled:opacity-70"
             >
-              {showAll ? 'Show Pages' : 'Show All'}
+              {showAllTransitioning && <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-transparent animate-spin" />}
+              {showAllTransitioning ? (showAll ? 'Loading all...' : 'Loading pages...') : showAll ? 'Show Pages' : 'Show All'}
             </button>
           </div>
         )}

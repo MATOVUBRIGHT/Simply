@@ -160,14 +160,16 @@ export async function redeemPaymentVerificationCode(
     if (!plan) return { status: 'invalid', message: 'This code points to a plan that no longer exists.', grant };
 
     const now = new Date();
-    const expiry = addMonths(now, cycleMonths(grant.billingCycle));
+    const isUnlimitedPlan = plan.id === 'unlimited';
+    const expiry = isUnlimitedPlan ? new Date('2099-12-31T23:59:59.999Z') : addMonths(now, cycleMonths(grant.billingCycle));
     const used = await getPlanStudentCount(tenantId);
+    const remaining = isUnlimitedPlan ? Number.MAX_SAFE_INTEGER : Math.max(0, plan.studentLimit - used);
     const state: SubscriptionAccessState = {
       plan,
       selectedPlanId: plan.id,
       used,
-      remaining: Math.max(0, plan.studentLimit - used),
-      eligible: used < plan.studentLimit,
+      remaining,
+      eligible: isUnlimitedPlan || used < plan.studentLimit,
       expiryDate: expiry.toISOString(),
       status: 'active',
       daysRemaining: Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)),
@@ -186,6 +188,7 @@ export async function redeemPaymentVerificationCode(
       billingCycle: grant.billingCycle,
       amount: grant.amount,
       planName: grant.planName,
+      unlimited: isUnlimitedPlan,
       activatedAt: remoteVerifiedAt,
     };
 

@@ -21,6 +21,7 @@ import { matchesTextSearch } from '../utils/searchMatch';
 import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { FitStatValue } from '../components/FitStatValue';
 import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
 
 function termRank(term: string) {
   const n = Number(String(term).replace(/[^0-9]/g, ''));
@@ -104,8 +105,8 @@ export default function Finance() {
 
   const students = useActiveStudents();
   const sid = schoolId || user?.id || '';
-  const { data: fees } = useTableData(sid, 'fees');
-  const { data: payments } = useTableData(sid, 'payments');
+  const { data: fees, loading: feesLoading } = useTableData(sid, 'fees');
+  const { data: payments, loading: paymentsLoading } = useTableData(sid, 'payments');
   const { data: settingsData } = useTableData(sid, 'settings');
   const { data: bursariesData } = useTableData(sid, 'bursaries');
   const { data: discountsData } = useTableData(sid, 'discounts');
@@ -393,21 +394,21 @@ export default function Finance() {
     setIsImporting(true);
     try {
       const now = new Date().toISOString();
-      let importedCount = 0;
       let skippedCount = 0;
-      const tasks = importPreview
+      const payments = importPreview
         .map((d, i) => ({ d, i }))
         .filter(({ i }) => !duplicateImportRows.has(i))
-        .map(({ d }) => async () => {
-        const s = students.find(x => matchesStudentSearch(x, d.studentName));
-        if (!s) {
-          skippedCount++;
-          return;
-        }
-        await dataService.create(id, 'payments', { id: uuidv4(), feeId: '', studentId: s.id, amount: parseFloat(d.amount), method: (d.method as PaymentMethod) || PaymentMethod.CASH, date: d.date || now, createdAt: now } as any);
-        importedCount++;
-      });
-      await runTasksInThirtyPercentBatches(tasks);
+        .map(({ d }) => {
+          const s = students.find(x => matchesStudentSearch(x, d.studentName));
+          if (!s) {
+            skippedCount++;
+            return null;
+          }
+          return { id: uuidv4(), feeId: '', studentId: s.id, amount: parseFloat(d.amount), method: (d.method as PaymentMethod) || PaymentMethod.CASH, date: d.date || now, createdAt: now };
+        })
+        .filter(Boolean) as any[];
+      if (payments.length) await dataService.bulkCreate(id, 'payments', payments);
+      const importedCount = payments.length;
       setIsImporting(false);
       closeImportModal();
       addToast(`${importedCount} payment${importedCount === 1 ? '' : 's'} imported${skippedCount ? `, ${skippedCount} skipped because no student matched` : ''}`, skippedCount ? 'warning' : 'success');
@@ -725,6 +726,7 @@ export default function Finance() {
   const visibleLedgerRows = ledgerProgress.visibleItems;
   const visibleInvoicesByStudent = invoiceProgress.visibleItems;
   const visiblePaymentsByStudent = paymentProgress.visibleItems;
+  const listLoading = useMinimumLoading(feesLoading || paymentsLoading, 2000);
 
   const tabs = [
     { id: 'students', label: 'Students', icon: Users },
@@ -922,7 +924,12 @@ export default function Finance() {
             <table>
               <thead><tr><th>No.</th><th>Student</th><th>ID Number</th><th>Invoices</th><th>Tags</th><th>Last Term</th><th>Current Invoiced</th><th>Payable</th><th>Total Paid</th><th>Upfront Credit</th><th>Balance</th><th>Status</th></tr></thead>
               <tbody>
-                {filteredStudentFinance.length === 0 ? (
+                {listLoading ? (
+                  <tr><td colSpan={12} className="text-center py-12">
+                    <div className="mx-auto mb-3 h-9 w-9 rounded-full border-4 border-primary-200 border-t-primary-500 animate-spin" />
+                    <p className="text-sm font-semibold text-slate-400">Loading finance records...</p>
+                  </td></tr>
+                ) : filteredStudentFinance.length === 0 ? (
                   <tr><td colSpan={12} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><Users size={24} className="text-violet-400" /></div>
@@ -1151,7 +1158,12 @@ export default function Finance() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ledgerRows.length === 0 ? (
+                  {listLoading ? (
+                    <tr><td colSpan={9} className="py-12 text-center">
+                      <div className="mx-auto mb-3 h-9 w-9 rounded-full border-4 border-primary-200 border-t-primary-500 animate-spin" />
+                      <p className="text-sm font-semibold text-slate-400">Loading ledger records...</p>
+                    </td></tr>
+                  ) : ledgerRows.length === 0 ? (
                     <tr><td colSpan={13} className="text-center py-12">
                       <div className="flex flex-col items-center gap-2">
                         <div className="w-12 h-12 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center"><FileText size={24} className="text-indigo-400" /></div>
@@ -1193,7 +1205,12 @@ export default function Finance() {
             <table>
               <thead><tr><th style={{width:'32px'}}></th><th>No.</th><th>Student</th><th>Invoices</th><th>Tags</th><th>Last Term</th><th>Current Total</th><th>Payable</th><th>Total Paid</th><th>Upfront Credit</th><th>Balance</th><th>Status</th></tr></thead>
               <tbody>
-                {invoicesByStudent.length === 0 ? (
+                {listLoading ? (
+                  <tr><td colSpan={8} className="py-12 text-center">
+                    <div className="mx-auto mb-3 h-9 w-9 rounded-full border-4 border-primary-200 border-t-primary-500 animate-spin" />
+                    <p className="text-sm font-semibold text-slate-400">Loading invoices...</p>
+                  </td></tr>
+                ) : invoicesByStudent.length === 0 ? (
                   <tr><td colSpan={12} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-12 h-12 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center"><FileText size={24} className="text-violet-400" /></div>
@@ -1271,7 +1288,12 @@ export default function Finance() {
             <table>
               <thead><tr><th style={{width:'32px'}}></th><th>No.</th><th>Student</th><th>Payments</th><th>Total Paid</th><th>Last Payment</th></tr></thead>
               <tbody>
-                {paymentsByStudent.length === 0 ? (
+                {listLoading ? (
+                  <tr><td colSpan={4} className="py-12 text-center">
+                    <div className="mx-auto mb-3 h-9 w-9 rounded-full border-4 border-primary-200 border-t-primary-500 animate-spin" />
+                    <p className="text-sm font-semibold text-slate-400">Loading payments...</p>
+                  </td></tr>
+                ) : paymentsByStudent.length === 0 ? (
                   <tr><td colSpan={6} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center"><Receipt size={24} className="text-green-400" /></div>

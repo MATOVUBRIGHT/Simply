@@ -178,6 +178,7 @@ function MainApp() {
     const fullPath = `${location.pathname}${location.search}${location.hash}`;
     if (location.pathname !== '/login' && location.pathname !== '/subscribe') {
       window.sessionStorage.setItem('lastRoute', fullPath);
+      window.localStorage.setItem('schofy_last_route', fullPath);
     }
   }, [location.pathname, location.search, location.hash]);
 
@@ -261,6 +262,10 @@ function MainApp() {
     });
   }, [location.pathname, confirm]);
 
+  if (loading) {
+    return <FullScreenLoader label="Loading..." />;
+  }
+
   if (!user && !localStorage.getItem('schofy_session')) {
     return <Navigate to="/login" replace />;
   }
@@ -341,6 +346,10 @@ function App() {
   const location = useLocation();
   const hasSession = !!localStorage.getItem('schofy_session');
   const [showRefreshLoader, setShowRefreshLoader] = useState(true);
+  const restoredRoute = useMemo(() => {
+    const stored = window.sessionStorage.getItem('lastRoute') || window.localStorage.getItem('schofy_last_route') || '/';
+    return stored && !stored.startsWith('/login') && !stored.startsWith('/subscribe') ? stored : '/';
+  }, [user?.id]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setShowRefreshLoader(false), REFRESH_LOADER_MS);
@@ -374,7 +383,7 @@ function App() {
     <>
       <Suspense fallback={<FullScreenLoader label="Loading..." />}>
         <Routes>
-          <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+          <Route path="/login" element={user ? <Navigate to={restoredRoute} replace /> : <Login />} />
           <Route path="/*" element={<MainApp />} />
         </Routes>
       </Suspense>

@@ -905,6 +905,10 @@ export default function Settings() {
                 <kbd className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">Ctrl + Right</kbd>
               </div>
               <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Open App Status</span>
+                <kbd className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">Ctrl + S</kbd>
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Save active popup or form</span>
                 <kbd className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">Enter</kbd>
               </div>

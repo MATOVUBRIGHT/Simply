@@ -25,6 +25,7 @@ import { Users, UserCheck, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, M
 import { Announcement } from '@schofy/shared';
 import { FitStatValue } from '../components/FitStatValue';
 import { computeProfitSummary, getGrowthPercent, getPreviousTermYear } from '../utils/profit';
+import { useTypewriterText } from '../hooks/useTypewriterText';
 
 // Uganda public holidays (month is 0-indexed)
 const UGANDA_HOLIDAYS: { month: number; day: number; name: string }[] = [
@@ -263,6 +264,22 @@ export default function Dashboard() {
     const currentYear = calendarToday.getFullYear();
     return Array.from({ length: 8 }, (_item, index) => currentYear - 2 + index);
   }, [calendarToday]);
+  const userName = useMemo(() => {
+    const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+    return fullName || user?.email?.split('@')[0] || 'Admin';
+  }, [user]);
+  const timeGreeting = useMemo(() => {
+    const hour = calendarToday.getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }, [calendarToday]);
+  const dashboardEncouragement = useTypewriterText([
+    'Keep every record clean and ready for the next school day.',
+    'Small updates now prevent large corrections later.',
+    'Review attendance, fees, and reports while the day is fresh.',
+    'Schofy is ready. Pick a card or search to continue.',
+  ], { holdMs: 5000 });
 
   function getEventsForMonth(month: number, year: number) {
     const evts = allCalendarEvents.filter(e => e.date.getMonth() === month && e.date.getFullYear() === year);
@@ -287,9 +304,10 @@ export default function Dashboard() {
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-extrabold text-slate-800 tracking-tight">Welcome</h1>
-          <p className="text-slate-500 font-medium mt-1">
-            {termSettings.academicYear || new Date().getFullYear()}-{(parseInt(termSettings.academicYear || String(new Date().getFullYear())) + 1)} · Term {termSettings.currentTerm || '1'}
+          <h1 className="text-4xl font-extrabold text-slate-800 tracking-tight">{timeGreeting}, {userName}</h1>
+          <p className="mt-1 min-h-[1.5rem] text-sm font-semibold text-slate-500">
+            {dashboardEncouragement}
+            <span className="ml-0.5 inline-block h-4 w-px translate-y-0.5 animate-pulse bg-slate-400" aria-hidden="true" />
           </p>
         </div>
         <div className="bg-white px-6 py-2 rounded-xl border border-slate-200 shadow-sm self-start md:self-auto">

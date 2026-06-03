@@ -20,6 +20,7 @@ import { FullscreenButton } from '../components/FullscreenButton';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
 
 const avatarColors = [
   'bg-violet-500',
@@ -364,6 +365,7 @@ export default function StaffPage() {
   const filteredTeachers = useMemo(() => filteredStaff.filter(s => s.role === StaffRole.TEACHER), [filteredStaff]);
   const staffProgress = useProgressiveList(filteredStaff, { initialCount: 120, step: 120, delayMs: 2000 });
   const visibleStaff = staffProgress.visibleItems;
+  const listLoading = useMinimumLoading(loading, 2000);
 
   async function handleDelete(id: string) {
     const authId = schoolId || user?.id;
@@ -608,15 +610,11 @@ export default function StaffPage() {
         newStaff.push(staffMember);
         successCount++;
       }
-      // Optimistic update
+      setImportProgress(50);
+      await dataService.bulkCreate(id, 'staff', newStaff as any[]);
+      setImportProgress(100);
       addToast(`Imported ${successCount} staff`, 'success');
       closeImportModal();
-      // Fire to Supabase in background
-      const tasks = newStaff.map((s) => async () => {
-        const result = await dataService.create(id, 'staff', s as any);
-        if (!result.success) console.error('Import failed for', s.firstName, result.error);
-      });
-      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
       window.dispatchEvent(new CustomEvent('dataRefresh'));
       window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'staff' } }));
     } catch (error) {
@@ -855,7 +853,7 @@ export default function StaffPage() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {listLoading ? (
                 <tr>
                   <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2 text-slate-400">

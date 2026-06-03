@@ -17,6 +17,7 @@ import { PortalDropdown } from '../components/PortalDropdown';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { getSubjectCode as readSubjectCode, getSubjectDisplayCode, normalizeSubjectCode } from '../utils/subjects';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
 
 const ugandaSubjects: Record<string, { name: string; code: string }[]> = {
   'nursery': [
@@ -228,6 +229,7 @@ export default function Subjects() {
 
   const classes = useMemo(() =>
     sortClassesBySectionThenLevel([...classesData]) as Class[], [classesData]);
+  const listLoading = useMinimumLoading(loading, 2000);
 
   const schoolType = useMemo(() => {
     const s = settingsData.find((s: any) => s.key === 'schoolType');
@@ -815,17 +817,16 @@ function getClassLevel(classId: string): string {
     try {
       const now = new Date().toISOString();
       const previewSnapshot = [...importPreview];
-      const tasks = previewSnapshot.map((data) => async () => {
-        const subject: Subject = {
+      const subjectsToImport: Subject[] = previewSnapshot.map((data) => ({
           id: uuidv4(),
           name: (data.name as string) || 'Unknown',
           code: normalizeSubjectCode(data.code),
           classId: (data.classId as string) || '',
           createdAt: now,
-        };
-        await dataService.create(id, 'subjects', subject as any);
-      });
-      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
+        }));
+      setImportProgress(50);
+      await dataService.bulkCreate(id, 'subjects', subjectsToImport as any[]);
+      setImportProgress(100);
       
       setIsImporting(false);
       closeImportModal();
@@ -1248,7 +1249,7 @@ function getClassLevel(classId: string): string {
           </div>
         </div>
 
-        {loading ? (
+        {listLoading ? (
           <div className="flex flex-col items-center gap-3 py-12">
             <div className="w-10 h-10 border-4 border-primary-200 border-t-primary-500 rounded-full animate-spin"></div>
             <p className="text-slate-500">Loading subjects...</p>

@@ -21,6 +21,7 @@ import InvoiceTemplate, { DEFAULT_INVOICE_LABELS, InvoiceLabels } from '../compo
 import { FullscreenButton } from '../components/FullscreenButton';
 import { FitStatValue } from '../components/FitStatValue';
 import { shouldSaveOnEnter } from '../utils/keyboard';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
 
 const LARGE_TABLE_RENDER_LIMIT = 300;
 
@@ -158,8 +159,8 @@ export default function Invoices() {
   const students = useActiveStudents();
   const { students: allStudents } = useStudents();
   const sid = schoolId || user?.id || '';
-  const { data: feesData, refresh: refreshFees } = useTableData(sid, 'fees');
-  const { data: paymentsData, refresh: refreshPayments } = useTableData(sid, 'payments');
+  const { data: feesData, loading: feesLoading, refresh: refreshFees } = useTableData(sid, 'fees');
+  const { data: paymentsData, loading: paymentsLoading, refresh: refreshPayments } = useTableData(sid, 'payments');
   const { data: settingsData } = useTableData(sid, 'settings');
   const { data: feeStructuresData } = useTableData(sid, 'feeStructures');
   const fees = feesData as any[];
@@ -1313,18 +1314,17 @@ export default function Invoices() {
     try {
       const now = new Date().toISOString();
       const year = new Date().getFullYear().toString();
-      let successCount = 0;
       let skippedCount = 0;
-      const tasks = importPreview.map((data) => async () => {
+      const fees = importPreview.map((data) => {
         const student = students.find(s => matchesStudentSearch(s, data.studentName));
         if (!student) {
           skippedCount++;
-          return;
+          return null;
         }
         const id = schoolId || user?.id;
         if (!id) {
           skippedCount++;
-          return;
+          return null;
         }
         const fee: Fee = {
           id: uuidv4(),
@@ -1335,10 +1335,12 @@ export default function Invoices() {
           year,
           createdAt: now,
         };
-        await dataService.create(id, 'fees', fee as any);
-        successCount++;
-      });
-      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
+        return fee;
+      }).filter(Boolean) as Fee[];
+      setImportProgress(50);
+      if (fees.length) await dataService.bulkCreate(schoolId || user.id, 'fees', fees as any[]);
+      setImportProgress(100);
+      const successCount = fees.length;
       addToast(`Successfully imported ${successCount} invoices${skippedCount ? `, ${skippedCount} skipped because no student matched` : ''}`, skippedCount ? 'warning' : 'success');
       closeImportModal();
       refreshInvoices();
@@ -1374,6 +1376,7 @@ export default function Invoices() {
   }), [invoices, filterStatus, filterTerm, filterClassId, filterStructure, deferredSearchTerm, classById]);
   const visibleFilteredStudentSummary = filteredStudentSummary.slice(0, LARGE_TABLE_RENDER_LIMIT);
   const visibleFilteredInvoices = filteredInvoices.slice(0, LARGE_TABLE_RENDER_LIMIT);
+  const listLoading = useMinimumLoading(feesLoading || paymentsLoading, 2000);
 
   const currentTermBursaries = useMemo(() => {
     return bursaries.filter(b => String(b.term) === String(selectedTerm) && String(b.year) === String(selectedYear));
@@ -1971,7 +1974,16 @@ export default function Invoices() {
                 </tr>
               </thead>
               <tbody>
-                {!studentInvoiceSummary || studentInvoiceSummary.length === 0 ? (
+                {listLoading ? (
+                  <tr>
+                    <td colSpan={10} className="text-center py-12">
+                      <div className="flex flex-col items-center gap-2 text-slate-400">
+                        <div className="h-9 w-9 rounded-full border-4 border-primary-200 border-t-primary-500 animate-spin" />
+                        <p className="text-sm font-semibold">Loading invoice records...</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : !studentInvoiceSummary || studentInvoiceSummary.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="text-center py-12">
                       <div className="flex flex-col items-center gap-3">
@@ -2084,10 +2096,11 @@ export default function Invoices() {
                 </tr>
               </thead>
               <tbody>
-                {!fees || !payments || !allStudents ? (
+                {listLoading || !fees || !payments || !allStudents ? (
                   <tr>
                     <td colSpan={selectedInvoiceIds.length > 0 ? 11 : 10} className="text-center py-12">
                       <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-200 border-t-primary-500 mx-auto"></div>
+                      <p className="mt-3 text-sm font-semibold text-slate-400">Loading invoice records...</p>
                     </td>
                   </tr>
                 ) : filteredInvoices.length === 0 ? (

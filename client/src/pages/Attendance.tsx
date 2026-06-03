@@ -14,6 +14,8 @@ import { SuccessPopup } from '../components/SuccessPopup';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { FitStatValue } from '../components/FitStatValue';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
+import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 
 type ImportAttendanceRow = {
   date: string;
@@ -51,14 +53,15 @@ export default function Attendance() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
   const { data: classesData } = useTableData(sid, 'classes');
-  const { data: studentsData } = useTableData(sid, 'students');
-  const { data: attendanceData } = useTableData(sid, 'attendance');
+  const { data: studentsData, loading: studentsLoading } = useTableData(sid, 'students');
+  const { data: attendanceData, loading: attendanceStoreLoading } = useTableData(sid, 'attendance');
   const classes = useMemo(() => sortClassesBySectionThenLevel([...classesData]), [classesData]);
 
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedClass, setSelectedClass] = useState('');
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({});
   const [loading, setLoading] = useState(false);
+  const listLoading = useMinimumLoading(loading || studentsLoading || attendanceStoreLoading, 2000);
   const { addToast } = useToast();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -472,11 +475,13 @@ export default function Attendance() {
       const importedStudentClassIds = new Set<string>();
       const importedDates = new Set<string>();
       const currentDateAttendanceUpdates: Record<string, AttendanceStatus> = {};
+      const recordsToCreate: AttendanceRecord[] = [];
+      const recordsToUpdate: Array<{ id: string; data: Partial<AttendanceRecord> }> = [];
 
       for (let start = 0; start < recordsToImport.length; start += IMPORT_BATCH_SIZE) {
         const batch = recordsToImport.slice(start, start + IMPORT_BATCH_SIZE);
         const batchUpdates: Record<string, AttendanceStatus> = {};
-        const writes = batch.map(async data => {
+        batch.forEach(data => {
           const student = studentByIdentifier.get(String(data.admissionNo));
           if (!student) {
             skippedCount++;
@@ -488,7 +493,7 @@ export default function Attendance() {
           const status = normalizeAttendanceStatus(data.status);
           const existingRecord = existingAttendanceByKey.get(`${data.date}:${student.id}`);
           if (existingRecord) {
-            await dataService.update(id, 'attendance', existingRecord.id, { ...existingRecord, status, updatedAt: now } as any);
+            recordsToUpdate.push({ id: existingRecord.id, data: { ...existingRecord, status, updatedAt: now } as any });
           } else {
             const newRecord: AttendanceRecord = {
               id: uuidv4(),
@@ -498,7 +503,7 @@ export default function Attendance() {
               status,
               createdAt: now,
             };
-            await dataService.create(id, 'attendance', newRecord as any);
+            recordsToCreate.push(newRecord);
             existingAttendanceByKey.set(`${data.date}:${student.id}`, newRecord);
           }
           if (data.date === selectedDate) {
@@ -508,7 +513,6 @@ export default function Attendance() {
           successCount++;
         });
 
-        await Promise.all(writes);
         if (Object.keys(batchUpdates).length > 0) {
           setAttendance(prev => ({ ...prev, ...batchUpdates }));
         }
@@ -519,6 +523,15 @@ export default function Attendance() {
           skipped: skippedCount,
         });
         await waitForPaint();
+      }
+      if (recordsToCreate.length) {
+        await dataService.bulkCreate(id, 'attendance', recordsToCreate as any[]);
+      }
+      if (recordsToUpdate.length) {
+        await runTasksInThirtyPercentBatches(
+          recordsToUpdate.map(item => () => dataService.update(id, 'attendance', item.id, item.data as any)),
+          (progress: number) => setImportProgress(prev => ({ ...prev, processed: Math.round((progress / 100) * recordsToImport.length) })),
+        );
       }
       if (importedDates.size === 1) setSelectedDate([...importedDates][0]);
       if (importedStudentClassIds.size === 1) setSelectedClass([...importedStudentClassIds][0]);
@@ -708,7 +721,7 @@ export default function Attendance() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {listLoading ? (
                 <tr>
                   <td colSpan={selectedClass ? 4 : 5} className="text-center py-12">
                     <div className="flex flex-col items-center gap-3">

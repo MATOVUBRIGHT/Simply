@@ -98,6 +98,7 @@ export default function Reports() {
   const { user, schoolId } = useAuth();
   const sid = schoolId || user?.id || '';
   const [selectedReport, setSelectedReport] = useState<ReportType>('terms');
+  const [previewLoading, setPreviewLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [selectedTerm, setSelectedTerm] = useState('all');
@@ -424,6 +425,11 @@ export default function Reports() {
   }
 
   const rows = useMemo(makeRows, [selectedReport, selectedTerm, selectedYear, selectedClass, search, dateFrom, dateTo, students, staff, classes, fees, payments, attendance, exams, examResults, subjects, bursaries, discounts, invoices, settings]);
+  useEffect(() => {
+    setPreviewLoading(true);
+    const timer = window.setTimeout(() => setPreviewLoading(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [selectedReport, selectedTerm, selectedYear, selectedClass, search, dateFrom, dateTo]);
   const columns = useMemo(() => {
     const keys = Array.from(rows.reduce((set, row) => {
       Object.keys(row).forEach(key => set.add(key));
@@ -610,7 +616,14 @@ export default function Reports() {
                 <tr>{columns.map(column => <th key={column.key}>{column.label}</th>)}</tr>
               </thead>
               <tbody>
-                {rows.length === 0 ? (
+                {previewLoading ? (
+                  <tr>
+                    <td colSpan={Math.max(columns.length, 1)} className="text-center py-12 text-slate-400">
+                      <span className="mx-auto mb-3 block h-9 w-9 rounded-full border-4 border-primary-200 border-t-primary-500 animate-spin" />
+                      Preparing report records...
+                    </td>
+                  </tr>
+                ) : rows.length === 0 ? (
                   <tr><td colSpan={Math.max(columns.length, 1)} className="text-center py-12 text-slate-400">No records match this report.</td></tr>
                 ) : groupedRows.map(group => (
                   <Fragment key={group.className}>

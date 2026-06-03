@@ -255,17 +255,16 @@ export default function Transport() {
       const previewSnapshot = [...importPreview];
       closeImportModal();
       addToast(`Importing ${previewSnapshot.length} route${previewSnapshot.length !== 1 ? 's' : ''}... completing in background`, 'info');
-      const tasks = previewSnapshot.map((data) => async () => {
-        const route: TransportRoute = {
+      const routes: TransportRoute[] = previewSnapshot.map((data) => ({
           id: uuidv4(),
           name: (data.name as string) || 'Unknown',
           description: (data.description as string) || '',
           fee: (data.fee as number) || 0,
           createdAt: now,
-        };
-        await dataService.create(id, 'transportRoutes', route as any);
-      });
-      await runTasksInThirtyPercentBatches(tasks, progress => setImportProgress(progress));
+        }));
+      setImportProgress(50);
+      await dataService.bulkCreate(id, 'transportRoutes', routes as any[]);
+      setImportProgress(100);
       setIsImporting(false);
       closeImportModal();
       setShowImportSuccess(true);

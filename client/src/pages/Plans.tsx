@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 
@@ -10,6 +11,7 @@ import { supabase } from '../lib/supabase';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
 import { redeemPaymentVerificationCode } from '../utils/paymentVerification';
 import { isUnlockedRelease } from '../utils/releaseChannel';
+import { useTypewriterText } from '../hooks/useTypewriterText';
 
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
@@ -22,6 +24,15 @@ const faqs = [
 const UGX_RATE = 3800;
 const MIN_PLANS_LOADING_MS = 2000;
 type PlanCurrency = 'USD' | 'UGX';
+const billingCycleActiveStyles: Record<'monthly' | 'term' | 'yearly', CSSProperties> = {
+  monthly: { backgroundColor: '#2563eb', boxShadow: '0 8px 18px rgba(37, 99, 235, 0.24)' },
+  term: { backgroundColor: 'var(--solid-emerald)', boxShadow: '0 8px 18px rgba(16, 185, 129, 0.24)' },
+  yearly: { backgroundColor: '#7c3aed', boxShadow: '0 8px 18px rgba(124, 58, 237, 0.24)' },
+};
+const currencyActiveStyles: Record<PlanCurrency, CSSProperties> = {
+  USD: { backgroundColor: '#0891b2', boxShadow: '0 8px 18px rgba(8, 145, 178, 0.24)' },
+  UGX: { backgroundColor: '#16a34a', boxShadow: '0 8px 18px rgba(22, 163, 74, 0.24)' },
+};
 
 function getStoredPlanId() {
   return localStorage.getItem('schofy_sub_plan') || localStorage.getItem('schofy_pending_plan') || null;
@@ -60,6 +71,7 @@ export default function Plans() {
   const [accessState, setAccessState] = useState<SubscriptionAccessState | null>(null);
   const [latestReceipt, setLatestReceipt] = useState<Awaited<ReturnType<typeof getLatestReceipt>>>(null);
   const [showTrialModal, setShowTrialModal] = useState(false);
+  const [showTopVerificationEntry, setShowTopVerificationEntry] = useState(false);
   const [trialRequested, setTrialRequested] = useState(false);
   const [showRenewModal, setShowRenewModal] = useState(false);
   const [renewPlan, setRenewPlan] = useState<typeof PLAN_DEFINITIONS[0] | null>(null);
@@ -468,6 +480,11 @@ Powered by Schofy`;
   const currentPlanLimitLabel = currentPlanLimit >= Number.MAX_SAFE_INTEGER ? 'Unlimited' : currentPlanLimit || 'N/A';
   const showBackToApp = Boolean(user && isDesktopApp());
   const contactMessage = (plan: PlanDefinition) => encodeURIComponent(`Hello,\n\nI want to buy the ${plan.name} plan.\nSchool: ${user?.email || ''}\nSchool ID: ${schoolId || user?.id || ''}\n\nPlease help me activate the one-time desktop version with unlimited students.`);
+  const lockedPlanMessage = useTypewriterText([
+    'Your account is locked or expired. Please select a plan below to unlock all features and increase student limits.',
+    'Have a code? You can use it right away to unlock the matching plan.',
+    'Need questions answered? Open Help or contact Schofy support before choosing a plan.',
+  ], { holdMs: 5000 });
 
   if (initialPlansLoading) {
     return (
@@ -494,8 +511,9 @@ Powered by Schofy`;
     <div className="plans-page-enter relative mx-auto min-h-screen w-full max-w-7xl space-y-5 px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-10">
       {(!currentPlanId || accessState?.status === 'expired') ? (
         <div className="plans-reveal rounded-xl border p-4 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
-          <p className="text-sm font-semibold text-slate-900 dark:text-white">
-            Your account is locked or expired. Please select a plan below to unlock all features and increase student limits.
+          <p className="min-h-[1.5rem] text-sm font-semibold text-slate-900 dark:text-white">
+            {lockedPlanMessage}
+            <span className="ml-0.5 inline-block h-4 w-px translate-y-0.5 animate-pulse bg-red-500" aria-hidden="true" />
           </p>
         </div>
       ) : (
@@ -563,9 +581,10 @@ Powered by Schofy`;
                 onClick={() => setBillingCycle(cycle)}
                 className={`px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
                   billingCycle === cycle
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                    ? 'text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
+                style={billingCycle === cycle ? billingCycleActiveStyles[cycle] : undefined}
               >
                 {cycle === 'yearly' ? 'Yearly' : cycle === 'term' ? 'Per Term' : 'Monthly'}
               </button>
@@ -579,9 +598,10 @@ Powered by Schofy`;
                 onClick={() => setPlanCurrency(currency)}
                 className={`px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
                   planCurrency === currency
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                    ? 'text-white shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
+                style={planCurrency === currency ? currencyActiveStyles[currency] : undefined}
               >
                 {currency}
               </button>
@@ -675,28 +695,57 @@ Powered by Schofy`;
         </div>
       )}
 
-      {!currentPlanId && (
-        <div className="plans-reveal rounded-xl border border-violet-200 bg-violet-50 dark:border-violet-800 dark:bg-violet-900/20 p-4" style={{ animationDelay: '120ms' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-violet-100 dark:bg-violet-900/50 flex items-center justify-center flex-shrink-0 text-xl">🎁</div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-violet-900 dark:text-violet-100 text-sm">New to Schofy?</h3>
-              <p className="text-xs text-violet-700 dark:text-violet-300 mt-0.5">Request a free 7-day trial — no payment needed. Admin will activate it for you.</p>
-            </div>
-            {!trialRequested ? (
+      <div className="plans-reveal rounded-xl border border-violet-200 bg-violet-50 p-4 dark:border-violet-800 dark:bg-violet-900/20" style={{ animationDelay: '120ms' }}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200">
+            <Star size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold text-violet-900 dark:text-violet-100">{currentPlanId ? 'Change plan by code' : 'New to Schofy?'}</h3>
+            <p className="mt-0.5 text-xs text-violet-700 dark:text-violet-300">
+              {currentPlanId
+                ? 'If you already received a Schofy verification code, enter it to activate the matching plan immediately.'
+                : 'Request a free 7-day trial with no payment needed, or enter a verification code if you already have one.'}
+            </p>
+            <p className="mt-2 text-xs font-semibold text-violet-800 dark:text-violet-200">Have a code? You can use it right away.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            {!currentPlanId && (!trialRequested ? (
               <button onClick={() => setShowTrialModal(true)}
-                className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium rounded-lg flex-shrink-0"
+                className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-violet-700"
               >
                 Request Trial
               </button>
             ) : (
-              <span className="px-3 py-1.5 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-xs font-medium rounded-lg flex-shrink-0">
-                ✓ Requested
+              <span className="rounded-lg bg-violet-100 px-3 py-1.5 text-xs font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+                Requested
               </span>
-            )}
+            ))}
+            <button
+              type="button"
+              onClick={() => setShowTopVerificationEntry((value) => !value)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
+              style={{ backgroundColor: 'var(--solid-emerald)' }}
+            >
+              <KeyRound size={13} />
+              {showTopVerificationEntry ? 'Hide code entry' : 'Enter verification code'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowFAQModal(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 dark:border-violet-800 dark:bg-slate-800 dark:text-violet-200 dark:hover:bg-violet-900/30"
+            >
+              <HelpCircle size={13} />
+              Need questions?
+            </button>
           </div>
         </div>
-      )}
+        {showTopVerificationEntry && (
+          <div className="mt-3">
+            {renderVerificationCodeEntry()}
+          </div>
+        )}
+      </div>
 
       {/* Current Plan Status */}
       {currentPlanId && accessState && (
