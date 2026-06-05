@@ -21,6 +21,7 @@
     }
   ],
   "win": {
+    "executableName": "Schofy",
     "target": [
       {
         "target": "nsis",
