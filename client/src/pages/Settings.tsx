@@ -16,6 +16,15 @@ import { releaseChannelLabel } from '../utils/releaseChannel';
 import { deleteInThirtyPercentBatches, processInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { compressImageFile } from '../utils/imageCompression';
 import { cleanupDeletedClassReferences } from '../utils/classDeletionCleanup';
+import { loginLocal } from '../lib/auth/LocalAuth';
+import {
+  clearSchoolDatabaseConfig,
+  readSchoolDatabaseConfig,
+  saveSchoolDatabaseConfig,
+  testSchoolDatabaseConnection,
+  toSharedSchoolDatabaseConfig,
+  type SchoolDatabaseConfig,
+} from '../utils/schoolDatabaseConfig';
 
 const APP_VERSION_LABEL = 'Version1.1';
 
@@ -65,6 +74,20 @@ export default function Settings() {
   const [showCloudBackupModal, setShowCloudBackupModal] = useState(false);
   const [backupAccount, setBackupAccount] = useState(user?.email || '');
   const [isCloudBackingUp, setIsCloudBackingUp] = useState(false);
+  const [schoolDbConfig, setSchoolDbConfig] = useState<SchoolDatabaseConfig>({
+    provider: 'database',
+    enabled: false,
+    url: '',
+    anonKey: '',
+    shareToDevices: false,
+  });
+  const [testingSchoolDb, setTestingSchoolDb] = useState(false);
+  const [savingSchoolDb, setSavingSchoolDb] = useState(false);
+  const [schoolDbMessage, setSchoolDbMessage] = useState('');
+  const [showSchoolDbConfirm, setShowSchoolDbConfirm] = useState(false);
+  const [schoolDbAdminPassword, setSchoolDbAdminPassword] = useState('');
+  const [schoolDbConfirmAction, setSchoolDbConfirmAction] = useState<'save' | 'clear' | null>(null);
+  const [schoolDbPasswordError, setSchoolDbPasswordError] = useState('');
   const [settings, setSettings] = useState({
     schoolName: 'My School',
     schoolAddress: '',
@@ -110,6 +133,13 @@ export default function Settings() {
     }
   }, [user?.id, schoolId]);
 
+  useEffect(() => {
+    const sid = schoolId || user?.schoolId || user?.id;
+    const saved = readSchoolDatabaseConfig(sid);
+    setSchoolDbConfig(saved || { provider: 'database', enabled: false, url: '', anonKey: '', shareToDevices: false });
+    setSchoolDbMessage('');
+  }, [schoolId, user?.schoolId, user?.id]);
+
   async function loadSettings() {
     const id = schoolId || user?.id;
     if (!id) return;
@@ -137,6 +167,14 @@ export default function Settings() {
       if (stored.length > 0) {
         const remoteObj: Record<string, any> = {};
         stored.forEach((s: any) => { remoteObj[s.key] = s.value; });
+        const sharedDbConfig = remoteObj.schoolDatabaseConnection as SchoolDatabaseConfig | undefined;
+        const existingDbConfig = readSchoolDatabaseConfig(id);
+        if (!existingDbConfig?.enabled && sharedDbConfig?.enabled && sharedDbConfig.url && sharedDbConfig.anonKey) {
+          const shared = toSharedSchoolDatabaseConfig(sharedDbConfig);
+          saveSchoolDatabaseConfig(id, shared);
+          setSchoolDbConfig(shared);
+          setSchoolDbMessage('Shared school database connection loaded for this device.');
+        }
 
         const merged = {
           ...localObj,
@@ -641,6 +679,126 @@ export default function Settings() {
     }
   }
 
+  async function handleTestSchoolDatabase() {
+    setTestingSchoolDb(true);
+    setSchoolDbMessage('');
+    try {
+      const result = await testSchoolDatabaseConnection(schoolDbConfig);
+      setSchoolDbMessage(result.message);
+      addToast(result.message, result.success ? 'success' : 'warning');
+    } catch (error: any) {
+      const message = error?.message || 'Database connection test failed';
+      setSchoolDbMessage(message);
+      addToast(message, 'error');
+    } finally {
+      setTestingSchoolDb(false);
+    }
+  }
+
+  async function handleSaveSchoolDatabase() {
+    setSchoolDbConfirmAction('save');
+    setSchoolDbAdminPassword('');
+    setSchoolDbPasswordError('');
+    setShowSchoolDbConfirm(true);
+  }
+
+  async function verifyAdminPassword(password: string) {
+    if (!password || !user?.email) return false;
+    if (isSupabaseConfigured && supabase && isOnline) {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password,
+      });
+      return !error;
+    }
+    const local = await loginLocal(user.email.toLowerCase().trim(), password, { syncToCloud: false });
+    return !!local.success;
+  }
+
+  async function completeSchoolDatabaseAction() {
+    const sid = schoolId || user?.schoolId || user?.id;
+    if (!sid) {
+      addToast('Login before saving database settings', 'error');
+      return;
+    }
+    if (!schoolDbAdminPassword) {
+      setSchoolDbPasswordError('Enter the admin password.');
+      return;
+    }
+    setSavingSchoolDb(true);
+    setSchoolDbPasswordError('');
+    setSchoolDbMessage('');
+    try {
+      const passwordOk = await verifyAdminPassword(schoolDbAdminPassword);
+      if (!passwordOk) {
+        setSchoolDbPasswordError('Incorrect admin password.');
+        return;
+      }
+      if (schoolDbConfirmAction === 'clear') {
+        clearSchoolDatabaseConfig(sid);
+        setSchoolDbConfig({ provider: 'database', enabled: false, url: '', anonKey: '', shareToDevices: false });
+        setSchoolDbMessage('Removed. Cloud database writes are paused until a school database is connected.');
+        setShowSchoolDbConfirm(false);
+        addToast('School database removed', 'info');
+        return;
+      }
+      const result = await testSchoolDatabaseConnection(schoolDbConfig);
+      if (!result.success) {
+        setSchoolDbMessage(result.message);
+        addToast(result.message, 'warning');
+        return;
+      }
+      const nextConfig: SchoolDatabaseConfig = {
+        ...schoolDbConfig,
+        enabled: true,
+        lastCheckedAt: new Date().toISOString(),
+      };
+      if (nextConfig.shareToDevices) {
+        if (!supabase || !isOnline) {
+          setSchoolDbMessage('Connection is valid, but sharing to other devices needs internet.');
+          addToast('Connect to internet to share this database to other devices', 'warning');
+          return;
+        }
+        const shared = toSharedSchoolDatabaseConfig(nextConfig);
+        const { error } = await supabase.from('settings').upsert(
+          { school_id: sid, key: 'schoolDatabaseConnection', value: shared, updated_at: new Date().toISOString() },
+          { onConflict: 'school_id,key' }
+        );
+        if (error) {
+          setSchoolDbMessage(error.message || 'Could not share this connection to other devices.');
+          addToast('Could not share database connection', 'error');
+          return;
+        }
+      }
+      saveSchoolDatabaseConfig(sid, nextConfig);
+      setSchoolDbConfig(prev => ({ ...prev, enabled: true, lastCheckedAt: nextConfig.lastCheckedAt }));
+      setSchoolDbMessage(nextConfig.shareToDevices ? 'Saved and shared. Other signed-in devices can load this database connection.' : 'Saved. School data sync will use this database.');
+      setShowSchoolDbConfirm(false);
+      addToast('School database saved', 'success');
+    } catch (error: any) {
+      const message = error?.message || 'Could not save database settings';
+      setSchoolDbMessage(message);
+      addToast(message, 'error');
+    } finally {
+      setSavingSchoolDb(false);
+    }
+  }
+
+  async function handleClearSchoolDatabase() {
+    const ok = await confirm({
+      title: 'Remove school database?',
+      description: 'This removes the school-owned database connection from this device. Local data remains saved and cloud writes pause until another database is connected.',
+      confirmLabel: 'Continue',
+      cancelLabel: 'Cancel',
+      variant: 'warning',
+    });
+    if (!ok) return;
+    setSchoolDbConfirmAction('clear');
+    setSchoolDbAdminPassword('');
+    setSchoolDbPasswordError('');
+    setShowSchoolDbConfirm(true);
+  }
+
   const colorOptions = [
     { color: '#4F46E5', name: 'Indigo' },
     { color: '#2da32d', name: 'Green' },
@@ -1059,6 +1217,105 @@ export default function Settings() {
               </div>
             )}
 
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-800 dark:bg-emerald-900/15">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Database size={18} className="text-emerald-600" />
+                    School-owned database
+                  </h3>
+                  <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                    Connect this school to its own database for school records and sync. Main login and plan checks stay on Schofy.
+                  </p>
+                </div>
+                <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${
+                  schoolDbConfig.enabled
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-white text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                }`}>
+                  {schoolDbConfig.enabled ? 'Using own database' : 'No school database connected'}
+                </span>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1.2fr_1fr]">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Database URL</label>
+                  <input
+                    type="url"
+                    className="form-input"
+                    placeholder="https://database.yourschool.com"
+                    value={schoolDbConfig.url}
+                    onChange={(event) => setSchoolDbConfig(prev => ({ ...prev, url: event.target.value, enabled: false }))}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Public access key</label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    placeholder="Paste limited public access key only"
+                    value={schoolDbConfig.anonKey}
+                    onChange={(event) => setSchoolDbConfig(prev => ({ ...prev, anonKey: event.target.value, enabled: false }))}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+              </div>
+
+              <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white/80 p-3 text-sm text-slate-700 shadow-sm transition hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  checked={!!schoolDbConfig.shareToDevices}
+                  onChange={(event) => setSchoolDbConfig(prev => ({ ...prev, shareToDevices: event.target.checked, enabled: false }))}
+                />
+                <span>
+                  <span className="block font-semibold">Share this database connection to all devices</span>
+                  <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    Other devices signed into this school can load the same connection automatically from Settings.
+                  </span>
+                </span>
+              </label>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary flex items-center gap-2"
+                  onClick={handleTestSchoolDatabase}
+                  disabled={testingSchoolDb || savingSchoolDb}
+                >
+                  <RefreshCw size={16} className={testingSchoolDb ? 'animate-spin' : ''} />
+                  {testingSchoolDb ? 'Testing...' : 'Test connection'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary flex items-center gap-2"
+                  onClick={handleSaveSchoolDatabase}
+                  disabled={testingSchoolDb || savingSchoolDb}
+                >
+                  <Save size={16} />
+                  {savingSchoolDb ? 'Saving...' : 'Save and use'}
+                </button>
+                {schoolDbConfig.enabled && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary flex items-center gap-2"
+                    onClick={handleClearSchoolDatabase}
+                  >
+                    <CloudOff size={16} />
+                    Remove connection
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-xs leading-5 text-slate-600 shadow-sm dark:bg-slate-900/40 dark:text-slate-300">
+                <strong>Security:</strong> use a limited public key only. Never paste an admin or service key. Sharing to all devices stores this connection for the school so other signed-in devices can use it.
+                {schoolDbMessage && <p className="mt-1 font-medium text-slate-800 dark:text-slate-100">{schoolDbMessage}</p>}
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-3 items-center">
               <button
                 type="button"
@@ -1327,6 +1584,72 @@ export default function Settings() {
               <button type="button" onClick={startCloudBackup} className="btn btn-primary flex items-center gap-2" disabled={isCloudBackingUp}>
                 {isCloudBackingUp ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Upload size={16} />}
                 {isCloudBackingUp ? 'Preparing...' : 'Export & Open'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
+
+      {showSchoolDbConfirm && createPortal((
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !savingSchoolDb) setShowSchoolDbConfirm(false);
+          }}
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center gap-3 border-b border-slate-200 bg-emerald-50 p-5 dark:border-slate-700 dark:bg-emerald-900/20">
+              <Shield size={22} className="text-emerald-600 dark:text-emerald-300" />
+              <div>
+                <h2 className="font-bold text-slate-900 dark:text-white">Confirm Database Change</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Admin password is required before changing where school data syncs.</p>
+              </div>
+            </div>
+            <div className="space-y-4 p-5">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                {schoolDbConfirmAction === 'clear'
+                  ? 'Removing this connection pauses external database writes until another school database is connected.'
+                  : schoolDbConfig.shareToDevices
+                    ? 'After saving, school records write to the connected school database. The connection will also be shared to other signed-in devices for this school.'
+                    : 'After saving, school records write to the connected school database. The app will not write school data to the default cloud while this connection is active.'}
+              </div>
+              <div>
+                <label className="form-label">Admin password</label>
+                <input
+                  type="password"
+                  value={schoolDbAdminPassword}
+                  onChange={(event) => {
+                    setSchoolDbAdminPassword(event.target.value);
+                    setSchoolDbPasswordError('');
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !savingSchoolDb) void completeSchoolDatabaseAction();
+                  }}
+                  className="form-input"
+                  placeholder="Enter admin password"
+                  autoComplete="current-password"
+                  autoFocus
+                />
+                {schoolDbPasswordError && <p className="mt-2 text-sm font-medium text-red-600">{schoolDbPasswordError}</p>}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 px-5 pb-5">
+              <button
+                type="button"
+                onClick={() => setShowSchoolDbConfirm(false)}
+                className="btn btn-secondary"
+                disabled={savingSchoolDb}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={completeSchoolDatabaseAction}
+                className="btn btn-primary flex items-center gap-2"
+                disabled={savingSchoolDb || !schoolDbAdminPassword}
+              >
+                {savingSchoolDb ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Shield size={16} />}
+                {savingSchoolDb ? 'Confirming...' : 'Confirm'}
               </button>
             </div>
           </div>

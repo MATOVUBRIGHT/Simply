@@ -5,6 +5,7 @@ import { useStaffAuth } from '../contexts/StaffAuthContext';
 import { supabase } from '../lib/supabase';
 import { loginLocal } from '../lib/auth/LocalAuth';
 import { appLogoFileName } from '../utils/releaseChannel';
+import { useConfirm } from './ConfirmModal';
 
 const gateEnabledKey = (schoolId: string) => `schofy_staff_gate_enabled_${schoolId}`;
 const assetBase = import.meta.env.BASE_URL || './';
@@ -26,9 +27,10 @@ function readSavedMainAdminSession() {
 }
 
 export function StaffRoleGate({ children }: { children: ReactNode }) {
-  const { user, schoolId, isOnline } = useAuth();
+  const { user, schoolId, isOnline, logout } = useAuth();
   const tenantId = schoolId || user?.id || '';
-  const { staffSession, staffLoading, staffLogin, hasSavedStaffLogin, clearSavedStaffLogin } = useStaffAuth();
+  const { staffSession, staffLoading, staffLogout, staffLogin, hasSavedStaffLogin, clearSavedStaffLogin } = useStaffAuth();
+  const confirm = useConfirm();
   const [checking, setChecking] = useState(true);
   const [requiresRole, setRequiresRole] = useState(false);
   const [staffName, setStaffName] = useState('');
@@ -44,6 +46,8 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
   const [adminError, setAdminError] = useState('');
   const [error, setError] = useState('');
   const [showStaffPassword, setShowStaffPassword] = useState(false);
+  const [restoreConfirmed, setRestoreConfirmed] = useState(false);
+  const [restorePromptChecked, setRestorePromptChecked] = useState(false);
 
   useEffect(() => {
     if (!tenantId) {
@@ -86,6 +90,55 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [tenantId, isOnline]);
+
+  useEffect(() => {
+    setRestoreConfirmed(false);
+    setRestorePromptChecked(false);
+  }, [tenantId, user?.id, staffSession?.staffMember.id]);
+
+  useEffect(() => {
+    if (staffLoading || checking || restorePromptChecked) return;
+    if (!user?.id && !staffSession) {
+      setRestorePromptChecked(true);
+      setRestoreConfirmed(true);
+      return;
+    }
+
+    let cancelled = false;
+    const showContinuePrompt = async () => {
+      const person = staffSession
+        ? `${staffSession.staffMember.firstName} ${staffSession.staffMember.lastName}`.trim()
+        : `${user?.firstName || 'Admin'} ${user?.lastName || ''}`.trim();
+      const role = staffSession ? staffSession.staffMember.role : 'admin';
+      const ok = await confirm({
+        title: `Continue as ${person || 'current user'}?`,
+        description: staffSession
+          ? `Your staff session is still active as ${role}. Continue working or logout from this session.`
+          : 'Your admin session is still active. Continue working or logout from this session.',
+        confirmLabel: 'Yes, continue',
+        cancelLabel: 'Logout',
+        variant: 'info',
+      });
+      if (cancelled) return;
+      setRestorePromptChecked(true);
+      if (ok) {
+        setRestoreConfirmed(true);
+        if (!staffSession) setAdminProceed(true);
+        return;
+      }
+      if (staffSession) {
+        setRestoreConfirmed(true);
+        staffLogout();
+      } else {
+        await logout();
+      }
+    };
+
+    void showContinuePrompt();
+    return () => {
+      cancelled = true;
+    };
+  }, [staffLoading, checking, restorePromptChecked, user?.id, user?.firstName, user?.lastName, staffSession, confirm, logout]);
 
   useEffect(() => {
     if (!tenantId) {
@@ -198,7 +251,7 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
     }
   }
 
-  if (staffLoading || checking) {
+  if (staffLoading || checking || !restorePromptChecked || (!restoreConfirmed && (user?.id || staffSession))) {
     return (
       <div className="relative min-h-screen bg-cover bg-center p-4" style={{ backgroundImage: `url(${authCover})` }}>
         <div className="pointer-events-none absolute inset-0 bg-white/35" />
@@ -206,7 +259,9 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
           <div className="card overflow-hidden bg-white/82 backdrop-blur-md dark:bg-slate-900/88">
             <div className="card-body flex items-center gap-3">
               <Loader2 size={22} className="animate-spin text-primary-600" />
-              <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">Preparing role access...</span>
+              <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                {staffLoading || checking ? 'Preparing role access...' : 'Restoring session...'}
+              </span>
             </div>
           </div>
         </div>

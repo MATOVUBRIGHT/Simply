@@ -10,7 +10,7 @@
  *    AND the record has no pending local queue entry)
  * - On bootstrap: seed cache from Supabase without overriding pending local changes
  */
-import { supabase, isSupabaseConfigured } from '../supabase';
+import { getActiveSupabaseClient, hasActiveSupabaseConfig } from '../../utils/schoolDatabaseConfig';
 import { generateUUID } from '../../utils/uuid';
 import { matchesTextSearch } from '../../utils/searchMatch';
 import { addToRecycleBin } from '../../utils/recycleBin';
@@ -994,8 +994,12 @@ class SupabaseDataService {
     return userOrSchoolId;
   }
 
-  private get db() { return supabase!; }
-  private get ok() { return isSupabaseConfigured && !!supabase; }
+  private get db() {
+    const client = getActiveSupabaseClient(this.sid(null));
+    if (!client) throw new Error('Cloud database is not configured');
+    return client;
+  }
+  private get ok() { return hasActiveSupabaseConfig(this.sid(null)); }
 
   private queueWrite(item: Omit<QueueItem, 'id' | 'ts'>) {
     enqueue(item);

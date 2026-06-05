@@ -1,13 +1,13 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef, useMemo } from 'react';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { syncService } from '../services/sync';
 import { userDBManager } from '../lib/database/UserDatabaseManager';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { serviceManager } from '../lib/ServiceManager';
 import { isCloudSyncEnabled, isDesktopApp, setCloudSyncEnabled, SCHOFY_SYNC_ENABLED_KEY } from '../utils/desktopSyncPreference';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { store } from '../lib/store';
+import { getActiveSupabaseClient, hasActiveSupabaseConfig } from '../utils/schoolDatabaseConfig';
 
 interface SyncContextType {
   isSyncing: boolean;
@@ -40,6 +40,16 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const MANUAL_SYNC_LIMIT = 3;
   const CLOUD_PULL_MIN_MS = 5 * 60 * 1000;
   const cloudPullStartedRef = useRef<Set<string>>(new Set());
+  const [databaseConfigVersion, setDatabaseConfigVersion] = useState(0);
+  const activeSchoolId = schoolId || user?.schoolId || user?.id;
+  const activeSupabase = useMemo(
+    () => getActiveSupabaseClient(activeSchoolId),
+    [activeSchoolId, databaseConfigVersion]
+  );
+  const activeSupabaseConfigured = useMemo(
+    () => hasActiveSupabaseConfig(activeSchoolId),
+    [activeSchoolId, databaseConfigVersion]
+  );
 
   useEffect(() => {
     if (desktopApp && localStorage.getItem(SCHOFY_SYNC_ENABLED_KEY) === null) {
@@ -53,10 +63,21 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener('schofyCloudSyncPreferenceChanged', onPreferenceChanged);
     window.addEventListener('storage', onPreferenceChanged);
+    window.addEventListener('schofyDatabaseConfigChanged', onPreferenceChanged);
     return () => {
       window.removeEventListener('schofyCloudSyncPreferenceChanged', onPreferenceChanged);
       window.removeEventListener('storage', onPreferenceChanged);
+      window.removeEventListener('schofyDatabaseConfigChanged', onPreferenceChanged);
     };
+  }, []);
+
+  useEffect(() => {
+    const onDatabaseChanged = () => {
+      cloudPullStartedRef.current.clear();
+      setDatabaseConfigVersion(version => version + 1);
+    };
+    window.addEventListener('schofyDatabaseConfigChanged', onDatabaseChanged);
+    return () => window.removeEventListener('schofyDatabaseConfigChanged', onDatabaseChanged);
   }, []);
 
   useEffect(() => {
@@ -71,13 +92,13 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (isSupabaseConfigured && supabase) {
+    if (activeSupabaseConfigured && activeSupabase) {
       if (syncEnabled && user?.id) {
         // Use serviceManager for centralized initialization
         serviceManager.initialize(user.id, schoolId || user.schoolId || user.id);
       }
     }
-  }, [syncEnabled, user?.id, user?.schoolId, schoolId, isSupabaseConfigured]);
+  }, [syncEnabled, user?.id, user?.schoolId, schoolId, activeSupabaseConfigured, activeSupabase]);
 
   useEffect(() => {
     const sid = schoolId || user?.id;
@@ -162,7 +183,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   const pullCloudData = useCallback(
     async (sid: string, showNotifications = false, force = false) => {
-      if (!isOnline || !isCloudSyncEnabled() || !isSupabaseConfigured || !supabase) {
+      if (!isOnline || !isCloudSyncEnabled() || !activeSupabaseConfigured || !activeSupabase) {
         return false;
       }
 
@@ -207,25 +228,25 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         setIsSyncing(false);
       }
     },
-    [addToast, isOnline, loadPendingCount]
+    [addToast, isOnline, loadPendingCount, activeSupabaseConfigured, activeSupabase]
   );
 
   useEffect(() => {
     const sid = schoolId || user?.id;
-    if (!sid || !user?.id || !syncEnabled || !isOnline || !isSupabaseConfigured || !supabase) return;
+    if (!sid || !user?.id || !syncEnabled || !isOnline || !activeSupabaseConfigured || !activeSupabase) return;
 
     const pullKey = `${user.id}:${sid}`;
     if (cloudPullStartedRef.current.has(pullKey)) return;
     cloudPullStartedRef.current.add(pullKey);
 
-    syncService.configure({ supabaseClient: supabase });
+    syncService.configure({ supabaseClient: activeSupabase });
     syncService.setUserId(user.id);
     syncService.setSchoolId(sid);
     void (async () => {
       await pullCloudData(sid, false);
       syncService.enableSync();
     })();
-  }, [schoolId, user?.id, syncEnabled, isOnline, pullCloudData]);
+  }, [schoolId, user?.id, syncEnabled, isOnline, pullCloudData, activeSupabaseConfigured, activeSupabase]);
 
   const wasOnlineRef = useRef(isOnline);
   useEffect(() => {
@@ -339,7 +360,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   const enableSync = useCallback(async () => {
     try {
-      if (!isSupabaseConfigured || !supabase) {
+      const client = getActiveSupabaseClient(schoolId || user?.schoolId || user?.id);
+      if (!hasActiveSupabaseConfig(schoolId || user?.schoolId || user?.id) || !client) {
         addToast('Cloud sync is not configured', 'error');
         return;
       }
@@ -352,7 +374,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const sid = schoolId || user.id;
       setCloudSyncEnabled(true);
       setSyncEnabled(true);
-      syncService.configure({ supabaseClient: supabase });
+      syncService.configure({ supabaseClient: client });
       syncService.setUserId(user.id);
       syncService.setSchoolId(sid);
       void dataService.bootstrapSession(user.id, sid, { wait: false });
@@ -404,7 +426,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         enableSync,
         disableSync,
         isSyncEnabled: syncEnabled,
-        isSupabaseConfigured,
+        isSupabaseConfigured: activeSupabaseConfigured,
       }}
     >
       {children}

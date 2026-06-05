@@ -20,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { SuccessPopup } from '../components/SuccessPopup';
+import { useConfirm } from '../components/ConfirmModal';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
 import { appLogoFileName, isUnlockedRelease, releaseChannelLabel } from '../utils/releaseChannel';
 import { UNLIMITED_PLAN_LABEL } from '../utils/plans';
@@ -140,6 +141,7 @@ export default function Login() {
 
   const { login, register, loginOffline, registerOffline, continueLocally, sendPasswordReset, user, isOnline } = useAuth();
   const { primaryColor } = useTheme();
+  const confirm = useConfirm();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -353,6 +355,15 @@ export default function Login() {
       setError('Enter your email address first, then request a reset link.');
       return;
     }
+
+    const ok = await confirm({
+      title: 'Send password OTP?',
+      description: `Schofy will send a password reset OTP to ${cleanEmail}. Continue only if this is your account email.`,
+      confirmLabel: 'Send OTP',
+      cancelLabel: 'Cancel',
+      variant: 'warning',
+    });
+    if (!ok) return;
 
     setResetLoading(true);
     try {
