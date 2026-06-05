@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { GraduationCap, Mail, Phone, Search, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, GraduationCap, Mail, Phone, Search, Users } from 'lucide-react';
 import type { Class, Student } from '@schofy/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
@@ -16,16 +16,41 @@ export default function Parents() {
   const students = studentsData as Student[];
   const classes = classesData as Class[];
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [showAll, setShowAll] = useState(false);
   const listLoading = useMinimumLoading(loading, 2000);
 
-  const parentRows = students
+  const parentRows = useMemo(() => students
     .filter((student: any) => student.guardianName || student.guardianPhone || student.guardianEmail)
     .filter((student: any) => matchesStudentSearch(student, search, [
       student.guardianName,
       student.guardianPhone,
       student.guardianEmail,
       getClassDisplayName(student.classId, classes),
-    ]));
+    ])), [students, classes, search]);
+  const pageSize = 25;
+  const totalPages = Math.max(1, Math.ceil(parentRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const visibleParentRows = showAll ? parentRows : parentRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const parentStats = useMemo(() => ({
+    parents: parentRows.length,
+    phones: parentRows.filter((student: any) => student.guardianPhone).length,
+    emails: parentRows.filter((student: any) => student.guardianEmail).length,
+    classes: new Set(parentRows.map((student: any) => student.classId).filter(Boolean)).size,
+  }), [parentRows]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  function handleSearch(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
+
+  function cellText(value: string) {
+    return <span title={value} className="block min-w-0 truncate">{value || '-'}</span>;
+  }
 
   return (
     <div className="max-w-full space-y-5 overflow-x-hidden animate-fade-in">
@@ -44,30 +69,49 @@ export default function Parents() {
         </div>
       </div>
 
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {[
+          { label: 'Parents Listed', value: parentStats.parents, icon: Users, color: 'card-solid-indigo' },
+          { label: 'Phone Contacts', value: parentStats.phones, icon: Phone, color: 'card-solid-emerald' },
+          { label: 'Email Contacts', value: parentStats.emails, icon: Mail, color: 'card-solid-cyan' },
+          { label: 'Classes Covered', value: parentStats.classes, icon: GraduationCap, color: 'card-solid-amber' },
+        ].map(card => {
+          const Icon = card.icon;
+          return (
+            <section key={card.label} className={`rounded-lg p-4 text-white shadow-lg ${card.color}`}>
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/18"><Icon size={20} /></span>
+                <div><p className="text-xs font-bold text-white/75">{card.label}</p><p className="text-2xl font-black">{card.value}</p></div>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
       <div className="card min-w-0 overflow-hidden">
         <div className="card-header">
           <div className="relative">
             <Search size={18} className="search-input-icon" />
             <input
               value={search}
-              onChange={event => setSearch(event.target.value)}
+              onChange={event => handleSearch(event.target.value)}
               className="search-input"
               placeholder="Search student name, ID, parent, class, phone, email..."
             />
           </div>
         </div>
-        <div className="table-container !overflow-x-hidden">
-          <table className="!min-w-0 table-fixed">
+        <div className="table-container overflow-x-auto">
+          <table className="min-w-[980px] table-fixed text-sm">
             <thead>
               <tr>
-                <th className="w-12">No.</th>
-                <th className="w-[18%]">Parent / Guardian</th>
-                <th className="w-[17%]">Student</th>
-                <th className="w-[12%]">Student ID</th>
-                <th className="w-[12%]">Class</th>
-                <th className="w-[13%]">Phone</th>
-                <th className="w-[18%]">Email</th>
-                <th className="w-[8%] text-center">Action</th>
+                <th className="w-[52px]">No.</th>
+                <th className="w-[170px]">Parent / Guardian</th>
+                <th className="w-[170px]">Student</th>
+                <th className="w-[115px]">Student ID</th>
+                <th className="w-[130px]">Class</th>
+                <th className="w-[135px]">Phone</th>
+                <th className="w-[235px]">Email</th>
+                <th className="w-[90px] text-center">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -85,19 +129,19 @@ export default function Parents() {
                     <p className="font-medium text-slate-500">No parent details found</p>
                   </td>
                 </tr>
-              ) : parentRows.map((student: any, index) => (
+              ) : visibleParentRows.map((student: any, index) => (
                 <tr key={student.id}>
-                  <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
-                  <td className="break-words font-semibold text-slate-800 dark:text-white">{student.guardianName || '-'}</td>
-                  <td className="break-words">
+                  <td className="text-center text-xs font-semibold text-slate-400">{showAll ? index + 1 : (currentPage - 1) * pageSize + index + 1}</td>
+                  <td className="min-w-0 font-semibold text-slate-800 dark:text-white">{cellText(student.guardianName || '-')}</td>
+                  <td className="min-w-0">
                     <Link to={`/students/${student.id}`} className="font-medium text-primary-600 hover:underline">
-                      {student.firstName} {student.lastName}
+                      {cellText(`${student.firstName} ${student.lastName}`)}
                     </Link>
                   </td>
-                  <td className="break-words font-mono text-xs">{student.studentId || student.admissionNo || '-'}</td>
-                  <td className="break-words">{getClassDisplayName(student.classId, classes)}</td>
-                  <td className="break-words">{student.guardianPhone || '-'}</td>
-                  <td className="break-words">{student.guardianEmail || '-'}</td>
+                  <td className="min-w-0 font-mono text-xs">{cellText(student.studentId || student.admissionNo || '-')}</td>
+                  <td className="min-w-0">{cellText(getClassDisplayName(student.classId, classes))}</td>
+                  <td className="min-w-0">{cellText(student.guardianPhone || '-')}</td>
+                  <td className="min-w-0">{cellText(student.guardianEmail || '-')}</td>
                   <td>
                     <div className="flex items-center justify-center gap-1.5">
                       {student.guardianPhone && (
@@ -127,6 +171,31 @@ export default function Parents() {
             </tbody>
           </table>
         </div>
+        {!listLoading && parentRows.length > pageSize && (
+          <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-semibold text-slate-500">
+              Showing {visibleParentRows.length} of {parentRows.length} parents
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setShowAll(value => !value)} className="btn btn-secondary py-1.5 text-sm">
+                {showAll ? 'Show Pages' : 'Show All'}
+              </button>
+              {!showAll && (
+                <>
+                  <button type="button" onClick={() => setPage(value => Math.max(1, value - 1))} disabled={currentPage <= 1} className="btn btn-secondary py-1.5 text-sm disabled:opacity-50">
+                    <ChevronLeft size={15} /> Prev
+                  </button>
+                  <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    {currentPage} / {totalPages}
+                  </span>
+                  <button type="button" onClick={() => setPage(value => Math.min(totalPages, value + 1))} disabled={currentPage >= totalPages} className="btn btn-secondary py-1.5 text-sm disabled:opacity-50">
+                    Next <ChevronRight size={15} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

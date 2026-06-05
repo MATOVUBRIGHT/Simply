@@ -9,6 +9,7 @@ import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { openPrintPreview } from '../utils/printPreview';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { computeProfitSummary } from '../utils/profit';
+import { PortalSelect } from '../components/PortalSelect';
 
 type ReportType = 'terms' | 'students' | 'fees' | 'payments' | 'attendance' | 'staff' | 'classes' | 'academic' | 'bursaries' | 'discounts' | 'invoices';
 type ReportRow = Record<string, string | number>;
@@ -513,14 +514,8 @@ export default function Reports() {
             <span className="text-xs text-slate-400">Uses class/date filters plus profit term/year</span>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:w-72">
-            <select value={profitTerm} onChange={e => setProfitTerm(e.target.value)} className="form-input form-select truncate px-3 pr-7">
-              <option value="all">All terms</option>
-              {termOptions.map(term => <option key={term} value={term}>Term {term}</option>)}
-            </select>
-            <select value={profitYear} onChange={e => setProfitYear(e.target.value)} className="form-input form-select truncate px-3 pr-7">
-              <option value="all">All years</option>
-              {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
-            </select>
+            <PortalSelect value={profitTerm} onChange={setProfitTerm} options={[{ value: 'all', label: 'All terms' }, ...termOptions.map(term => ({ value: term, label: `Term ${term}` }))]} />
+            <PortalSelect value={profitYear} onChange={setProfitYear} options={[{ value: 'all', label: 'All years' }, ...yearOptions.map(year => ({ value: year, label: String(year) }))]} />
           </div>
         </div>
         <div className="card-body grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -576,18 +571,9 @@ export default function Reports() {
               <Search size={16} className="input-icon" />
               <input value={search} onChange={e => setSearch(e.target.value)} className="form-input form-input-with-icon" placeholder="Search report..." />
             </div>
-            <select value={selectedTerm} onChange={e => setSelectedTerm(e.target.value)} className="form-input form-select truncate px-3 pr-7">
-              <option value="all">All terms</option>
-              {termOptions.map(term => <option key={term} value={term}>Term {term}</option>)}
-            </select>
-            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="form-input form-select truncate px-3 pr-7">
-              <option value="all">All years</option>
-              {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
-            </select>
-            <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="form-input form-select truncate px-3 pr-7">
-              <option value="all">All classes</option>
-              {classes.map((cls: any) => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
-            </select>
+            <PortalSelect value={selectedTerm} onChange={setSelectedTerm} options={[{ value: 'all', label: 'All terms' }, ...termOptions.map(term => ({ value: term, label: `Term ${term}` }))]} />
+            <PortalSelect value={selectedYear} onChange={setSelectedYear} options={[{ value: 'all', label: 'All years' }, ...yearOptions.map(year => ({ value: year, label: String(year) }))]} />
+            <PortalSelect value={selectedClass} onChange={setSelectedClass} options={[{ value: 'all', label: 'All classes' }, ...classes.map((cls: any) => ({ value: cls.id, label: cls.name }))]} />
             <div className="grid grid-cols-2 gap-2">
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="form-input" title="From date" />
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="form-input" title="To date" />

@@ -1,5 +1,5 @@
 // Generated payment access grants. Do not add plaintext verification codes here.
-// The private workbook is "Verification codes.xlsx" and is ignored by git.
+// Source: private "Verification codes.xlsx" workbook. This deployed file stores salted SHA-256 hashes only.
 import type { BillingCycle } from './plans';
 
 export interface EmbeddedAccessGrant {

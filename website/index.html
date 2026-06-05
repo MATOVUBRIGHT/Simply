@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Schofy - School Management System</title>
+    <meta
+      name="description"
+      content="Schofy is a school management system for admissions, attendance, fees, reports, roles, offline work, and release downloads."
+    />
+    <link rel="icon" href="assets/schofy.logo.png" />
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+
+      :root {
+        --ink: #172033;
+        --muted: #5f6f86;
+        --line: #dfe7f0;
+        --soft: #f5f8fb;
+        --white: #ffffff;
+        --green: #22a72b;
+        --green-dark: #13751d;
+        --blue: #246bfe;
+        --indigo: #5546e8;
+        --teal: #0891b2;
+        --shadow: 0 18px 45px rgba(23, 32, 51, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--soft);
+        font-family: "Plus Jakarta Sans", "Segoe UI", Arial, sans-serif;
+        line-height: 1.55;
+        text-rendering: optimizeLegibility;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .shell {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        border-bottom: 1px solid rgba(223, 231, 240, 0.88);
+        background: rgba(255, 255, 255, 0.94);
+        backdrop-filter: blur(14px);
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 74px;
+        gap: 20px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .brand img {
+        width: 44px;
+        height: 44px;
+        border-radius: 8px;
+        object-fit: cover;
+        box-shadow: 0 10px 20px rgba(23, 32, 51, 0.14);
+      }
+
+      .brand span {
+        display: block;
+        font-size: 0.78rem;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .navlinks {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #354258;
+        font-weight: 700;
+        font-size: 0.93rem;
+      }
+
+      .navlinks a {
+        padding: 10px 12px;
+        border-radius: 8px;
+      }
+
+      .navlinks a:hover {
+        background: #edf4ff;
+        color: var(--blue);
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 44px;
+        padding: 0 18px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: var(--green);
+        color: #fff;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 12px 22px rgba(34, 167, 43, 0.24);
+        transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+        background: var(--green-dark);
+        box-shadow: 0 16px 30px rgba(34, 167, 43, 0.28);
+      }
+
+      .button.secondary {
+        background: #fff;
+        color: var(--ink);
+        border-color: var(--line);
+        box-shadow: none;
+      }
+
+      .button.secondary:hover {
+        background: #f2f6fb;
+      }
+
+      .hero {
+        min-height: 650px;
+        padding: 80px 0 34px;
+        color: #fff;
+        background:
+          linear-gradient(90deg, rgba(12, 22, 42, 0.86) 0%, rgba(12, 22, 42, 0.66) 48%, rgba(12, 22, 42, 0.28) 100%),
+          url("assets/cover.jpg") center / cover no-repeat;
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.02fr) minmax(340px, 0.72fr);
+        align-items: end;
+        gap: 42px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.12);
+        font-size: 0.84rem;
+        font-weight: 800;
+        color: #e9f7eb;
+      }
+
+      h1 {
+        margin: 22px 0 18px;
+        max-width: 780px;
+        font-size: clamp(2.4rem, 5vw, 5rem);
+        line-height: 1.02;
+        letter-spacing: 0;
+      }
+
+      .hero p {
+        max-width: 660px;
+        margin: 0;
+        color: rgba(255, 255, 255, 0.86);
+        font-size: clamp(1rem, 2vw, 1.2rem);
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 28px;
+      }
+
+      .release-panel {
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.95);
+        color: var(--ink);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .release-panel header {
+        padding: 20px;
+        border-bottom: 1px solid var(--line);
+        background: #f8fbff;
+      }
+
+      .release-panel h2 {
+        margin: 0;
+        font-size: 1.08rem;
+      }
+
+      .release-panel p {
+        margin: 5px 0 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .quick-release {
+        display: grid;
+        gap: 0;
+      }
+
+      .quick-release a {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        padding: 16px 20px;
+        border-bottom: 1px solid #eef3f8;
+      }
+
+      .quick-release a:last-child {
+        border-bottom: 0;
+      }
+
+      .quick-release a:hover {
+        background: #eef7ef;
+      }
+
+      .quick-release strong {
+        display: block;
+      }
+
+      .quick-release small {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .tag {
+        align-self: center;
+        padding: 5px 9px;
+        border-radius: 8px;
+        background: #e8f7ea;
+        color: var(--green-dark);
+        font-size: 0.72rem;
+        font-weight: 900;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      section {
+        padding: 76px 0;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 26px;
+      }
+
+      .section-head h2 {
+        margin: 0;
+        max-width: 690px;
+        font-size: clamp(1.8rem, 3vw, 2.6rem);
+        line-height: 1.08;
+      }
+
+      .section-head p {
+        max-width: 480px;
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .release-grid,
+      .module-grid,
+      .workflow-grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .release-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 12px 28px rgba(23, 32, 51, 0.07);
+      }
+
+      .release-card {
+        display: flex;
+        flex-direction: column;
+        min-height: 280px;
+        padding: 20px;
+      }
+
+      .release-card .pill {
+        width: fit-content;
+        margin-bottom: 18px;
+      }
+
+      .release-card h3 {
+        margin: 0 0 8px;
+        font-size: 1.18rem;
+      }
+
+      .release-card p {
+        margin: 0 0 18px;
+        color: var(--muted);
+        font-size: 0.94rem;
+      }
+
+      .release-card .button {
+        width: 100%;
+        margin-top: auto;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 0 10px;
+        border-radius: 8px;
+        background: #eef4ff;
+        color: var(--blue);
+        font-weight: 900;
+        font-size: 0.76rem;
+      }
+
+      .pill.green {
+        background: #e8f7ea;
+        color: var(--green-dark);
+      }
+
+      .pill.indigo {
+        background: #efedff;
+        color: var(--indigo);
+      }
+
+      .module-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .module-card {
+        padding: 22px;
+      }
+
+      .icon {
+        display: inline-grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        margin-bottom: 18px;
+        border-radius: 8px;
+        background: #eaf7ec;
+        color: var(--green-dark);
+        font-weight: 900;
+      }
+
+      .module-card h3,
+      .workflow-card h3 {
+        margin: 0 0 8px;
+      }
+
+      .module-card p,
+      .workflow-card p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .product-band {
+        background: #fff;
+        border-block: 1px solid var(--line);
+      }
+
+      .product-shot {
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        gap: 34px;
+        align-items: center;
+      }
+
+      .screen {
+        min-height: 410px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.92)),
+          url("assets/cover.jpg") center / cover no-repeat;
+        box-shadow: var(--shadow);
+        padding: 24px;
+      }
+
+      .mock-top {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .mock-stat {
+        min-height: 84px;
+        padding: 15px;
+        border-radius: 8px;
+        color: #fff;
+        font-weight: 900;
+      }
+
+      .mock-stat:nth-child(1) {
+        background: var(--indigo);
+      }
+
+      .mock-stat:nth-child(2) {
+        background: var(--green);
+      }
+
+      .mock-stat:nth-child(3) {
+        background: var(--teal);
+      }
+
+      .mock-row {
+        display: grid;
+        grid-template-columns: 44px 1fr 110px;
+        gap: 14px;
+        align-items: center;
+        padding: 13px 0;
+        border-bottom: 1px solid #edf1f6;
+      }
+
+      .avatar {
+        width: 38px;
+        height: 38px;
+        border-radius: 8px;
+        background: #dce8ff;
+      }
+
+      .line {
+        height: 10px;
+        border-radius: 8px;
+        background: #dfe7f0;
+      }
+
+      .line.short {
+        width: 70%;
+        margin-top: 8px;
+      }
+
+      .status {
+        height: 28px;
+        border-radius: 8px;
+        background: #e8f7ea;
+      }
+
+      .workflow-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .workflow-card {
+        padding: 22px;
+      }
+
+      .step {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        margin-bottom: 18px;
+        border-radius: 8px;
+        background: var(--ink);
+        color: #fff;
+        font-weight: 900;
+      }
+
+      .support {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+
+      .support-card {
+        padding: 26px;
+      }
+
+      .support-card h3 {
+        margin: 0 0 10px;
+      }
+
+      .support-card p {
+        margin: 0 0 18px;
+        color: var(--muted);
+      }
+
+      .contact-list {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        color: #344157;
+        font-weight: 700;
+      }
+
+      .note {
+        padding: 18px;
+        border: 1px dashed #aab8ca;
+        border-radius: 8px;
+        color: #41516a;
+        background: #f8fbff;
+        font-size: 0.94rem;
+      }
+
+      footer {
+        padding: 34px 0;
+        color: var(--muted);
+        border-top: 1px solid var(--line);
+        background: #fff;
+      }
+
+      .footer-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      @media (max-width: 980px) {
+        .nav {
+          align-items: flex-start;
+          flex-direction: column;
+          padding: 14px 0;
+        }
+
+        .navlinks {
+          flex-wrap: wrap;
+        }
+
+        .hero {
+          padding-top: 54px;
+        }
+
+        .hero-grid,
+        .product-shot,
+        .support {
+          grid-template-columns: 1fr;
+        }
+
+        .release-grid,
+        .module-grid,
+        .workflow-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          width: min(100% - 22px, 1180px);
+        }
+
+        .navlinks a {
+          padding-inline: 8px;
+        }
+
+        .hero {
+          min-height: auto;
+        }
+
+        .hero-grid,
+        .release-grid,
+        .module-grid,
+        .workflow-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .section-head,
+        .footer-row {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .mock-top {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <nav class="shell nav" aria-label="Main navigation">
+          <a class="brand" href="#top" aria-label="Schofy home">
+          <img src="assets/schofy.logo.png" alt="Schofy logo" />
+          <strong>Schofy <span>School Management System</span></strong>
+        </a>
+        <div class="navlinks">
+          <a href="#releases">Releases</a>
+          <a href="#modules">Modules</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#support">Support</a>
+          <a class="button" href="#releases">Downloads</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="shell hero-grid">
+          <div>
+            <span class="eyebrow">Offline-ready school management software</span>
+            <h1>Schofy School Management System</h1>
+            <p>
+              Manage students, attendance, fees, invoices, reports, staff access, and school records from one dependable workspace for everyday administration.
+            </p>
+            <div class="hero-actions">
+              <a class="button" href="#releases">Download Schofy</a>
+              <a class="button secondary" href="#support">Talk to support</a>
+            </div>
+          </div>
+
+          <aside class="release-panel" aria-label="Latest release downloads">
+            <header>
+              <h2>Latest Version 1.1</h2>
+              <p>Select the installer that fits your computer setup.</p>
+            </header>
+            <div class="quick-release">
+              <a href="../Version%20released/02%20Standard%20Release/Schofy%20Setup%201.1.0.exe">
+                <span><strong>Standard Release</strong><small>Full school setup</small></span>
+                <span class="tag">Windows</span>
+              </a>
+              <a href="../Version%20released/03%20Lite%20Release/Schofy%20Lite-1.1.0-x64.exe">
+                <span><strong>Lite Release</strong><small>Smaller installer</small></span>
+                <span class="tag">Lite</span>
+              </a>
+              <a href="../Version%20released/04%20Windows%207%20Release/Schofy-Setup-1.1.0-win7.exe">
+                <span><strong>Windows 7 Release</strong><small>Legacy support build</small></span>
+                <span class="tag">Legacy</span>
+              </a>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="releases">
+        <div class="shell">
+          <div class="section-head">
+            <div>
+              <h2>Download the right Schofy installer</h2>
+            </div>
+            <p>Install Schofy on school office computers, then activate the account or request help from support if your school needs a special release.</p>
+          </div>
+
+          <div class="release-grid">
+            <article class="card release-card">
+              <span class="pill green">Recommended</span>
+              <h3>Standard Release</h3>
+              <p>Main Schofy installer for schools using the complete desktop app with account activation, plans, sync, and full records.</p>
+              <a class="button" href="../Version%20released/02%20Standard%20Release/Schofy%20Setup%201.1.0.exe">Download Standard</a>
+            </article>
+
+            <article class="card release-card">
+              <span class="pill indigo">Lightweight</span>
+              <h3>Lite Release</h3>
+              <p>A compact installer for lighter computers and faster transfer where the school needs a smaller desktop package.</p>
+              <a class="button" href="../Version%20released/03%20Lite%20Release/Schofy%20Lite-1.1.0-x64.exe">Download Lite</a>
+            </article>
+
+            <article class="card release-card">
+              <span class="pill">Legacy PCs</span>
+              <h3>Windows 7 Release</h3>
+              <p>Legacy installer for older Windows computers that cannot run the current standard desktop release comfortably.</p>
+              <a class="button" href="../Version%20released/04%20Windows%207%20Release/Schofy-Setup-1.1.0-win7.exe">Download Win 7</a>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="product-band" id="modules">
+        <div class="shell product-shot">
+          <div>
+            <div class="section-head">
+              <div>
+                <h2>A daily workspace for the whole school office</h2>
+              </div>
+            </div>
+            <p>
+              Schofy supports the real school office: registering learners, checking attendance, issuing invoices, recording payments, printing report cards, managing staff access, and keeping work available when internet is not reliable.
+            </p>
+          </div>
+
+          <div class="screen" aria-label="Schofy product preview">
+            <div class="mock-top">
+              <div class="mock-stat">300<br /><small>Students</small></div>
+              <div class="mock-stat">98%<br /><small>Attendance</small></div>
+              <div class="mock-stat">UGX<br /><small>Fees</small></div>
+            </div>
+            <div class="mock-row"><span class="avatar"></span><span><span class="line"></span><span class="line short"></span></span><span class="status"></span></div>
+            <div class="mock-row"><span class="avatar"></span><span><span class="line"></span><span class="line short"></span></span><span class="status"></span></div>
+            <div class="mock-row"><span class="avatar"></span><span><span class="line"></span><span class="line short"></span></span><span class="status"></span></div>
+            <div class="mock-row"><span class="avatar"></span><span><span class="line"></span><span class="line short"></span></span><span class="status"></span></div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="shell">
+          <div class="module-grid">
+            <article class="card module-card"><span class="icon">01</span><h3>Students and admissions</h3><p>Register learners, organize classes, manage guardians, emails, IDs, and profiles.</p></article>
+            <article class="card module-card"><span class="icon">02</span><h3>Attendance and boarding</h3><p>Track daily attendance, day and boarding records, and class attendance summaries.</p></article>
+            <article class="card module-card"><span class="icon">03</span><h3>Fees, invoices, and ledgers</h3><p>Create fee structures, invoice students, record payments, and print ledgers.</p></article>
+            <article class="card module-card"><span class="icon">04</span><h3>Exams and reports</h3><p>Enter marks, use report card templates, print results, and manage grading.</p></article>
+            <article class="card module-card"><span class="icon">05</span><h3>Staff roles</h3><p>Let teachers, accountants, and office staff work with the pages they are allowed to access.</p></article>
+            <article class="card module-card"><span class="icon">06</span><h3>Offline-first records</h3><p>Keep working from local data and sync in the background when online access returns.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow">
+        <div class="shell">
+          <div class="section-head">
+            <h2>A clear path from setup to daily use</h2>
+            <p>Start with the core records, then expand into finance, reports, roles, and synchronized devices.</p>
+          </div>
+          <div class="workflow-grid">
+            <article class="card workflow-card"><span class="step">1</span><h3>Set up the school</h3><p>Add school details, logo, terms, plans, roles, and payment accounts.</p></article>
+            <article class="card workflow-card"><span class="step">2</span><h3>Import records</h3><p>Bring in students, staff, classes, fees, subjects, and existing school data.</p></article>
+            <article class="card workflow-card"><span class="step">3</span><h3>Run daily work</h3><p>Record attendance, payments, assignments, reports, invoices, and expenses.</p></article>
+            <article class="card workflow-card"><span class="step">4</span><h3>Print and sync</h3><p>Export PDFs, print templates, use local mode, and sync online devices when available.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section id="support" class="product-band">
+        <div class="shell support">
+          <article class="card support-card">
+            <h3>Contact and support</h3>
+            <p>For activation, installation help, school setup, and special release access, contact Schofy support.</p>
+            <ul class="contact-list">
+              <li>WhatsApp: 0750034304</li>
+              <li>WhatsApp: 0775011029</li>
+              <li>Email: support@schofy.app</li>
+            </ul>
+          </article>
+          <article class="card support-card">
+            <h3>Special school releases</h3>
+            <p>Unlimited or private school builds are supplied directly by Schofy support after confirmation.</p>
+            <div class="note">
+              Public downloads include the standard, lite, and legacy installers. Special builds are handled manually so each school receives the correct package and activation guidance.
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell footer-row">
+        <span>Schofy School Management System - Version 1.1</span>
+        <span>Practical school records, offline work, finance, reports, and support.</span>
+      </div>
+    </footer>
+  </body>
+</html>

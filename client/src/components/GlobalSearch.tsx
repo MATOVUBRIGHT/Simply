@@ -8,6 +8,7 @@ import { store } from '../lib/store';
 import { getStudentDisplayId, matchesStudentSearch } from '../utils/studentSearch';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { getSubjectDisplayCode } from '../utils/subjects';
+import { releaseChannelLabel } from '../utils/releaseChannel';
 
 interface SearchResult {
   id: string;
@@ -66,6 +67,7 @@ const pages = [
   { path: '/plans', title: 'Plans & Subscription', subtitle: 'Plan status, upgrade and renewal', icon: Receipt, keywords: ['plans', 'subscription', 'upgrade', 'trial', 'billing'] },
   { path: '/recycle-bin', title: 'Recycle Bin', subtitle: 'Restore deleted records', icon: ClipboardList, keywords: ['recycle bin', 'deleted', 'restore', 'trash'] },
   { path: '/settings', title: 'Settings', subtitle: 'System settings', icon: Settings, keywords: ['settings', 'preferences', 'config'] },
+  { path: '/settings', title: 'App Version & Release', subtitle: `Current download type: ${releaseChannelLabel}`, icon: Settings, keywords: ['version', 'release', 'download version', 'app version', 'release type', 'lite', 'windows 7', 'windows version', 'desktop version', 'web version', 'locked release', 'unlocked release'] },
   { path: '/payment-accounts', title: 'Payment Accounts Settings', subtitle: 'Configure invoice payment accounts', icon: Settings, keywords: ['payment accounts settings', 'bank settings', 'mobile money settings', 'invoice accounts settings'] },
   { path: '/settings', title: 'Cloud Backup', subtitle: 'Backup and sync settings', icon: Settings, keywords: ['cloud backup', 'google drive', 'backup', 'restore backup', 'sync settings'] },
   { path: '/settings', title: 'New Term', subtitle: 'Promote students and start a new term', icon: Settings, keywords: ['new term', 'promote students', 'complete term', 'start term', 'term settings'] },

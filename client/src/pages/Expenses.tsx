@@ -8,6 +8,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { generateUUID } from '../utils/uuid';
 import { matchesTextSearch } from '../utils/searchMatch';
+import { PortalSelect } from '../components/PortalSelect';
 
 type ExpenseDraft = {
   title: string;
@@ -186,9 +187,7 @@ export default function Expenses() {
           </div>
           <div>
             <label className="form-label">Category</label>
-            <select value={draft.category} onChange={event => setDraft(prev => ({ ...prev, category: event.target.value }))} className="form-input form-select">
-              {categories.map(category => <option key={category} value={category}>{category}</option>)}
-            </select>
+            <PortalSelect value={draft.category} onChange={value => setDraft(prev => ({ ...prev, category: value }))} options={categories.map(category => ({ value: category, label: category }))} />
           </div>
           <div>
             <label className="form-label">Amount</label>
@@ -200,12 +199,16 @@ export default function Expenses() {
           </div>
           <div>
             <label className="form-label">Payment Method</label>
-            <select value={draft.paymentMethod} onChange={event => setDraft(prev => ({ ...prev, paymentMethod: event.target.value as PaymentMethod }))} className="form-input form-select">
-              <option value={PaymentMethod.CASH}>Cash</option>
-              <option value={PaymentMethod.BANK_TRANSFER}>Bank Transfer</option>
-              <option value={PaymentMethod.CARD}>Card</option>
-              <option value={PaymentMethod.OTHER}>Other</option>
-            </select>
+            <PortalSelect
+              value={draft.paymentMethod}
+              onChange={value => setDraft(prev => ({ ...prev, paymentMethod: value as PaymentMethod }))}
+              options={[
+                { value: PaymentMethod.CASH, label: 'Cash' },
+                { value: PaymentMethod.BANK_TRANSFER, label: 'Bank Transfer' },
+                { value: PaymentMethod.CARD, label: 'Card' },
+                { value: PaymentMethod.OTHER, label: 'Other' },
+              ]}
+            />
           </div>
           <div>
             <label className="form-label">Recorded By</label>
@@ -229,17 +232,18 @@ export default function Expenses() {
             <Search size={16} className="search-input-icon" />
             <input value={search} onChange={event => setSearch(event.target.value)} className="search-input" placeholder="Search expenses..." />
           </div>
-          <select value={filterCategory} onChange={event => setFilterCategory(event.target.value)} className="form-input form-select">
-            <option value="all">All Categories</option>
-            {categories.map(category => <option key={category} value={category}>{category}</option>)}
-          </select>
-          <select value={filterMethod} onChange={event => setFilterMethod(event.target.value)} className="form-input form-select">
-            <option value="all">All Methods</option>
-            <option value={PaymentMethod.CASH}>Cash</option>
-            <option value={PaymentMethod.BANK_TRANSFER}>Bank</option>
-            <option value={PaymentMethod.CARD}>Card</option>
-            <option value={PaymentMethod.OTHER}>Other</option>
-          </select>
+          <PortalSelect value={filterCategory} onChange={setFilterCategory} options={[{ value: 'all', label: 'All Categories' }, ...categories.map(category => ({ value: category, label: category }))]} />
+          <PortalSelect
+            value={filterMethod}
+            onChange={setFilterMethod}
+            options={[
+              { value: 'all', label: 'All Methods' },
+              { value: PaymentMethod.CASH, label: 'Cash' },
+              { value: PaymentMethod.BANK_TRANSFER, label: 'Bank' },
+              { value: PaymentMethod.CARD, label: 'Card' },
+              { value: PaymentMethod.OTHER, label: 'Other' },
+            ]}
+          />
         </div>
         <div className="table-container">
           <table>

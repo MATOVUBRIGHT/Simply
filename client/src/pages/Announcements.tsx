@@ -11,6 +11,7 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
+import { PortalSelect } from '../components/PortalSelect';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { deleteInThirtyPercentBatches } from '../utils/bulkDelete';
@@ -416,12 +417,16 @@ export default function Announcements() {
                   </div>
                   <div className="space-y-2">
                     <label className="form-label">Priority</label>
-                    <select value={formData.priority} onChange={e => setFormData(prev => ({ ...prev, priority: e.target.value as Priority }))} className="form-input">
-                      <option value={Priority.LOW}>Low - General info</option>
-                      <option value={Priority.MEDIUM}>Medium - Important</option>
-                      <option value={Priority.HIGH}>High - Urgent attention</option>
-                      <option value={Priority.URGENT}>Urgent - Immediate action</option>
-                    </select>
+                    <PortalSelect
+                      value={formData.priority}
+                      onChange={value => setFormData(prev => ({ ...prev, priority: value as Priority }))}
+                      options={[
+                        { value: Priority.LOW, label: 'Low - General info' },
+                        { value: Priority.MEDIUM, label: 'Medium - Important' },
+                        { value: Priority.HIGH, label: 'High - Urgent attention' },
+                        { value: Priority.URGENT, label: 'Urgent - Immediate action' },
+                      ]}
+                    />
                   </div>
                   <div className="space-y-2">
                     <label className="form-label">Event Date <span className="text-slate-400 font-normal text-xs">(optional — shows on calendar)</span></label>

@@ -80,22 +80,22 @@ export default function StaffSessionBanner() {
   const { staffMember } = staffSession;
 
   return (
-    <div className={`fixed bottom-0 left-0 right-0 z-[9998] bg-indigo-600 text-white px-4 py-2 flex items-center justify-between shadow-lg transition-transform duration-200 ${hidden ? 'translate-y-full' : 'translate-y-0'}`}>
+    <div className={`fixed bottom-0 left-0 right-0 z-[9998] border-t border-white/45 bg-white/45 px-4 py-2 text-slate-900 shadow-[0_-10px_30px_rgba(15,23,42,0.10)] backdrop-blur-xl transition-transform duration-200 dark:border-slate-700/45 dark:bg-slate-950/45 dark:text-white ${hidden ? 'translate-y-full' : 'translate-y-0'}`}>
       <div className="flex items-center gap-2 text-sm">
-        <Shield size={15} className="text-indigo-200" />
-        <span className="font-medium">{staffMember.firstName} {staffMember.lastName}</span>
-        <span className="text-indigo-200 text-xs">({staffMember.staffId} · {staffMember.role})</span>
+        <Shield size={15} className="text-primary-600 dark:text-primary-300" />
+        <span className="font-semibold">{staffMember.firstName} {staffMember.lastName}</span>
+        <span className="text-slate-600 text-xs dark:text-slate-300">({staffMember.staffId} · {staffMember.role})</span>
       </div>
       <div className="flex items-center gap-2">
         <button
           onClick={() => navigate('/roles')}
-          className="flex items-center gap-1 text-xs text-indigo-200 hover:text-white transition-colors px-2 py-1 rounded hover:bg-white/10"
+          className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-primary-700 transition-colors hover:bg-white/55 hover:text-primary-900 dark:text-primary-200 dark:hover:bg-slate-800/60 dark:hover:text-white"
         >
           <Eye size={13} /> My Access
         </button>
         <button
           onClick={staffLogout}
-          className="flex items-center gap-1.5 text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg transition-colors font-medium"
+          className="flex items-center gap-1.5 rounded-lg border border-white/50 bg-white/45 px-3 py-1.5 text-xs font-semibold text-slate-800 transition-colors hover:bg-white/75 dark:border-slate-700/60 dark:bg-slate-900/45 dark:text-slate-100 dark:hover:bg-slate-800/70"
         >
           <LogOut size={13} /> Sign Out
         </button>

@@ -19,6 +19,7 @@ import { matchesTextSearch } from '../utils/searchMatch';
 import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { getSubjectDisplayCode, normalizeSubjectCode } from '../utils/subjects';
 import { getGradeFromScale, getSavedGradingScale } from '../utils/grading';
+import { PortalSelect } from '../components/PortalSelect';
 
 interface StudentGrade extends ExamResult {
   studentName: string;
@@ -1184,41 +1185,30 @@ export default function Grades() {
               <div className="px-7 pb-4 border-b border-slate-200 grid grid-cols-2 sm:grid-cols-3 gap-3 shrink-0">
                 <div>
                   <label className="form-label">Class *</label>
-                  <select value={bulkForm.classId}
-                    onChange={e => { setBulkForm(p => ({ ...p, classId: e.target.value, studentId: '' })); setBulkScores({}); }}
-                    className="form-input" required>
-                    <option value="">- Select Class -</option>
-                    {sortClassesBySectionThenLevel([...allClassesData]).map((c: any) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                  <PortalSelect
+                    value={bulkForm.classId}
+                    onChange={value => { setBulkForm(p => ({ ...p, classId: value, studentId: '' })); setBulkScores({}); }}
+                    placeholder="- Select Class -"
+                    options={[{ value: '', label: '- Select Class -' }, ...sortClassesBySectionThenLevel([...allClassesData]).map((c: any) => ({ value: c.id, label: c.name }))]}
+                  />
                 </div>
                 <div>
                   <label className="form-label">Student *</label>
-                  <select value={bulkForm.studentId} onChange={e => handleBulkStudentChange(e.target.value)}
-                    className="form-input" required disabled={!bulkForm.classId}>
-                    <option value="">- Select Student -</option>
-                    {studentsForBulkClass.map(s => (
-                      <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>
-                    ))}
-                  </select>
+                  <PortalSelect
+                    value={bulkForm.studentId}
+                    onChange={handleBulkStudentChange}
+                    disabled={!bulkForm.classId}
+                    placeholder="- Select Student -"
+                    options={[{ value: '', label: '- Select Student -' }, ...studentsForBulkClass.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))]}
+                  />
                 </div>
                 <div>
                   <label className="form-label">Exam Type</label>
-                  <select value={bulkForm.examType} onChange={e => setBulkForm(p => ({ ...p, examType: e.target.value }))} className="form-input">
-                    <option value="Mid-Term">Mid-Term</option>
-                    <option value="End-Term">End-Term</option>
-                    <option value="CAT">CAT</option>
-                    <option value="Final">Final Exam</option>
-                  </select>
+                  <PortalSelect value={bulkForm.examType} onChange={value => setBulkForm(p => ({ ...p, examType: value }))} options={['Mid-Term', 'End-Term', 'CAT', 'Final'].map(value => ({ value, label: value === 'Final' ? 'Final Exam' : value }))} />
                 </div>
                 <div>
                   <label className="form-label">Term</label>
-                  <select value={bulkForm.term} onChange={e => setBulkForm(p => ({ ...p, term: e.target.value }))} className="form-input">
-                    <option value="1">Term 1</option>
-                    <option value="2">Term 2</option>
-                    <option value="3">Term 3</option>
-                  </select>
+                  <PortalSelect value={bulkForm.term} onChange={value => setBulkForm(p => ({ ...p, term: value }))} options={[1, 2, 3].map(term => ({ value: String(term), label: `Term ${term}` }))} />
                 </div>
                 <div>
                   <label className="form-label">Year</label>
@@ -1344,15 +1334,7 @@ export default function Grades() {
               </div>
               <div>
                 <label className="form-label">Term</label>
-                <select
-                  value={invoiceTerm}
-                  onChange={(e) => setInvoiceTerm(e.target.value)}
-                  className="form-input"
-                >
-                  <option value="1">Term 1</option>
-                  <option value="2">Term 2</option>
-                  <option value="3">Term 3</option>
-                </select>
+                <PortalSelect value={invoiceTerm} onChange={setInvoiceTerm} options={[1, 2, 3].map(term => ({ value: String(term), label: `Term ${term}` }))} />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button onClick={() => setShowInvoiceModal(false)} className="btn btn-secondary" disabled={isCreatingInvoice}>Cancel</button>
@@ -1459,36 +1441,23 @@ export default function Grades() {
                   {/* Class selector */}
                   <div>
                     <label className="form-label">Select Class *</label>
-                    <select
+                    <PortalSelect
                       value={templateClassId}
-                      onChange={e => { setTemplateClassId(e.target.value); setTemplateStudentIds(new Set()); }}
-                      className="form-input"
-                    >
-                      <option value="">- Choose a class -</option>
-                      {sortClassesBySectionThenLevel([...allClassesData]).map((c: any) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                      onChange={value => { setTemplateClassId(value); setTemplateStudentIds(new Set()); }}
+                      placeholder="- Choose a class -"
+                      options={[{ value: '', label: '- Choose a class -' }, ...sortClassesBySectionThenLevel([...allClassesData]).map((c: any) => ({ value: c.id, label: c.name }))]}
+                    />
                   </div>
 
                   {/* Exam config */}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                     <div>
                       <label className="form-label">Exam Type</label>
-                      <select value={importExamType} onChange={e => setImportExamType(e.target.value)} className="form-input">
-                        <option value="Mid-Term">Mid-Term</option>
-                        <option value="End-Term">End-Term</option>
-                        <option value="CAT">CAT</option>
-                        <option value="Final">Final Exam</option>
-                      </select>
+                      <PortalSelect value={importExamType} onChange={setImportExamType} options={['Mid-Term', 'End-Term', 'CAT', 'Final'].map(value => ({ value, label: value === 'Final' ? 'Final Exam' : value }))} />
                     </div>
                     <div>
                       <label className="form-label">Term</label>
-                      <select value={importTerm} onChange={e => setImportTerm(e.target.value)} className="form-input">
-                        <option value="1">Term 1</option>
-                        <option value="2">Term 2</option>
-                        <option value="3">Term 3</option>
-                      </select>
+                      <PortalSelect value={importTerm} onChange={setImportTerm} options={[1, 2, 3].map(term => ({ value: String(term), label: `Term ${term}` }))} />
                     </div>
                     <div>
                       <label className="form-label">Year</label>
@@ -1615,10 +1584,9 @@ export default function Grades() {
                               <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
                               <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                               <td className="px-3 py-2">
-                                <select
+                                <PortalSelect
                                   value={currentMapping}
-                                  onChange={e => {
-                                    const newKey = e.target.value;
+                                  onChange={newKey => {
                                     setFieldMapping(prev => {
                                       const next = { ...prev };
                                       // Remove old mapping for this header
@@ -1627,13 +1595,9 @@ export default function Grades() {
                                       return next;
                                     });
                                   }}
-                                  className="w-full form-input py-1 px-2 text-xs"
-                                >
-                                  <option value="">- Skip -</option>
-                                  {gradeExpectedFields.map(f => (
-                                    <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
-                                  ))}
-                                </select>
+                                  className="py-1 text-xs"
+                                  options={[{ value: '', label: '- Skip -' }, ...gradeExpectedFields.map(f => ({ value: f.key, label: `${f.label}${f.required ? ' *' : ''}` }))]}
+                                />
                               </td>
                             </tr>
                           );

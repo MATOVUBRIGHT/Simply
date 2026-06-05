@@ -9,7 +9,6 @@ import UpdateBanner from './components/UpdateBanner';
 import DesktopUpdatePrompt from './components/DesktopUpdatePrompt';
 import StorageWarning from './components/StorageWarning';
 import SubscriptionGate from './components/SubscriptionGate';
-import StaffSessionBanner from './components/StaffSessionBanner';
 import { StaffRoleGate } from './components/StaffRoleGate';
 import { useStaffAuth } from './contexts/StaffAuthContext';
 import { useToast } from './contexts/ToastContext';
@@ -279,7 +278,7 @@ function MainApp() {
             <SubscriptionGate>
             <Layout>
               <Suspense fallback={<FullScreenLoader label="Loading..." />}>
-                <div key={`${location.pathname}${location.search}`} className="page-shell page-shell-enter">
+                <div className="page-shell">
                   <Routes location={location}>
                     <Route path="/" element={<ErrorBoundary inline><Dashboard /></ErrorBoundary>} />
                     <Route path="/dashboard" element={<Navigate to="/" replace />} />
@@ -331,7 +330,6 @@ function MainApp() {
             </SubscriptionGate>
           <UpdateBanner />
           <StorageWarning />
-          <StaffSessionBanner />
           <LocalMergePrompt />
           <CloudProblemPrompt />
           </StaffRoleGate>
@@ -366,7 +364,7 @@ function App() {
     return (
       <>
         <Suspense fallback={<FullScreenLoader label="Loading..." />}>
-          <div key={`${location.pathname}${location.search}`} className="page-shell page-shell-enter">
+          <div className="page-shell">
             <Routes location={location}>
               <Route path="/login" element={<Login />} />
               <Route path="*" element={<Navigate to="/login" replace />} />

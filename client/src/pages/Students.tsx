@@ -2,7 +2,7 @@
 import { createPortal } from 'react-dom';
 import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, Settings, Edit } from 'lucide-react';
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, Settings, Edit, ImagePlus } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import type { Class, Student } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
@@ -27,6 +27,7 @@ import { FitStatValue } from '../components/FitStatValue';
 import { LargeDataSpinner } from '../components/LargeDataSpinner';
 import { sortStudentsForList } from '../utils/studentOrdering';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
+import { BulkImageUpdateModal, type BulkImageRecord } from '../components/BulkImageUpdateModal';
 
 const avatarColors = [
   'bg-rose-500',
@@ -185,7 +186,9 @@ export default function Students() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportDropdownPos, setExportDropdownPos] = useState({ top: 0, right: 0 });
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const exportButtonRef = useRef<HTMLButtonElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -202,6 +205,7 @@ export default function Students() {
   const [showStatusFilter, setShowStatusFilter] = useState(false);
   const [showClassFilter, setShowClassFilter] = useState(false);
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
+  const [showBulkImageModal, setShowBulkImageModal] = useState(false);
   const [completedYearFilter, setCompletedYearFilter] = useState<string>('');
   const [planLimitMessage, setPlanLimitMessage] = useState<string | null>(null);
   const [importRemaining, setImportRemaining] = useState<number | null>(null);
@@ -453,6 +457,17 @@ export default function Students() {
 
   const totalPages = Math.ceil(totalCount / itemsPerPage);
   const paginatedStudents = students;
+  const allVisibleStudentsSelected = paginatedStudents.length > 0 && selectedStudents.size === paginatedStudents.length;
+  const selectedStudentImageRecords = useMemo<BulkImageRecord[]>(() => paginatedStudents
+    .filter(student => selectedStudents.has(student.id))
+    .map(student => ({
+      id: student.id,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      primaryId: student.studentId || student.admissionNo,
+      secondaryId: student.admissionNo,
+      label: `${student.firstName} ${student.lastName}`,
+    })), [paginatedStudents, selectedStudents]);
 
   useEffect(() => {
     const lastPage = Math.max(1, totalPages);
@@ -878,6 +893,7 @@ export default function Students() {
     const data = getStudentsByFilter();
     exportToCSV(data, getExportLabel().toLowerCase().replace(/\s+/g, '-'), studentCSVColumns);
     addToast(`${getExportLabel()} exported to CSV`, 'success');
+    setShowExportMenu(false);
   }
 
   function handleExportPDF() {
@@ -896,13 +912,15 @@ export default function Students() {
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const isExportMenuClick = target instanceof Element && target.closest('[data-students-export-menu="true"]');
+      if (exportMenuRef.current && !exportMenuRef.current.contains(target) && !isExportMenuClick) {
         setShowExportMenu(false);
       }
-      if (statusFilterRef.current && !statusFilterRef.current.contains(event.target as Node)) {
+      if (statusFilterRef.current && !statusFilterRef.current.contains(target)) {
         setShowStatusFilter(false);
       }
-      if (classFilterRef.current && !classFilterRef.current.contains(event.target as Node)) {
+      if (classFilterRef.current && !classFilterRef.current.contains(target)) {
         setShowClassFilter(false);
       }
     }
@@ -1114,6 +1132,32 @@ export default function Students() {
     setImportStep('preview');
   }
 
+  async function handleBulkStudentImages(updates: Array<{ id: string; photoUrl: string }>) {
+    const id = schoolId || user?.id;
+    if (!id || updates.length === 0) return;
+    const now = new Date().toISOString();
+    await Promise.all(updates.map(update =>
+      dataService.update(id, 'students', update.id, { photoUrl: update.photoUrl, updatedAt: now } as any)
+    ));
+    await refreshStudents();
+    await loadData();
+    addToast(`Updated ${updates.length} student image${updates.length === 1 ? '' : 's'}`, 'success');
+    window.dispatchEvent(new CustomEvent('studentsUpdated', { detail: { table: 'students' } }));
+  }
+
+  async function handleRemoveBulkStudentImages(ids: string[]) {
+    const id = schoolId || user?.id;
+    if (!id || ids.length === 0) return;
+    const now = new Date().toISOString();
+    await Promise.all(ids.map(studentId =>
+      dataService.update(id, 'students', studentId, { photoUrl: null, updatedAt: now } as any)
+    ));
+    await refreshStudents();
+    await loadData();
+    addToast(`Removed ${ids.length} student image${ids.length === 1 ? '' : 's'}`, 'success');
+    window.dispatchEvent(new CustomEvent('studentsUpdated', { detail: { table: 'students' } }));
+  }
+
   async function executeImport(importAvailableOnly = false) {
     const id = schoolId || user?.id;
     if (importPreview.length === 0 || !id) {
@@ -1283,6 +1327,25 @@ export default function Students() {
   const completedCount = allStudents.filter(s => s.status === 'completed').length;
   const totalEnrolled = allStudents.filter(s => s.status !== 'completed').length;
 
+  const updateExportDropdownPosition = useCallback(() => {
+    const rect = exportButtonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 192;
+    setExportDropdownPos({
+      top: rect.bottom + 8,
+      right: Math.max(8, Math.min(window.innerWidth - rect.right, window.innerWidth - width - 8)),
+    });
+  }, []);
+
+  function toggleExportMenu() {
+    if (showExportMenu) {
+      setShowExportMenu(false);
+      return;
+    }
+    updateExportDropdownPosition();
+    setShowExportMenu(true);
+  }
+
   const getDropdownPosition = (button: HTMLButtonElement | null) => {
     const rect = button?.getBoundingClientRect();
     if (!rect) return { top: 0, left: 0 };
@@ -1310,6 +1373,17 @@ export default function Students() {
     };
   }, [showStatusFilter, showClassFilter, updateDropdownPositions, throttledDropdownPositionUpdate]);
 
+  useEffect(() => {
+    if (!showExportMenu) return;
+    updateExportDropdownPosition();
+    window.addEventListener('scroll', updateExportDropdownPosition, true);
+    window.addEventListener('resize', updateExportDropdownPosition);
+    return () => {
+      window.removeEventListener('scroll', updateExportDropdownPosition, true);
+      window.removeEventListener('resize', updateExportDropdownPosition);
+    };
+  }, [showExportMenu, updateExportDropdownPosition]);
+
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
@@ -1329,9 +1403,10 @@ export default function Students() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative" ref={exportMenuRef}>
+          <div className="relative z-[100]" ref={exportMenuRef}>
             <button 
-              onClick={() => setShowExportMenu(!showExportMenu)} 
+              ref={exportButtonRef}
+              onClick={toggleExportMenu}
               className="btn btn-secondary"
               title="Export"
             >
@@ -1339,34 +1414,6 @@ export default function Students() {
               <span className="hidden sm:inline">Export {viewFilter === 'all' ? '' : `(${viewFilter === 'completed' ? 'Records' : viewFilter})`}</span>
               <ChevronDown size={14} className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
             </button>
-            {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden animate-dropdown-in">
-                <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                  Exporting: {getExportLabel()}
-                </div>
-                <button
-                  onClick={handleExportPDF}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <FileText size={14} />
-                  Export PDF
-                </button>
-                <button
-                  onClick={handleExportCSV}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <Download size={14} />
-                  Export CSV
-                </button>
-                <button
-                  onClick={handleExportExcel}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  <FileText size={14} />
-                  Export Excel
-                </button>
-              </div>
-            )}
           </div>
           <button onClick={() => setShowImportModal(true)} className="btn btn-secondary" title="Import">
             <Upload size={16} />
@@ -1644,6 +1691,15 @@ export default function Students() {
                 >
                   {selectedStudents.size === paginatedStudents.length ? 'Deselect All' : 'Select All'}
                 </button>
+                {allVisibleStudentsSelected && (
+                  <button
+                    onClick={() => setShowBulkImageModal(true)}
+                    className="px-3 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
+                  >
+                    <ImagePlus size={12} />
+                    Edit Images
+                  </button>
+                )}
                 {viewFilter !== 'deactivated' && (
                   <>
                     <button
@@ -1716,6 +1772,15 @@ export default function Students() {
                 >
                   {selectedStudents.size === paginatedStudents.length ? 'Deselect All' : 'Select All'}
                 </button>
+                {allVisibleStudentsSelected && (
+                  <button
+                    onClick={() => setShowBulkImageModal(true)}
+                    className="px-3 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
+                  >
+                    <ImagePlus size={12} />
+                    Edit Images
+                  </button>
+                )}
                 <button
                   onClick={handleBulkMarkActive}
                   className="px-3 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
@@ -2399,6 +2464,51 @@ export default function Students() {
           </div>
         </div>
       ), document.body)}
+
+      {showExportMenu && createPortal(
+        <div
+          data-students-export-menu="true"
+          className="fixed z-[999999] w-48 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl animate-dropdown-in dark:border-slate-700 dark:bg-slate-800"
+          style={{ top: exportDropdownPos.top, right: exportDropdownPos.right }}
+        >
+          <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            Exporting: {getExportLabel()}
+          </div>
+          <button
+            onClick={handleExportPDF}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            <FileText size={14} />
+            Export PDF
+          </button>
+          <button
+            onClick={handleExportCSV}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            <Download size={14} />
+            Export CSV
+          </button>
+          <button
+            onClick={handleExportExcel}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            <FileText size={14} />
+            Export Excel
+          </button>
+        </div>,
+        document.body
+      )}
+
+      {showBulkImageModal && (
+        <BulkImageUpdateModal
+          title="Edit Student Images"
+          entityLabel="student"
+          records={selectedStudentImageRecords}
+          onClose={() => setShowBulkImageModal(false)}
+          onApply={handleBulkStudentImages}
+          onRemove={handleRemoveBulkStudentImages}
+        />
+      )}
       {(
         <BulkEditClassModal
           isOpen={showBulkEditModal}

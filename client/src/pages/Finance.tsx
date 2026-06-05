@@ -1011,17 +1011,17 @@ export default function Finance() {
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-slate-700 dark:bg-slate-700 sm:grid-cols-5">
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
                   {[
-                    { key: 'summary.openingBalance', label: 'Opening Balance', value: selectedLedgerRow.openingBalance, color: selectedLedgerRow.openingBalance > 0 ? 'text-pink-600' : 'text-slate-700 dark:text-slate-200' },
-                    { key: 'summary.currentInvoiced', label: 'Current Invoiced', value: selectedLedgerRow.invoiced, color: 'text-indigo-600 dark:text-indigo-300' },
-                    { key: 'summary.currentPaid', label: 'Current Paid', value: selectedLedgerRow.paid, color: 'text-emerald-600 dark:text-emerald-300' },
-                    { key: 'summary.closingBalance', label: 'Closing Balance', value: selectedLedgerRow.closingBalance, color: selectedLedgerRow.closingBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300' },
-                    { key: 'summary.upfrontCredit', label: 'Upfront Credit', value: selectedLedgerRow.upfrontCredit, color: 'text-emerald-600 dark:text-emerald-300' },
+                    { key: 'summary.openingBalance', label: 'Opening Balance', value: selectedLedgerRow.openingBalance, bg: 'from-pink-500 to-rose-600' },
+                    { key: 'summary.currentInvoiced', label: 'Current Invoiced', value: selectedLedgerRow.invoiced, bg: 'from-indigo-500 to-violet-600' },
+                    { key: 'summary.currentPaid', label: 'Current Paid', value: selectedLedgerRow.paid, bg: 'from-emerald-500 to-green-600' },
+                    { key: 'summary.closingBalance', label: 'Closing Balance', value: selectedLedgerRow.closingBalance, bg: selectedLedgerRow.closingBalance > 0 ? 'from-red-500 to-rose-600' : 'from-emerald-500 to-teal-600' },
+                    { key: 'summary.upfrontCredit', label: 'Upfront Credit', value: selectedLedgerRow.upfrontCredit, bg: 'from-sky-500 to-blue-600' },
                   ].map(item => (
-                    <div key={item.label} className="bg-white p-3 dark:bg-slate-900 print:bg-white">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText(item.key, item.label)}</p>
-                      <p className={`mt-1 text-lg font-bold tabular-nums ${item.color}`}>{formatMoney(item.value)}</p>
+                    <div key={item.label} className={`rounded-lg bg-gradient-to-br ${item.bg} p-3 text-white shadow-sm print:bg-white print:text-slate-900`}>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-white/80 print:text-slate-500">{editableLedgerText(item.key, item.label)}</p>
+                      <p className="mt-1 text-lg font-bold tabular-nums text-white print:text-slate-900">{formatMoney(item.value)}</p>
                     </div>
                   ))}
                 </div>
@@ -1116,26 +1116,18 @@ export default function Finance() {
               {renderSchoolPrintHeader(`Fee Ledger - Term ${ledgerTerm} ${ledgerYear}`)}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
-              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.openingBalance', 'Opening Balance')}</p>
-                <p className="mt-1 text-lg font-bold tabular-nums text-slate-900 dark:text-white">{formatMoney(ledgerTotals.openingBalance)}</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.invoiced', 'Invoiced')}</p>
-                <p className="mt-1 text-lg font-bold tabular-nums text-indigo-600 dark:text-indigo-300">{formatMoney(ledgerTotals.invoiced)}</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.paid', 'Paid')}</p>
-                <p className="mt-1 text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-300">{formatMoney(ledgerTotals.paid)}</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.closingBalance', 'Closing Balance')}</p>
-                <p className={`mt-1 text-lg font-bold tabular-nums ${ledgerTotals.closingBalance > 0 ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300'}`}>{formatMoney(ledgerTotals.closingBalance)}</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editableLedgerText('summary.upfrontCredit', 'Upfront Credit')}</p>
-                <p className="mt-1 text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-300">{formatMoney(ledgerTotals.upfrontCredit)}</p>
-              </div>
+              {[
+                { key: 'summary.openingBalance', label: 'Opening Balance', value: ledgerTotals.openingBalance, bg: 'from-pink-500 to-rose-600' },
+                { key: 'summary.invoiced', label: 'Invoiced', value: ledgerTotals.invoiced, bg: 'from-indigo-500 to-violet-600' },
+                { key: 'summary.paid', label: 'Paid', value: ledgerTotals.paid, bg: 'from-emerald-500 to-green-600' },
+                { key: 'summary.closingBalance', label: 'Closing Balance', value: ledgerTotals.closingBalance, bg: ledgerTotals.closingBalance > 0 ? 'from-red-500 to-rose-600' : 'from-emerald-500 to-teal-600' },
+                { key: 'summary.upfrontCredit', label: 'Upfront Credit', value: ledgerTotals.upfrontCredit, bg: 'from-sky-500 to-blue-600' },
+              ].map(item => (
+                <div key={item.key} className={`rounded-lg bg-gradient-to-br ${item.bg} p-3 text-white shadow-sm print:bg-white print:text-slate-900`}>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-white/80 print:text-slate-500">{editableLedgerText(item.key, item.label)}</p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-white print:text-slate-900">{formatMoney(item.value)}</p>
+                </div>
+              ))}
             </div>
 
             <div className="table-container mt-5">

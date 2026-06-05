@@ -223,7 +223,7 @@ export default function Login() {
         setSecuringAccount(true);
         setSyncStatus({ step: 'creating', message: 'Creating your account...', progress: 20 });
 
-        if (!phone.trim()) {
+        if (!offlineAuthMode && !phone.trim()) {
           setError('Phone number is required');
           setSecuringAccount(false);
           setLoading(false);
@@ -571,7 +571,7 @@ export default function Login() {
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{isRegister ? 'Create account' : 'Welcome back'}</h2>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    {isUnlockedRelease ? `${releaseChannelLabel}: unlimited offline access.` : offlineAuthMode ? 'Verified offline login only. A plan code must already be active on this device.' : isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}
+                    {isUnlockedRelease ? `${releaseChannelLabel}: unlimited offline access.` : offlineAuthMode ? 'Create or sign in to a local desktop account. A Schofy code unlocks the plan offline.' : isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}
                   </p>
                 </div>
               </div>
@@ -708,7 +708,7 @@ export default function Login() {
 
               {offlineAuthMode && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-                  Offline login only works after this device has an active Schofy plan from a verification code. New accounts and first-time plan activation need internet.
+                  Offline desktop accounts can be created locally. The app will ask for a Schofy verification code to activate the plan on this device.
                 </div>
               )}
 
@@ -723,8 +723,8 @@ export default function Login() {
                     <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} className="form-input" placeholder="Last name" required />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="form-label">Phone number</label>
-                    <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="form-input" placeholder="0771234567" required autoComplete="tel" />
+                    <label className="form-label">Phone number{offlineAuthMode ? ' (optional)' : ''}</label>
+                    <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="form-input" placeholder="0771234567" required={!offlineAuthMode} autoComplete="tel" />
                   </div>
                 </div>
               )}
@@ -875,7 +875,7 @@ export default function Login() {
 
             <div className="mt-6 flex items-center justify-center gap-2 border-t border-slate-200 pt-5 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <Cloud size={16} className={isOnline ? 'text-emerald-500' : 'text-amber-500'} />
-              <span>{isUnlockedRelease ? `Unlocked release - ${UNLIMITED_PLAN_LABEL} plan, works offline` : offlineAuthMode ? 'Verified offline login - plan required' : isOnline ? 'Connected to cloud' : 'Offline access requires a previously verified plan code'}</span>
+              <span>{isUnlockedRelease ? `Unlocked release - ${UNLIMITED_PLAN_LABEL} plan, works offline` : offlineAuthMode ? 'Local desktop account - activate with a Schofy code' : isOnline ? 'Connected to cloud' : 'Offline local account available on desktop'}</span>
             </div>
           </section>
         </div>
@@ -912,10 +912,10 @@ export default function Login() {
             </div>
             <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">You're offline</h2>
             <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">
-              New accounts cannot be created offline. Sign in only if this desktop already has an active Schofy plan verified by code.
+              You can create a local desktop account offline. A Schofy verification code is required to activate the plan on this device.
             </p>
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              To unlock offline access, connect to internet, choose a plan, send payment through WhatsApp, then enter the one-time Schofy verification code.
+              Enter offline mode, create or sign in to a local account, then use the one-time Schofy verification code when the plan screen appears.
             </div>
             <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
@@ -930,7 +930,7 @@ export default function Login() {
                 onClick={() => enterOfflineMode()}
                 className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
               >
-                Verified offline login
+                Offline account
               </button>
             </div>
           </div>

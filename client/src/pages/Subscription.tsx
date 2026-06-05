@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { Check, CreditCard, Crown, Zap, Star, HelpCircle, Phone, X, MessageCircle, ChevronDown, ChevronUp, LogOut, RefreshCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { PLAN_DEFINITIONS, PlanDefinition, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen, saveCurrentPlan } from '../utils/plans';
+import { useConfirm } from '../components/ConfirmModal';
 
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
@@ -16,6 +17,7 @@ const faqs = [
 export default function Subscription() {
   const navigate = useNavigate();
   const { user, schoolId, logout } = useAuth();
+  const confirm = useConfirm();
   const tenantId = schoolId || user?.id;
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'term' | 'yearly'>('term');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -295,11 +297,23 @@ export default function Subscription() {
                 <button
                   onClick={async () => {
                     if (!transactionId.trim()) {
-                      alert('Please enter Transaction ID');
+                      await confirm({
+                        title: 'Transaction ID Required',
+                        description: 'Please enter Transaction ID before submitting payment.',
+                        confirmLabel: 'OK',
+                        cancelLabel: 'Close',
+                        variant: 'info',
+                      });
                       return;
                     }
                     if (!user?.id) {
-                      alert('Please sign in first');
+                      await confirm({
+                        title: 'Sign In Required',
+                        description: 'Please sign in first before submitting payment.',
+                        confirmLabel: 'OK',
+                        cancelLabel: 'Close',
+                        variant: 'info',
+                      });
                       return;
                     }
                     const usage = await saveCurrentPlan(tenantId!, selectedPlan.id, billingCycle, {

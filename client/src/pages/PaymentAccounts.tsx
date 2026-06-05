@@ -6,6 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useTableData } from '../lib/store';
 import { shouldSaveOnEnter } from '../utils/keyboard';
+import { PortalSelect } from '../components/PortalSelect';
 
 type AccountDraft = {
   accountName: string;
@@ -194,17 +195,17 @@ export default function PaymentAccounts() {
             <div className="card-body space-y-4">
               <div>
                 <label className="form-label">Payment Method</label>
-                <select
+                <PortalSelect
                   value={account.paymentMethod}
-                  onChange={e => updateAccount(index, { paymentMethod: e.target.value })}
-                  className="form-input"
-                >
-                  <option value="BANK TRANSFER">Bank Transfer</option>
-                  <option value="MOBILE MONEY">Mobile Money</option>
-                  <option value="CASH">Cash</option>
-                  <option value="CHEQUE">Cheque</option>
-                  <option value="OTHER">Other</option>
-                </select>
+                  onChange={value => updateAccount(index, { paymentMethod: value })}
+                  options={[
+                    { value: 'BANK TRANSFER', label: 'Bank Transfer' },
+                    { value: 'MOBILE MONEY', label: 'Mobile Money' },
+                    { value: 'CASH', label: 'Cash' },
+                    { value: 'CHEQUE', label: 'Cheque' },
+                    { value: 'OTHER', label: 'Other' },
+                  ]}
+                />
               </div>
               {!isMobileMoney(account.paymentMethod) && (
                 <div>

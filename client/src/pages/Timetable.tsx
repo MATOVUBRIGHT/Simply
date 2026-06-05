@@ -10,6 +10,7 @@ import { generateUUID } from '../utils/uuid';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { getSubjectDisplayCode } from '../utils/subjects';
 import { openPrintPreview } from '../utils/printPreview';
+import { PortalSelect } from '../components/PortalSelect';
 
 type DraftCell = {
   id?: string;
@@ -502,9 +503,7 @@ export default function Timetable() {
           </div>
           <div>
             <label className="form-label">Class</label>
-            <select value={selectedClassId} onChange={event => changeClass(event.target.value)} className="form-input">
-              {classes.map(classItem => <option key={classItem.id} value={classItem.id}>{classItem.name}</option>)}
-            </select>
+            <PortalSelect value={selectedClassId} onChange={changeClass} options={classes.map(classItem => ({ value: classItem.id, label: classItem.name }))} />
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
             <div>
@@ -585,10 +584,10 @@ export default function Timetable() {
                         <td key={key} className="border-b border-slate-100 p-1.5 dark:border-slate-800">
                           <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800/60">
                             {hasEntryDetails(cell) && renderHighlightCard({ ...cell, dayOfWeek: day, startTime: slot.startTime, endTime: slot.endTime }, true)}
-                            <select
+                            <PortalSelect
                               value={cell.entryType || 'class'}
-                              onChange={event => {
-                                const entryType = event.target.value as DraftCell['entryType'];
+                              onChange={value => {
+                                const entryType = value as DraftCell['entryType'];
                                 updateCell(day, slot, {
                                   entryType,
                                   subjectId: entryType === 'class' || entryType === 'exam' ? cell.subjectId : '',
@@ -596,24 +595,19 @@ export default function Timetable() {
                                   customName: cell.customName,
                                 });
                               }}
-                              className="form-input h-8 truncate text-xs"
-                            >
-                              <option value="class">Class</option>
-                              <option value="exam">Exam</option>
-                              <option value="event">Custom Event</option>
-                              <option value="free">Free Time</option>
-                            </select>
+                              className="h-8 text-xs"
+                              options={[
+                                { value: 'class', label: 'Class' },
+                                { value: 'exam', label: 'Exam' },
+                                { value: 'event', label: 'Custom Event' },
+                                { value: 'free', label: 'Free Time' },
+                              ]}
+                            />
                             {((cell.entryType || 'class') === 'class' || cell.entryType === 'exam') && (
-                              <select value={cell.subjectId} onChange={event => updateCell(day, slot, { subjectId: event.target.value })} className="form-input h-8 truncate text-xs" title={cell.subjectId ? subjectMap.get(cell.subjectId)?.name : 'Subject'}>
-                                <option value="">Subject</option>
-                                {classSubjects.map(subject => <option key={subject.id} value={subject.id}>{getSubjectDisplayCode(subject)}</option>)}
-                              </select>
+                              <PortalSelect value={cell.subjectId} onChange={value => updateCell(day, slot, { subjectId: value })} className="h-8 text-xs" placeholder="Subject" options={[{ value: '', label: 'Subject' }, ...classSubjects.map(subject => ({ value: subject.id, label: getSubjectDisplayCode(subject) }))]} />
                             )}
                             {cell.entryType === 'exam' && (
-                              <select value={cell.examId} onChange={event => updateCell(day, slot, { examId: event.target.value })} className="form-input h-8 truncate text-xs">
-                                <option value="">Select exam</option>
-                                {classExams.map(exam => <option key={exam.id} value={exam.id}>{exam.name} - T{exam.term} {exam.year}</option>)}
-                              </select>
+                              <PortalSelect value={cell.examId} onChange={value => updateCell(day, slot, { examId: value })} className="h-8 text-xs" placeholder="Select exam" options={[{ value: '', label: 'Select exam' }, ...classExams.map(exam => ({ value: exam.id, label: `${exam.name} - T${exam.term} ${exam.year}` }))]} />
                             )}
                             {cell.entryType !== 'free' && (
                               <input
@@ -630,10 +624,7 @@ export default function Timetable() {
                               placeholder="Room"
                             />
                             <div className="flex gap-2">
-                              <select value={cell.teacherId || ''} onChange={event => updateCell(day, slot, { teacherId: event.target.value })} className="form-input h-8 min-w-0 flex-1 truncate text-xs">
-                                <option value="">Teacher</option>
-                                {teachers.map(teacher => <option key={teacher.id} value={teacher.id}>{teacher.firstName} {teacher.lastName}</option>)}
-                              </select>
+                              <PortalSelect value={cell.teacherId || ''} onChange={value => updateCell(day, slot, { teacherId: value })} className="h-8 min-w-0 flex-1 text-xs" placeholder="Teacher" options={[{ value: '', label: 'Teacher' }, ...teachers.map(teacher => ({ value: teacher.id, label: `${teacher.firstName} ${teacher.lastName}` }))]} />
                               {(cell.entryType === 'free' || cell.subjectId || cell.teacherId || cell.examId || cell.customName || cell.room) && (
                                 <button type="button" onClick={() => clearCell(day, slot)} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" title="Clear period">
                                   <X size={14} />

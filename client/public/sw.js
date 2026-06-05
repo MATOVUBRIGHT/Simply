@@ -10,8 +10,8 @@
  * - Cache is versioned — old caches are deleted on activate
  */
 
-const CACHE_VERSION = 'schofy-v14';
-const ASSET_CACHE = 'schofy-assets-v14';
+const CACHE_VERSION = 'schofy-v15';
+const ASSET_CACHE = 'schofy-assets-v15';
 
 // Core files to pre-cache on install
 const PRECACHE_URLS = [
@@ -25,9 +25,6 @@ const PRECACHE_URLS = [
   '/cover.jpg',
   '/schofy.logo.png',
   '/chat-icon.png',
-  '/chat icon.png',
-  '/chat%20icon.png',
-  '/schofy-assistant-icon.png',
   '/sound/success.mp3',
   '/sound/error.wav',
   '/sounds/success.mp3',
@@ -267,9 +264,7 @@ self.addEventListener('message', event => {
       '/icon-512.png',
       '/cover.jpg',
       '/schofy.logo.png',
-      '/chat icon.png',
-      '/chat%20icon.png',
-      '/schofy-assistant-icon.png',
+      '/chat-icon.png',
       '/sound/success.mp3',
       '/sound/error.wav',
       '/sounds/success.mp3',

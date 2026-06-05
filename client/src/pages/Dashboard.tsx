@@ -6,6 +6,7 @@ import { DashboardStats } from '@schofy/shared';
 import { useCurrency } from '../hooks/useCurrency';
 import { useActiveStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useStaffAuth } from '../contexts/StaffAuthContext';
 import { useTableData } from '../lib/store';
 import { 
   ResponsiveContainer,
@@ -44,6 +45,7 @@ const UGANDA_HOLIDAYS: { month: number; day: number; name: string }[] = [
 
 export default function Dashboard() {
   const { user, schoolId } = useAuth();
+  const { staffSession, isStaffMode } = useStaffAuth();
   const navigate = useNavigate();
   const { formatMoney } = useCurrency();
   const calendarToday = useMemo(() => new Date(), []);
@@ -265,9 +267,13 @@ export default function Dashboard() {
     return Array.from({ length: 8 }, (_item, index) => currentYear - 2 + index);
   }, [calendarToday]);
   const userName = useMemo(() => {
+    if (isStaffMode && staffSession?.staffMember) {
+      const staffName = `${staffSession.staffMember.firstName || ''} ${staffSession.staffMember.lastName || ''}`.trim();
+      return staffName || staffSession.staffMember.staffId || 'Staff';
+    }
     const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
     return fullName || user?.email?.split('@')[0] || 'Admin';
-  }, [user]);
+  }, [isStaffMode, staffSession, user]);
   const timeGreeting = useMemo(() => {
     const hour = calendarToday.getHours();
     if (hour < 12) return 'Good morning';

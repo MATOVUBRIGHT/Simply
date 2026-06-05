@@ -15,6 +15,7 @@ import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { sortClassesBySectionThenLevel, groupClassesBySection } from '../utils/classroom';
 import { PortalDropdown } from '../components/PortalDropdown';
+import { PortalSelect } from '../components/PortalSelect';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { cleanupDeletedClassReferences } from '../utils/classDeletionCleanup';
@@ -834,27 +835,51 @@ export default function Classes() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="form-label">Day</label>
-                  <select value={ttForm.dayOfWeek} onChange={e => setTtForm(p => ({ ...p, dayOfWeek: e.target.value }))} className="form-input">
-                    {DAYS.map((d, i) => <option key={i} value={String(i + 1)}>{d}</option>)}
-                  </select>
+                  <PortalSelect
+                    value={ttForm.dayOfWeek}
+                    onChange={value => setTtForm(p => ({ ...p, dayOfWeek: value }))}
+                    options={DAYS.map((day, index) => ({ value: String(index + 1), label: day }))}
+                  />
                 </div>
                 <div>
                   <label className="form-label">Subject *</label>
-                  <select value={ttForm.subjectId} onChange={e => setTtForm(p => ({ ...p, subjectId: e.target.value }))} className="form-input">
+                  <PortalSelect
+                    value={ttForm.subjectId}
+                    onChange={value => setTtForm(p => ({ ...p, subjectId: value }))}
+                    placeholder="Select"
+                    options={[
+                      { value: '', label: 'Select' },
+                      ...(subjectsData as any[])
+                        .filter(s => s.classId === timetableClassId)
+                        .map(s => ({ value: s.id, label: s.name })),
+                    ]}
+                  />
+                  {false && <>
                     <option value="">— Select —</option>
                     {(subjectsData as any[]).filter(s => s.classId === timetableClassId).map(s => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
-                  </select>
+                  </>}
                 </div>
                 <div>
                   <label className="form-label">Teacher</label>
-                  <select value={ttForm.teacherId} onChange={e => setTtForm(p => ({ ...p, teacherId: e.target.value }))} className="form-input">
+                  <PortalSelect
+                    value={ttForm.teacherId}
+                    onChange={value => setTtForm(p => ({ ...p, teacherId: value }))}
+                    placeholder="Optional"
+                    options={[
+                      { value: '', label: 'Optional' },
+                      ...(staffData as any[])
+                        .filter(s => s.role === 'teacher' || s.role === 'Teacher')
+                        .map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` })),
+                    ]}
+                  />
+                  {false && <>
                     <option value="">— Optional —</option>
                     {(staffData as any[]).filter(s => s.role === 'teacher' || s.role === 'Teacher').map(s => (
                       <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>
                     ))}
-                  </select>
+                  </>}
                 </div>
                 <div>
                   <label className="form-label">Start Time *</label>
@@ -985,10 +1010,9 @@ export default function Classes() {
                               <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
                               <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                               <td className="px-3 py-2">
-                                <select
+                                <PortalSelect
                                   value={currentMapping}
-                                  onChange={e => {
-                                    const newKey = e.target.value;
+                                  onChange={newKey => {
                                     setFieldMapping(prev => {
                                       const next = { ...prev };
                                       Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; });
@@ -996,13 +1020,12 @@ export default function Classes() {
                                       return next;
                                     });
                                   }}
-                                  className="w-full form-input py-1 px-2 text-xs"
-                                >
-                                  <option value="">Skip</option>
-                                  {classExpectedFields.map(f => (
-                                    <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
-                                  ))}
-                                </select>
+                                  className="py-1 text-xs"
+                                  options={[
+                                    { value: '', label: 'Skip' },
+                                    ...classExpectedFields.map(f => ({ value: f.key, label: `${f.label}${f.required ? ' *' : ''}` })),
+                                  ]}
+                                />
                               </td>
                             </tr>
                           );

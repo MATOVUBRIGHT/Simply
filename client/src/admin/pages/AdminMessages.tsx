@@ -5,6 +5,7 @@ import { useAdminTheme } from '../AdminThemeContext';
 import { buildAdminMessageLink, normalizeExternalUrl } from '../../utils/adminMessageLinks';
 import { downloadAttachment, openExternalLink } from '../../utils/externalActions';
 import { matchesTextSearch } from '../../utils/searchMatch';
+import { useConfirm } from '../../components/ConfirmModal';
 
 interface SchoolOption { schoolId: string; schoolName: string; email: string; lastSeenAt?: string; online: boolean; }
 interface SentMessage {
@@ -38,6 +39,7 @@ const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 
 export default function AdminMessages() {
   const { isDark, t } = useAdminTheme();
+  const confirm = useConfirm();
   const [schools, setSchools] = useState<SchoolOption[]>([]);
   const [selectedSchools, setSelectedSchools] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
@@ -323,7 +325,13 @@ export default function AdminMessages() {
 
   async function clearChat() {
     if (!supabase) return;
-    if (!confirm('Clear all broadcast messages and school replies from the Schofy assistant chat?')) return;
+    const ok = await confirm({
+      title: 'Clear Assistant Chat',
+      description: 'Clear all broadcast messages and school replies from the Schofy assistant chat?',
+      confirmLabel: 'Clear Chat',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setClearing(true);
     try {
       await supabase.from('admin_messages').delete().neq('id', '__never__');

@@ -34,6 +34,10 @@ build
 .next
 out
 public
+!client/public/
+!client/public/chat-icon.png
+!client/public/website/
+!client/public/website/**
 
 # Package manager
 pnpm-lock.yaml
@@ -43,6 +47,7 @@ yarn.lock
 *.log
 logs
 *.log*
+!client/public/website/assets/schofy.logo.png
 test-supabase-console.txt
 
 # IDE

@@ -12,6 +12,7 @@ import { matchesTextSearch } from '../utils/searchMatch';
 import { getSubjectDisplayCode } from '../utils/subjects';
 import { shouldSaveOnEnter } from '../utils/keyboard';
 import { useConfirm } from '../components/ConfirmModal';
+import { PortalSelect } from '../components/PortalSelect';
 
 type CardFilter = 'all' | 'homework' | 'tests' | 'completed' | 'results';
 
@@ -29,11 +30,11 @@ type WorkItem = {
   studentCount: number;
 };
 
-const cardConfig: Array<{ id: CardFilter; label: string; icon: any; iconClass: string }> = [
-  { id: 'homework', label: 'Issued Assignments', icon: BookOpenCheck, iconClass: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300' },
-  { id: 'tests', label: 'Issued Tests', icon: ClipboardList, iconClass: 'bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300' },
-  { id: 'completed', label: 'Completed', icon: CheckCircle2, iconClass: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300' },
-  { id: 'results', label: 'Results', icon: Award, iconClass: 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300' },
+const cardConfig: Array<{ id: CardFilter; label: string; icon: any; cardClass: string }> = [
+  { id: 'homework', label: 'Issued Assignments', icon: BookOpenCheck, cardClass: 'card-solid-indigo' },
+  { id: 'tests', label: 'Issued Tests', icon: ClipboardList, cardClass: 'card-solid-cyan' },
+  { id: 'completed', label: 'Completed', icon: CheckCircle2, cardClass: 'card-solid-emerald' },
+  { id: 'results', label: 'Results', icon: Award, cardClass: 'card-solid-amber' },
 ];
 
 function toDateTime(value: unknown) {
@@ -271,15 +272,15 @@ export default function HomeworkTests() {
             <button
               key={card.id}
               onClick={() => setActiveCard(isActive ? 'all' : card.id)}
-              className={`card text-left transition-all hover:-translate-y-0.5 hover:shadow-lg ${isActive ? 'ring-2 ring-primary-400' : ''}`}
+              className={`overflow-hidden rounded-lg text-left text-white shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl ${card.cardClass} ${isActive ? 'ring-2 ring-offset-2 ring-primary-400 dark:ring-offset-slate-950' : ''}`}
             >
-              <div className="card-body flex items-center gap-4">
-                <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${card.iconClass}`}>
+              <div className="flex items-center gap-4 p-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/18">
                   <Icon size={22} />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">{card.label}</p>
-                  <p className="mt-1 text-2xl font-black text-slate-900 dark:text-white">{counts[card.id as keyof typeof counts]}</p>
+                  <p className="text-sm font-bold text-white/78">{card.label}</p>
+                  <p className="mt-1 text-3xl font-black">{counts[card.id as keyof typeof counts]}</p>
                 </div>
               </div>
             </button>
@@ -293,14 +294,22 @@ export default function HomeworkTests() {
             <Search size={16} className="input-icon" />
             <input value={search} onChange={e => setSearch(e.target.value)} className="form-input form-input-with-icon" placeholder="Search assignments or tests..." />
           </div>
-          <select value={filterClass} onChange={e => { setFilterClass(e.target.value); setFilterSubject('all'); }} className="form-input form-select truncate px-3 pr-7">
-            <option value="all">All Classes</option>
-            {classes.map((cls: any) => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
-          </select>
-          <select value={filterSubject} onChange={e => setFilterSubject(e.target.value)} className="form-input form-select truncate px-3 pr-7">
-            <option value="all">All Subjects</option>
-            {subjectOptions.map((subject: any) => <option key={subject.id} value={subject.id}>{subjectName(subject.id)}</option>)}
-          </select>
+          <PortalSelect
+            value={filterClass}
+            onChange={value => { setFilterClass(value); setFilterSubject('all'); }}
+            options={[
+              { value: 'all', label: 'All Classes' },
+              ...classes.map((cls: any) => ({ value: cls.id, label: cls.name })),
+            ]}
+          />
+          <PortalSelect
+            value={filterSubject}
+            onChange={setFilterSubject}
+            options={[
+              { value: 'all', label: 'All Subjects' },
+              ...subjectOptions.map((subject: any) => ({ value: subject.id, label: subjectName(subject.id) })),
+            ]}
+          />
           <button onClick={() => { setActiveCard('all'); setFilterClass('all'); setFilterSubject('all'); setSearch(''); }} className="btn btn-secondary">
             Clear
           </button>
@@ -399,19 +408,29 @@ export default function HomeworkTests() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
                   <label className="form-label">Class</label>
-                  <select value={draft.classId} onChange={e => setDraft(prev => ({ ...prev, classId: e.target.value, subjectId: '' }))} className="form-input form-select">
-                    <option value="">Select class</option>
-                    {classes.map((cls: any) => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
-                  </select>
+                  <PortalSelect
+                    value={draft.classId}
+                    onChange={value => setDraft(prev => ({ ...prev, classId: value, subjectId: '' }))}
+                    placeholder="Select class"
+                    options={[
+                      { value: '', label: 'Select class' },
+                      ...classes.map((cls: any) => ({ value: cls.id, label: cls.name })),
+                    ]}
+                  />
                 </div>
                 <div>
                   <label className="form-label">Subject</label>
-                  <select value={draft.subjectId} onChange={e => setDraft(prev => ({ ...prev, subjectId: e.target.value }))} className="form-input form-select">
-                    <option value="">Select subject</option>
-                    {subjects
-                      .filter((subject: any) => !draft.classId || !subject.classId || subject.classId === draft.classId)
-                      .map((subject: any) => <option key={subject.id} value={subject.id}>{subjectName(subject.id)}</option>)}
-                  </select>
+                  <PortalSelect
+                    value={draft.subjectId}
+                    onChange={value => setDraft(prev => ({ ...prev, subjectId: value }))}
+                    placeholder="Select subject"
+                    options={[
+                      { value: '', label: 'Select subject' },
+                      ...subjects
+                        .filter((subject: any) => !draft.classId || !subject.classId || subject.classId === draft.classId)
+                        .map((subject: any) => ({ value: subject.id, label: subjectName(subject.id) })),
+                    ]}
+                  />
                 </div>
                 <div>
                   <label className="form-label">Due Date</label>

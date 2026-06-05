@@ -323,14 +323,6 @@ export default function SubscriptionGate({ children }: Props) {
   const handleVerifyCode = async () => {
     const tenantId = schoolId || user?.id;
     if (!tenantId || verifyingCode) return;
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      setVerificationNotice({
-        type: 'error',
-        message: 'Connect to the internet to verify a new code.',
-        reason: 'Your already verified plan stays saved for offline access, but plan changes and first-time code verification require internet.',
-      });
-      return;
-    }
     setVerifyingCode(true);
     setVerificationNotice(null);
     try {
@@ -339,7 +331,7 @@ export default function SubscriptionGate({ children }: Props) {
         setVerificationCode('');
         setVerificationNotice({ type: 'success', message: `${result.message} Redirecting to dashboard...` });
         setChecking(true);
-        await checkSubscription({ forceRemote: true });
+        await checkSubscription({ forceRemote: typeof navigator === 'undefined' ? true : navigator.onLine });
         window.setTimeout(() => navigate('/'), 900);
         return;
       }

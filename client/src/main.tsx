@@ -83,9 +83,7 @@ if (import.meta.env.PROD && !isFileProtocol && 'serviceWorker' in navigator) {
             '/cover.jpg',
             '/schofy.logo.png',
             '/Schofy.logo_unlocked.png',
-            '/chat icon.png',
-            '/chat%20icon.png',
-            '/schofy-assistant-icon.png',
+            '/chat-icon.png',
             '/sound/success.mp3',
             '/sound/error.wav',
             '/sounds/success.mp3',
@@ -170,7 +168,9 @@ if (isAdminPath) {
   // Admin portal — minimal providers, no school auth
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <AppRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <AdminApp />
+      <ConfirmProvider>
+        <AdminApp />
+      </ConfirmProvider>
     </AppRouter>
   );
 } else {

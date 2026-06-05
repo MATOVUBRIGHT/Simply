@@ -15,6 +15,7 @@ import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
+import { PortalSelect } from '../components/PortalSelect';
 
 export default function Transport() {
   const { user, schoolId } = useAuth();
@@ -498,16 +499,13 @@ export default function Transport() {
             </div>
           </div>
           <div className="p-5">
-            <select 
-              value={selectedRoute} 
-              onChange={e => setSelectedRoute(e.target.value)} 
-              className="form-input mb-5"
-            >
-              <option value="">Select a route to view students</option>
-              {routes.map(r => (
-                <option key={r.id} value={r.id}>{r.name} - {formatMoney(r.fee)}/month</option>
-              ))}
-            </select>
+            <PortalSelect
+              value={selectedRoute}
+              onChange={setSelectedRoute}
+              className="mb-5"
+              placeholder="Select a route to view students"
+              options={[{ value: '', label: 'Select a route to view students' }, ...routes.map(r => ({ value: r.id, label: `${r.name} - ${formatMoney(r.fee)}/month` }))]}
+            />
             
             {selectedRoute ? (
               routeStudents.length > 0 ? (
@@ -641,10 +639,9 @@ export default function Transport() {
                                 <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
                                 <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                                 <td className="px-3 py-2">
-                                  <select
+                                  <PortalSelect
                                     value={currentMapping}
-                                    onChange={e => {
-                                      const newKey = e.target.value;
+                                    onChange={newKey => {
                                       setFieldMapping(prev => {
                                         const next = { ...prev };
                                         Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; });
@@ -652,13 +649,9 @@ export default function Transport() {
                                         return next;
                                       });
                                     }}
-                                    className="w-full form-input py-1 px-2 text-xs"
-                                  >
-                                    <option value="">Skip</option>
-                                    {transportExpectedFields.map(f => (
-                                      <option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>
-                                    ))}
-                                  </select>
+                                    className="py-1 text-xs"
+                                    options={[{ value: '', label: 'Skip' }, ...transportExpectedFields.map(f => ({ value: f.key, label: `${f.label}${f.required ? ' *' : ''}` }))]}
+                                  />
                                 </td>
                               </tr>
                             );

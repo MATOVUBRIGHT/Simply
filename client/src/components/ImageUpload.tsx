@@ -12,16 +12,18 @@ interface ImageUploadProps {
 export default function ImageUpload({ value, onChange, label = 'Photo', className = '' }: ImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(value || null);
   const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(file: File) {
-    if (!file.type.startsWith('image/')) {
-      return;
+    try {
+      setError('');
+      const compressed = await compressImageFile(file);
+      setPreview(compressed);
+      onChange(compressed);
+    } catch (err: any) {
+      setError(err?.message || 'Could not upload this image');
     }
-
-    const compressed = await compressImageFile(file);
-    setPreview(compressed);
-    onChange(compressed);
   }
 
   function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -111,6 +113,7 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
           className="hidden"
         />
       </div>
+      {error && <p className="mt-2 text-xs font-semibold text-red-600">{error}</p>}
     </div>
   );
 }

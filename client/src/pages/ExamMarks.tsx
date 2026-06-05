@@ -12,6 +12,7 @@ import { openPrintPreview } from '../utils/printPreview';
 import { useBackOrFallback } from '../utils/navigation';
 import { getSubjectDisplayCode } from '../utils/subjects';
 import { getGradeFromScale, getSavedGradingScale } from '../utils/grading';
+import { PortalSelect } from '../components/PortalSelect';
 
 function gradeColor(grade: string): string {
   if (grade.startsWith('D')) return 'text-emerald-600 font-bold';
@@ -438,26 +439,24 @@ export default function ExamMarks() {
       <div className="card p-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(120px,150px)_minmax(105px,125px)_minmax(180px,1fr)_minmax(200px,1fr)] print:hidden">
         <div>
           <label className="form-label">Class</label>
-          <select value={filterClass} onChange={e => { setFilterClass(e.target.value); setFilterExam(''); }} className="form-input form-select truncate px-3 pr-7">
-            <option value="">All Classes</option>
-            {sortedClasses.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <PortalSelect value={filterClass} onChange={value => { setFilterClass(value); setFilterExam(''); }} options={[{ value: '', label: 'All Classes' }, ...sortedClasses.map((c: any) => ({ value: c.id, label: c.name }))]} />
         </div>
         <div>
           <label className="form-label">Term</label>
-          <select value={filterTerm} onChange={e => { setFilterTerm(e.target.value); setFilterExam(''); }} className="form-input form-select truncate px-3 pr-7">
-            <option value="">All Terms</option>
-            <option value="1">Term 1</option>
-            <option value="2">Term 2</option>
-            <option value="3">Term 3</option>
-          </select>
+          <PortalSelect
+            value={filterTerm}
+            onChange={value => { setFilterTerm(value); setFilterExam(''); }}
+            options={[
+              { value: '', label: 'All Terms' },
+              { value: '1', label: 'Term 1' },
+              { value: '2', label: 'Term 2' },
+              { value: '3', label: 'Term 3' },
+            ]}
+          />
         </div>
         <div>
           <label className="form-label">Exam</label>
-          <select value={filterExam} onChange={e => setFilterExam(e.target.value)} className="form-input">
-            <option value="">All Exams</option>
-            {dedupedExamOptions.map((e: any) => <option key={e.id} value={e.id}>{e.name} - T{e.term} {e.year}</option>)}
-          </select>
+          <PortalSelect value={filterExam} onChange={setFilterExam} options={[{ value: '', label: 'All Exams' }, ...dedupedExamOptions.map((exam: any) => ({ value: exam.id, label: `${exam.name} - T${exam.term} ${exam.year}` }))]} />
         </div>
         <div>
           <label className="form-label">Search Student</label>

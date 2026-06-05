@@ -4,6 +4,8 @@
   "installCommand": "echo skip",
   "framework": null,
   "rewrites": [
+    { "source": "/website", "destination": "/website/index.html" },
+    { "source": "/website/", "destination": "/website/index.html" },
     { "source": "/((?!assets|favicon|icon|manifest|sw\\.js|sounds).*)", "destination": "/index.html" }
   ],
   "headers": [

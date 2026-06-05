@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard, Info, Shield, ScrollText, HelpCircle, Save } from 'lucide-react';
@@ -10,7 +10,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { useConfirm } from '../components/ConfirmModal';
+import { PortalSelect } from '../components/PortalSelect';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
+import { releaseChannelLabel } from '../utils/releaseChannel';
 import { deleteInThirtyPercentBatches, processInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { compressImageFile } from '../utils/imageCompression';
 import { cleanupDeletedClassReferences } from '../utils/classDeletionCleanup';
@@ -96,6 +98,11 @@ export default function Settings() {
   });
 
   const desktopApp = isDesktopApp();
+  const releaseTypeLabel = desktopApp ? 'Desktop App' : 'Web App';
+  const releaseDownloadLabel = `${APP_VERSION_LABEL} · ${releaseTypeLabel} · ${releaseChannelLabel}`;
+  const releaseUpdateNote = desktopApp
+    ? 'Use this release type when downloading updates so you choose the correct package, not Lite or Windows 7 by mistake.'
+    : 'Web app updates are automatic. Refresh the page when Schofy announces a new update.';
 
   useEffect(() => {
     if (user?.id || schoolId) {
@@ -653,7 +660,7 @@ export default function Settings() {
         </div>
         <div className="flex items-center gap-3">
           <span className="hidden rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300 sm:inline-flex">
-            {APP_VERSION_LABEL}
+            {releaseDownloadLabel}
           </span>
           {autoSaved && <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle size={14} /> Auto-saved</span>}
           {isSaving && <span className="text-sm text-slate-400 flex items-center gap-1"><div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> Saving...</span>}
@@ -666,6 +673,28 @@ export default function Settings() {
       </div>
 
       <form onSubmit={(event) => event.preventDefault()} className="space-y-6">
+        <div className="card border-primary-100 bg-gradient-to-br from-white to-primary-50/40 dark:border-slate-700 dark:from-slate-900 dark:to-slate-900">
+          <div className="card-body flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
+                <Info size={20} />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">App Release</h2>
+                <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">{releaseDownloadLabel}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {releaseUpdateNote}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs font-bold">
+              <span className="rounded-full bg-white px-3 py-1 text-primary-700 ring-1 ring-primary-100 dark:bg-slate-800 dark:text-primary-200 dark:ring-slate-700">{APP_VERSION_LABEL}</span>
+              <span className="rounded-full bg-white px-3 py-1 text-emerald-700 ring-1 ring-emerald-100 dark:bg-slate-800 dark:text-emerald-200 dark:ring-slate-700">{releaseTypeLabel}</span>
+              <span className="rounded-full bg-white px-3 py-1 text-violet-700 ring-1 ring-violet-100 dark:bg-slate-800 dark:text-violet-200 dark:ring-slate-700">{releaseChannelLabel}</span>
+            </div>
+          </div>
+        </div>
+
         <div className="card">
           <div className="card-header flex items-center gap-2">
             <Building size={20} />
@@ -682,23 +711,31 @@ export default function Settings() {
             </div>
             <div>
               <label className="form-label">School Type</label>
-              <select name="schoolType" value={settings.schoolType} onChange={handleChange} className="form-input form-select">
-                <option value="nursery">Nursery</option>
-                <option value="primary">Primary</option>
-                <option value="secondary">Secondary</option>
-                <option value="nursery_primary">Nursery & Primary</option>
-                <option value="primary_secondary">Primary & Secondary</option>
-                <option value="all">All Sections</option>
-              </select>
+              <PortalSelect
+                value={settings.schoolType}
+                onChange={value => void handleSchoolTypeChange(value)}
+                options={[
+                  { value: 'nursery', label: 'Nursery' },
+                  { value: 'primary', label: 'Primary' },
+                  { value: 'secondary', label: 'Secondary' },
+                  { value: 'nursery_primary', label: 'Nursery & Primary' },
+                  { value: 'primary_secondary', label: 'Primary & Secondary' },
+                  { value: 'all', label: 'All Sections' },
+                ]}
+              />
               <p className="mt-1 text-xs text-slate-500">Changing type generates the matching academic class list.</p>
             </div>
             <div>
               <label className="form-label">School Category <span className="text-slate-400 font-normal">(optional)</span></label>
-              <select name="schoolCategory" value={settings.schoolCategory} onChange={handleChange} className="form-input form-select">
-                <option value="">None</option>
-                <option value="music_school">Music School</option>
-                <option value="tailoring">Tailoring</option>
-              </select>
+              <PortalSelect
+                value={settings.schoolCategory}
+                onChange={value => handleChange({ target: { name: 'schoolCategory', value } } as ChangeEvent<HTMLSelectElement>)}
+                options={[
+                  { value: '', label: 'None' },
+                  { value: 'music_school', label: 'Music School' },
+                  { value: 'tailoring', label: 'Tailoring' },
+                ]}
+              />
               <p className="mt-1 text-xs text-slate-500">Optional category does not replace the academic school type.</p>
             </div>
             <div className="md:col-span-2">
@@ -764,11 +801,15 @@ export default function Settings() {
             </div>
             <div>
               <label className="form-label">Current Term</label>
-              <select name="currentTerm" value={settings.currentTerm} onChange={handleChange} className="form-input form-select">
-                <option value="1">Term 1</option>
-                <option value="2">Term 2</option>
-                <option value="3">Term 3</option>
-              </select>
+              <PortalSelect
+                value={settings.currentTerm}
+                onChange={value => handleChange({ target: { name: 'currentTerm', value } } as ChangeEvent<HTMLSelectElement>)}
+                options={[
+                  { value: '1', label: 'Term 1' },
+                  { value: '2', label: 'Term 2' },
+                  { value: '3', label: 'Term 3' },
+                ]}
+              />
             </div>
             <div>
               <label className="form-label">Term 1 Start</label>
@@ -832,11 +873,11 @@ export default function Settings() {
           <div className="card-body grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div>
               <label className="form-label">Currency</label>
-              <select name="currency" value={settings.currency} onChange={handleChange} className="form-input form-select">
-                {currencies.map(c => (
-                  <option key={c.code} value={c.code}>{c.symbol} {c.code} - {c.name}</option>
-                ))}
-              </select>
+              <PortalSelect
+                value={settings.currency}
+                onChange={value => handleChange({ target: { name: 'currency', value } } as ChangeEvent<HTMLSelectElement>)}
+                options={currencies.map(c => ({ value: c.code, label: `${c.symbol} ${c.code} - ${c.name}` }))}
+              />
             </div>
           </div>
         </div>
@@ -1312,11 +1353,15 @@ export default function Settings() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="form-label">New Term</label>
-                  <select value={promoteNewTerm} onChange={e => setPromoteNewTerm(e.target.value)} className="form-input form-select">
-                    <option value="1">Term 1</option>
-                    <option value="2">Term 2</option>
-                    <option value="3">Term 3</option>
-                  </select>
+                  <PortalSelect
+                    value={promoteNewTerm}
+                    onChange={setPromoteNewTerm}
+                    options={[
+                      { value: '1', label: 'Term 1' },
+                      { value: '2', label: 'Term 2' },
+                      { value: '3', label: 'Term 3' },
+                    ]}
+                  />
                 </div>
                 <div>
                   <label className="form-label">Academic Year</label>

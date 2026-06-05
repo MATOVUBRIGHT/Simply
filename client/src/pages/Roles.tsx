@@ -4,7 +4,9 @@ import { Users, Plus, Eye, EyeOff, Trash2, Edit2, History, CheckCircle, XCircle,
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { hashPassword } from '../lib/security';
-import { useStaffAuth, logStaffActivity } from '../contexts/StaffAuthContext';
+import { cacheStaffUsersForOffline, useStaffAuth, logStaffActivity } from '../contexts/StaffAuthContext';
+import { useConfirm } from '../components/ConfirmModal';
+import { PortalSelect } from '../components/PortalSelect';
 
 const ALL_PAGES = [
   { path: '/', label: 'Dashboard' },
@@ -57,6 +59,7 @@ interface ActivityLog {
 export default function Roles() {
   const { user, schoolId } = useAuth();
   const { isStaffMode } = useStaffAuth();
+  const confirm = useConfirm();
   const tenantId = schoolId || user?.id || '';
 
   const [staffList, setStaffList] = useState<StaffUser[]>([]);
@@ -94,7 +97,9 @@ export default function Roles() {
         supabase.from('school_staff_users').select('*').eq('school_id', tenantId).order('created_at', { ascending: false }),
         supabase.from('staff_activity_log').select('*').eq('school_id', tenantId).order('created_at', { ascending: false }).limit(300),
       ]);
-      setStaffList((staffRes.data || []).map((s: any) => ({
+      const staffRows = staffRes.data || [];
+      cacheStaffUsersForOffline(tenantId, staffRows);
+      setStaffList(staffRows.map((s: any) => ({
         id: s.id, staffId: s.staff_id, firstName: s.first_name, lastName: s.last_name,
         role: s.role, email: s.email || '',
         phone: s.phone || '',
@@ -162,8 +167,9 @@ export default function Roles() {
         await logStaffActivity(tenantId, user?.id || '', 'admin', 'edit_staff', 'Edited: ' + cleanStaffId);
         setSuccess('Staff updated successfully');
       } else {
+        const newStaffId = crypto.randomUUID();
         await supabase.from('school_staff_users').insert({
-          id: crypto.randomUUID(), school_id: tenantId, staff_id: cleanStaffId,
+          id: newStaffId, school_id: tenantId, staff_id: cleanStaffId,
           first_name: form.firstName.trim(), last_name: form.lastName.trim(),
           role: form.role, email: null, phone: null,
           password_hash: await hashPassword(form.password), allowed_pages: form.allowedPages,
@@ -202,7 +208,14 @@ export default function Roles() {
   }
 
   async function deleteStaff(s: StaffUser) {
-    if (!supabase || !confirm('Delete ' + s.firstName + ' ' + s.lastName + '? This cannot be undone.')) return;
+    if (!supabase) return;
+    const ok = await confirm({
+      title: 'Delete Staff Access',
+      description: `Delete ${s.firstName} ${s.lastName}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     await supabase.from('school_staff_users').delete().eq('id', s.id);
     await logStaffActivity(tenantId, user?.id || '', 'admin', 'delete_staff', 'Deleted: ' + s.staffId);
     await loadData();
@@ -245,48 +258,28 @@ export default function Roles() {
       {success && <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 rounded-xl p-3 text-sm flex items-center gap-2"><CheckCircle size={16} />{success}</div>}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <section className="card overflow-hidden">
-          <div className="card-body flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center text-primary-600 dark:text-primary-300">
-            <Gauge size={20} />
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Total Staff</p>
-            <p className="text-xl font-bold text-slate-900 dark:text-white">{staffList.length}</p>
-          </div>
+        <section className="card-solid-indigo overflow-hidden rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/18 flex items-center justify-center"><Gauge size={20} /></div>
+            <div><p className="text-xs font-bold text-white/75">Total Staff</p><p className="text-2xl font-black">{staffList.length}</p></div>
           </div>
         </section>
-        <section className="card overflow-hidden">
-          <div className="card-body flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-300">
-            <UserCheck size={20} />
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Active</p>
-            <p className="text-xl font-bold text-slate-900 dark:text-white">{activeStaffCount}</p>
-          </div>
+        <section className="card-solid-emerald overflow-hidden rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/18 flex items-center justify-center"><UserCheck size={20} /></div>
+            <div><p className="text-xs font-bold text-white/75">Active</p><p className="text-2xl font-black">{activeStaffCount}</p></div>
           </div>
         </section>
-        <section className="card overflow-hidden">
-          <div className="card-body flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 dark:text-red-300">
-            <UserX size={20} />
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Inactive</p>
-            <p className="text-xl font-bold text-slate-900 dark:text-white">{inactiveStaffCount}</p>
-          </div>
+        <section className="card-solid-rose overflow-hidden rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/18 flex items-center justify-center"><UserX size={20} /></div>
+            <div><p className="text-xs font-bold text-white/75">Inactive</p><p className="text-2xl font-black">{inactiveStaffCount}</p></div>
           </div>
         </section>
-        <section className="card overflow-hidden">
-          <div className="card-body flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-300">
-            <Eye size={20} />
-          </div>
-          <div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Read Only / Today</p>
-            <p className="text-xl font-bold text-slate-900 dark:text-white">{readOnlyStaffCount} / {recentLoginCount}</p>
-          </div>
+        <section className="card-solid-amber overflow-hidden rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/18 flex items-center justify-center"><Eye size={20} /></div>
+            <div><p className="text-xs font-bold text-white/75">Read Only / Today</p><p className="text-2xl font-black">{readOnlyStaffCount} / {recentLoginCount}</p></div>
           </div>
         </section>
       </div>
@@ -503,18 +496,22 @@ export default function Roles() {
               </div>
               <div>
                 <label className="form-label">Role</label>
-                <select className="form-input" value={form.role} onChange={e => setForm(f => ({
-                  ...f,
-                  role: e.target.value,
-                  staffId: editingStaff ? f.staffId : generateStaffId(e.target.value, staffList.filter(s => s.role === e.target.value).length),
-                  allowedPages: ROLE_PRESETS[e.target.value] || []
-                }))}>
-                  <option value="teacher">Teacher</option>
-                  <option value="accountant">Accountant</option>
-                  <option value="librarian">Librarian</option>
-                  <option value="receptionist">Receptionist</option>
-                  <option value="custom">Custom</option>
-                </select>
+                <PortalSelect
+                  value={form.role}
+                  onChange={value => setForm(f => ({
+                    ...f,
+                    role: value,
+                    staffId: editingStaff ? f.staffId : generateStaffId(value, staffList.filter(s => s.role === value).length),
+                    allowedPages: ROLE_PRESETS[value] || []
+                  }))}
+                  options={[
+                    { value: 'teacher', label: 'Teacher' },
+                    { value: 'accountant', label: 'Accountant' },
+                    { value: 'librarian', label: 'Librarian' },
+                    { value: 'receptionist', label: 'Receptionist' },
+                    { value: 'custom', label: 'Custom' },
+                  ]}
+                />
               </div>
               <div>
                 <label className="form-label">{editingStaff ? 'New Password (blank = keep)' : 'Password *'}</label>

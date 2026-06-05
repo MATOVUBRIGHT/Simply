@@ -14,6 +14,7 @@ import { getSubscriptionAccessState } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { BoardingStatus, withBoardingStatus } from '../utils/studentBoarding';
 import { useBackOrFallback } from '../utils/navigation';
+import { PortalSelect } from '../components/PortalSelect';
 
 const steps = [
   { id: 1, label: 'Student Info', icon: User },
@@ -251,11 +252,15 @@ export default function Admission() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="form-label">Gender *</label>
-                    <select name="gender" value={form.gender} onChange={handleChange} className="form-input">
-                      <option value={Gender.MALE}>Male</option>
-                      <option value={Gender.FEMALE}>Female</option>
-                      <option value={Gender.OTHER}>Other</option>
-                    </select>
+                    <PortalSelect
+                      value={form.gender}
+                      onChange={value => setForm(p => ({ ...p, gender: value as Gender }))}
+                      options={[
+                        { value: Gender.MALE, label: 'Male' },
+                        { value: Gender.FEMALE, label: 'Female' },
+                        { value: Gender.OTHER, label: 'Other' },
+                      ]}
+                    />
                   </div>
                   <div>
                     <label className="form-label">Date of Birth</label>
@@ -275,14 +280,18 @@ export default function Admission() {
               </div>
               <div>
                 <label className="form-label">Class *</label>
-                <select name="classId" value={form.classId} onChange={handleChange} className="form-input">
-                  <option value="">Select Class</option>
-                  {classes.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.enrolled}/{c.capacity}){c.isFull ? ' - increase capacity or ignore' : ''}
-                    </option>
-                  ))}
-                </select>
+                <PortalSelect
+                  value={form.classId}
+                  onChange={value => setForm(p => ({ ...p, classId: value }))}
+                  placeholder="Select Class"
+                  options={[
+                    { value: '', label: 'Select Class' },
+                    ...classes.map(c => ({
+                      value: c.id,
+                      label: `${c.name} (${c.enrolled}/${c.capacity})${c.isFull ? ' - increase capacity or ignore' : ''}`,
+                    })),
+                  ]}
+                />
               </div>
               <div>
                 <label className="form-label">Address</label>
@@ -290,10 +299,14 @@ export default function Admission() {
               </div>
               <div>
                 <label className="form-label">Day or Boarding *</label>
-                <select name="boardingStatus" value={form.boardingStatus} onChange={handleChange} className="form-input" required>
-                  <option value="day">Day</option>
-                  <option value="boarding">Boarding</option>
-                </select>
+                <PortalSelect
+                  value={form.boardingStatus}
+                  onChange={value => setForm(p => ({ ...p, boardingStatus: value as BoardingStatus }))}
+                  options={[
+                    { value: 'day', label: 'Day' },
+                    { value: 'boarding', label: 'Boarding' },
+                  ]}
+                />
               </div>
             </div>
           </div>
@@ -315,9 +328,11 @@ export default function Admission() {
               </div>
               <div>
                 <label className="form-label">Relationship</label>
-                <select name="guardianRelation" value={form.guardianRelation} onChange={handleChange} className="form-input">
-                  <option>Parent</option><option>Guardian</option><option>Sibling</option><option>Relative</option><option>Other</option>
-                </select>
+                <PortalSelect
+                  value={form.guardianRelation}
+                  onChange={value => setForm(p => ({ ...p, guardianRelation: value }))}
+                  options={['Parent', 'Guardian', 'Sibling', 'Relative', 'Other'].map(value => ({ value, label: value }))}
+                />
               </div>
               <div>
                 <label className="form-label">Phone *</label>

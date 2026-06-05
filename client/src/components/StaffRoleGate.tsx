@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
-import { BriefcaseBusiness, Loader2, LockKeyhole, Save, ShieldCheck, Trash2, UserCheck } from 'lucide-react';
+import { BriefcaseBusiness, Eye, EyeOff, Loader2, LockKeyhole, Save, ShieldCheck, Trash2, UserCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useStaffAuth } from '../contexts/StaffAuthContext';
 import { supabase } from '../lib/supabase';
@@ -10,6 +10,20 @@ const gateEnabledKey = (schoolId: string) => `schofy_staff_gate_enabled_${school
 const assetBase = import.meta.env.BASE_URL || './';
 const appLogo = `${assetBase}${appLogoFileName}`;
 const authCover = `${assetBase}cover.jpg`;
+const profileImage = `${assetBase}profile.png`;
+
+function readSavedMainAdminSession() {
+  try {
+    return JSON.parse(localStorage.getItem('schofy_session') || 'null') as {
+      id?: string;
+      schoolId?: string;
+      email?: string;
+      adminLoginSaved?: boolean;
+    } | null;
+  } catch {
+    return null;
+  }
+}
 
 export function StaffRoleGate({ children }: { children: ReactNode }) {
   const { user, schoolId, isOnline } = useAuth();
@@ -25,9 +39,11 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
   const [adminProceed, setAdminProceed] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPasswordValue, setShowAdminPasswordValue] = useState(false);
   const [adminVerifying, setAdminVerifying] = useState(false);
   const [adminError, setAdminError] = useState('');
   const [error, setError] = useState('');
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
 
   useEffect(() => {
     if (!tenantId) {
@@ -156,6 +172,18 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
         }
       }
 
+      const savedAdmin = readSavedMainAdminSession();
+      const savedAdminSchoolId = savedAdmin?.schoolId || savedAdmin?.id || '';
+      const savedAdminMatchesCurrentAccount =
+        Boolean(savedAdmin?.adminLoginSaved) &&
+        savedAdminSchoolId === tenantId &&
+        savedAdmin?.email?.trim().toLowerCase() === email;
+
+      if (!savedAdminMatchesCurrentAccount) {
+        setAdminError('Offline admin login is only available when Save admin was enabled on the main login for this school.');
+        return;
+      }
+
       const localResult = await loginLocal(email, adminPassword, { syncToCloud: false });
       if (localResult.success) {
         setAdminPassword('');
@@ -208,6 +236,14 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
                 <p className="max-w-md text-sm leading-6 text-slate-700">Admin or staff role.</p>
               </div>
             </div>
+            <div className="my-6 flex justify-center">
+              <img
+                src={profileImage}
+                alt="Profile access"
+                className="h-56 w-56 rounded-2xl bg-white/70 object-cover p-2 ring-1 ring-slate-200/80"
+                loading="eager"
+              />
+            </div>
             <div className="grid gap-3 text-sm text-slate-700">
               <div className="rounded-lg border border-slate-300/70 bg-white/62 p-3 shadow-sm backdrop-blur-sm">
                 <p className="font-bold">Admin</p>
@@ -243,14 +279,24 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
             {showAdminPassword && (
               <div>
                 <label className="form-label">Admin Password</label>
-                <input
-                  type="password"
-                  value={adminPassword}
-                  onChange={event => setAdminPassword(event.target.value)}
-                  className="form-input"
-                  placeholder="Main account password"
-                  autoComplete="new-password"
-                />
+                <div className="relative">
+                  <input
+                    type={showAdminPasswordValue ? 'text' : 'password'}
+                    value={adminPassword}
+                    onChange={event => setAdminPassword(event.target.value)}
+                    className="form-input pr-11"
+                    placeholder="Main account password"
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPasswordValue(value => !value)}
+                    className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-white"
+                    title={showAdminPasswordValue ? 'Hide password' : 'Show password'}
+                  >
+                    {showAdminPasswordValue ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
                 {adminError && <p className="mt-2 text-xs font-semibold text-red-600 dark:text-red-300">{adminError}</p>}
               </div>
             )}
@@ -279,7 +325,7 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
           )}
           {!isOnline && !savedOfflineLogin && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-              Connect to the internet to start a role shift, or use a staff login that was saved before.
+              Staff login needs a saved role on this device. Admin can unlock offline only if Save admin was enabled on the main login.
             </div>
           )}
           {!isOnline && savedOfflineLogin && (
@@ -293,7 +339,7 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
               value={staffName}
               onChange={event => setStaffName(event.target.value)}
               className="form-input"
-              placeholder="First Last"
+              placeholder="Name"
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
@@ -302,14 +348,24 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
           </div>
           <div>
             <label className="form-label">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={event => setPassword(event.target.value)}
-              className="form-input"
-              placeholder="Role password"
-              autoComplete="new-password"
-            />
+            <div className="relative">
+              <input
+                type={showStaffPassword ? 'text' : 'password'}
+                value={password}
+                onChange={event => setPassword(event.target.value)}
+                className="form-input pr-11"
+                placeholder="Role password"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowStaffPassword(value => !value)}
+                className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-white"
+                title={showStaffPassword ? 'Hide password' : 'Show password'}
+              >
+                {showStaffPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
           <button
             type="submit"

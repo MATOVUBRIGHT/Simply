@@ -346,19 +346,6 @@ export default function Plans() {
   async function handleVerifyCode() {
     const authId = schoolId || user?.id;
     if (!authId) return;
-    if (!isOnline) {
-      setAccessNotice({
-        type: 'info',
-        message: 'You are offline. Your verified plan remains saved for access, but new code verification and plan changes require internet.',
-      });
-      setVerificationPopup({
-        status: 'failed',
-        title: 'Internet required',
-        message: 'Connect to the internet to verify a new payment code.',
-        reason: 'Already verified plans keep working offline from the saved local proof.',
-      });
-      return;
-    }
     setVerifyingCode(true);
     setAccessNotice(null);
     setVerificationPopup({
@@ -413,7 +400,7 @@ export default function Plans() {
         Payment verification code
       </h3>
       <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-        Enter a one-time Schofy code to activate the matching plan. Internet is required for first-time verification.
+        Enter a one-time Schofy code to activate the matching plan. Offline activation works on this device; online sync can confirm it later.
       </p>
       <div className="mt-3 flex flex-col gap-2 sm:flex-row">
         <input
@@ -422,7 +409,7 @@ export default function Plans() {
           onChange={(e) => setVerificationCode(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void handleVerifyCode(); }}
           placeholder="Enter verification code"
-          disabled={!isOnline || verifyingCode}
+          disabled={verifyingCode}
           className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
           autoComplete="off"
           spellCheck={false}
@@ -430,12 +417,12 @@ export default function Plans() {
         <button
           type="button"
           onClick={() => void handleVerifyCode()}
-          disabled={verifyingCode || !isOnline}
+          disabled={verifyingCode}
           className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
           style={{ backgroundColor: 'var(--solid-emerald)' }}
         >
           {verifyingCode ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
-          {isOnline ? 'Verify' : 'Online required'}
+          Verify
         </button>
       </div>
     </div>
@@ -1025,7 +1012,7 @@ Powered by Schofy`;
                       onChange={(e) => setVerificationCode(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') void handleVerifyCode(); }}
                       placeholder="Enter code"
-                      disabled={!isOnline || verifyingCode}
+                      disabled={verifyingCode}
                       className="min-w-0 flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 dark:border-emerald-800 dark:bg-slate-800 dark:text-white"
                       autoComplete="off"
                       spellCheck={false}
@@ -1033,11 +1020,11 @@ Powered by Schofy`;
                     <button
                       type="button"
                       onClick={() => void handleVerifyCode()}
-                      disabled={verifyingCode || !isOnline}
+                      disabled={verifyingCode}
                       className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
                     >
                       {verifyingCode ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
-                      {isOnline ? 'Verify' : 'Online required'}
+                      Verify
                     </button>
                   </div>
                 </div>
@@ -1056,7 +1043,7 @@ Powered by Schofy`;
                         return;
                       }
                       if (!transactionId.trim()) {
-                        alert('Enter Transaction ID');
+                        setAccessNotice({ type: 'error', message: 'Enter Transaction ID before submitting payment.' });
                         return;
                       }
                       const authId = schoolId || user?.id;

@@ -134,11 +134,9 @@ export async function redeemPaymentVerificationCode(
 ): Promise<VerificationCodeResult> {
   const code = normalizeVerificationCode(rawCode);
   if (!code) return { status: 'invalid', message: 'Enter a verification code.' };
-  if (!supabase || typeof navigator !== 'undefined' && !navigator.onLine) {
-    return { status: 'error', message: 'Connect to the internet to verify this code the first time. Offline access works after online verification succeeds.' };
-  }
 
   try {
+    const online = typeof navigator === 'undefined' ? true : navigator.onLine;
     const codeHash = await hashVerificationCode(code);
     const grant = EMBEDDED_ACCESS_GRANTS.find((item) => item.codeHash === codeHash);
     if (!grant) return { status: 'invalid', message: 'This verification code is not valid.' };
@@ -152,7 +150,8 @@ export async function redeemPaymentVerificationCode(
       ...getLocalUsedVerificationCodeHashes(),
       ...(await getSettingHashList(tenantId, 'usedPaymentVerificationCodes')),
     ]);
-    if (usedLocal.has(codeHash) || await isCodeUsedRemotely(codeHash)) {
+    const usedRemotely = supabase && online ? await isCodeUsedRemotely(codeHash) : false;
+    if (usedLocal.has(codeHash) || usedRemotely) {
       return { status: 'used', message: 'This verification code has already been used.', grant };
     }
 
@@ -192,20 +191,6 @@ export async function redeemPaymentVerificationCode(
       activatedAt: remoteVerifiedAt,
     };
 
-    const { error: subError } = await supabase.from('subscriptions').insert({
-      id: crypto.randomUUID(),
-      school_id: tenantId,
-      user_id: authUserId || tenantId,
-      plan: plan.id,
-      status: 'active',
-      starts_at: remoteVerifiedAt,
-      ends_at: expiry.toISOString(),
-      metadata,
-      created_at: remoteVerifiedAt,
-      updated_at: remoteVerifiedAt,
-    });
-    if (subError) throw subError;
-
     const receipt = {
       planId: plan.id,
       planName: plan.name,
@@ -225,21 +210,42 @@ export async function redeemPaymentVerificationCode(
       usedPaymentVerificationCodes: nextUsed,
       subscriptionReceipt: receipt,
     };
-    const { error: settingsError } = await supabase.from('settings').upsert(
-      Object.entries(settingsPayload).map(([key, value]) => ({
+
+    if (supabase && online) {
+      const { error: subError } = await supabase.from('subscriptions').insert({
+        id: crypto.randomUUID(),
         school_id: tenantId,
-        key,
-        value,
+        user_id: authUserId || tenantId,
+        plan: plan.id,
+        status: 'active',
+        starts_at: remoteVerifiedAt,
+        ends_at: expiry.toISOString(),
+        metadata,
         created_at: remoteVerifiedAt,
         updated_at: remoteVerifiedAt,
-      })),
-      { onConflict: 'school_id,key' }
-    );
-    if (settingsError) throw settingsError;
+      });
+      if (subError) throw subError;
+
+      const { error: settingsError } = await supabase.from('settings').upsert(
+        Object.entries(settingsPayload).map(([key, value]) => ({
+          school_id: tenantId,
+          key,
+          value,
+          created_at: remoteVerifiedAt,
+          updated_at: remoteVerifiedAt,
+        })),
+        { onConflict: 'school_id,key' }
+      );
+      if (settingsError) throw settingsError;
+    }
 
     writeHashList(USED_CODES_KEY, nextUsed);
     localStorage.setItem('schofy_plan_remote_verified_at', remoteVerifiedAt);
     localStorage.setItem('schofy_plan_verification_code_hash', codeHash);
+    localStorage.setItem('schofy_sub_expiry', expiry.toISOString());
+    localStorage.setItem('schofy_sub_status', 'active');
+    localStorage.setItem('schofy_sub_plan', plan.id);
+    localStorage.setItem('schofy_sub_pending', '0');
     cachePlanStateLocally(tenantId, state);
     await createVerifiedPlanProof({
       tenantId,
@@ -256,7 +262,7 @@ export async function redeemPaymentVerificationCode(
 
     return {
       status: 'valid',
-      message: `${plan.name} access verified. Your plan is active until ${expiry.toLocaleDateString()}.`,
+      message: `${plan.name} access verified${online ? '' : ' offline on this device'}. Your plan is active until ${expiry.toLocaleDateString()}.`,
       grant,
       expiryDate: expiry.toISOString(),
     };

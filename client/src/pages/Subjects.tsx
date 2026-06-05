@@ -14,6 +14,7 @@ import { useTableData } from '../lib/store';
 import { useConfirm } from '../components/ConfirmModal';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { PortalDropdown } from '../components/PortalDropdown';
+import { PortalSelect } from '../components/PortalSelect';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { getSubjectCode as readSubjectCode, getSubjectDisplayCode, normalizeSubjectCode } from '../utils/subjects';
@@ -1089,24 +1090,22 @@ function getClassLevel(classId: string): string {
                     <div>
                       <label className="form-label">Subject Name *</label>
                       {selectedLevel && ugandaSubjects[selectedLevel]?.length > 0 && !formData.customSubject ? (
-                        <select
+                        <PortalSelect
                           value={formData.name}
-                          onChange={e => {
-                            if (e.target.value === '__custom__') {
+                          onChange={value => {
+                            if (value === '__custom__') {
                               setFormData(prev => ({ ...prev, name: '', code: '', customSubject: true }));
                             } else {
-                              const s = ugandaSubjects[selectedLevel]?.find(x => x.name === e.target.value);
-                              setFormData(prev => ({ ...prev, name: e.target.value, code: s ? generateSubjectCode(s.name) || s.code : prev.code, customSubject: false }));
+                              const subject = ugandaSubjects[selectedLevel]?.find(item => item.name === value);
+                              setFormData(prev => ({ ...prev, name: value, code: subject ? generateSubjectCode(subject.name) || subject.code : prev.code, customSubject: false }));
                             }
                           }}
-                          className="form-input"
-                        >
-                          <option value="">Select subject</option>
-                          {ugandaSubjects[selectedLevel].map(s => (
-                            <option key={s.name} value={s.name}>{s.name}</option>
-                          ))}
-                          <option value="__custom__">+ Custom subject...</option>
-                        </select>
+                          options={[
+                            { value: '', label: 'Select subject' },
+                            ...ugandaSubjects[selectedLevel].map(subject => ({ value: subject.name, label: subject.name })),
+                            { value: '__custom__', label: '+ Custom subject...' },
+                          ]}
+                        />
                       ) : (
                         <div className="flex gap-2">
                           <input
@@ -1513,10 +1512,22 @@ function getClassLevel(classId: string): string {
                               <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
                               <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                               <td className="px-3 py-2">
-                                <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">Skip</option>
-                                  {subjectExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
-                                </select>
+                                <PortalSelect
+                                  value={currentMapping}
+                                  onChange={nextKey => {
+                                    setFieldMapping(prev => {
+                                      const next = { ...prev };
+                                      Object.keys(next).forEach(key => { if (next[key] === header) delete next[key]; });
+                                      if (nextKey) next[nextKey] = header;
+                                      return next;
+                                    });
+                                  }}
+                                  className="py-1 text-xs"
+                                  options={[
+                                    { value: '', label: 'Skip' },
+                                    ...subjectExpectedFields.map(field => ({ value: field.key, label: `${field.label}${field.required ? ' *' : ''}` })),
+                                  ]}
+                                />
                               </td>
                             </tr>
                           );

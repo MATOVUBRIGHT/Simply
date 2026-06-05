@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings, ImagePlus } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, StaffRole } from '@schofy/shared';
 import type { Staff, SalaryPayment, Subject } from '@schofy/shared';
@@ -21,6 +21,7 @@ import { matchesTextSearch } from '../utils/searchMatch';
 import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
+import { BulkImageUpdateModal, type BulkImageRecord } from '../components/BulkImageUpdateModal';
 
 const avatarColors = [
   'bg-violet-500',
@@ -116,6 +117,7 @@ export default function StaffPage() {
   const [importProgress, setImportProgress] = useState(0);
   const [selectedStaff, setSelectedStaff] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
+  const [showBulkImageModal, setShowBulkImageModal] = useState(false);
   const rowClickTimeoutRef = useRef<number | null>(null);
   const navigate = useNavigate();
 
@@ -325,6 +327,28 @@ export default function StaffPage() {
     }
   }
 
+  async function handleBulkStaffImages(updates: Array<{ id: string; photoUrl: string }>) {
+    const id = schoolId || user?.id;
+    if (!id || updates.length === 0) return;
+    const now = new Date().toISOString();
+    await Promise.all(updates.map(update =>
+      dataService.update(id, 'staff', update.id, { photoUrl: update.photoUrl, updatedAt: now } as any)
+    ));
+    addToast(`Updated ${updates.length} staff image${updates.length === 1 ? '' : 's'}`, 'success');
+    window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'staff' } }));
+  }
+
+  async function handleRemoveBulkStaffImages(ids: string[]) {
+    const id = schoolId || user?.id;
+    if (!id || ids.length === 0) return;
+    const now = new Date().toISOString();
+    await Promise.all(ids.map(staffId =>
+      dataService.update(id, 'staff', staffId, { photoUrl: null, updatedAt: now } as any)
+    ));
+    addToast(`Removed ${ids.length} staff image${ids.length === 1 ? '' : 's'}`, 'success');
+    window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'staff' } }));
+  }
+
   const getStaffSubjects = useMemo(() => {
     const byStaffId = new Map<string, Subject[]>();
     const subjectKey = (subject: Subject) => {
@@ -362,6 +386,17 @@ export default function StaffPage() {
   const filteredStaff = useMemo(() => staff.filter((s) =>
     matchesTextSearch([s.firstName, s.lastName, `${s.firstName} ${s.lastName}`, `${s.lastName} ${s.firstName}`, s.employeeId, s.email, s.phone, getStaffSubjectSummary(s)], search)
   ), [staff, search, getStaffSubjectSummary]);
+  const allFilteredStaffSelected = filteredStaff.length > 0 && selectedStaff.size === filteredStaff.length;
+  const selectedStaffImageRecords = useMemo<BulkImageRecord[]>(() => filteredStaff
+    .filter(member => selectedStaff.has(member.id))
+    .map(member => ({
+      id: member.id,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      primaryId: member.employeeId,
+      secondaryId: member.email,
+      label: `${member.firstName} ${member.lastName}`,
+    })), [filteredStaff, selectedStaff]);
   const filteredTeachers = useMemo(() => filteredStaff.filter(s => s.role === StaffRole.TEACHER), [filteredStaff]);
   const staffProgress = useProgressiveList(filteredStaff, { initialCount: 120, step: 120, delayMs: 2000 });
   const visibleStaff = staffProgress.visibleItems;
@@ -807,6 +842,15 @@ export default function StaffPage() {
                 >
                   {selectedStaff.size === filteredStaff.length ? 'Deselect All' : 'Select All'}
                 </button>
+                {allFilteredStaffSelected && (
+                  <button
+                    onClick={() => setShowBulkImageModal(true)}
+                    className="px-3 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors flex items-center gap-1"
+                  >
+                    <ImagePlus size={12} />
+                    Edit Images
+                  </button>
+                )}
                 <button
                   onClick={handleBulkToggleStatus}
                   className="px-3 py-1.5 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors flex items-center gap-1"
@@ -984,6 +1028,17 @@ export default function StaffPage() {
           alt={previewImage.alt} 
           isOpen={!!previewImage}
           onClose={() => setPreviewImage(null)}
+        />
+      )}
+
+      {showBulkImageModal && (
+        <BulkImageUpdateModal
+          title="Edit Staff Images"
+          entityLabel="staff"
+          records={selectedStaffImageRecords}
+          onClose={() => setShowBulkImageModal(false)}
+          onApply={handleBulkStaffImages}
+          onRemove={handleRemoveBulkStaffImages}
         />
       )}
 

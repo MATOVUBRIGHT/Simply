@@ -340,12 +340,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const { data, error } = await usersApi.getById(savedUser.id);
           if (stale()) return;
-          if (!data || error || data.is_active === false) {
+          if (data?.is_active === false) {
             clearSession();
             setUser(null);
             setSchoolId(null);
             setLoading(false);
             return;
+          }
+          if (!data || error) {
+            throw error || new Error('Saved session could not be verified remotely.');
           }
 
           const userData: LocalUser = {
@@ -813,7 +816,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const cleanEmail = profile.email.trim().toLowerCase();
     if (!cleanEmail) return { success: false, error: 'Enter an email first.' };
 
-    if (profile.mode === 'register' && isUnlockedRelease) {
+    if (profile.mode === 'register') {
       const result = await registerLocal(cleanEmail, profile.password || '', profile.firstName || 'School', profile.lastName || 'Admin', { syncToCloud: false });
       if (!result.success || !result.user) return { success: false, error: result.error || 'Offline registration failed' };
       const userData = mapLocalAccount(result.user);
@@ -825,16 +828,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       setCloudSyncEnabled(false);
       markLocalUnlimitedAccess(userData);
-      localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'unlocked_local_registration');
+      localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, isUnlockedRelease ? 'unlocked_local_registration' : 'locked_local_registration_pending_plan');
       saveSession(userData);
       setUser(userData);
       setSchoolId(userData.schoolId);
       initializeSyncForUser(userData);
       return { success: true };
-    }
-
-    if (profile.mode === 'register') {
-      return { success: false, error: 'Internet is required to create an account. After payment, use your Schofy verification code to unlock offline access.' };
     }
 
     const cleanPassword = profile.password || '';
@@ -913,27 +912,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function registerOffline(email: string, password: string, firstName: string, lastName: string): Promise<AuthResult> {
-    if (isUnlockedRelease && isDesktopApp()) {
-      const cleanEmail = email.trim().toLowerCase();
-      const result = await registerLocal(cleanEmail, password, firstName || 'School', lastName || 'Admin', { syncToCloud: false });
-      if (!result.success || !result.user) return { success: false, error: result.error || 'Offline registration failed' };
-      const userData = mapLocalAccount(result.user);
-      await unlockStorageEncryption({
-        userId: userData.id,
-        schoolId: userData.schoolId,
-        email: userData.email,
-        password,
-      });
-      setCloudSyncEnabled(false);
-      markLocalUnlimitedAccess(userData);
-      localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'unlocked_offline_registration');
-      saveSession(userData);
-      setUser(userData);
-      setSchoolId(userData.schoolId);
-      initializeSyncForUser(userData);
-      return { success: true };
+    if (!isDesktopApp()) {
+      return { success: false, error: 'Offline local account creation is available only in the desktop app.' };
     }
-    return { success: false, error: 'Internet is required to create an account. Pay through WhatsApp, receive a Schofy verification code, then activate the plan for offline use.' };
+    const cleanEmail = email.trim().toLowerCase();
+    const result = await registerLocal(cleanEmail, password, firstName || 'School', lastName || 'Admin', { syncToCloud: false });
+    if (!result.success || !result.user) return { success: false, error: result.error || 'Offline registration failed' };
+    const userData = mapLocalAccount(result.user);
+    await unlockStorageEncryption({
+      userId: userData.id,
+      schoolId: userData.schoolId,
+      email: userData.email,
+      password,
+    });
+    setCloudSyncEnabled(false);
+    markLocalUnlimitedAccess(userData);
+    localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, isUnlockedRelease ? 'unlocked_offline_registration' : 'locked_offline_registration_pending_plan');
+    saveSession(userData);
+    setUser(userData);
+    setSchoolId(userData.schoolId);
+    initializeSyncForUser(userData);
+    return { success: true };
   }
 
   async function sendPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {

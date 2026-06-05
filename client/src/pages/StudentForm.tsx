@@ -16,6 +16,7 @@ import { getSubscriptionAccessState } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { BoardingStatus, getBoardingStatus, withBoardingStatus } from '../utils/studentBoarding';
 import { useBackOrFallback } from '../utils/navigation';
+import { PortalSelect } from '../components/PortalSelect';
 
 interface CustomField { id: string; label: string; value: string; }
 interface Attachment { id: string; name: string; file: string; type: string; }
@@ -281,18 +282,26 @@ export default function StudentForm() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="form-label">Status</label>
-                    <select name="status" value={formData.status || 'active'} onChange={handleChange} className="form-input">
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                    </select>
+                    <PortalSelect
+                      value={formData.status || 'active'}
+                      onChange={value => setFormData(prev => ({ ...prev, status: value as any }))}
+                      options={[
+                        { value: 'active', label: 'Active' },
+                        { value: 'inactive', label: 'Inactive' },
+                      ]}
+                    />
                   </div>
                   <div>
                     <label className="form-label">Gender *</label>
-                    <select name="gender" value={formData.gender || Gender.MALE} onChange={handleChange} className="form-input">
-                      <option value={Gender.MALE}>Male</option>
-                      <option value={Gender.FEMALE}>Female</option>
-                      <option value={Gender.OTHER}>Other</option>
-                    </select>
+                    <PortalSelect
+                      value={formData.gender || Gender.MALE}
+                      onChange={value => setFormData(prev => ({ ...prev, gender: value as Gender }))}
+                      options={[
+                        { value: Gender.MALE, label: 'Male' },
+                        { value: Gender.FEMALE, label: 'Female' },
+                        { value: Gender.OTHER, label: 'Other' },
+                      ]}
+                    />
                   </div>
                 </div>
               </div>
@@ -315,21 +324,29 @@ export default function StudentForm() {
               </div>
               <div>
                 <label className="form-label">Class *</label>
-                <select name="classId" value={formData.classId || ''} onChange={handleChange} className="form-input" required>
-                  <option value="">Select Class</option>
-                  {classes.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.enrolled}/{c.capacity}){c.isFull && c.id !== formData.classId ? ' - increase capacity or ignore' : ''}
-                    </option>
-                  ))}
-                </select>
+                <PortalSelect
+                  value={formData.classId || ''}
+                  onChange={value => setFormData(prev => ({ ...prev, classId: value }))}
+                  placeholder="Select Class"
+                  options={[
+                    { value: '', label: 'Select Class' },
+                    ...classes.map(c => ({
+                      value: c.id,
+                      label: `${c.name} (${c.enrolled}/${c.capacity})${c.isFull && c.id !== formData.classId ? ' - increase capacity or ignore' : ''}`,
+                    })),
+                  ]}
+                />
               </div>
               <div>
                 <label className="form-label">Day or Boarding *</label>
-                <select name="boardingStatus" value={(formData as any).boardingStatus || 'day'} onChange={handleChange} className="form-input" required>
-                  <option value="day">Day</option>
-                  <option value="boarding">Boarding</option>
-                </select>
+                <PortalSelect
+                  value={(formData as any).boardingStatus || 'day'}
+                  onChange={value => setFormData(prev => ({ ...prev, boardingStatus: value as BoardingStatus } as any))}
+                  options={[
+                    { value: 'day', label: 'Day' },
+                    { value: 'boarding', label: 'Boarding' },
+                  ]}
+                />
               </div>
             </div>
 

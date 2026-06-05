@@ -22,6 +22,7 @@ import { FullscreenButton } from '../components/FullscreenButton';
 import { FitStatValue } from '../components/FitStatValue';
 import { shouldSaveOnEnter } from '../utils/keyboard';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
+import { PortalSelect } from '../components/PortalSelect';
 
 const LARGE_TABLE_RENDER_LIMIT = 300;
 
@@ -79,6 +80,7 @@ function isBeforeTerm(fee: Pick<Fee, 'term' | 'year'>, term: string, year: strin
 export default function Invoices() {
   const { user, schoolId } = useAuth();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [bulkInvoiceTerm, setBulkInvoiceTerm] = useState('1');
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterTerm, setFilterTerm] = useState<string>('all');
@@ -1603,24 +1605,20 @@ export default function Invoices() {
               <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto_auto] md:items-end">
                 <div className="relative z-[80] dropdown-parent">
                   <label className="form-label">Class / Grade</label>
-                  <select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)} className={pageSelectClass}>
-                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <PortalSelect value={selectedClassId} onChange={setSelectedClassId} options={classes.map(c => ({ value: c.id, label: c.name }))} />
                 </div>
                 <div className="relative z-[80] dropdown-parent">
                   <label className="form-label">Term</label>
-                  <select value={selectedTerm} onChange={(e) => setSelectedTerm(e.target.value)} className={`${pageSelectClass} w-32`}>
-                    <option value="1">Term 1</option>
-                    <option value="2">Term 2</option>
-                    <option value="3">Term 3</option>
-                  </select>
+                  <PortalSelect className="w-32" value={selectedTerm} onChange={setSelectedTerm} options={[1, 2, 3].map(term => ({ value: String(term), label: `Term ${term}` }))} />
                 </div>
                 <div className="relative z-[80] dropdown-parent">
                   <label className="form-label">Year</label>
-                  <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className={`${pageSelectClass} w-32`}>
-                    <option value={new Date().getFullYear().toString()}>{new Date().getFullYear()}</option>
-                    <option value={(new Date().getFullYear() + 1).toString()}>{new Date().getFullYear() + 1}</option>
-                  </select>
+                  <PortalSelect
+                    className="w-32"
+                    value={selectedYear}
+                    onChange={setSelectedYear}
+                    options={[new Date().getFullYear(), new Date().getFullYear() + 1].map(year => ({ value: String(year), label: String(year) }))}
+                  />
                 </div>
                 <button onClick={() => setShowAddStructureForm(true)} className="btn btn-primary">
                   <Plus size={16} /> Add Fee
@@ -1632,9 +1630,7 @@ export default function Invoices() {
                   <h3 className="mb-3 font-semibold text-emerald-800 dark:text-emerald-200">Add Fee Structure</h3>
                   <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
                     <input value={newStructure.name} onChange={(e) => setNewStructure({ ...newStructure, name: e.target.value })} className="form-input" placeholder="Name" />
-                    <select value={newStructure.category} onChange={(e) => setNewStructure({ ...newStructure, category: e.target.value as FeeCategory })} className={pageSelectClass}>
-                      {Object.values(FeeCategory).map(category => <option key={category} value={category}>{getCategoryLabel(category)}</option>)}
-                    </select>
+                    <PortalSelect value={newStructure.category} onChange={value => setNewStructure({ ...newStructure, category: value as FeeCategory })} options={Object.values(FeeCategory).map(category => ({ value: category, label: getCategoryLabel(category) }))} />
                     <input type="number" value={newStructure.amount || ''} onChange={(e) => setNewStructure({ ...newStructure, amount: parseFloat(e.target.value) || 0 })} className="form-input" placeholder={`Amount (${currency.symbol})`} />
                     <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
                       <input type="checkbox" checked={newStructure.isRequired} onChange={(e) => setNewStructure({ ...newStructure, isRequired: e.target.checked })} />
@@ -1721,7 +1717,7 @@ export default function Invoices() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px]">
                     <div className="relative"><SearchIcon size={18} className="search-input-icon" /><input value={searchStudent} onChange={(e) => setSearchStudent(e.target.value)} className="search-input" placeholder="Search full name or ID..." /></div>
-                    <div className="relative z-[80] dropdown-parent"><select value={filterBursaryClass} onChange={(e) => setFilterBursaryClass(e.target.value)} className={pageSelectClass}><option value="all">All Classes</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                    <div className="relative z-[80] dropdown-parent"><PortalSelect value={filterBursaryClass} onChange={setFilterBursaryClass} options={[{ value: 'all', label: 'All Classes' }, ...classes.map(c => ({ value: c.id, label: c.name }))]} /></div>
                   </div>
                   <div className="max-h-80 overflow-y-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
                     {filteredBursaryStudents.map((s, index) => (
@@ -1750,7 +1746,7 @@ export default function Invoices() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px]">
                     <div className="relative"><SearchIcon size={18} className="search-input-icon" /><input value={searchDiscountStudent} onChange={(e) => setSearchDiscountStudent(e.target.value)} className="search-input" placeholder="Search full name or ID..." /></div>
-                    <div className="relative z-[80] dropdown-parent"><select value={filterDiscountClass} onChange={(e) => setFilterDiscountClass(e.target.value)} className={pageSelectClass}><option value="all">All Classes</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                    <div className="relative z-[80] dropdown-parent"><PortalSelect value={filterDiscountClass} onChange={setFilterDiscountClass} options={[{ value: 'all', label: 'All Classes' }, ...classes.map(c => ({ value: c.id, label: c.name }))]} /></div>
                   </div>
                   <div className="max-h-80 overflow-y-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
                     {filteredDiscountStudents.map((s, index) => (
@@ -1764,7 +1760,7 @@ export default function Invoices() {
                 </div>
                 <div className="space-y-3 rounded-xl border border-cyan-200 bg-cyan-50 p-4 dark:border-cyan-800 dark:bg-cyan-900/20">
                   <p className="font-semibold text-cyan-800 dark:text-cyan-200">{selectedDiscountStudentIds.length} selected</p>
-                  <select value={newDiscount.type} onChange={(e) => setNewDiscount({ ...newDiscount, type: e.target.value as 'fixed' | 'percentage' })} className={pageSelectClass}><option value="fixed">Fixed Amount</option><option value="percentage">Percentage (%)</option></select>
+                  <PortalSelect value={newDiscount.type} onChange={value => setNewDiscount({ ...newDiscount, type: value as 'fixed' | 'percentage' })} options={[{ value: 'fixed', label: 'Fixed Amount' }, { value: 'percentage', label: 'Percentage (%)' }]} />
                   <input type="number" value={newDiscount.amount || ''} onChange={(e) => setNewDiscount({ ...newDiscount, amount: parseFloat(e.target.value) || 0 })} className="form-input" placeholder={newDiscount.type === 'percentage' ? '10' : `Amount (${currency.symbol})`} max={newDiscount.type === 'percentage' ? 100 : undefined} />
                   <button onClick={handleAddDiscount} disabled={savingDiscount} className="btn btn-primary w-full justify-center disabled:opacity-70">{savingDiscount ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Plus size={16} />} {savingDiscount ? 'Saving...' : 'Add Discount'}</button>
                 </div>
@@ -1923,14 +1919,8 @@ export default function Invoices() {
               )}
               {viewMode === 'invoices' && (
                 <>
-                  <select value={filterClassId} onChange={(e) => setFilterClassId(e.target.value)} className={`${pageSelectClass} h-10 w-[118px] max-w-full px-3 pr-7 text-sm`}>
-                    <option value="all">All Classes</option>
-                    {classes.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
-                  </select>
-                  <select value={filterStructure} onChange={(e) => setFilterStructure(e.target.value)} className={`${pageSelectClass} h-10 w-[128px] max-w-full px-3 pr-7 text-sm`}>
-                    <option value="all">All Fee Items</option>
-                    {invoiceStructureOptions.map(name => <option key={name} value={name}>{name}</option>)}
-                  </select>
+                  <PortalSelect className="h-10 w-[118px] max-w-full text-sm" value={filterClassId} onChange={setFilterClassId} options={[{ value: 'all', label: 'All Classes' }, ...classes.map(cls => ({ value: cls.id, label: cls.name }))]} />
+                  <PortalSelect className="h-10 w-[128px] max-w-full text-sm" value={filterStructure} onChange={setFilterStructure} options={[{ value: 'all', label: 'All Fee Items' }, ...invoiceStructureOptions.map(name => ({ value: name, label: name }))]} />
                   {(filterClassId !== 'all' || filterStructure !== 'all') && (
                     <button
                       onClick={() => { setFilterClassId('all'); setFilterStructure('all'); }}
@@ -2245,16 +2235,16 @@ export default function Invoices() {
               </div>
               <div>
                 <label className="form-label">Payment Method</label>
-                <select
+                <PortalSelect
                   value={paymentDraft.method}
-                  onChange={e => setPaymentDraft(prev => ({ ...prev, method: e.target.value as PaymentMethod }))}
-                  className="form-input"
-                >
-                  <option value={PaymentMethod.CASH}>Cash</option>
-                  <option value={PaymentMethod.BANK_TRANSFER}>Bank Transfer</option>
-                  <option value={PaymentMethod.CARD}>Card</option>
-                  <option value={PaymentMethod.OTHER}>Other</option>
-                </select>
+                  onChange={value => setPaymentDraft(prev => ({ ...prev, method: value as PaymentMethod }))}
+                  options={[
+                    { value: PaymentMethod.CASH, label: 'Cash' },
+                    { value: PaymentMethod.BANK_TRANSFER, label: 'Bank Transfer' },
+                    { value: PaymentMethod.CARD, label: 'Card' },
+                    { value: PaymentMethod.OTHER, label: 'Other' },
+                  ]}
+                />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button onClick={() => setPaymentInvoice(null)} className="btn btn-secondary" disabled={!!recordingPaymentId}>Cancel</button>
@@ -2307,11 +2297,7 @@ export default function Invoices() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="form-label">Term</label>
-                  <select value={invoiceDraft.term} onChange={e => setInvoiceDraft(p => ({ ...p, term: e.target.value }))} className="form-input">
-                    <option value="1">Term 1</option>
-                    <option value="2">Term 2</option>
-                    <option value="3">Term 3</option>
-                  </select>
+                  <PortalSelect value={invoiceDraft.term} onChange={value => setInvoiceDraft(p => ({ ...p, term: value }))} options={[1, 2, 3].map(term => ({ value: String(term), label: `Term ${term}` }))} />
                 </div>
                 <div>
                   <label className="form-label">Year</label>
@@ -2320,12 +2306,16 @@ export default function Invoices() {
               </div>
               <div>
                 <label className="form-label">Status</label>
-                <select value={invoiceDraft.status} onChange={e => setInvoiceDraft(p => ({ ...p, status: e.target.value }))} className="form-input">
-                  <option value="pending">Pending</option>
-                  <option value="partial">Partial</option>
-                  <option value="paid">Paid</option>
-                  <option value="overdue">Overdue</option>
-                </select>
+                <PortalSelect
+                  value={invoiceDraft.status}
+                  onChange={value => setInvoiceDraft(p => ({ ...p, status: value }))}
+                  options={[
+                    { value: 'pending', label: 'Pending' },
+                    { value: 'partial', label: 'Partial' },
+                    { value: 'paid', label: 'Paid' },
+                    { value: 'overdue', label: 'Overdue' },
+                  ]}
+                />
                 <p className="mt-1 text-xs text-slate-500">Selecting Paid records the remaining balance as a cash payment.</p>
               </div>
               <div className="flex justify-end gap-2 pt-2">
@@ -2417,11 +2407,7 @@ export default function Invoices() {
                   </div>
                   <div>
                     <label className="form-label">Term</label>
-                    <select id="bulk-term" className="form-input form-select">
-                      <option value="1">Term 1</option>
-                      <option value="2">Term 2</option>
-                      <option value="3">Term 3</option>
-                    </select>
+                    <PortalSelect value={bulkInvoiceTerm} onChange={setBulkInvoiceTerm} options={[1, 2, 3].map(term => ({ value: String(term), label: `Term ${term}` }))} />
                   </div>
                 </div>
               </div>
@@ -2434,7 +2420,7 @@ export default function Invoices() {
                 onClick={() => {
                   const desc = (document.getElementById('bulk-desc') as HTMLInputElement).value;
                   const amount = parseFloat((document.getElementById('bulk-amount') as HTMLInputElement).value);
-                  const term = (document.getElementById('bulk-term') as HTMLSelectElement).value;
+                  const term = bulkInvoiceTerm;
                   
                   if (!desc || isNaN(amount) || amount <= 0) {
                     addToast('Please fill all required fields', 'error');
@@ -2519,16 +2505,12 @@ export default function Invoices() {
                               {field.label}*
                             </td>
                             <td className="px-2 py-1.5">
-                              <select
+                              <PortalSelect
                                 value={fieldMapping[field.key] || ''}
-                                onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
-                                className="w-full form-input py-1 px-2 text-xs"
-                              >
-                                <option value="">-- Skip --</option>
-                                {csvHeaders.map(header => (
-                                  <option key={header} value={header}>{header}</option>
-                                ))}
-                              </select>
+                                onChange={value => setFieldMapping(prev => ({ ...prev, [field.key]: value }))}
+                                className="py-1 text-xs"
+                                options={[{ value: '', label: '-- Skip --' }, ...csvHeaders.map(header => ({ value: header, label: header }))]}
+                              />
                             </td>
                           </tr>
                         ))}
@@ -2629,38 +2611,15 @@ export default function Invoices() {
               <div className="flex flex-wrap gap-4 items-end">
                 <div className="flex-1 min-w-[200px]">
                   <label className="form-label">Class / Grade</label>
-                  <select 
-                    value={selectedClassId} 
-                    onChange={(e) => setSelectedClassId(e.target.value)}
-                    className="form-input"
-                  >
-                    {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                  <PortalSelect value={selectedClassId} onChange={setSelectedClassId} options={classes.map(c => ({ value: c.id, label: c.name }))} />
                 </div>
                 <div>
                   <label className="form-label">Term</label>
-                  <select 
-                    value={selectedTerm} 
-                    onChange={(e) => setSelectedTerm(e.target.value)}
-                    className="form-input w-32"
-                  >
-                    <option value="1">Term 1</option>
-                    <option value="2">Term 2</option>
-                    <option value="3">Term 3</option>
-                  </select>
+                  <PortalSelect className="w-32" value={selectedTerm} onChange={setSelectedTerm} options={[1, 2, 3].map(term => ({ value: String(term), label: `Term ${term}` }))} />
                 </div>
                 <div>
                   <label className="form-label">Year</label>
-                  <select 
-                    value={selectedYear} 
-                    onChange={(e) => setSelectedYear(e.target.value)}
-                    className="form-input w-28"
-                  >
-                    <option value={new Date().getFullYear().toString()}>{new Date().getFullYear()}</option>
-                    <option value={(new Date().getFullYear() + 1).toString()}>{new Date().getFullYear() + 1}</option>
-                  </select>
+                  <PortalSelect className="w-28" value={selectedYear} onChange={setSelectedYear} options={[new Date().getFullYear(), new Date().getFullYear() + 1].map(year => ({ value: String(year), label: String(year) }))} />
                 </div>
                 <button 
                   onClick={() => setShowAddStructureForm(true)}
@@ -2687,21 +2646,11 @@ export default function Invoices() {
                   </div>
                   <div>
                     <label className="form-label text-xs">Category</label>
-                    <select
+                    <PortalSelect
                       value={newStructure.category}
-                      onChange={(e) => setNewStructure({...newStructure, category: e.target.value as FeeCategory})}
-                      className="form-input"
-                    >
-                      <option value={FeeCategory.TUITION}>Tuition</option>
-                      <option value={FeeCategory.BOARDING}>Boarding</option>
-                      <option value={FeeCategory.EXAM}>Examination</option>
-                      <option value={FeeCategory.REGISTRATION}>Registration</option>
-                      <option value={FeeCategory.UNIFORM}>Uniform</option>
-                      <option value={FeeCategory.BOOKS}>Books</option>
-                      <option value={FeeCategory.TRANSPORT}>Transport</option>
-                      <option value={FeeCategory.ACTIVITY}>Activity</option>
-                      <option value={FeeCategory.OTHER}>Other</option>
-                    </select>
+                      onChange={value => setNewStructure({...newStructure, category: value as FeeCategory})}
+                      options={Object.values(FeeCategory).map(category => ({ value: category, label: getCategoryLabel(category) }))}
+                    />
                   </div>
                   <div>
                     <label className="form-label text-xs">Amount ({currency.symbol}) *</label>
@@ -2916,16 +2865,7 @@ export default function Invoices() {
                 </div>
                 <div className="w-40">
                   <label className="form-label">Class Filter</label>
-                  <select 
-                    value={filterBursaryClass} 
-                    onChange={(e) => setFilterBursaryClass(e.target.value)}
-                    className="form-input"
-                  >
-                    <option value="all">All Classes</option>
-                    {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                  <PortalSelect value={filterBursaryClass} onChange={setFilterBursaryClass} options={[{ value: 'all', label: 'All Classes' }, ...classes.map(c => ({ value: c.id, label: c.name }))]} />
                 </div>
               </div>
               
@@ -3100,16 +3040,7 @@ export default function Invoices() {
                 </div>
                 <div className="w-40">
                   <label className="form-label">Class Filter</label>
-                  <select 
-                    value={filterDiscountClass} 
-                    onChange={(e) => setFilterDiscountClass(e.target.value)}
-                    className="form-input"
-                  >
-                    <option value="all">All Classes</option>
-                    {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                  <PortalSelect value={filterDiscountClass} onChange={setFilterDiscountClass} options={[{ value: 'all', label: 'All Classes' }, ...classes.map(c => ({ value: c.id, label: c.name }))]} />
                 </div>
               </div>
 
@@ -3151,14 +3082,7 @@ export default function Invoices() {
                 <div className="space-y-3">
                   <div>
                     <label className="form-label">Type</label>
-                    <select 
-                      value={newDiscount.type} 
-                      onChange={(e) => setNewDiscount({...newDiscount, type: e.target.value as 'fixed' | 'percentage'})}
-                      className="form-input"
-                    >
-                      <option value="fixed">Fixed Amount</option>
-                      <option value="percentage">Percentage (%)</option>
-                    </select>
+                    <PortalSelect value={newDiscount.type} onChange={value => setNewDiscount({...newDiscount, type: value as 'fixed' | 'percentage'})} options={[{ value: 'fixed', label: 'Fixed Amount' }, { value: 'percentage', label: 'Percentage (%)' }]} />
                   </div>
                   <div>
                     <label className="form-label">{newDiscount.type === 'percentage' ? 'Percent' : 'Amount'} ({newDiscount.type === 'percentage' ? '%' : currency.symbol})</label>

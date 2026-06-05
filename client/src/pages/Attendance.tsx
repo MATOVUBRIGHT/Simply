@@ -16,6 +16,7 @@ import { sortClassesBySectionThenLevel } from '../utils/classroom';
 import { FitStatValue } from '../components/FitStatValue';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
 import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
+import { PortalSelect } from '../components/PortalSelect';
 
 type ImportAttendanceRow = {
   date: string;
@@ -683,12 +684,7 @@ export default function Attendance() {
             <BookOpen size={16} className="text-slate-400" />
             Select Class
           </label>
-          <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="form-input">
-            <option value="">All Classes</option>
-            {classes.map((c: any) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <PortalSelect value={selectedClass} onChange={setSelectedClass} options={[{ value: '', label: 'All Classes' }, ...classes.map((c: any) => ({ value: c.id, label: c.name }))]} />
         </div>
       </div>
 
@@ -847,16 +843,12 @@ export default function Attendance() {
                 <div className="space-y-4">
                   <div>
                     <label className="form-label">Select Class *</label>
-                    <select
+                    <PortalSelect
                       value={importTemplateClassId}
-                      onChange={e => handleImportTemplateClassChange(e.target.value)}
-                      className="form-input"
-                    >
-                      <option value="">Choose a class</option>
-                      {classes.map((c: any) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                      onChange={handleImportTemplateClassChange}
+                      placeholder="Choose a class"
+                      options={[{ value: '', label: 'Choose a class' }, ...classes.map((c: any) => ({ value: c.id, label: c.name }))]}
+                    />
                   </div>
 
                   {importTemplateClassId && (
@@ -968,10 +960,12 @@ export default function Attendance() {
                               <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap">{header}</td>
                               <td className="px-3 py-2 text-slate-400 truncate max-w-[80px]">{sample}</td>
                               <td className="px-3 py-2">
-                                <select value={currentMapping} onChange={e => { const nk = e.target.value; setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }} className="w-full form-input py-1 px-2 text-xs">
-                                  <option value="">Skip</option>
-                                  {attendanceExpectedFields.map(f => (<option key={f.key} value={f.key}>{f.label}{f.required ? ' *' : ''}</option>))}
-                                </select>
+                                <PortalSelect
+                                  value={currentMapping}
+                                  onChange={nk => { setFieldMapping(prev => { const next = { ...prev }; Object.keys(next).forEach(k => { if (next[k] === header) delete next[k]; }); if (nk) next[nk] = header; return next; }); }}
+                                  className="py-1 text-xs"
+                                  options={[{ value: '', label: 'Skip' }, ...attendanceExpectedFields.map(f => ({ value: f.key, label: `${f.label}${f.required ? ' *' : ''}` }))]}
+                                />
                               </td>
                             </tr>
                           );

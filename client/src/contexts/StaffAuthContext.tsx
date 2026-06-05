@@ -22,6 +22,7 @@ interface SavedStaffLogin {
 
 const STAFF_SESSION_KEY = 'schofy_staff_session';
 const STAFF_SAVED_LOGIN_PREFIX = 'schofy_saved_staff_login_';
+const STAFF_OFFLINE_CACHE_PREFIX = 'schofy_staff_offline_cache_';
 
 export function buildGeneratedEmail(firstName: string, lastName: string, staffId: string): string {
   const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -61,19 +62,89 @@ function legacySavedStaffLoginKey(schoolId: string) {
   return `${STAFF_SAVED_LOGIN_PREFIX}${schoolId}`;
 }
 
+function staffOfflineCacheKey(schoolId: string) {
+  return `${STAFF_OFFLINE_CACHE_PREFIX}${schoolId}`;
+}
+
+function rowToStaffMember(data: any): StaffMember {
+  return {
+    id: data.id,
+    staffId: data.staff_id ?? data.staffId,
+    schoolId: data.school_id ?? data.schoolId,
+    firstName: data.first_name ?? data.firstName,
+    lastName: data.last_name ?? data.lastName,
+    role: data.role,
+    email: data.email || '',
+    generatedEmail: data.generated_email ?? data.generatedEmail ?? buildGeneratedEmail(data.first_name ?? data.firstName, data.last_name ?? data.lastName, data.staff_id ?? data.staffId),
+    phone: data.phone || '',
+    allowedPages: Array.isArray(data.allowed_pages) ? data.allowed_pages : Array.isArray(data.allowedPages) ? data.allowedPages : [],
+    isActive: data.is_active ?? data.isActive ?? true,
+    isReadOnly: data.is_read_only ?? data.isReadOnly ?? false,
+    lastLoginAt: data.last_login_at ?? data.lastLoginAt ?? null,
+    createdAt: data.created_at ?? data.createdAt ?? new Date().toISOString(),
+  };
+}
+
+export function cacheStaffUsersForOffline(schoolId: string, rows: any[]) {
+  if (!schoolId || !Array.isArray(rows)) return;
+  try {
+    const cached = rows
+      .filter(row => row?.id && (row.password_hash || row.passwordHash))
+      .map(row => ({
+        id: row.id,
+        school_id: row.school_id ?? row.schoolId ?? schoolId,
+        staff_id: row.staff_id ?? row.staffId,
+        first_name: row.first_name ?? row.firstName,
+        last_name: row.last_name ?? row.lastName,
+        role: row.role,
+        email: row.email || '',
+        phone: row.phone || '',
+        generated_email: row.generated_email ?? row.generatedEmail ?? null,
+        password_hash: row.password_hash ?? row.passwordHash,
+        allowed_pages: Array.isArray(row.allowed_pages) ? row.allowed_pages : Array.isArray(row.allowedPages) ? row.allowedPages : [],
+        is_active: row.is_active ?? row.isActive ?? true,
+        is_read_only: row.is_read_only ?? row.isReadOnly ?? false,
+        last_login_at: row.last_login_at ?? row.lastLoginAt ?? null,
+        created_at: row.created_at ?? row.createdAt ?? new Date().toISOString(),
+        updated_at: row.updated_at ?? row.updatedAt ?? new Date().toISOString(),
+      }));
+    localStorage.setItem(staffOfflineCacheKey(schoolId), JSON.stringify({ savedAt: new Date().toISOString(), rows: cached }));
+    localStorage.setItem(`schofy_staff_gate_enabled_${schoolId}`, cached.length > 0 ? '1' : '0');
+  } catch {}
+}
+
+function readCachedStaffUsers(schoolId: string): any[] {
+  if (!schoolId) return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(staffOfflineCacheKey(schoolId)) || 'null');
+    return Array.isArray(parsed?.rows) ? parsed.rows : [];
+  } catch {
+    localStorage.removeItem(staffOfflineCacheKey(schoolId));
+    return [];
+  }
+}
+
+function readStaffSession(): StaffSession | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STAFF_SESSION_KEY) || 'null') as StaffSession | null;
+    if (!parsed?.staffMember?.id || !parsed.staffMember.schoolId) return null;
+    return parsed;
+  } catch {
+    localStorage.removeItem(STAFF_SESSION_KEY);
+    return null;
+  }
+}
+
+function saveStaffSession(session: StaffSession) {
+  localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session));
+}
+
 export function StaffAuthProvider({ children }: { children: ReactNode }) {
   const [staffSession, setStaffSession] = useState<StaffSession | null>(null);
   const [staffLoading, setStaffLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STAFF_SESSION_KEY) || 'null') as StaffSession | null;
-      if (saved?.staffMember?.id && saved?.staffMember?.schoolId) {
-        setStaffSession(saved);
-      }
-    } catch {
-      localStorage.removeItem(STAFF_SESSION_KEY);
-    }
+    setStaffSession(readStaffSession());
     setStaffLoading(false);
   }, []);
 
@@ -101,6 +172,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   function hasSavedStaffLogin(schoolId: string): boolean {
     if (!schoolId) return false;
     const prefix = savedStaffLoginPrefix(schoolId);
+    if (readCachedStaffUsers(schoolId).length > 0) return true;
     if (localStorage.getItem(legacySavedStaffLoginKey(schoolId))) return true;
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
@@ -119,6 +191,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       }
       keysToRemove.forEach(key => localStorage.removeItem(key));
       localStorage.removeItem(legacySavedStaffLoginKey(schoolId));
+      localStorage.removeItem(staffOfflineCacheKey(schoolId));
       if (staffSession?.staffMember.schoolId === schoolId) {
         localStorage.removeItem(STAFF_SESSION_KEY);
         setStaffSession(null);
@@ -128,16 +201,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   }
 
   function mapRow(data: any): StaffMember {
-    return {
-      id: data.id, staffId: data.staff_id, schoolId: data.school_id,
-      firstName: data.first_name, lastName: data.last_name, role: data.role,
-      email: data.email || '',
-      generatedEmail: data.generated_email || buildGeneratedEmail(data.first_name, data.last_name, data.staff_id),
-      phone: data.phone || '',
-      allowedPages: Array.isArray(data.allowed_pages) ? data.allowed_pages : [],
-      isActive: data.is_active, isReadOnly: data.is_read_only || false,
-      lastLoginAt: data.last_login_at || null, createdAt: data.created_at,
-    };
+    return rowToStaffMember(data);
   }
 
   function staffLogout() {
@@ -175,11 +239,55 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       clearFailedAttempts(rateKey);
       const session = { staffMember: saved.staffMember, loginAt: new Date().toISOString() };
       setStaffSession(session);
-      localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session));
+      saveStaffSession(session);
       return { success: true };
     }
 
-    if (!supabase || !navigator.onLine) return trySavedOfflineLogin();
+    async function tryCachedOfflineLogin(): Promise<{ success: boolean; error?: string }> {
+      const rows = readCachedStaffUsers(schoolId).filter(row => row?.is_active !== false);
+      if (rows.length === 0) return { success: false, error: 'No offline staff credentials are saved on this device. Connect once as admin and open Roles & Access.' };
+      const matches = rows.filter((staff: any) => {
+        const fullName = `${staff.first_name || ''} ${staff.last_name || ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
+        const reverseName = `${staff.last_name || ''} ${staff.first_name || ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
+        return normalizedName === fullName || normalizedName === reverseName;
+      });
+      if (matches.length === 0) {
+        recordFailedAttempt(rateKey);
+        return { success: false, error: 'Invalid staff name or password.' };
+      }
+      if (matches.length > 1) return { success: false, error: 'More than one staff member has that name. Use the full first and last name exactly.' };
+      const staffRow = matches[0];
+      const verified = await verifyPassword(password, staffRow.password_hash || '');
+      if (!verified) {
+        recordFailedAttempt(rateKey);
+        return { success: false, error: 'Invalid staff name or password.' };
+      }
+      clearFailedAttempts(rateKey);
+      const now = new Date().toISOString();
+      const member = mapRow({ ...staffRow, last_login_at: now });
+      const session = { staffMember: member, loginAt: now };
+      setStaffSession(session);
+      saveStaffSession(session);
+      localStorage.setItem(savedStaffLoginKey(schoolId, normalizedName), JSON.stringify({
+        schoolId,
+        normalizedName,
+        passwordHash: staffRow.password_hash,
+        staffMember: member,
+        savedAt: now,
+      } satisfies SavedStaffLogin));
+      window.dispatchEvent(new CustomEvent('schofySavedStaffLoginChanged'));
+      return { success: true };
+    }
+
+    async function tryAnyOfflineLogin(): Promise<{ success: boolean; error?: string }> {
+      const saved = await trySavedOfflineLogin();
+      if (saved.success) return saved;
+      const cached = await tryCachedOfflineLogin();
+      if (cached.success) return cached;
+      return { success: false, error: cached.error || saved.error };
+    }
+
+    if (!supabase || !navigator.onLine) return tryAnyOfflineLogin();
 
     try {
       const { data, error } = await supabase
@@ -187,6 +295,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
         .select('*')
         .eq('school_id', schoolId)
         .eq('is_active', true);
+      if (!error && Array.isArray(data)) cacheStaffUsersForOffline(schoolId, data);
 
       const matches = (data || []).filter((staff: any) => {
         const fullName = `${staff.first_name || ''} ${staff.last_name || ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -216,20 +325,16 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       const member = mapRow({ ...staffRow, last_login_at: now });
       const session = { staffMember: member, loginAt: now };
       setStaffSession(session);
+      saveStaffSession(session);
       const passwordHash = staffRow.password_hash || await hashPassword(password);
       const saved: SavedStaffLogin = { schoolId, normalizedName, passwordHash, staffMember: member, savedAt: now };
       localStorage.setItem(savedStaffLoginKey(schoolId, normalizedName), JSON.stringify(saved));
       window.dispatchEvent(new CustomEvent('schofySavedStaffLoginChanged'));
-      if (options?.remember) {
-        localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session));
-      } else {
-        localStorage.removeItem(STAFF_SESSION_KEY);
-      }
       void supabase.from('school_staff_users').update({ last_login_at: now, updated_at: now }).eq('id', staffRow.id);
       void logActivity(schoolId, staffRow.id, staffRow.staff_id, 'login', `${staffRow.first_name} ${staffRow.last_name} started shift`);
       return { success: true };
     } catch (error: any) {
-      const offlineResult = await trySavedOfflineLogin();
+      const offlineResult = await tryAnyOfflineLogin();
       if (offlineResult.success) return offlineResult;
       return { success: false, error: error?.message || offlineResult.error || 'Could not start role shift.' };
     }

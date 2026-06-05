@@ -98,9 +98,9 @@ const TEMPLATE_OPTIONS: { type: ReportTemplateType; label: string; icon: typeof 
   { type: 'signed', label: 'Head & Class Signatures', icon: Check },
   { type: 'nursery', label: 'Nursery Template Report Card', icon: Palette },
   { type: 'primary', label: 'Primary Template Report Card', icon: Building },
-  { type: 'o-level', label: 'O-level Template Report Card', icon: GraduationCap },
-  { type: 'a-level-new-curriculum', label: 'A-level New Curriculum Template Report Card', icon: FileTextIcon },
-  { type: 'secondary-default-subjects', label: 'Secondary O-level and A-Level Default Subjects', icon: Layout },
+  { type: 'o-level', label: 'Secondary Template Report Card', icon: GraduationCap },
+  { type: 'a-level-new-curriculum', label: 'Advanced Curriculum Template Report Card', icon: FileTextIcon },
+  { type: 'secondary-default-subjects', label: 'Secondary Default Subjects', icon: Layout },
 ];
 
 const DEFAULT_TEMPLATE: ReportTemplate = {
@@ -556,11 +556,11 @@ export default function ReportCard() {
       case 'primary':
         return { title: 'PRIMARY TEMPLATE REPORT CARD', header: '#1d4ed8', accent: '#22c55e', soft: '#eff6ff', table: 'Subject', score: 'Score' };
       case 'o-level':
-        return { title: 'O-LEVEL TEMPLATE REPORT CARD', header: '#064e3b', accent: '#0ea5e9', soft: '#ecfdf5', table: 'Subject', score: 'Score' };
+        return { title: 'SECONDARY TEMPLATE REPORT CARD', header: '#064e3b', accent: '#0ea5e9', soft: '#ecfdf5', table: 'Subject', score: 'Score' };
       case 'a-level-new-curriculum':
-        return { title: 'A-LEVEL NEW CURRICULUM TEMPLATE REPORT CARD', header: '#7f1d1d', accent: '#d97706', soft: '#fff7ed', table: 'Subject / Paper', score: 'Score' };
+        return { title: 'ADVANCED CURRICULUM TEMPLATE REPORT CARD', header: '#7f1d1d', accent: '#d97706', soft: '#fff7ed', table: 'Subject / Paper', score: 'Score' };
       case 'secondary-default-subjects':
-        return { title: 'SECONDARY O-LEVEL AND A-LEVEL DEFAULT SUBJECTS', header: '#312e81', accent: '#14b8a6', soft: '#eef2ff', table: 'Default Subject', score: 'Status' };
+        return { title: 'SECONDARY DEFAULT SUBJECTS', header: '#312e81', accent: '#14b8a6', soft: '#eef2ff', table: 'Default Subject', score: 'Status' };
       default:
         return { title: 'REPORT CARD WITH HEADTEACHER AND CLASS TEACHER SIGNATURES', header: '#1e3a5f', accent: '#16a34a', soft: '#f8fafc', table: 'Subject', score: 'Score' };
     }
@@ -640,7 +640,7 @@ export default function ReportCard() {
                   {!showSubjectsOnly && <td className="border border-slate-300 px-2 py-1.5 text-center">{row.score ?? '-'}</td>}
                   {!showSubjectsOnly && <td className="border border-slate-300 px-2 py-1.5 text-center">{row.maxScore ?? '-'}</td>}
                   {!showSubjectsOnly && <td className="border border-slate-300 px-2 py-1.5 text-center font-black">{row.grade || '-'}</td>}
-                  <td className="border border-slate-300 px-2 py-1.5">{showSubjectsOnly ? 'Default subject' : row.remarks || row.remark || '-'}</td>
+                  <td className="border border-slate-300 px-2 py-1.5">{showSubjectsOnly ? editableText('named.defaultSubjectStatus', 'Default subject') : row.remarks || row.remark || '-'}</td>
                 </tr>
               ))}
               {!showSubjectsOnly && (
@@ -666,8 +666,21 @@ export default function ReportCard() {
             <div className="rounded-lg border p-3" style={{ borderColor: `${style.header}55` }}>
               <p className="mb-2 font-black uppercase" style={{ color: style.header }}>{editableText('named.gradingSummary', 'Grading Summary')}</p>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                {template.gradingScale.slice(0, 8).map(scale => (
-                  <p key={scale.grade}><span className="font-black">{scale.grade}</span> {scale.min}-{scale.max}: {scale.remark}</p>
+                {template.gradingScale.slice(0, 8).map((scale, index) => (
+                  <p key={`${scale.grade}-${index}`}>
+                    <span className="font-black">
+                      <LiveEditable value={scale.grade} onSave={value => updateTemplateGradeScale(index, { grade: value })} isLiveEditing={isLiveEditing} />
+                    </span>{' '}
+                    <span>
+                      <LiveEditable value={`${scale.min}-${scale.max}`} onSave={value => {
+                        const [min, max] = value.split('-').map(part => Number(part.trim()));
+                        updateTemplateGradeScale(index, {
+                          min: Number.isFinite(min) ? min : scale.min,
+                          max: Number.isFinite(max) ? max : scale.max,
+                        });
+                      }} isLiveEditing={isLiveEditing} />
+                    </span>: <LiveEditable value={scale.remark} onSave={value => updateTemplateGradeScale(index, { remark: value })} isLiveEditing={isLiveEditing} />
+                  </p>
                 ))}
               </div>
             </div>
@@ -778,6 +791,11 @@ export default function ReportCard() {
       isLiveEditing={isLiveEditing}
     />
   );
+  const updateTemplateGradeScale = (index: number, updates: Partial<ReportTemplate['gradingScale'][number]>) => {
+    updateTemplate({
+      gradingScale: template.gradingScale.map((item, itemIndex) => itemIndex === index ? { ...item, ...updates } : item),
+    });
+  };
 
   const switchTemplate = (direction: -1 | 1) => {
     const nextIndex = (currentTemplateIndex + direction + TEMPLATE_OPTIONS.length) % TEMPLATE_OPTIONS.length;
@@ -817,7 +835,7 @@ export default function ReportCard() {
             <ChevronLeft size={17} />
           </button>
           <span className="min-w-[9rem] px-2 text-center text-xs font-bold text-slate-700 dark:text-slate-200">
-            {currentTemplateOption.label}
+            {editableText(`template.option.${currentTemplateOption.type}`, currentTemplateOption.label)}
           </span>
           <button
             type="button"
@@ -1096,10 +1114,21 @@ export default function ReportCard() {
                   {template.showGradingSystem && (
                     <div>
                       <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>{editableText('modern.gradingSystem', 'Grading System')}</div>
-                      {template.gradingScale.map(({ grade, min, max, remark }) => (
-                        <div key={grade} className="py-0.5 border-b border-slate-100">
-                          <span className="text-[10px] font-bold text-slate-700">{grade} ({min}-{max}%): </span>
-                          <span className="text-[10px] text-slate-600">{remark}</span>
+                      {template.gradingScale.map(({ grade, min, max, remark }, index) => (
+                        <div key={`${grade}-${index}`} className="py-0.5 border-b border-slate-100">
+                          <span className="text-[10px] font-bold text-slate-700">
+                            <LiveEditable value={grade} onSave={value => updateTemplateGradeScale(index, { grade: value })} isLiveEditing={isLiveEditing} /> (
+                            <LiveEditable value={`${min}-${max}%`} onSave={value => {
+                              const [nextMin, nextMax] = value.replace('%', '').split('-').map(part => Number(part.trim()));
+                              updateTemplateGradeScale(index, {
+                                min: Number.isFinite(nextMin) ? nextMin : min,
+                                max: Number.isFinite(nextMax) ? nextMax : max,
+                              });
+                            }} isLiveEditing={isLiveEditing} />):{' '}
+                          </span>
+                          <span className="text-[10px] text-slate-600">
+                            <LiveEditable value={remark} onSave={value => updateTemplateGradeScale(index, { remark: value })} isLiveEditing={isLiveEditing} />
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -1193,10 +1222,18 @@ export default function ReportCard() {
                   <section>
                     <h3 className="text-md font-bold text-[#2d3748] mb-3">{editableText('high.gradingScale', 'Grading Scale:')}</h3>
                     <ul className="space-y-1 text-xs">
-                      {template.gradingScale.slice(0, 5).map(s => (
-                        <li key={s.grade} className="flex gap-2">
-                          <span className="font-bold w-4">• {s.grade}:</span>
-                          <span>{s.min}-{s.max}%</span>
+                      {template.gradingScale.slice(0, 5).map((s, index) => (
+                        <li key={`${s.grade}-${index}`} className="flex gap-2">
+                          <span className="font-bold w-4">* <LiveEditable value={s.grade} onSave={value => updateTemplateGradeScale(index, { grade: value })} isLiveEditing={isLiveEditing} />:</span>
+                          <span>
+                            <LiveEditable value={`${s.min}-${s.max}%`} onSave={value => {
+                              const [min, max] = value.replace('%', '').split('-').map(part => Number(part.trim()));
+                              updateTemplateGradeScale(index, {
+                                min: Number.isFinite(min) ? min : s.min,
+                                max: Number.isFinite(max) ? max : s.max,
+                              });
+                            }} isLiveEditing={isLiveEditing} />
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -1205,15 +1242,15 @@ export default function ReportCard() {
                     <h3 className="text-md font-bold text-[#2d3748] mb-3">{editableText('high.attendance', 'Attendance:')}</h3>
                     <ul className="space-y-1 text-xs">
                       <li className="flex gap-2">
-                        <span className="font-bold">• Days Present:</span>
+                        <span className="font-bold">{editableText('high.daysPresent', '* Days Present:')}</span>
                         <span>170</span>
                       </li>
                       <li className="flex gap-2">
-                        <span className="font-bold">• Days Absent:</span>
+                        <span className="font-bold">{editableText('high.daysAbsent', '* Days Absent:')}</span>
                         <span>10</span>
                       </li>
                       <li className="flex gap-2">
-                        <span className="font-bold">• Tardies:</span>
+                        <span className="font-bold">{editableText('high.tardies', '* Tardies:')}</span>
                         <span>3</span>
                       </li>
                     </ul>
@@ -1400,10 +1437,18 @@ export default function ReportCard() {
                 <div>
                   <p className="text-[10px] font-black uppercase mb-2">{editableText('classic.gradingScale', 'Grading Scale')}</p>
                   <div className="space-y-1 text-[10px] font-bold">
-                    <p>(A) 90-100</p>
-                    <p>(B) 80-89</p>
-                    <p>(C) 70-79</p>
-                    <p>(D) 60-69</p>
+                    {template.gradingScale.slice(0, 4).map((scale, index) => (
+                      <p key={`${scale.grade}-${index}`}>
+                        (<LiveEditable value={scale.grade} onSave={value => updateTemplateGradeScale(index, { grade: value })} isLiveEditing={isLiveEditing} />){' '}
+                        <LiveEditable value={`${scale.min}-${scale.max}`} onSave={value => {
+                          const [min, max] = value.split('-').map(part => Number(part.trim()));
+                          updateTemplateGradeScale(index, {
+                            min: Number.isFinite(min) ? min : scale.min,
+                            max: Number.isFinite(max) ? max : scale.max,
+                          });
+                        }} isLiveEditing={isLiveEditing} />
+                      </p>
+                    ))}
                   </div>
                 </div>
                 <div>
@@ -1442,8 +1487,10 @@ export default function ReportCard() {
           </>
         )}
 
-        {template.footerText && (
-          <div className="px-5 py-2 text-center text-[10px] text-slate-500 italic">{template.footerText}</div>
+        {(template.footerText || isLiveEditing) && (
+          <div className="px-5 py-2 text-center text-[10px] text-slate-500 italic">
+            <LiveEditable value={template.footerText || 'Footer text'} onSave={value => updateTemplate({ footerText: value })} isLiveEditing={isLiveEditing} />
+          </div>
         )}
         <div className="h-6 mt-1" style={{ backgroundColor: acc }} />
       </div>

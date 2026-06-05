@@ -21,8 +21,8 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CACHE_KEY = 'schofy_desktop_update_check';
 const DISMISS_PREFIX = 'schofy_desktop_update_dismissed_';
 const SHOWN_PREFIX = 'schofy_desktop_update_shown_';
-const DEFAULT_MANIFEST_URL =
-  'https://raw.githubusercontent.com/MATOVUBRIGHT/Simply/main/desktop/update-manifest.json';
+const SCHOFY_WEBSITE_URL = 'https://schofy.vercel.app/website/';
+const DEFAULT_MANIFEST_URL = `${SCHOFY_WEBSITE_URL}update-manifest.json`;
 
 function normalizeVersion(version: string): number[] {
   return version
@@ -50,24 +50,32 @@ async function loadManifest(): Promise<UpdateManifest | null> {
   const manifestUrl =
     (import.meta.env.VITE_DESKTOP_UPDATE_MANIFEST_URL as string | undefined) || DEFAULT_MANIFEST_URL;
   const fallbackVersion = import.meta.env.VITE_DESKTOP_LATEST_VERSION as string | undefined;
-  const fallbackDownloadUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_URL as string | undefined;
+  const fallbackDownloadUrl = (import.meta.env.VITE_DESKTOP_DOWNLOAD_URL as string | undefined) || SCHOFY_WEBSITE_URL;
+  const fallbackManifest = fallbackVersion
+    ? {
+        version: fallbackVersion,
+        downloadUrl: fallbackDownloadUrl,
+        notes: ['Desktop update available'],
+        required: false,
+      }
+    : null;
 
   if (manifestUrl) {
-    const response = await fetch(manifestUrl, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Update manifest returned ${response.status}`);
-    return response.json() as Promise<UpdateManifest>;
+    try {
+      const response = await fetch(manifestUrl, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Update manifest returned ${response.status}`);
+      const manifest = await response.json() as UpdateManifest;
+      return {
+        ...manifest,
+        downloadUrl: manifest.downloadUrl || SCHOFY_WEBSITE_URL,
+      };
+    } catch (error) {
+      if (fallbackManifest) return fallbackManifest;
+      throw error;
+    }
   }
 
-  if (fallbackVersion && fallbackDownloadUrl) {
-    return {
-      version: fallbackVersion,
-      downloadUrl: fallbackDownloadUrl,
-      notes: ['Desktop update available'],
-      required: false,
-    };
-  }
-
-  return null;
+  return fallbackManifest;
 }
 
 function isDesktopApp(): boolean {
@@ -102,7 +110,8 @@ export default function DesktopUpdatePrompt() {
 
         localStorage.setItem(CACHE_KEY, JSON.stringify({ checkedAt: Date.now() }));
 
-        if (!currentVersion || !manifest?.version || !manifest.downloadUrl) return;
+        if (!currentVersion || !manifest?.version) return;
+        const downloadUrl = manifest.downloadUrl || SCHOFY_WEBSITE_URL;
 
         const dismissedKey = `${DISMISS_PREFIX}${manifest.version}`;
         const shownKey = `${SHOWN_PREFIX}${manifest.version}`;
@@ -115,7 +124,7 @@ export default function DesktopUpdatePrompt() {
           setUpdate({
             currentVersion,
             latestVersion: manifest.version,
-            downloadUrl: manifest.downloadUrl,
+            downloadUrl,
             notes: manifest.notes?.slice(0, 3) ?? [],
             required: Boolean(manifest.required),
           });
