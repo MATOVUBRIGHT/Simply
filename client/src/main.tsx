@@ -15,15 +15,6 @@ import { appIconFileName, isUnlockedRelease } from './utils/releaseChannel';
 import './index.css';
 
 const queryClient = getQueryClient();
-const DEFAULT_PRIMARY_COLOR = '#0082FC';
-const safePrimaryColor = (() => {
-  const stored = localStorage.getItem('primaryColor') || DEFAULT_PRIMARY_COLOR;
-  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(stored.trim()) ? stored.trim() : DEFAULT_PRIMARY_COLOR;
-})();
-
-document.documentElement.style.setProperty('--primary-color', safePrimaryColor);
-void window.electronAPI?.setTitleBarColor?.(safePrimaryColor);
-
 const isFileProtocol = window.location.protocol === 'file:';
 const AppRouter = isFileProtocol ? HashRouter : BrowserRouter;
 const assetBase = import.meta.env.BASE_URL || '/';
