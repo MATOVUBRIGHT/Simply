@@ -118,67 +118,6 @@ body {
   transition: background-color 0.2s, color 0.2s;
 }
 
-.desktop-titlebar-brand {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  min-width: 0;
-  color: #ffffff;
-  font-size: 0.875rem;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.desktop-titlebar-logo {
-  width: 1rem;
-  height: 1rem;
-  flex-shrink: 0;
-  object-fit: contain;
-}
-
-.desktop-titlebar {
-  display: flex;
-  height: 39px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 0 0 0.625rem;
-  background-color: var(--primary-color, #0082FC) !important;
-  color: #ffffff;
-  -webkit-app-region: drag;
-  user-select: none;
-}
-
-.desktop-titlebar-controls {
-  display: flex;
-  height: 39px;
-  -webkit-app-region: no-drag;
-}
-
-.desktop-titlebar-controls button {
-  width: 46px;
-  height: 39px;
-  border: 0;
-  background: transparent;
-  color: #ffffff;
-  font-size: 1rem;
-  line-height: 1;
-  transition: background-color 120ms ease;
-}
-
-.desktop-titlebar-controls button:hover {
-  background-color: rgba(255, 255, 255, 0.16);
-}
-
-.desktop-titlebar-controls button:last-child:hover {
-  background-color: #dc2626;
-}
-
-.desktop-shell {
-  min-height: 100vh;
-  background-color: #ffffff;
-}
-
 body,
 body * {
   text-shadow: none !important;

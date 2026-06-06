@@ -168,27 +168,6 @@ function PageLoadingSpinner({ label = 'Loading page...' }: { label?: string }) {
   );
 }
 
-function DesktopTitleBar() {
-  const isDesktop = typeof window !== 'undefined' && Boolean(window.electronAPI);
-  if (!isDesktop) return null;
-  const control = (action: 'minimize' | 'maximize' | 'close') => {
-    void window.electronAPI?.windowControl?.(action);
-  };
-  return (
-    <div className="desktop-titlebar">
-      <div className="desktop-titlebar-brand">
-        <img src="/schofy.logo.png" alt="" className="desktop-titlebar-logo" />
-        <span>Schofy - School Management System</span>
-      </div>
-      <div className="desktop-titlebar-controls">
-        <button type="button" onClick={() => control('minimize')} aria-label="Minimize">-</button>
-        <button type="button" onClick={() => control('maximize')} aria-label="Maximize">□</button>
-        <button type="button" onClick={() => control('close')} aria-label="Close">×</button>
-      </div>
-    </div>
-  );
-}
-
 function MainApp() {
   const { user, loading } = useAuth();
   const { canAccessPage, isStaffMode } = useStaffAuth();
@@ -397,8 +376,7 @@ function App() {
   if (!hasSession && !user) {
     if (loading) return <FullScreenLoader label="Loading..." />;
     return (
-      <div className="desktop-shell">
-        <DesktopTitleBar />
+      <>
         <Suspense fallback={<PageLoadingSpinner />}>
           <div className="page-shell">
             <Routes location={location}>
@@ -408,14 +386,13 @@ function App() {
           </div>
         </Suspense>
         <DesktopUpdatePrompt />
-      </div>
+      </>
     );
   }
 
   // Has session or user — render app
   return (
-    <div className="desktop-shell">
-      <DesktopTitleBar />
+    <>
       <Suspense fallback={<PageLoadingSpinner />}>
         <Routes>
           <Route path="/login" element={user ? <Navigate to={restoredRoute} replace /> : <Login />} />
@@ -423,7 +400,7 @@ function App() {
         </Routes>
       </Suspense>
       <DesktopUpdatePrompt />
-    </div>
+    </>
   );
 }
 

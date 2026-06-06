@@ -14,7 +14,6 @@ const ZOOM_FILE = 'schofy-zoom.json';
 const ZOOM_STEP = 0.1;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
-const DEFAULT_TITLE_BAR_COLOR = '#0082FC';
 
 function desktopLog(message, error) {
   const line = `[${new Date().toISOString()}] ${message}${error ? ` ${error.stack || error.message || error}` : ''}\n`;
@@ -142,17 +141,6 @@ function getDesktopIcon() {
   return icon.isEmpty() ? nativeImage.createFromPath(pngPath) : icon;
 }
 
-function sanitizeTitleBarColor(color) {
-  const trimmed = String(color || '').trim();
-  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed) ? trimmed : DEFAULT_TITLE_BAR_COLOR;
-}
-
-function applyTitleBarColor(color = DEFAULT_TITLE_BAR_COLOR) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const safeColor = sanitizeTitleBarColor(color);
-  mainWindow.setBackgroundColor(safeColor);
-}
-
 function getAppUserModelId() {
   const appName = app.getName().toLowerCase();
   if (appName.includes('unlocked')) return 'com.schofy.desktop.unlocked';
@@ -237,9 +225,9 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 700,
     title: 'Schofy',
-    frame: false,
+    frame: true,
     autoHideMenuBar: true,
-    backgroundColor: DEFAULT_TITLE_BAR_COLOR,
+    backgroundColor: '#FFFFFF',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -252,7 +240,6 @@ function createWindow() {
     icon: getDesktopIcon(),
     show: false,
   });
-  applyTitleBarColor(DEFAULT_TITLE_BAR_COLOR);
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (!input.control && !input.meta) return;
@@ -502,29 +489,6 @@ ipcMain.handle('check-online', async () => {
 });
 
 // ── Native file backup IPC handlers ───────────────────────────────────────────
-
-ipcMain.handle('set-title-bar-color', (_event, color) => {
-  applyTitleBarColor(color);
-  return { success: true };
-});
-
-ipcMain.handle('window-control', (_event, action) => {
-  if (!mainWindow || mainWindow.isDestroyed()) return { success: false, error: 'Window unavailable' };
-  if (action === 'minimize') {
-    mainWindow.minimize();
-    return { success: true };
-  }
-  if (action === 'maximize') {
-    if (mainWindow.isMaximized()) mainWindow.unmaximize();
-    else mainWindow.maximize();
-    return { success: true };
-  }
-  if (action === 'close') {
-    mainWindow.close();
-    return { success: true };
-  }
-  return { success: false, error: 'Unknown window action' };
-});
 
 ipcMain.handle('write-backup', async (event, key, data) => {
   try {
