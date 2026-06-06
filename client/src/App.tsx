@@ -168,6 +168,19 @@ function PageLoadingSpinner({ label = 'Loading page...' }: { label?: string }) {
   );
 }
 
+function DesktopTitleBar() {
+  const isDesktop = typeof window !== 'undefined' && Boolean(window.electronAPI);
+  if (!isDesktop) return null;
+  return (
+    <div className="desktop-titlebar">
+      <div className="desktop-titlebar-brand">
+        <img src="/schofy.logo.png" alt="" className="desktop-titlebar-logo" />
+        <span>Schofy - School Management System</span>
+      </div>
+    </div>
+  );
+}
+
 function MainApp() {
   const { user, loading } = useAuth();
   const { canAccessPage, isStaffMode } = useStaffAuth();
@@ -300,6 +313,8 @@ function MainApp() {
           {/* SubscriptionGate wraps all content — shows blocking modal if expired/incomplete */}
           <StaffRoleGate>
             <SubscriptionGate>
+            <div className="desktop-shell">
+            <DesktopTitleBar />
             <Layout>
               <Suspense fallback={<PageLoadingSpinner />}>
                 <div key={location.pathname} className="page-shell page-shell-enter">
@@ -351,6 +366,7 @@ function MainApp() {
                 </div>
               </Suspense>
             </Layout>
+            </div>
             </SubscriptionGate>
           <UpdateBanner />
           <StorageWarning />

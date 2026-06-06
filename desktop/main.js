@@ -14,6 +14,7 @@ const ZOOM_FILE = 'schofy-zoom.json';
 const ZOOM_STEP = 0.1;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
+const DEFAULT_TITLE_BAR_COLOR = '#0082FC';
 
 function desktopLog(message, error) {
   const line = `[${new Date().toISOString()}] ${message}${error ? ` ${error.stack || error.message || error}` : ''}\n`;
@@ -141,6 +142,27 @@ function getDesktopIcon() {
   return icon.isEmpty() ? nativeImage.createFromPath(pngPath) : icon;
 }
 
+function sanitizeTitleBarColor(color) {
+  const trimmed = String(color || '').trim();
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed) ? trimmed : DEFAULT_TITLE_BAR_COLOR;
+}
+
+function applyTitleBarColor(color = DEFAULT_TITLE_BAR_COLOR) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const safeColor = sanitizeTitleBarColor(color);
+  if (typeof mainWindow.setTitleBarOverlay === 'function') {
+    try {
+      mainWindow.setTitleBarOverlay({
+        color: safeColor,
+        symbolColor: '#FFFFFF',
+        height: 39,
+      });
+    } catch {
+      // Native title-bar overlays are platform dependent.
+    }
+  }
+}
+
 function getAppUserModelId() {
   const appName = app.getName().toLowerCase();
   if (appName.includes('unlocked')) return 'com.schofy.desktop.unlocked';
@@ -226,6 +248,12 @@ function createWindow() {
     minHeight: 700,
     title: 'Schofy',
     frame: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: DEFAULT_TITLE_BAR_COLOR,
+      symbolColor: '#FFFFFF',
+      height: 39,
+    },
     autoHideMenuBar: true,
     backgroundColor: '#FFFFFF',
     webPreferences: {
@@ -240,6 +268,7 @@ function createWindow() {
     icon: getDesktopIcon(),
     show: false,
   });
+  applyTitleBarColor(DEFAULT_TITLE_BAR_COLOR);
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (!input.control && !input.meta) return;
@@ -489,6 +518,11 @@ ipcMain.handle('check-online', async () => {
 });
 
 // ── Native file backup IPC handlers ───────────────────────────────────────────
+
+ipcMain.handle('set-title-bar-color', (_event, color) => {
+  applyTitleBarColor(color);
+  return { success: true };
+});
 
 ipcMain.handle('write-backup', async (event, key, data) => {
   try {

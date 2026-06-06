@@ -110,6 +110,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.style.setProperty('--card-accent-5', '#06b6d4');
     root.style.setProperty('--card-accent-6', '#8b5cf6');
     localStorage.setItem('primaryColor', safeColor);
+    void window.electronAPI?.setTitleBarColor?.(safeColor);
   }, [primaryColor]);
 
   function toggleTheme() {

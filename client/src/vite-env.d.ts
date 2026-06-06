@@ -26,5 +26,6 @@ interface Window {
     getAppVersion?: () => Promise<string>;
     openExternal?: (url: string) => Promise<{ success: boolean; error?: string }>;
     checkOnline?: () => Promise<boolean>;
+    setTitleBarColor?: (color: string) => Promise<{ success: boolean; error?: string }>;
   };
 }

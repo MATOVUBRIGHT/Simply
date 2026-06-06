@@ -40,4 +40,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   /** Check if the backend is reachable */
   checkOnline: () => ipcRenderer.invoke('check-online'),
+
+  /** Match the desktop title bar to the selected app theme color */
+  setTitleBarColor: (color) => ipcRenderer.invoke('set-title-bar-color', color),
 });
