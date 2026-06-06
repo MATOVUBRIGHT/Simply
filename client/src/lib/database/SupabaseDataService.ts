@@ -2022,11 +2022,15 @@ class SupabaseDataService {
 
   async restoreDeletedBatch(userId: string, tableName: string, records: any[]): Promise<SyncResult & { imported: number; records: any[] }> {
     const sid = this.sid(userId);
-    const result = await this.bulkCreate(userId, tableName, records);
-    const restoredIds = new Set(result.records.map(record => String(record?.id || '')));
-    records.forEach(record => {
+    const capacity = await this.filterCreatesByPlanCapacity(sid, tableName, records);
+    capacity.allowed.forEach(record => {
       const originalId = String(record?.id || '');
-      if (originalId && restoredIds.has(originalId)) unmarkDeleted(sid, tableName, originalId);
+      if (originalId) unmarkDeleted(sid, tableName, originalId);
+    });
+    const result = await this.bulkCreate(userId, tableName, records);
+    result.records.forEach(record => {
+      const originalId = String(record?.id || '');
+      if (originalId) unmarkDeleted(sid, tableName, originalId);
     });
     if (result.imported > 0) notifyUI(tableName);
     return result;

@@ -22,7 +22,10 @@ function getStoreName(type: string): string | null {
 }
 
 function isDuplicateDeletedItem(item: DeletedItem, record: any): boolean {
-  if (item.type === 'student' || item.type === 'staff') {
+  if (item.type === 'student') {
+    return Boolean(item.data?.id && record.id === item.data.id);
+  }
+  if (item.type === 'staff') {
     return record.firstName === item.data?.firstName && record.lastName === item.data?.lastName;
   }
   return record.name === item.data?.name;
