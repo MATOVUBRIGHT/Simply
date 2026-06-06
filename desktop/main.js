@@ -247,13 +247,7 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 700,
     title: 'Schofy',
-    frame: true,
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: DEFAULT_TITLE_BAR_COLOR,
-      symbolColor: '#FFFFFF',
-      height: 39,
-    },
+    frame: false,
     autoHideMenuBar: true,
     backgroundColor: '#FFFFFF',
     webPreferences: {
@@ -522,6 +516,24 @@ ipcMain.handle('check-online', async () => {
 ipcMain.handle('set-title-bar-color', (_event, color) => {
   applyTitleBarColor(color);
   return { success: true };
+});
+
+ipcMain.handle('window-control', (_event, action) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { success: false, error: 'Window unavailable' };
+  if (action === 'minimize') {
+    mainWindow.minimize();
+    return { success: true };
+  }
+  if (action === 'maximize') {
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+    return { success: true };
+  }
+  if (action === 'close') {
+    mainWindow.close();
+    return { success: true };
+  }
+  return { success: false, error: 'Unknown window action' };
 });
 
 ipcMain.handle('write-backup', async (event, key, data) => {

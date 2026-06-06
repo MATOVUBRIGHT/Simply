@@ -27,5 +27,6 @@ interface Window {
     openExternal?: (url: string) => Promise<{ success: boolean; error?: string }>;
     checkOnline?: () => Promise<boolean>;
     setTitleBarColor?: (color: string) => Promise<{ success: boolean; error?: string }>;
+    windowControl?: (action: 'minimize' | 'maximize' | 'close') => Promise<{ success: boolean; error?: string }>;
   };
 }

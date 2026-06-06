@@ -43,4 +43,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   /** Match the desktop title bar to the selected app theme color */
   setTitleBarColor: (color) => ipcRenderer.invoke('set-title-bar-color', color),
+
+  /** Native desktop window controls for the custom title bar */
+  windowControl: (action) => ipcRenderer.invoke('window-control', action),
 });

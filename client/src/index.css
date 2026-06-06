@@ -145,11 +145,37 @@ body:has(.desktop-titlebar) .desktop-titlebar {
   display: flex;
   height: 39px;
   align-items: center;
-  padding: 0 9.5rem 0 0.625rem;
+  justify-content: space-between;
+  padding: 0 0 0 0.625rem;
   background-color: var(--primary-color);
   color: #ffffff;
   -webkit-app-region: drag;
   user-select: none;
+}
+
+.desktop-titlebar-controls {
+  display: flex;
+  height: 39px;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-titlebar-controls button {
+  width: 46px;
+  height: 39px;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  font-size: 1rem;
+  line-height: 1;
+  transition: background-color 120ms ease;
+}
+
+.desktop-titlebar-controls button:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.desktop-titlebar-controls button:last-child:hover {
+  background-color: #dc2626;
 }
 
 body:has(.desktop-titlebar) .desktop-shell {
