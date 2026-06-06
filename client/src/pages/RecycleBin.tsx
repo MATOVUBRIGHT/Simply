@@ -21,6 +21,13 @@ function getStoreName(type: string): string | null {
   }
 }
 
+function isDuplicateDeletedItem(item: DeletedItem, record: any): boolean {
+  if (item.type === 'student' || item.type === 'staff') {
+    return record.firstName === item.data?.firstName && record.lastName === item.data?.lastName;
+  }
+  return record.name === item.data?.name;
+}
+
 export default function RecycleBin() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
@@ -48,6 +55,86 @@ export default function RecycleBin() {
     }
   };
 
+  async function restoreStudentItemsOnce(items: DeletedItem[]) {
+    const authId = schoolId || user?.id;
+    if (!authId) return;
+
+    const studentItems = items.filter(item => item.type === 'student' && item.data && !restoringIds.has(item.id));
+    if (studentItems.length === 0) return;
+
+    const itemIds = studentItems.map(item => item.id);
+    setRestoringIds(prev => {
+      const next = new Set(prev);
+      itemIds.forEach(id => next.add(id));
+      return next;
+    });
+
+    try {
+      const existingRecords = await dataService.getAll(authId, 'students');
+      const duplicates: DeletedItem[] = [];
+      const toRestore: DeletedItem[] = [];
+
+      studentItems.forEach(item => {
+        if (existingRecords.some((record: any) => isDuplicateDeletedItem(item, record))) {
+          duplicates.push(item);
+        } else {
+          toRestore.push(item);
+        }
+      });
+
+      duplicates.forEach(item => removeFromRecycleBin(authId, item.id));
+
+      let restoredCount = 0;
+      let blockedCount = 0;
+      const restoredItemIds: string[] = [];
+      if (toRestore.length > 0) {
+        const result = await dataService.restoreDeletedBatch(authId, 'students', toRestore.map(item => item.data));
+        if (!result.success) throw new Error(result.error || 'Restore failed');
+
+        const restoredIds = new Set(result.records.map((record: any) => String(record?.id || '')));
+        toRestore.forEach(item => {
+          const originalId = String(item.data?.id || '');
+          if (result.imported >= toRestore.length || restoredIds.has(originalId)) {
+            removeFromRecycleBin(authId, item.id);
+            restoredCount++;
+            restoredItemIds.push(item.id);
+          } else {
+            blockedCount++;
+          }
+        });
+
+        if (result.error && blockedCount > 0) addToast(result.error, 'warning');
+      }
+
+      const completedIds = new Set([
+        ...duplicates.map(item => item.id),
+        ...restoredItemIds,
+      ]);
+
+      setSelectedItems(prev => {
+        const next = new Set(prev);
+        completedIds.forEach(id => next.delete(id));
+        return next;
+      });
+      loadDeletedItems();
+
+      const parts = [];
+      if (restoredCount > 0) parts.push(`${restoredCount} student${restoredCount === 1 ? '' : 's'} restored`);
+      if (duplicates.length > 0) parts.push(`${duplicates.length} duplicate${duplicates.length === 1 ? '' : 's'} removed`);
+      if (blockedCount > 0) parts.push(`${blockedCount} kept because of plan limit`);
+      addToast(parts.join(', ') || 'No students restored', restoredCount > 0 ? 'success' : 'info');
+    } catch (error: any) {
+      console.error('Bulk student restore error:', error);
+      addToast(`Failed to restore students: ${error?.message || 'Unknown error'}`, 'error');
+    } finally {
+      setRestoringIds(prev => {
+        const next = new Set(prev);
+        itemIds.forEach(id => next.delete(id));
+        return next;
+      });
+    }
+  }
+
   async function restoreItem(id: string) {
     const authId = schoolId || user?.id;
     if (!authId) return;
@@ -66,11 +153,7 @@ export default function RecycleBin() {
       const storeName = getStoreName(item.type);
       if (storeName) {
         const existingRecords = await dataService.getAll(authId, storeName);
-        const isDuplicate = existingRecords.some((record: any) => {
-          if (item.type === 'student') return record.firstName === item.data.firstName && record.lastName === item.data.lastName;
-          if (item.type === 'staff') return record.firstName === item.data.firstName && record.lastName === item.data.lastName;
-          return record.name === item.data.name;
-        });
+        const isDuplicate = existingRecords.some((record: any) => isDuplicateDeletedItem(item, record));
 
         if (isDuplicate) {
           removeFromRecycleBin(authId, id);
@@ -130,7 +213,10 @@ export default function RecycleBin() {
      });
     if (!ok) return;
 
-    const ids = deletedItems.map(i => i.id);
+    const items = deletedItems.filter(item => !restoringIds.has(item.id));
+    await restoreStudentItemsOnce(items);
+
+    const ids = items.filter(item => item.type !== 'student').map(i => i.id);
     for (const id of ids) {
       if (!restoringIds.has(id)) {
         await restoreItem(id);
@@ -139,7 +225,10 @@ export default function RecycleBin() {
   }
 
   async function restoreSelected() {
-    const ids = Array.from(selectedItems);
+    const items = deletedItems.filter(item => selectedItems.has(item.id) && !restoringIds.has(item.id));
+    await restoreStudentItemsOnce(items);
+
+    const ids = items.filter(item => item.type !== 'student').map(i => i.id);
     for (const id of ids) {
       if (!restoringIds.has(id)) {
         await restoreItem(id);
