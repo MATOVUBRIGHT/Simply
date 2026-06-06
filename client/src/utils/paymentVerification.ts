@@ -127,17 +127,17 @@ export async function loadTerminatedVerificationCodeHashes() {
   }
 }
 
-async function isCodeUsedRemotely(codeHash: string) {
+async function isCodeUsedByAnotherTenant(codeHash: string, tenantId: string) {
   if (!supabase || typeof navigator !== 'undefined' && !navigator.onLine) {
     throw new Error('Online verification is required.');
   }
   const { data, error } = await supabase
     .from('subscriptions')
-    .select('id')
+    .select('school_id')
     .contains('metadata', { verificationCodeHash: codeHash })
-    .limit(1);
+    .limit(5);
   if (error) throw error;
-  return Boolean(data?.length);
+  return Boolean(data?.some(row => String(row.school_id || '') !== tenantId));
 }
 
 export async function redeemPaymentVerificationCode(
@@ -175,17 +175,25 @@ export async function redeemPaymentVerificationCode(
       };
     }
 
+    const isUnlimitedGrant = grant.planId === 'unlimited';
     const terminated = await loadTerminatedVerificationCodeHashes();
     if (terminated.includes(codeHash)) {
       return { status: 'terminated', message: 'This verification code has been terminated.', grant };
     }
 
+    const tenantUsedCodes = await getSettingHashList(tenantId, 'usedPaymentVerificationCodes');
     const usedLocal = new Set([
       ...getLocalUsedVerificationCodeHashes(),
-      ...(await getSettingHashList(tenantId, 'usedPaymentVerificationCodes')),
+      ...tenantUsedCodes,
     ]);
-    const usedRemotely = supabase && online ? await isCodeUsedRemotely(codeHash) : false;
-    if (usedLocal.has(codeHash) || usedRemotely) {
+    const usedByAnotherTenant = supabase && online ? await isCodeUsedByAnotherTenant(codeHash, tenantId) : false;
+    const sameTenantUnlimitedCode = isUnlockedRelease
+      && isUnlimitedGrant
+      && (
+        tenantUsedCodes.includes(codeHash)
+        || localStorage.getItem('schofy_plan_verification_code_hash') === codeHash
+      );
+    if (usedByAnotherTenant || (usedLocal.has(codeHash) && !sameTenantUnlimitedCode)) {
       return { status: 'used', message: 'This verification code has already been used.', grant };
     }
 
