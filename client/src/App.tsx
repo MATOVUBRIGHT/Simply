@@ -321,8 +321,6 @@ function MainApp() {
           {/* SubscriptionGate wraps all content — shows blocking modal if expired/incomplete */}
           <StaffRoleGate>
             <SubscriptionGate>
-            <div className="desktop-shell">
-            <DesktopTitleBar />
             <Layout>
               <Suspense fallback={<PageLoadingSpinner />}>
                 <div key={location.pathname} className="page-shell page-shell-enter">
@@ -374,7 +372,6 @@ function MainApp() {
                 </div>
               </Suspense>
             </Layout>
-            </div>
             </SubscriptionGate>
           <UpdateBanner />
           <StorageWarning />
@@ -400,7 +397,8 @@ function App() {
   if (!hasSession && !user) {
     if (loading) return <FullScreenLoader label="Loading..." />;
     return (
-      <>
+      <div className="desktop-shell">
+        <DesktopTitleBar />
         <Suspense fallback={<PageLoadingSpinner />}>
           <div className="page-shell">
             <Routes location={location}>
@@ -410,13 +408,14 @@ function App() {
           </div>
         </Suspense>
         <DesktopUpdatePrompt />
-      </>
+      </div>
     );
   }
 
   // Has session or user — render app
   return (
-    <>
+    <div className="desktop-shell">
+      <DesktopTitleBar />
       <Suspense fallback={<PageLoadingSpinner />}>
         <Routes>
           <Route path="/login" element={user ? <Navigate to={restoredRoute} replace /> : <Login />} />
@@ -424,7 +423,7 @@ function App() {
         </Routes>
       </Suspense>
       <DesktopUpdatePrompt />
-    </>
+    </div>
   );
 }
 
