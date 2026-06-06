@@ -301,7 +301,7 @@ export default function GlobalSearch() {
   }
 
   return (
-    <div ref={searchRef} className="relative w-full">
+    <div ref={searchRef} className="global-search-root relative z-[1000] w-full">
       <div className="relative flex items-center">
         <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         <input
@@ -319,7 +319,7 @@ export default function GlobalSearch() {
       </div>
 
       {results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200/50 dark:border-slate-700/50 overflow-hidden z-50">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200/50 dark:border-slate-700/50 overflow-hidden z-[99999]">
           <div className="py-1">
             {results.map((result, index) => {
               const Icon = getIcon(result);
@@ -363,7 +363,7 @@ export default function GlobalSearch() {
       )}
 
       {query.length >= 2 && results.length === 0 && !loading && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200/50 dark:border-slate-700/50 p-4 z-50">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200/50 dark:border-slate-700/50 p-4 z-[99999]">
           <p className="text-center text-slate-500 text-sm">No results found</p>
         </div>
       )}

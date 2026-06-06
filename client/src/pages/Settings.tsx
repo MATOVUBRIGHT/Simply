@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef, useCallback, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard, Info, Shield, ScrollText, HelpCircle, Save } from 'lucide-react';
+import { Palette, Building, Calendar, DollarSign, Cloud, CloudOff, RefreshCw, CheckCircle, Database, Upload, Download, AlertTriangle, Trash2, GraduationCap, ArrowRight, Users, Keyboard, Info, Shield, ScrollText, HelpCircle, Save, X } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCurrency } from '../hooks/useCurrency';
-import { useSync } from '../contexts/SyncContext';
+import { useSync, type BackupImportPreview, type BackupImportProgress } from '../contexts/SyncContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { dataService } from '../lib/database/SupabaseDataService';
@@ -17,6 +17,7 @@ import { deleteInThirtyPercentBatches, processInThirtyPercentBatches, runTasksIn
 import { compressImageFile } from '../utils/imageCompression';
 import { cleanupDeletedClassReferences } from '../utils/classDeletionCleanup';
 import { loginLocal } from '../lib/auth/LocalAuth';
+import { OperationProgressPopup } from '../components/OperationProgressPopup';
 import {
   clearSchoolDatabaseConfig,
   readSchoolDatabaseConfig,
@@ -58,7 +59,7 @@ export default function Settings() {
   const { primaryColor, setPrimaryColor } = useTheme();
   const { addToast } = useToast();
   const { setCurrency } = useCurrency();
-  const { isOnline, isSyncing, pendingChanges, lastSyncTime, exportBackup, importBackup, isSyncEnabled, enableSync, disableSync, isSupabaseConfigured } = useSync();
+  const { isOnline, isSyncing, pendingChanges, lastSyncTime, exportBackup, previewBackupImport, executeBackupImport, isSyncEnabled, enableSync, disableSync, isSupabaseConfigured } = useSync();
   const { user, schoolId } = useAuth();
   const confirm = useConfirm();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -74,6 +75,17 @@ export default function Settings() {
   const [showCloudBackupModal, setShowCloudBackupModal] = useState(false);
   const [backupAccount, setBackupAccount] = useState(user?.email || '');
   const [isCloudBackingUp, setIsCloudBackingUp] = useState(false);
+  const [backupPreview, setBackupPreview] = useState<BackupImportPreview | null>(null);
+  const [ignoredBackupTables, setIgnoredBackupTables] = useState<Set<string>>(new Set());
+  const [skipBackupDuplicates, setSkipBackupDuplicates] = useState(true);
+  const [backupProgress, setBackupProgress] = useState<BackupImportProgress>({
+    open: false,
+    title: '',
+    detail: '',
+    progress: 0,
+    processed: 0,
+    total: 0,
+  });
   const [schoolDbConfig, setSchoolDbConfig] = useState<SchoolDatabaseConfig>({
     provider: 'database',
     enabled: false,
@@ -540,23 +552,34 @@ export default function Settings() {
       }
 
       const tables = [
-        'schools', 'students', 'staff', 'classes', 'subjects',
-        'attendance', 'fees', 'feeStructures', 'bursaries', 'discounts',
-        'payments', 'announcements', 'notifications', 'exams', 'examResults',
-        'timetable', 'transportRoutes', 'transportAssignments', 'salaryPayments',
-        'settings', 'syncQueue', 'syncMeta'
+        'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
+        'announcements', 'attendance', 'feeStructures',
+        'exams', 'examResults', 'transportRoutes', 'transportAssignments', 'salaryPayments',
+        'pointTransactions', 'bursaries', 'discounts', 'notifications', 'invoices', 'settings', 'timetable',
+        'inventory', 'expenses', 'auditLogs', 'libraryBooks', 'libraryIssues', 'homework', 'behaviorLogs', 'parentMessages', 'studentAttendance',
+        'staffAttendance', 'examTimetable', 'lessonPlans', 'studentResources', 'hostelRooms', 'hostelAssignments', 'events', 'visitorLogs', 'certificates',
+        'schools', 'subscriptions', 'users', 'plans', 'syncQueue', 'syncMeta'
       ];
+      let failedTables = 0;
 
       for (const table of tables) {
         try {
-          await dataService.clear(id, table);
-        } catch {
+          const result = await dataService.clear(id, table);
+          if (result && !result.success) failedTables += 1;
+        } catch (error) {
+          console.warn(`Failed to clear ${table}:`, error);
           // Table might not exist
+          failedTables += 1;
         }
+      }
+
+      if (failedTables > 0) {
+        throw new Error(`${failedTables} table${failedTables === 1 ? '' : 's'} could not be cleared`);
       }
       
       setShowDeleteConfirm(false);
       setDeletePassword('');
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { localOnly: true } }));
       addToast('All data deleted successfully', 'success');
       
       setTimeout(() => {
@@ -676,6 +699,67 @@ export default function Settings() {
       addToast(error?.message || 'Cloud backup could not start', 'error');
     } finally {
       setIsCloudBackingUp(false);
+    }
+  }
+
+  async function handleBackupFileSelected(file: File | undefined) {
+    if (!file) return;
+    setBackupProgress({
+      open: true,
+      title: 'Reading backup',
+      detail: 'Preparing preview and checking duplicates.',
+      progress: 12,
+      processed: 0,
+      total: 0,
+    });
+    try {
+      const preview = await previewBackupImport(file);
+      if (!preview) return;
+      setBackupProgress({
+        open: true,
+        title: 'Reading backup',
+        detail: 'Preview ready.',
+        progress: 100,
+        processed: preview.totalRecords,
+        total: preview.totalRecords,
+      });
+      setBackupPreview(preview);
+      setIgnoredBackupTables(new Set(preview.ignoredTables));
+      setSkipBackupDuplicates(true);
+      window.setTimeout(() => setBackupProgress(prev => prev.title === 'Reading backup' ? { ...prev, open: false } : prev), 500);
+    } finally {
+      window.setTimeout(() => setBackupProgress(prev => prev.title === 'Reading backup' ? { ...prev, open: false } : prev), 900);
+    }
+  }
+
+  function toggleIgnoredBackupTable(table: string) {
+    setIgnoredBackupTables(prev => {
+      const next = new Set(prev);
+      next.has(table) ? next.delete(table) : next.add(table);
+      return next;
+    });
+  }
+
+  async function executePreviewedBackupImport() {
+    if (!backupPreview) return;
+    const selected = backupPreview.tables.filter(table => !ignoredBackupTables.has(table.table));
+    if (selected.length === 0) {
+      addToast('Select at least one backup page to import', 'warning');
+      return;
+    }
+    if (backupPreview.planCheck && !backupPreview.planCheck.ok && selected.some(table => table.table === 'students' || table.table === 'staff')) {
+      addToast(backupPreview.planCheck.message, 'error');
+      return;
+    }
+    const ok = await executeBackupImport(backupPreview, {
+      ignoredTables: Array.from(ignoredBackupTables),
+      skipDuplicates: skipBackupDuplicates,
+      onProgress: setBackupProgress,
+    });
+    if (ok) {
+      setBackupPreview(null);
+      setIgnoredBackupTables(new Set());
+      window.setTimeout(() => setBackupProgress(prev => ({ ...prev, open: false })), 700);
     }
   }
 
@@ -800,6 +884,7 @@ export default function Settings() {
   }
 
   const colorOptions = [
+    { color: '#0082FC', name: 'Blue' },
     { color: '#4F46E5', name: 'Indigo' },
     { color: '#2da32d', name: 'Green' },
     { color: '#ed1e1e', name: 'Red' },
@@ -807,6 +892,10 @@ export default function Settings() {
     { color: '#06b6d4', name: 'Cyan' },
     { color: '#6F2DA8', name: 'Purple' },
     { color: '#8b5cf6', name: 'Violet' },
+    { color: '#14b8a6', name: 'Teal' },
+    { color: '#db2777', name: 'Rose' },
+    { color: '#64748b', name: 'Slate' },
+    { color: '#0f766e', name: 'Deep Teal' },
   ];
 
   return (
@@ -1071,7 +1160,7 @@ export default function Settings() {
             </div>
             <p className="text-sm text-slate-500 mt-4">Current: {colorOptions.find(c => c.color === primaryColor)?.name || 'Custom'}</p>
             
-            <div className="mt-6 p-4 rounded-xl border border-slate-200 dark:border-slate-700" style={{ backgroundColor: `${primaryColor}10` }}>
+            <div className="mt-6 p-4 rounded-xl border border-slate-200 dark:border-slate-700" style={{ backgroundColor: 'var(--primary-color-soft)' }}>
               <p className="text-sm font-medium mb-3" style={{ color: primaryColor }}>Preview</p>
               <div className="flex gap-3">
                 <button className="px-4 py-2 rounded-lg text-white font-medium" style={{ backgroundColor: primaryColor }}>
@@ -1080,7 +1169,7 @@ export default function Settings() {
                 <button className="px-4 py-2 rounded-lg border-2 font-medium" style={{ borderColor: primaryColor, color: primaryColor }}>
                   Secondary
                 </button>
-                <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: `${primaryColor}20`, color: primaryColor }}>
+                <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'var(--primary-color-muted)', color: primaryColor }}>
                   Badge
                 </span>
               </div>
@@ -1217,11 +1306,11 @@ export default function Settings() {
               </div>
             )}
 
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-800 dark:bg-emerald-900/15">
+            <div className="rounded-xl p-4 theme-note">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Database size={18} className="text-emerald-600" />
+                    <Database size={18} className="text-primary-600" />
                     School-owned database
                   </h3>
                   <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
@@ -1230,9 +1319,11 @@ export default function Settings() {
                 </div>
                 <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${
                   schoolDbConfig.enabled
-                    ? 'bg-emerald-600 text-white'
+                    ? 'text-white'
                     : 'bg-white text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                }`}>
+                }`}
+                  style={schoolDbConfig.enabled ? { backgroundColor: 'var(--primary-color)' } : undefined}
+                >
                   {schoolDbConfig.enabled ? 'Using own database' : 'No school database connected'}
                 </span>
               </div>
@@ -1264,10 +1355,13 @@ export default function Settings() {
                 </div>
               </div>
 
-              <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white/80 p-3 text-sm text-slate-700 shadow-sm transition hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+              <label
+                className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white/80 p-3 text-sm text-slate-700 shadow-sm transition dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200"
+                style={{ borderColor: schoolDbConfig.shareToDevices ? 'var(--primary-color)' : undefined }}
+              >
                 <input
                   type="checkbox"
-                  className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
                   checked={!!schoolDbConfig.shareToDevices}
                   onChange={(event) => setSchoolDbConfig(prev => ({ ...prev, shareToDevices: event.target.checked, enabled: false }))}
                 />
@@ -1401,9 +1495,8 @@ export default function Settings() {
                     className="hidden"
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
-                      if (file) {
-                        await importBackup(file);
-                      }
+                      await handleBackupFileSelected(file);
+                      e.target.value = '';
                     }}
                   />
                 </label>
@@ -1549,6 +1642,147 @@ export default function Settings() {
         </div>
       </form>
 
+      {backupPreview && createPortal((
+        <div className="fixed inset-0 z-[9999] bg-white dark:bg-slate-950 animate-fade-in">
+          <div className="flex h-full flex-col">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
+              <div className="min-w-0">
+                <h2 className="text-lg font-black text-slate-900 dark:text-white">Backup Import Preview</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {backupPreview.fileName} {backupPreview.exportedAt ? `- exported ${new Date(backupPreview.exportedAt).toLocaleString()}` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBackupPreview(null)}
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="grid flex-1 overflow-hidden lg:grid-cols-[320px,1fr]">
+              <aside className="border-b border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 lg:border-b-0 lg:border-r">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="highlight-label-indigo rounded-lg p-3">
+                    <p className="text-xs font-bold opacity-80">Records</p>
+                    <p className="text-2xl font-black">{backupPreview.totalRecords.toLocaleString()}</p>
+                  </div>
+                  <div className="highlight-label-emerald rounded-lg p-3">
+                    <p className="text-xs font-bold opacity-80">New</p>
+                    <p className="text-2xl font-black">{backupPreview.totalNewRecords.toLocaleString()}</p>
+                  </div>
+                  <div className="highlight-label-amber rounded-lg p-3">
+                    <p className="text-xs font-bold opacity-80">Duplicates</p>
+                    <p className="text-2xl font-black">{backupPreview.totalDuplicates.toLocaleString()}</p>
+                  </div>
+                  <div className="highlight-label-slate rounded-lg p-3">
+                    <p className="text-xs font-bold opacity-80">Pages</p>
+                    <p className="text-2xl font-black">{backupPreview.tables.length.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <label className="mt-5 flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={skipBackupDuplicates}
+                    onChange={event => setSkipBackupDuplicates(event.target.checked)}
+                  />
+                  Skip duplicates while importing
+                </label>
+
+                {backupPreview.planCheck && (
+                  <div className={`mt-4 rounded-lg border p-3 text-sm font-semibold ${
+                    backupPreview.planCheck.ok
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200'
+                      : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-200'
+                  }`}>
+                    {backupPreview.planCheck.message}
+                  </div>
+                )}
+
+                {backupPreview.unsupportedTables.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                    Ignored unsupported pages/files: {backupPreview.unsupportedTables.join(', ')}
+                  </div>
+                )}
+              </aside>
+
+              <main className="overflow-y-auto p-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-bold text-slate-800 dark:text-white">Choose Pages To Import</h3>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setIgnoredBackupTables(new Set())} className="btn btn-secondary px-3 py-1.5 text-xs">Select all</button>
+                    <button type="button" onClick={() => setIgnoredBackupTables(new Set(backupPreview.tables.map(table => table.table)))} className="btn btn-secondary px-3 py-1.5 text-xs">Ignore all</button>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {backupPreview.tables.map(table => {
+                    const ignored = ignoredBackupTables.has(table.table);
+                    return (
+                      <button
+                        key={table.table}
+                        type="button"
+                        onClick={() => toggleIgnoredBackupTable(table.table)}
+                        className={`rounded-lg border p-4 text-left transition ${
+                          ignored
+                            ? 'border-slate-200 bg-slate-50 opacity-70 dark:border-slate-700 dark:bg-slate-900'
+                            : 'border-indigo-200 bg-white shadow-sm ring-2 ring-indigo-500/10 dark:border-indigo-800 dark:bg-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-black capitalize text-slate-900 dark:text-white">{table.table.replace(/([A-Z])/g, ' $1')}</p>
+                            <p className="text-xs text-slate-500">{ignored ? 'Ignored' : 'Will import'}</p>
+                          </div>
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-black ${ignored ? 'badge badge-gray' : 'badge badge-info'}`}>
+                            {ignored ? 'Skip' : 'Import'}
+                          </span>
+                        </div>
+                        <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+                          <div className="rounded bg-slate-100 p-2 dark:bg-slate-700"><strong>{table.valid}</strong><br />valid</div>
+                          <div className="rounded bg-emerald-100 p-2 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200"><strong>{table.newRecords}</strong><br />new</div>
+                          <div className="rounded bg-amber-100 p-2 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200"><strong>{table.duplicates}</strong><br />dupes</div>
+                        </div>
+                        {table.skippedInvalid > 0 && <p className="mt-2 text-xs text-rose-500">{table.skippedInvalid} invalid record{table.skippedInvalid === 1 ? '' : 's'} ignored</p>}
+                        {table.duplicateExamples.length > 0 && <p className="mt-2 truncate text-xs text-slate-400">Examples: {table.duplicateExamples.join(', ')}</p>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </main>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
+              <p className="text-xs text-slate-500">
+                Import keeps existing data and skips duplicates by default. Ignored pages are not imported.
+              </p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setBackupPreview(null)} className="btn btn-secondary">Cancel</button>
+                <button
+                  type="button"
+                  onClick={executePreviewedBackupImport}
+                  disabled={Boolean(backupPreview.planCheck && !backupPreview.planCheck.ok && backupPreview.tables.some(table => !ignoredBackupTables.has(table.table) && (table.table === 'students' || table.table === 'staff')))}
+                  className="btn btn-primary flex items-center gap-2 disabled:opacity-60"
+                >
+                  <Upload size={16} />
+                  Import Selected Pages
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
+
+      <OperationProgressPopup
+        open={backupProgress.open}
+        title={backupProgress.title}
+        detail={backupProgress.detail}
+        progress={backupProgress.progress}
+        processed={backupProgress.processed}
+        total={backupProgress.total}
+      />
+
       {showCloudBackupModal && createPortal((
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
@@ -1557,8 +1791,8 @@ export default function Settings() {
           }}
         >
           <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-            <div className="flex items-center gap-3 border-b border-slate-200 bg-emerald-50 p-5 dark:border-slate-700 dark:bg-emerald-900/20">
-              <Cloud size={22} className="text-emerald-600 dark:text-emerald-300" />
+            <div className="flex items-center gap-3 border-b border-slate-200 p-5 theme-note dark:border-slate-700">
+              <Cloud size={22} className="text-primary-600" />
               <div>
                 <h2 className="font-bold text-slate-900 dark:text-white">Cloud Backup</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Export a backup and open Google Drive.</p>
@@ -1598,8 +1832,8 @@ export default function Settings() {
           }}
         >
           <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-            <div className="flex items-center gap-3 border-b border-slate-200 bg-emerald-50 p-5 dark:border-slate-700 dark:bg-emerald-900/20">
-              <Shield size={22} className="text-emerald-600 dark:text-emerald-300" />
+            <div className="flex items-center gap-3 border-b border-slate-200 p-5 theme-note dark:border-slate-700">
+              <Shield size={22} className="text-primary-600" />
               <div>
                 <h2 className="font-bold text-slate-900 dark:text-white">Confirm Database Change</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Admin password is required before changing where school data syncs.</p>

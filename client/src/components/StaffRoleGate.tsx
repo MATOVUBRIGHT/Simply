@@ -253,17 +253,28 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
 
   if (staffLoading || checking || !restorePromptChecked || (!restoreConfirmed && (user?.id || staffSession))) {
     return (
-      <div className="relative min-h-screen bg-cover bg-center p-4" style={{ backgroundImage: `url(${authCover})` }}>
-        <div className="pointer-events-none absolute inset-0 bg-white/35" />
-        <div className="relative flex min-h-[calc(100vh-2rem)] items-center justify-center">
-          <div className="card overflow-hidden bg-white/82 backdrop-blur-md dark:bg-slate-900/88">
-            <div className="card-body flex items-center gap-3">
-              <Loader2 size={22} className="animate-spin text-primary-600" />
-              <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">
-                {staffLoading || checking ? 'Preparing role access...' : 'Restoring session...'}
-              </span>
+      <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-slate-50 px-4 py-12 dark:bg-slate-950">
+        <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-slate-200 to-transparent dark:via-slate-800" />
+        <div className="relative flex flex-col items-center text-center">
+          <div className="relative mb-5 h-24 w-24">
+            <div className="absolute inset-0 rounded-full opacity-15 blur-xl" style={{ backgroundColor: 'var(--primary-color)' }} />
+            <div className="absolute inset-2 animate-ping rounded-full border" style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 28%, transparent)' }} />
+            <div className="absolute inset-5 rounded-full border-2 border-transparent animate-spin" style={{ borderTopColor: 'var(--primary-color)', borderRightColor: 'color-mix(in srgb, var(--primary-color) 35%, transparent)' }} />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg shadow-slate-300/30 dark:shadow-black/30" style={{ backgroundColor: 'var(--primary-color)' }}>
+                <ShieldCheck size={24} />
+              </div>
             </div>
           </div>
+          <p className="text-sm font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--primary-color)' }}>
+            Role access
+          </p>
+          <p className="mt-2 text-lg font-black text-slate-900 dark:text-white">
+            {staffLoading || checking ? 'Preparing role access...' : 'Restoring session...'}
+          </p>
+          <p className="mt-2 max-w-xs text-sm font-medium text-slate-500 dark:text-slate-400">
+            Please wait while Schofy safely reconnects your account.
+          </p>
         </div>
       </div>
     );
@@ -358,7 +369,7 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
             <button
               type="submit"
               disabled={adminVerifying}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--solid-indigo)] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-[#4338ca] hover:shadow-indigo-500/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--solid-indigo)] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:bg-[var(--primary-color-700)] hover:shadow-indigo-500/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70"
             >
               {adminVerifying ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
               {showAdminPassword ? (adminVerifying ? 'Verifying admin...' : 'Unlock Admin') : 'Continue as Admin'}

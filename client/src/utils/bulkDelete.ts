@@ -6,6 +6,10 @@ export function chunkThirtyPercent<T>(items: T[]) {
   return chunkByPercent(items, 0.3);
 }
 
+export function chunkFortyPercent<T>(items: T[]) {
+  return chunkByPercent(items, 0.4);
+}
+
 export function chunkByPercent<T>(items: T[], percent: number) {
   if (items.length === 0) return [];
   const safePercent = Number.isFinite(percent) && percent > 0 ? percent : 0.3;
@@ -106,6 +110,23 @@ export async function deleteInThirtyPercentBatches(
     if (!result.success) throw new Error(result.error || `Failed to delete ${tableName}`);
     deletedTotal += chunk.length;
     onBatchDeleted?.(chunk, deletedTotal);
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  return deletedTotal;
+}
+
+export async function deleteInFortyPercentBatches(
+  userId: string,
+  tableName: string,
+  ids: string[],
+  onBatchDeleted?: (deletedIds: string[], deletedTotal: number, total: number) => void,
+) {
+  let deletedTotal = 0;
+  for (const chunk of chunkFortyPercent(ids)) {
+    const result = await dataService.batchDelete(userId, tableName, chunk);
+    if (!result.success) throw new Error(result.error || `Failed to delete ${tableName}`);
+    deletedTotal += chunk.length;
+    onBatchDeleted?.(chunk, deletedTotal, ids.length);
     await new Promise(resolve => setTimeout(resolve, 0));
   }
   return deletedTotal;

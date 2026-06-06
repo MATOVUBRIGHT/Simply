@@ -21,9 +21,14 @@ export function FitStatValue({ children, className = '' }: FitStatValueProps) {
     card?.classList.toggle('has-long-stat-value', isLongValue);
 
     const fit = () => {
-      let nextSize = 24;
+      let nextSize = isLongValue ? 21 : 24;
       element.style.fontSize = `${nextSize}px`;
-      while (nextSize > 15 && element.scrollWidth > element.clientWidth) {
+      element.style.whiteSpace = isLongValue ? 'normal' : 'nowrap';
+      const overflows = () => {
+        const maxTwoLineHeight = nextSize * 2.45;
+        return element.scrollWidth > element.clientWidth || element.scrollHeight > maxTwoLineHeight;
+      };
+      while (nextSize > 14 && overflows()) {
         nextSize -= 1;
         element.style.fontSize = `${nextSize}px`;
       }
@@ -40,11 +45,11 @@ export function FitStatValue({ children, className = '' }: FitStatValueProps) {
   }, [children, isLongValue]);
 
   return (
-    <span className="fit-stat-wrap relative inline-block max-w-full align-top">
+    <span className="fit-stat-wrap relative block max-w-full align-top">
       <p
         ref={ref}
         tabIndex={isLongValue ? 0 : undefined}
-        className={`fit-stat-value font-bold leading-tight text-white whitespace-nowrap max-w-full overflow-visible outline-none ${className}`}
+        className={`fit-stat-value max-w-full overflow-visible font-bold leading-tight text-white outline-none ${isLongValue ? 'whitespace-normal break-words' : 'whitespace-nowrap'} ${className}`}
         style={{ fontSize }}
       >
         {children}

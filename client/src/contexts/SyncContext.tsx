@@ -8,6 +8,51 @@ import { isCloudSyncEnabled, isDesktopApp, setCloudSyncEnabled, SCHOFY_SYNC_ENAB
 import { dataService } from '../lib/database/SupabaseDataService';
 import { store } from '../lib/store';
 import { getActiveSupabaseClient, hasActiveSupabaseConfig } from '../utils/schoolDatabaseConfig';
+import { countsTowardPlan, getPlanStaffLimit, getSubscriptionAccessState } from '../utils/plans';
+
+export interface BackupTablePreview {
+  table: string;
+  total: number;
+  valid: number;
+  duplicates: number;
+  newRecords: number;
+  skippedInvalid: number;
+  ignored: boolean;
+  duplicateExamples: string[];
+  records: any[];
+}
+
+export interface BackupPlanCheck {
+  ok: boolean;
+  message: string;
+  planName: string;
+  studentLimit?: number;
+  staffLimit?: number;
+  studentsToAdd?: number;
+  staffToAdd?: number;
+}
+
+export interface BackupImportPreview {
+  version: number;
+  exportedAt?: string;
+  fileName: string;
+  tables: BackupTablePreview[];
+  ignoredTables: string[];
+  unsupportedTables: string[];
+  totalRecords: number;
+  totalNewRecords: number;
+  totalDuplicates: number;
+  planCheck: BackupPlanCheck | null;
+}
+
+export interface BackupImportProgress {
+  open: boolean;
+  title: string;
+  detail: string;
+  progress: number;
+  processed: number;
+  total: number;
+}
 
 interface SyncContextType {
   isSyncing: boolean;
@@ -18,6 +63,11 @@ interface SyncContextType {
   syncNow: (showNotifications?: boolean) => Promise<void>;
   exportBackup: () => Promise<void>;
   importBackup: (file: File) => Promise<boolean>;
+  previewBackupImport: (file: File) => Promise<BackupImportPreview | null>;
+  executeBackupImport: (
+    preview: BackupImportPreview,
+    options?: { ignoredTables?: string[]; skipDuplicates?: boolean; onProgress?: (progress: BackupImportProgress) => void }
+  ) => Promise<boolean>;
   enableSync: () => Promise<void>;
   disableSync: () => void;
   isSyncEnabled: boolean;
@@ -25,6 +75,90 @@ interface SyncContextType {
 }
 
 const SyncContext = createContext<SyncContextType | undefined>(undefined);
+
+const BACKUP_TABLES = [
+  'students',
+  'staff',
+  'classes',
+  'subjects',
+  'attendance',
+  'fees',
+  'payments',
+  'announcements',
+  'notifications',
+  'exams',
+  'examResults',
+  'feeStructures',
+  'bursaries',
+  'discounts',
+  'invoices',
+  'timetable',
+  'transportRoutes',
+  'transportAssignments',
+  'salaryPayments',
+  'pointTransactions',
+  'inventory',
+  'expenses',
+  'auditLogs',
+  'libraryBooks',
+  'libraryIssues',
+  'homework',
+  'behaviorLogs',
+  'parentMessages',
+  'studentAttendance',
+  'staffAttendance',
+  'examTimetable',
+  'lessonPlans',
+  'studentResources',
+  'hostelRooms',
+  'hostelAssignments',
+  'events',
+  'visitorLogs',
+  'certificates',
+];
+
+function normalizeBackupKey(value: unknown) {
+  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function backupRecordKeys(table: string, record: any): string[] {
+  const keys = [record?.id ? `id:${record.id}` : ''];
+  switch (table) {
+    case 'students':
+      keys.push(
+        record?.studentId ? `student:${normalizeBackupKey(record.studentId)}` : '',
+        record?.admissionNo ? `admission:${normalizeBackupKey(record.admissionNo)}` : '',
+      );
+      break;
+    case 'staff':
+      keys.push(
+        record?.employeeId ? `employee:${normalizeBackupKey(record.employeeId)}` : '',
+        record?.email ? `email:${normalizeBackupKey(record.email)}` : '',
+      );
+      break;
+    case 'classes':
+      keys.push(record?.name ? `class:${normalizeBackupKey(record.name)}:${normalizeBackupKey(record.stream)}` : '');
+      break;
+    case 'subjects':
+      keys.push(record?.code || record?.name ? `subject:${normalizeBackupKey(record.code || record.name)}:${normalizeBackupKey(record.classId)}` : '');
+      break;
+    case 'fees':
+      keys.push(record?.studentId && record?.term && record?.year ? `fee:${normalizeBackupKey(record.studentId)}:${record.term}:${record.year}:${normalizeBackupKey(record.category || record.description)}` : '');
+      break;
+    case 'payments':
+      keys.push(record?.feeId && record?.amount && record?.date ? `payment:${normalizeBackupKey(record.feeId)}:${record.amount}:${normalizeBackupKey(record.date)}` : '');
+      break;
+    default:
+      break;
+  }
+  return keys.filter(Boolean);
+}
+
+function buildBackupRecordKeySet(table: string, records: any[]) {
+  const keys = new Set<string>();
+  records.forEach(record => backupRecordKeys(table, record).forEach(key => keys.add(key)));
+  return keys;
+}
 
 export function SyncProvider({ children }: { children: ReactNode }) {
   const { isOnline, user, schoolId } = useAuth();
@@ -266,24 +400,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     if (!sid || !user?.id) return;
 
     try {
-      const tables = [
-        'students',
-        'staff',
-        'classes',
-        'subjects',
-        'attendance',
-        'fees',
-        'payments',
-        'announcements',
-        'exams',
-        'examResults',
-        'transportRoutes',
-        'transportAssignments',
-      ];
-
       const data: Record<string, any[]> = {};
 
-      for (const table of tables) {
+      for (const table of BACKUP_TABLES) {
         try {
           const tableData = await userDBManager.getAll(sid, table);
           data[table] = tableData;
@@ -315,10 +434,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     }
   }, [user, schoolId, addToast]);
 
-  const importBackup = useCallback(
-    async (file: File): Promise<boolean> => {
+  const previewBackupImport = useCallback(
+    async (file: File): Promise<BackupImportPreview | null> => {
       const sid = schoolId || user?.id;
-      if (!sid || !user?.id) return false;
+      if (!sid || !user?.id) return null;
 
       try {
         const text = await file.text();
@@ -326,28 +445,182 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
         if (backup.version !== 1) {
           addToast('Unsupported backup version', 'error');
-          return false;
+          return null;
         }
 
-        for (const [table, records] of Object.entries(backup.data)) {
-          try {
-            await userDBManager.clear(sid, table);
-            if (Array.isArray(records)) {
-              for (const record of records as { id?: string }[]) {
-                if (record?.id) {
-                  await userDBManager.put(sid, table, record as { id: string });
-                } else {
-                  await userDBManager.add(sid, table, record);
-                }
+        const backupData = backup.data && typeof backup.data === 'object' ? backup.data : {};
+        const supported = new Set(BACKUP_TABLES);
+        const unsupportedTables = Object.keys(backupData).filter(table => !supported.has(table));
+        const tables: BackupTablePreview[] = [];
+        let totalRecords = 0;
+        let totalNewRecords = 0;
+        let totalDuplicates = 0;
+
+        for (const table of BACKUP_TABLES) {
+          const records = Array.isArray(backupData[table]) ? backupData[table] : [];
+          if (records.length === 0) continue;
+          const existing = await userDBManager.getAll(sid, table).catch(() => []);
+          const existingKeys = buildBackupRecordKeySet(table, existing);
+          const seenInBackup = new Set<string>();
+          let duplicates = 0;
+          let skippedInvalid = 0;
+          const duplicateExamples: string[] = [];
+          const validRecords: any[] = [];
+
+          for (const record of records) {
+            if (!record || typeof record !== 'object') {
+              skippedInvalid++;
+              continue;
+            }
+            validRecords.push(record);
+            const keys = backupRecordKeys(table, record);
+            const duplicate = keys.some(key => existingKeys.has(key) || seenInBackup.has(key));
+            keys.forEach(key => seenInBackup.add(key));
+            if (duplicate) {
+              duplicates++;
+              if (duplicateExamples.length < 3) {
+                duplicateExamples.push(String(record.name || record.firstName || record.employeeId || record.studentId || record.id || 'record'));
               }
             }
-          } catch {
-            // Table might not exist
           }
+
+          const newRecords = Math.max(0, validRecords.length - duplicates);
+          totalRecords += records.length;
+          totalNewRecords += newRecords;
+          totalDuplicates += duplicates;
+          tables.push({
+            table,
+            total: records.length,
+            valid: validRecords.length,
+            duplicates,
+            newRecords,
+            skippedInvalid,
+            ignored: false,
+            duplicateExamples,
+            records: validRecords,
+          });
         }
 
-        window.dispatchEvent(new Event('schofyDataRefresh'));
-        addToast('Backup imported', 'success');
+        let planCheck: BackupPlanCheck | null = null;
+        const access = await getSubscriptionAccessState(sid, undefined, { authUserId: user?.id });
+        if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
+          planCheck = {
+            ok: false,
+            message: `Choose an active plan before importing backup records. Current plan: ${access.plan?.name || 'No active plan'}.`,
+            planName: access.plan?.name || 'No active plan',
+          };
+        } else {
+          const studentsTable = tables.find(table => table.table === 'students');
+          const staffTable = tables.find(table => table.table === 'staff');
+          const existingStudents = await userDBManager.getAll(sid, 'students').catch(() => []);
+          const existingStudentKeys = buildBackupRecordKeySet('students', existingStudents);
+          const seenStudentKeys = new Set<string>();
+          const studentsToAdd = studentsTable?.records.filter(record => {
+            const keys = backupRecordKeys('students', record);
+            const duplicate = keys.some(key => existingStudentKeys.has(key) || seenStudentKeys.has(key));
+            keys.forEach(key => seenStudentKeys.add(key));
+            return !duplicate && countsTowardPlan(record);
+          }).length || 0;
+          const staffLimit = getPlanStaffLimit(access.plan);
+          const existingStaff = await userDBManager.getAll(sid, 'staff').catch(() => []);
+          const existingStaffKeys = buildBackupRecordKeySet('staff', existingStaff);
+          const seenStaffKeys = new Set<string>();
+          const activeStaff = existingStaff.filter((staffMember: any) => staffMember.status !== 'inactive').length;
+          const staffToAdd = staffTable?.records.filter(record => {
+            const keys = backupRecordKeys('staff', record);
+            const duplicate = keys.some(key => existingStaffKeys.has(key) || seenStaffKeys.has(key));
+            keys.forEach(key => seenStaffKeys.add(key));
+            return !duplicate && record.status !== 'inactive';
+          }).length || 0;
+          const studentOk = access.plan.studentLimit >= Number.MAX_SAFE_INTEGER || studentsToAdd <= access.remaining;
+          const staffOk = staffLimit >= Number.MAX_SAFE_INTEGER || activeStaff + staffToAdd <= staffLimit;
+          planCheck = {
+            ok: studentOk && staffOk,
+            message: studentOk && staffOk
+              ? `Plan check passed for ${access.plan.name}.`
+              : `Backup import exceeds ${access.plan.name}. Students available: ${Math.max(0, access.remaining).toLocaleString()}; staff limit: ${staffLimit >= Number.MAX_SAFE_INTEGER ? 'Unlimited' : staffLimit.toLocaleString()}.`,
+            planName: access.plan.name,
+            studentLimit: access.plan.studentLimit,
+            staffLimit,
+            studentsToAdd,
+            staffToAdd,
+          };
+        }
+
+        return {
+          version: backup.version,
+          exportedAt: backup.exportedAt,
+          fileName: file.name,
+          tables,
+          ignoredTables: unsupportedTables,
+          unsupportedTables,
+          totalRecords,
+          totalNewRecords,
+          totalDuplicates,
+          planCheck,
+        };
+      } catch (error) {
+        console.error('Backup preview failed:', error);
+        addToast('Failed to preview backup', 'error');
+        return null;
+      }
+    },
+    [user, schoolId, addToast]
+  );
+
+  const executeBackupImport = useCallback(
+    async (
+      preview: BackupImportPreview,
+      options: { ignoredTables?: string[]; skipDuplicates?: boolean; onProgress?: (progress: BackupImportProgress) => void } = {},
+    ): Promise<boolean> => {
+      const sid = schoolId || user?.id;
+      if (!sid || !user?.id) return false;
+      const ignoredTables = new Set(options.ignoredTables || []);
+      const skipDuplicates = options.skipDuplicates !== false;
+      const selectedTables = preview.tables.filter(table => !ignoredTables.has(table.table));
+      const total = selectedTables.reduce((sum, table) => sum + table.records.length, 0);
+      let processed = 0;
+      const emit = (detail: string, progress = total > 0 ? Math.round((processed / total) * 100) : 100) => {
+        options.onProgress?.({ open: true, title: 'Importing backup', detail, progress, processed, total });
+      };
+
+      if (preview.planCheck && !preview.planCheck.ok && selectedTables.some(table => table.table === 'students' || table.table === 'staff')) {
+        addToast(preview.planCheck.message, 'error');
+        return false;
+      }
+
+      try {
+        emit('Preparing backup import.', 5);
+        for (const table of selectedTables) {
+          const existing = await userDBManager.getAll(sid, table.table).catch(() => []);
+          const existingKeys = buildBackupRecordKeySet(table.table, existing);
+          const importedKeys = new Set<string>();
+          for (const record of table.records) {
+            const keys = backupRecordKeys(table.table, record);
+            const duplicate = keys.some(key => existingKeys.has(key) || importedKeys.has(key));
+            keys.forEach(key => importedKeys.add(key));
+            if (skipDuplicates && duplicate) {
+              processed++;
+              emit(`Skipped duplicate in ${table.table}.`);
+              continue;
+            }
+            const finalRecord = record?.id ? record : { ...record, id: crypto.randomUUID() };
+            const result = await dataService.create(sid, table.table, finalRecord);
+            if (!result.success) {
+              processed++;
+              emit(result.error || `Skipped ${table.table} record because the plan limit is reached.`);
+              continue;
+            }
+            processed++;
+            emit(`Imported ${processed.toLocaleString()} of ${total.toLocaleString()} records.`);
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
+          window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: table.table, localOnly: true } }));
+        }
+
+        options.onProgress?.({ open: true, title: 'Importing backup', detail: 'Backup import complete.', progress: 100, processed, total });
+        window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { localOnly: true } }));
+        addToast(`Backup imported: ${processed.toLocaleString()} processed`, 'success');
         return true;
       } catch (error) {
         console.error('Backup import failed:', error);
@@ -356,6 +629,15 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       }
     },
     [user, schoolId, addToast]
+  );
+
+  const importBackup = useCallback(
+    async (file: File): Promise<boolean> => {
+      const preview = await previewBackupImport(file);
+      if (!preview) return false;
+      return executeBackupImport(preview, { ignoredTables: preview.ignoredTables, skipDuplicates: true });
+    },
+    [previewBackupImport, executeBackupImport]
   );
 
   const enableSync = useCallback(async () => {
@@ -423,6 +705,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         syncNow,
         exportBackup,
         importBackup,
+        previewBackupImport,
+        executeBackupImport,
         enableSync,
         disableSync,
         isSyncEnabled: syncEnabled,
@@ -452,7 +736,7 @@ export function SyncStatusIndicator() {
 
   const getStatusColor = () => {
     if (!isOnline) return 'bg-slate-400';
-    if (isSyncing) return 'bg-amber-500 animate-pulse';
+    if (isSyncing) return 'bg-amber-500';
     if (pendingChanges > 0) return 'bg-orange-500';
     return 'bg-emerald-500';
   };

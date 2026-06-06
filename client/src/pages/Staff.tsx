@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings, ImagePlus } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Users, Briefcase, Phone, Mail, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserX, DollarSign, Clock, CheckCircle, Settings, ImagePlus, Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, StaffRole } from '@schofy/shared';
 import type { Staff, SalaryPayment, Subject } from '@schofy/shared';
@@ -18,10 +18,13 @@ import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { matchesTextSearch } from '../utils/searchMatch';
-import { deleteInThirtyPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
+import { deleteInFortyPercentBatches, runTasksInPercentBatches, runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
 import { BulkImageUpdateModal, type BulkImageRecord } from '../components/BulkImageUpdateModal';
+import { OperationProgressPopup } from '../components/OperationProgressPopup';
+import { getPlanStaffLimit, getSubscriptionAccessState } from '../utils/plans';
+import { getImportCellText, parseImportFile } from '../utils/importParser';
 
 const avatarColors = [
   'bg-violet-500',
@@ -36,6 +39,10 @@ const avatarColors = [
 function getAvatarColor(name: string) {
   const index = name.charCodeAt(0) % avatarColors.length;
   return avatarColors[index];
+}
+
+function normalizeImportHeader(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
 function StaffActions({
@@ -112,12 +119,24 @@ export default function StaffPage() {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
+  const [customFieldMapping, setCustomFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<Partial<Staff>[]>([]);
+  const [selectedImportRows, setSelectedImportRows] = useState<Set<number>>(new Set());
+  const [isPreviewingImport, setIsPreviewingImport] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [operationProgress, setOperationProgress] = useState<{ open: boolean; title: string; detail: string; progress: number; processed?: number; total?: number }>({
+    open: false,
+    title: '',
+    detail: '',
+    progress: 0,
+  });
   const [selectedStaff, setSelectedStaff] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const [showBulkImageModal, setShowBulkImageModal] = useState(false);
+  const [staffLimitNotice, setStaffLimitNotice] = useState<string | null>(null);
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
+  const [importPlanCapacity, setImportPlanCapacity] = useState<{ planName: string; limit: number; activeStaff: number } | null>(null);
   const rowClickTimeoutRef = useRef<number | null>(null);
   const navigate = useNavigate();
 
@@ -290,13 +309,34 @@ export default function StaffPage() {
             deletedAt: now
         });
       });
-      const deletedCount = await deleteInThirtyPercentBatches(id, 'staff', idsToDelete);
+      setOperationProgress({
+        open: true,
+        title: 'Deleting staff',
+        detail: 'Removing selected records in 40% batches.',
+        progress: 5,
+        processed: 0,
+        total: idsToDelete.length,
+      });
+      const deletedCount = await deleteInFortyPercentBatches(id, 'staff', idsToDelete, (_deletedIds, deletedTotal, total) => {
+        setOperationProgress({
+          open: true,
+          title: 'Deleting staff',
+          detail: 'Removing selected records in 40% batches.',
+          progress: Math.round((deletedTotal / total) * 100),
+          processed: deletedTotal,
+          total,
+        });
+      });
       
       
       setSelectedStaff(new Set());
       setSelectMode(false);
       addToast(`${deletedCount} staff moved to recycle bin`, 'success');    } catch (error) {
       addToast('Failed to delete staff', 'error');
+    } finally {
+      window.setTimeout(() => {
+        setOperationProgress(prev => prev.title === 'Deleting staff' ? { ...prev, open: false } : prev);
+      }, 350);
     }
   }
 
@@ -444,15 +484,76 @@ export default function StaffPage() {
   ];
 
   const staffExpectedFields = [
-    { key: 'employeeId', label: 'Employee ID', required: false },
-    { key: 'firstName', label: 'First Name', required: true },
-    { key: 'lastName', label: 'Last Name', required: true },
-    { key: 'role', label: 'Role', required: false },
-    { key: 'department', label: 'Department', required: false },
-    { key: 'phone', label: 'Phone', required: false },
-    { key: 'email', label: 'Email', required: false },
-    { key: 'address', label: 'Address', required: false },
+    { key: 'employeeId', label: 'Employee ID', required: false, aliases: ['id', 'staff id', 'staff no', 'staff number', 'employee no', 'employee number', 'id number'] },
+    { key: 'firstName', label: 'First Name', required: true, aliases: ['firstname', 'given name', 'forename', 'name', 'staff name', 'employee name', 'full name'] },
+    { key: 'lastName', label: 'Last Name', required: true, aliases: ['lastname', 'surname', 'family name'] },
+    { key: 'role', label: 'Role', required: false, aliases: ['staff role', 'position', 'job title', 'designation'] },
+    { key: 'department', label: 'Department', required: false, aliases: ['section', 'unit', 'faculty'] },
+    { key: 'phone', label: 'Phone', required: false, aliases: ['phone number', 'mobile', 'mobile number', 'contact', 'contact number'] },
+    { key: 'email', label: 'Email', required: false, aliases: ['email address', 'staff email', 'work email'] },
+    { key: 'address', label: 'Address', required: false, aliases: ['home address', 'residence'] },
+    { key: 'dob', label: 'Date of Birth', required: false, aliases: ['birth date', 'birthday', 'date birth'] },
+    { key: 'salary', label: 'Salary', required: false, aliases: ['monthly salary', 'pay', 'wage', 'basic salary'] },
+    { key: 'joinDate', label: 'Join Date', required: false, aliases: ['joining date', 'date joined', 'employment date', 'start date', 'hire date'] },
+    { key: 'qualification', label: 'Qualification', required: false, aliases: ['qualifications', 'education', 'academic qualification'] },
+    { key: 'status', label: 'Status', required: false, aliases: ['active status', 'employment status'] },
+    { key: 'subjects', label: 'Subjects', required: false, aliases: ['subject', 'teaching subjects', 'assigned subjects'] },
+    { key: 'photoUrl', label: 'Photo URL', required: false, aliases: ['photo', 'image', 'picture', 'profile photo'] },
   ];
+  const staffImportDraftKey = sid ? `schofy_staff_import_draft_${sid}` : '';
+
+  function clearStaffImportDraft() {
+    if (staffImportDraftKey) localStorage.removeItem(staffImportDraftKey);
+    setDraftNotice(null);
+  }
+
+  function saveStaffImportDraft(reason = 'Staff import draft saved') {
+    if (!staffImportDraftKey || csvHeaders.length === 0) return;
+    localStorage.setItem(staffImportDraftKey, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      reason,
+      importStep,
+      csvHeaders,
+      csvData,
+      fieldMapping,
+      customFieldMapping,
+      importPreview,
+      selectedImportRows: Array.from(selectedImportRows),
+      staffLimitNotice,
+      importPlanCapacity,
+    }));
+    setDraftNotice(reason);
+  }
+
+  useEffect(() => {
+    if (!staffImportDraftKey || showImportModal || csvHeaders.length > 0) return;
+    try {
+      const rawDraft = localStorage.getItem(staffImportDraftKey);
+      if (!rawDraft) return;
+      const draft = JSON.parse(rawDraft);
+      if (!Array.isArray(draft.csvHeaders) || !Array.isArray(draft.csvData)) return;
+      setCsvHeaders(draft.csvHeaders);
+      setCsvData(draft.csvData);
+      setFieldMapping(draft.fieldMapping || {});
+      setCustomFieldMapping(draft.customFieldMapping || {});
+      setImportPreview(Array.isArray(draft.importPreview) ? draft.importPreview : []);
+      setSelectedImportRows(new Set(Array.isArray(draft.selectedImportRows) ? draft.selectedImportRows.filter((value: unknown) => Number.isInteger(value as number)) : []));
+      setStaffLimitNotice(draft.staffLimitNotice || null);
+      setImportPlanCapacity(draft.importPlanCapacity || null);
+      setImportStep(draft.importStep === 'preview' || draft.importStep === 'map' ? draft.importStep : 'map');
+      setShowImportModal(true);
+      setDraftNotice('Staff import draft restored where you stopped.');
+      addToast('Staff import draft restored', 'info');
+    } catch (error) {
+      console.error('Failed to restore staff import draft:', error);
+      clearStaffImportDraft();
+    }
+  }, [staffImportDraftKey]);
+
+  useEffect(() => {
+    if (!showImportModal || isImporting || importStep === 'upload' || csvHeaders.length === 0) return;
+    saveStaffImportDraft('Staff import draft saved');
+  }, [showImportModal, importStep, csvHeaders, csvData, fieldMapping, customFieldMapping, importPreview, selectedImportRows, staffLimitNotice, importPlanCapacity, isImporting]);
 
   function handleExportCSV() {
     exportToCSV(filteredStaff, 'staff', staffCSVColumns);
@@ -493,6 +594,13 @@ export default function StaffPage() {
         case 'phone': return '0771234567';
         case 'email': return 'john.doe@school.com';
         case 'address': return '123 Main Street';
+        case 'dob': return '1988-05-20';
+        case 'salary': return '750000';
+        case 'joinDate': return '2024-01-15';
+        case 'qualification': return 'Diploma in Education';
+        case 'status': return 'active';
+        case 'subjects': return 'Mathematics; Science';
+        case 'photoUrl': return '';
         default: return '';
       }
     });
@@ -506,15 +614,21 @@ export default function StaffPage() {
     });
   }
 
-  function closeImportModal() {
+  function closeImportModal(clearDraft = true) {
     setShowImportModal(false);
     setImportStep('upload');
     setCsvHeaders([]);
     setCsvData([]);
     setFieldMapping({});
+    setCustomFieldMapping({});
     setImportPreview([]);
+    setSelectedImportRows(new Set());
+    setIsPreviewingImport(false);
     setIsImporting(false);
     setImportProgress(0);
+    setStaffLimitNotice(null);
+    setImportPlanCapacity(null);
+    if (clearDraft) clearStaffImportDraft();
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
@@ -522,47 +636,37 @@ export default function StaffPage() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      let headers: string[] = [];
-      let data: string[][] = [];
-      if (/\.(xlsx|xls)$/i.test(file.name)) {
-        const { read, utils } = await import('xlsx');
-        const workbook = read(await file.arrayBuffer(), { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' })
-          .filter(row => row.some(cell => String(cell ?? '').trim()));
-        if (rows.length < 2) {
-          addToast('Excel file must have headers and at least one data row', 'error');
-          return;
-        }
-        headers = rows[0].map(cell => String(cell ?? '').trim());
-        data = rows.slice(1).map(row => headers.map((_, index) => String(row[index] ?? '').trim()));
-      } else {
-        const text = await file.text();
-        const lines = text.split('\n').filter(line => line.trim());
-        if (lines.length < 2) {
-          addToast('CSV must have headers and at least one data row', 'error');
-          return;
-        }
-        headers = parseCSVHeaders(lines[0]);
-        data = lines.slice(1).map(line => parseCSVLine(line));
-      }
+      const { headers, data } = await parseImportFile(file);
       setCsvHeaders(headers);
       setCsvData(data);
       const autoMapping: Record<string, string> = {};
+      const normalizedHeaders = headers.map(header => ({ header, normalized: normalizeImportHeader(header) }));
       staffExpectedFields.forEach(field => {
-        const matchingHeader = headers.find(h => 
-          h.toLowerCase() === field.label.toLowerCase() ||
-          h.toLowerCase() === field.key.toLowerCase() ||
-          h.toLowerCase().includes(field.key.toLowerCase()) ||
-          field.label.toLowerCase().includes(h.toLowerCase())
+        const candidates = [
+          field.key,
+          field.label,
+          ...((field as any).aliases || []),
+        ].map(normalizeImportHeader).filter(Boolean);
+        const matchingHeader = normalizedHeaders.find(({ normalized }) =>
+          candidates.some(candidate => normalized === candidate || normalized.includes(candidate) || candidate.includes(normalized))
         );
-        if (matchingHeader) autoMapping[field.key] = matchingHeader;
+        if (matchingHeader) autoMapping[field.key] = matchingHeader.header;
+      });
+      const mappedHeaders = new Set(Object.values(autoMapping).filter(Boolean));
+      const autoCustomMapping: Record<string, string> = {};
+      headers.forEach(header => {
+        if (!header || mappedHeaders.has(header)) return;
+        autoCustomMapping[header] = header;
       });
       setFieldMapping(autoMapping);
+      setCustomFieldMapping(autoCustomMapping);
+      setSelectedImportRows(new Set());
       setImportStep('map');
       setShowImportModal(true);
+      window.setTimeout(() => saveStaffImportDraft('Staff import draft started'), 0);
     } catch (error) {
-      addToast('Failed to read import file', 'error');
+      console.error('Staff import file read error:', error);
+      addToast(error instanceof Error ? error.message : 'Failed to read import file', 'error');
     }
     event.target.value = '';
   }
@@ -599,57 +703,416 @@ export default function StaffPage() {
     return result;
   }
 
-  function processMapping() {
+  function normalizeImportId(value: unknown): string {
+    return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
+  function normalizeImportedStaffRole(value: unknown): StaffRole {
+    const normalized = String(value ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
+    if (['teacher', 'teach', 'tr', 'tutor'].includes(normalized)) return StaffRole.TEACHER;
+    if (['admin', 'administrator'].includes(normalized)) return StaffRole.ADMIN;
+    if (['director', 'headteacher', 'headmaster', 'principal'].includes(normalized)) return StaffRole.DIRECTOR;
+    if (['accountant', 'accounts', 'bursar', 'finance'].includes(normalized)) return StaffRole.BURSAR;
+    if (['support', 'librarian', 'library', 'receptionist', 'reception', 'frontdesk'].includes(normalized)) return StaffRole.SUPPORT;
+    return StaffRole.TEACHER;
+  }
+
+  function normalizeImportedStaffStatus(value: unknown): 'active' | 'inactive' {
+    const normalized = String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (['inactive', 'disabled', 'deactivated', 'terminated', 'left', 'former', '0', 'false', 'no'].includes(normalized)) return 'inactive';
+    return 'active';
+  }
+
+  function parseImportedSubjects(value: unknown): string[] | undefined {
+    const subjects = getImportCellText(value)
+      .split(/[;,|]/)
+      .map(subject => subject.trim())
+      .filter(Boolean);
+    return subjects.length > 0 ? subjects : undefined;
+  }
+
+  function getKnownMappedHeaders(mapping: Record<string, string> = fieldMapping) {
+    return new Set(Object.values(mapping).filter(Boolean));
+  }
+
+  function updateKnownFieldMapping(fieldKey: string, header: string) {
+    setFieldMapping(prev => {
+      const next = { ...prev, [fieldKey]: header };
+      const used = getKnownMappedHeaders(next);
+      setCustomFieldMapping(customPrev => {
+        const customNext = { ...customPrev };
+        csvHeaders.forEach(csvHeader => {
+          if (used.has(csvHeader)) delete customNext[csvHeader];
+          else if (customNext[csvHeader] === undefined) customNext[csvHeader] = csvHeader;
+        });
+        return customNext;
+      });
+      return next;
+    });
+  }
+
+  async function processMapping() {
     const mappedData: Partial<Staff>[] = [];
+    const headerIndexByName = new Map(csvHeaders.map((header, index) => [header, index]));
+    const fieldIndexes = staffExpectedFields.map(field => ({
+      key: field.key,
+      index: fieldMapping[field.key] ? headerIndexByName.get(fieldMapping[field.key]) ?? -1 : -1,
+    }));
+    const customFieldIndexes = Object.entries(customFieldMapping)
+      .map(([header, label]) => ({
+        header,
+        label: label.trim(),
+        index: headerIndexByName.get(header) ?? -1,
+      }))
+      .filter(item => item.label && item.index !== -1);
     for (const row of csvData) {
       const staffMember: Partial<Staff> = {};
-      staffExpectedFields.forEach(field => {
-        const csvHeader = fieldMapping[field.key];
-        if (csvHeader) {
-          const headerIndex = csvHeaders.indexOf(csvHeader);
-          if (headerIndex !== -1 && row[headerIndex]) {
-            (staffMember as any)[field.key] = row[headerIndex];
+      fieldIndexes.forEach(field => {
+        if (field.index === -1) return;
+        const value = getImportCellText(row[field.index]);
+        if (!value) return;
+        if (field.key === 'salary') {
+          const amount = Number(value.replace(/,/g, ''));
+          if (Number.isFinite(amount)) (staffMember as any).salary = amount;
+          return;
+        }
+        if (field.key === 'subjects') {
+          const parsed = parseImportedSubjects(value);
+          if (parsed) (staffMember as any).subjects = parsed;
+          return;
+        }
+        if (field.key === 'status') {
+          (staffMember as any).status = normalizeImportedStaffStatus(value);
+          return;
+        }
+        (staffMember as any)[field.key] = value;
+      });
+      if ((staffMember as any).firstName && !(staffMember as any).lastName) {
+        const mappedFirstHeader = fieldMapping.firstName || '';
+        const looksLikeFullName = ['name', 'staffname', 'employeename', 'fullname'].includes(normalizeImportHeader(mappedFirstHeader));
+        if (looksLikeFullName) {
+          const parts = getImportCellText((staffMember as any).firstName).split(/\s+/).filter(Boolean);
+          if (parts.length > 1) {
+            (staffMember as any).firstName = parts.shift() || '';
+            (staffMember as any).lastName = parts.join(' ');
           }
         }
-      });
+      }
+      const customFields = customFieldIndexes
+        .map(field => ({
+          id: generateUUID(),
+          label: field.label,
+          value: getImportCellText(row[field.index]),
+        }))
+        .filter(field => field.value);
+      if (customFields.length > 0) {
+        (staffMember as any).customFields = customFields;
+      }
       if (staffMember.firstName || staffMember.lastName || staffMember.employeeId) {
         mappedData.push(staffMember);
       }
     }
     setImportPreview(mappedData);
+    setSelectedImportRows(new Set(mappedData.map((_, index) => index)));
+    setStaffLimitNotice(null);
+    const capacity = await getStaffPlanCapacity();
+    if (capacity && !capacity.ok) {
+      setImportPlanCapacity(null);
+      setStaffLimitNotice(`${capacity.message} Current plan: ${capacity.planName}. Upgrade to continue.`);
+    } else if (capacity?.ok) {
+      setImportPlanCapacity({ planName: capacity.planName, limit: capacity.limit, activeStaff: capacity.activeStaff });
+      const existingEmployeeIds = new Set(staff.map(member => normalizeImportId(member.employeeId)).filter(Boolean));
+      const newActiveStaffCount = mappedData.filter(member => {
+        const employeeId = normalizeImportId((member as any).employeeId);
+        const isExisting = employeeId && existingEmployeeIds.has(employeeId);
+        return !isExisting && ((member as any).status || 'active') !== 'inactive';
+      }).length;
+      const projectedStaff = capacity.activeStaff + newActiveStaffCount;
+      const remaining = Math.max(0, capacity.limit - capacity.activeStaff);
+      if (projectedStaff > capacity.limit) {
+        const existingOrInactiveCount = mappedData.filter(member => !isNewActiveImportRow(member)).length;
+        const availableRecordCount = existingOrInactiveCount + remaining;
+        setStaffLimitNotice(`Current plan: ${capacity.planName}. Staff limit is ${capacity.limit.toLocaleString()} (15% of student plan size), with ${remaining.toLocaleString()} new active staff slot${remaining === 1 ? '' : 's'} remaining. This import adds ${newActiveStaffCount.toLocaleString()} new active staff. Import available for plan: ${availableRecordCount.toLocaleString()} record${availableRecordCount === 1 ? '' : 's'}; upgrade for the rest.`);
+      }
+    } else {
+      setImportPlanCapacity(null);
+    }
     setImportStep('preview');
   }
 
-  async function executeImport() {
+  async function previewStaffImportWithDelay() {
+    if (isPreviewingImport) return;
+    setIsPreviewingImport(true);
+    try {
+      await new Promise(resolve => window.setTimeout(resolve, 2000));
+      await processMapping();
+    } finally {
+      setIsPreviewingImport(false);
+    }
+  }
+
+  async function getStaffPlanCapacity() {
+    const id = schoolId || user?.id;
+    if (!id) return null;
+    const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
+    if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
+      return { ok: false as const, message: 'Choose an active plan before adding staff.', planName: access.plan?.name || 'No active plan', limit: 0, activeStaff: staff.filter(s => s.status !== 'inactive').length };
+    }
+    const limit = getPlanStaffLimit(access.plan);
+    const activeStaff = staff.filter(s => s.status !== 'inactive').length;
+    return { ok: true as const, planName: access.plan.name, limit, activeStaff };
+  }
+
+  function getExistingStaffByEmployeeId() {
+    const existingByEmployeeId = new Map<string, Staff>();
+    staff.forEach(member => {
+      const key = normalizeImportId(member.employeeId);
+      if (key && !existingByEmployeeId.has(key)) existingByEmployeeId.set(key, member);
+    });
+    return existingByEmployeeId;
+  }
+
+  function isNewActiveImportRow(member: Partial<Staff>, existingByEmployeeId = getExistingStaffByEmployeeId()) {
+    const employeeId = normalizeImportId((member as any).employeeId);
+    const isExisting = employeeId && existingByEmployeeId.has(employeeId);
+    return !isExisting && ((member as any).status || 'active') !== 'inactive';
+  }
+
+  function getSelectedImportPreviewRows() {
+    return importPreview.filter((_, index) => selectedImportRows.has(index));
+  }
+
+  function getAvailableStaffImportRows() {
+    return Promise.resolve(getAvailableStaffImportRowsForCapacity(importPlanCapacity));
+  }
+
+  function getAvailableStaffImportRowsForCapacity(capacity: { limit: number; activeStaff: number } | null) {
+    const existingByEmployeeId = getExistingStaffByEmployeeId();
+    const selectedRows = getSelectedImportPreviewRows();
+    if (!capacity) return [];
+    let remainingNewActive = Math.max(0, capacity.limit - capacity.activeStaff);
+    return selectedRows.filter(member => {
+      if (!isNewActiveImportRow(member, existingByEmployeeId)) return true;
+      if (remainingNewActive <= 0) return false;
+      remainingNewActive -= 1;
+      return true;
+    });
+  }
+
+  function toggleImportRow(index: number) {
+    setSelectedImportRows(prev => {
+      const next = new Set(prev);
+      next.has(index) ? next.delete(index) : next.add(index);
+      return next;
+    });
+  }
+
+  function setAllImportRowsSelected(selected: boolean) {
+    setSelectedImportRows(selected ? new Set(importPreview.map((_, index) => index)) : new Set());
+  }
+
+  async function proceedWithAvailableStaffImport() {
+    let rows: Partial<Staff>[] = [];
+    const capacity = await getStaffPlanCapacity();
+    if (capacity?.ok) {
+      const nextCapacity = { planName: capacity.planName, limit: capacity.limit, activeStaff: capacity.activeStaff };
+      setImportPlanCapacity(nextCapacity);
+      rows = getAvailableStaffImportRowsForCapacity(nextCapacity);
+    } else if (capacity) {
+      setImportPlanCapacity({ planName: capacity.planName, limit: capacity.limit, activeStaff: capacity.activeStaff });
+    }
+    if (rows.length === 0) {
+      addToast('No available staff slots on the current plan. Upgrade to import more active staff.', 'error');
+      return;
+    }
+    if (rows.length < getSelectedImportPreviewRows().length) {
+      addToast(`Proceeding with ${rows.length} available staff record${rows.length === 1 ? '' : 's'}; extra new active staff will be skipped.`, 'info');
+    }
+    await executeImport(rows);
+  }
+
+  async function handleAddStaffClick() {
+    try {
+      const capacity = await getStaffPlanCapacity();
+      if (!capacity) return;
+      if (!capacity.ok) {
+        setStaffLimitNotice(`${capacity.message} Current plan: ${capacity.planName}. Upgrade to continue.`);
+        addToast(`${capacity.message} Current plan: ${capacity.planName}.`, 'error');
+        navigate('/plans');
+        return;
+      }
+      if (capacity.activeStaff >= capacity.limit) {
+        const message = `Staff limit reached on ${capacity.planName}. This plan allows ${capacity.limit.toLocaleString()} staff (15% of student plan size). Upgrade to add more staff.`;
+        setStaffLimitNotice(message);
+        addToast(message, 'error');
+        navigate('/plans');
+        return;
+      }
+      navigate('/staff/new');
+    } catch {
+      addToast('Could not check plan limit. Try again.', 'error');
+    }
+  }
+
+  async function executeImport(rowsOverride?: Partial<Staff>[]) {
     const id = schoolId || user?.id;
     if (!id || submittingRef.current) return;
-    if (importPreview.length === 0) { addToast('No valid staff to import', 'error'); return; }
+    const rowsToImport = rowsOverride || getSelectedImportPreviewRows();
+    if (rowsToImport.length === 0) { addToast('Select at least one staff record to import', 'error'); return; }
     setIsImporting(true);
     setImportProgress(0);
+    setOperationProgress({
+      open: true,
+      title: 'Importing staff',
+      detail: 'Preparing records in 40% phase.',
+      progress: 5,
+      processed: 0,
+      total: rowsToImport.length,
+    });
     submittingRef.current = true;
     try {
       const now = new Date().toISOString();
       let successCount = 0;
       const newStaff: Staff[] = [];
-      for (const data of importPreview) {
+      const updates: Array<{ id: string; data: Partial<Staff> }> = [];
+      const existingByEmployeeId = getExistingStaffByEmployeeId();
+      const mergeCustomFields = (existingStaff: Partial<Staff> | undefined, incomingFields: any[] = []) => {
+        const byLabel = new Map<string, any>();
+        ((existingStaff as any)?.customFields || []).forEach((field: any) => {
+          const key = String(field?.label || '').trim().toLowerCase();
+          if (key) byLabel.set(key, field);
+        });
+        incomingFields.forEach((field: any) => {
+          const label = String(field?.label || '').trim();
+          if (!label) return;
+          byLabel.set(label.toLowerCase(), {
+            id: byLabel.get(label.toLowerCase())?.id || field.id || generateUUID(),
+            label,
+            value: String(field?.value ?? '').trim(),
+          });
+        });
+        return Array.from(byLabel.values());
+      };
+      for (const data of rowsToImport) {
+        const employeeId = (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const existing = existingByEmployeeId.get(normalizeImportId(employeeId));
         const staffMember: Staff = {
           id: crypto.randomUUID(), schoolId: id,
-          employeeId: (data.employeeId as string) || `EMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          employeeId,
           firstName: (data.firstName as string) || 'Unknown',
           lastName: (data.lastName as string) || 'Unknown',
-          role: (data.role as any) || 'teacher',
+          role: normalizeImportedStaffRole(data.role),
           department: data.department, phone: (data.phone as string) || '',
           email: data.email as string | undefined, address: data.address as string | undefined,
-          status: 'active', createdAt: now, updatedAt: now,
+          dob: data.dob as string | undefined,
+          salary: typeof (data as any).salary === 'number' ? (data as any).salary : undefined,
+          joinDate: (data as any).joinDate as string | undefined,
+          qualification: (data as any).qualification as string | undefined,
+          photoUrl: (data as any).photoUrl as string | undefined,
+          subjects: Array.isArray((data as any).subjects) ? (data as any).subjects : undefined,
+          customFields: Array.isArray((data as any).customFields) ? (data as any).customFields : undefined,
+          status: ((data as any).status as 'active' | 'inactive') || 'active',
+          createdAt: now,
+          updatedAt: now,
         };
-        newStaff.push(staffMember);
+        if (existing) {
+          const updateData = {
+            ...staffMember,
+            id: existing.id,
+            schoolId: existing.schoolId || id,
+            createdAt: existing.createdAt || now,
+            updatedAt: now,
+          };
+          if (Array.isArray((data as any).customFields) && (data as any).customFields.length > 0) {
+            (updateData as any).customFields = mergeCustomFields(existing, (data as any).customFields);
+          }
+          updates.push({
+            id: existing.id,
+            data: updateData,
+          });
+        } else {
+          newStaff.push(staffMember);
+        }
         successCount++;
       }
-      setImportProgress(50);
-      await dataService.bulkCreate(id, 'staff', newStaff as any[]);
+      const promptDraftUpgrade = async (message: string) => {
+        saveStaffImportDraft('Staff import draft saved before upgrade');
+        const goUpgrade = await confirm({
+          title: 'Staff Import Draft Saved',
+          description: `${message} Your import draft has been saved and will reopen here when you return to Staff.`,
+          confirmLabel: 'Upgrade Plan',
+          cancelLabel: 'Stay Here',
+          variant: 'warning',
+        });
+        if (goUpgrade) {
+          closeImportModal(false);
+          navigate('/plans');
+        }
+      };
+      const capacity = await getStaffPlanCapacity();
+      if (!capacity) return;
+      if (!capacity.ok) {
+        const message = `${capacity.message} Current plan: ${capacity.planName}. Upgrade to continue.`;
+        setStaffLimitNotice(message);
+        addToast(message, 'error');
+        await promptDraftUpgrade(message);
+        return;
+      }
+      const newActiveStaffCount = newStaff.filter(member => member.status !== 'inactive').length;
+      const projectedStaff = capacity.activeStaff + newActiveStaffCount;
+      if (projectedStaff > capacity.limit) {
+        const remaining = Math.max(0, capacity.limit - capacity.activeStaff);
+        const message = `Staff import exceeds ${capacity.planName}. This plan allows ${capacity.limit.toLocaleString()} staff (15% of student plan size), with ${remaining.toLocaleString()} slot${remaining === 1 ? '' : 's'} remaining. Upgrade your plan to import ${newActiveStaffCount.toLocaleString()} new active staff.`;
+        setStaffLimitNotice(message);
+        addToast(message, 'error');
+        await promptDraftUpgrade(message);
+        return;
+      }
+      setImportProgress(40);
+      setOperationProgress({
+        open: true,
+        title: 'Importing staff',
+        detail: 'Saving new staff records.',
+        progress: 40,
+        processed: newStaff.length,
+        total: rowsToImport.length,
+      });
+      if (newStaff.length > 0) await dataService.bulkCreate(id, 'staff', newStaff as any[]);
+      setImportProgress(80);
+      setOperationProgress({
+        open: true,
+        title: 'Importing staff',
+        detail: 'Replacing matching staff records.',
+        progress: 80,
+        processed: newStaff.length,
+        total: rowsToImport.length,
+      });
+      await runTasksInPercentBatches(
+        updates.map(update => () => dataService.update(id, 'staff', update.id, update.data as any)),
+        0.4,
+        (_progress, processed) => {
+          setOperationProgress({
+            open: true,
+            title: 'Importing staff',
+            detail: 'Replacing matching staff records.',
+            progress: Math.min(99, 80 + Math.round((processed / Math.max(1, updates.length)) * 19)),
+            processed: newStaff.length + processed,
+            total: rowsToImport.length,
+          });
+        },
+      );
       setImportProgress(100);
-      addToast(`Imported ${successCount} staff`, 'success');
-      closeImportModal();
+      setOperationProgress({
+        open: true,
+        title: 'Importing staff',
+        detail: 'Import complete.',
+        progress: 100,
+        processed: newStaff.length + updates.length,
+        total: rowsToImport.length,
+      });
+      addToast(`Imported ${newStaff.length} staff${updates.length ? `, replaced ${updates.length}` : ''}`, 'success');
+      clearStaffImportDraft();
+      closeImportModal(false);
       window.dispatchEvent(new CustomEvent('dataRefresh'));
       window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'staff' } }));
     } catch (error) {
@@ -657,6 +1120,9 @@ export default function StaffPage() {
     } finally {
       setIsImporting(false);
       submittingRef.current = false;
+      window.setTimeout(() => {
+        setOperationProgress(prev => prev.title === 'Importing staff' ? { ...prev, open: false } : prev);
+      }, 450);
     }
   }
 
@@ -665,6 +1131,15 @@ export default function StaffPage() {
 
   const teachersCount = staff.filter(s => s.role === 'teacher').length;
   const activeCount = staff.filter(s => s.status === 'active').length;
+  const selectedImportPreviewRows = getSelectedImportPreviewRows();
+  const selectedImportCount = selectedImportPreviewRows.length;
+  const allImportRowsSelected = importPreview.length > 0 && selectedImportRows.size === importPreview.length;
+  const selectedNewActiveImportCount = selectedImportPreviewRows.filter(member => isNewActiveImportRow(member)).length;
+  const availableStaffImportRows = getAvailableStaffImportRowsForCapacity(importPlanCapacity);
+  const availableStaffImportCount = availableStaffImportRows.length;
+  const availableNewActiveImportCount = availableStaffImportRows.filter(member => isNewActiveImportRow(member)).length;
+  const skippedStaffImportCount = Math.max(0, selectedImportCount - availableStaffImportCount);
+  const remainingStaffSlots = importPlanCapacity ? Math.max(0, importPlanCapacity.limit - importPlanCapacity.activeStaff) : 0;
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -700,12 +1175,18 @@ export default function StaffPage() {
             <span className="hidden sm:inline">Import</span>
           </button>
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept=".csv,.xlsx,.xls" className="hidden" />
-          <Link to="/staff/new" className="btn btn-primary">
+          <button type="button" onClick={handleAddStaffClick} className="btn btn-primary">
             <Plus size={16} />
             Add Staff
-          </Link>
+          </button>
         </div>
       </div>
+
+      {staffLimitNotice && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-200">
+          {staffLimitNotice}
+        </div>
+      )}
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -901,7 +1382,7 @@ export default function StaffPage() {
                 <tr>
                   <td colSpan={selectMode ? 9 : 8} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
-                      <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
+                      <div className="w-8 h-8 border-2 border-slate-200 border-t-transparent rounded-full animate-spin" style={{ borderTopColor: 'var(--primary-color)' }}></div>
                       <p className="text-sm">Loading...</p>
                     </div>
                   </td>
@@ -1047,17 +1528,19 @@ export default function StaffPage() {
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-backdrop-in p-4"
           onClick={e => { if (e.target === e.currentTarget && !isImporting) closeImportModal(); }}
         >
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
+          <div className={`bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700 flex flex-col ${
+            importStep === 'preview' ? 'max-w-6xl h-[92vh]' : 'max-w-md max-h-[85vh]'
+          }`}>
             <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
               <div className="flex items-center gap-2">
                 <Upload size={18} className="text-white" />
                 <h2 className="font-bold text-white">Import Staff</h2>
               </div>
-              <button onClick={closeImportModal} disabled={isImporting} className="p-1 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-50">
+              <button onClick={() => closeImportModal()} disabled={isImporting} className="p-1 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-50">
                 <X size={18} className="text-white" />
               </button>
             </div>
-            <div className="p-5 overflow-y-auto max-h-[calc(85vh-56px)]">
+            <div className={`flex-1 min-h-0 p-5 ${importStep === 'preview' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
               {importStep === 'upload' && (
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-4">
@@ -1086,6 +1569,11 @@ export default function StaffPage() {
               )}
               {importStep === 'map' && (
                 <div className="space-y-3">
+                  {draftNotice && (
+                    <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 dark:border-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-200">
+                      {draftNotice}
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                     <span className="px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded">1</span>
                     <ArrowRight size={12} />
@@ -1096,11 +1584,11 @@ export default function StaffPage() {
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {staffExpectedFields.filter(f => f.required).map(field => (
+                        {staffExpectedFields.map(field => (
                           <tr key={field.key}>
-                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">{field.label}*</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">{field.label}{field.required ? '*' : ''}</td>
                             <td className="px-2 py-1.5">
-                              <select value={fieldMapping[field.key] || ''} onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))} className="w-full form-input py-1 px-2 text-xs">
+                              <select value={fieldMapping[field.key] || ''} onChange={(e) => updateKnownFieldMapping(field.key, e.target.value)} className="w-full form-input py-1 px-2 text-xs">
                                 <option value="">-- Skip --</option>
                                 {csvHeaders.map(header => (<option key={header} value={header}>{header}</option>))}
                               </select>
@@ -1110,63 +1598,157 @@ export default function StaffPage() {
                       </tbody>
                     </table>
                   </div>
+                  {csvHeaders.filter(header => !getKnownMappedHeaders().has(header)).length > 0 && (
+                    <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                      <div className="px-3 py-2 bg-slate-50 dark:bg-slate-700/50">
+                        <h4 className="text-xs font-bold text-slate-700 dark:text-slate-200">Extra fields</h4>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">Rename detected columns to save them as custom staff fields, or clear the name to skip.</p>
+                      </div>
+                      <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+                        {csvHeaders.filter(header => !getKnownMappedHeaders().has(header)).map(header => (
+                          <div key={header} className="grid grid-cols-[1fr,1.2fr] gap-2 px-3 py-2 items-center">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{header}</p>
+                              <p className="text-[10px] text-slate-400">Detected column</p>
+                            </div>
+                            <input
+                              value={customFieldMapping[header] ?? ''}
+                              onChange={(e) => setCustomFieldMapping(prev => ({ ...prev, [header]: e.target.value }))}
+                              className="form-input py-1 px-2 text-xs"
+                              placeholder="Skip or rename"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2 pt-2">
-                    <button onClick={closeImportModal} disabled={isImporting} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
-                    <button onClick={processMapping} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1">Preview <ArrowRight size={14} /></button>
+                    <button onClick={() => closeImportModal()} disabled={isImporting} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
+                    <button onClick={previewStaffImportWithDelay} disabled={isPreviewingImport} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                      {isPreviewingImport ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
+                      {isPreviewingImport ? 'Loading preview...' : 'Preview'}
+                    </button>
                   </div>
                 </div>
               )}
               {importStep === 'preview' && (
-                <div data-preview-fullscreen-root className="space-y-3 rounded-xl bg-white p-1 dark:bg-slate-800">
+                <div data-preview-fullscreen-root className="flex h-full min-h-0 flex-col gap-3 rounded-xl bg-white p-1 dark:bg-slate-800">
+                  {draftNotice && (
+                    <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 dark:border-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-200">
+                      {draftNotice}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
+                      <span className="px-1.5 py-0.5 text-white rounded flex items-center gap-1" style={{ backgroundColor: 'var(--solid-emerald)' }}><Check size={10} /> 1</span>
                       <ArrowRight size={12} />
-                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
+                      <span className="px-1.5 py-0.5 text-white rounded flex items-center gap-1" style={{ backgroundColor: 'var(--solid-emerald)' }}><Check size={10} /> 2</span>
                       <ArrowRight size={12} />
                       <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3</span>
                     </div>
                     <FullscreenButton />
                   </div>
-                  <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300"><strong>{importPreview.length}</strong> staff ready to import</p>
+                  <div className="highlight-label-emerald rounded-lg p-2.5">
+                    <p className="text-sm"><strong>{importPreview.length}</strong> staff ready to import</p>
+                    <p className="mt-1 text-xs opacity-90">
+                      <strong>{selectedImportCount}</strong> selected
+                      {selectedNewActiveImportCount > 0 ? `, ${selectedNewActiveImportCount} new active staff` : ''}
+                    </p>
+                    {importPlanCapacity && (
+                      <p className="mt-1 text-xs opacity-90">
+                        Current plan: <strong>{importPlanCapacity.planName}</strong>. Available now: <strong>{availableStaffImportCount}</strong> selected record{availableStaffImportCount === 1 ? '' : 's'}
+                        {availableNewActiveImportCount > 0 ? `, including ${availableNewActiveImportCount} new active staff` : ''}.
+                        {' '}New active slots left before import: <strong>{remainingStaffSlots}</strong>.
+                      </p>
+                    )}
                   </div>
-                  <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                  {staffLimitNotice && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-sm font-semibold text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                      {staffLimitNotice}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900/40">
+                    <button
+                      type="button"
+                      onClick={() => setAllImportRowsSelected(!allImportRowsSelected)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      disabled={isImporting}
+                    >
+                      {allImportRowsSelected ? <CheckSquare size={14} /> : <Square size={14} />}
+                      {allImportRowsSelected ? 'Clear all' : 'Select all'}
+                    </button>
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      Choose exactly what to import, or use available slots only.
+                    </span>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div className="h-full overflow-y-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-slate-50 dark:bg-slate-700/50 sticky top-0">
                         <tr>
+                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Select</th>
                           <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">#</th>
                           <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Name</th>
                           <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Role</th>
+                          <th className="px-2 py-1.5 text-left font-medium text-slate-600 dark:text-slate-300">Extra</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {importPreview.map((staffMember, index) => (
                           <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                            <td className="px-2 py-1.5">
+                              <button
+                                type="button"
+                                onClick={() => toggleImportRow(index)}
+                                className={`inline-flex h-6 w-6 items-center justify-center rounded-md border transition ${
+                                  selectedImportRows.has(index)
+                                    ? 'border-indigo-500 bg-indigo-600 text-white'
+                                    : 'border-slate-300 bg-white text-slate-400 dark:border-slate-600 dark:bg-slate-800'
+                                }`}
+                                disabled={isImporting}
+                                title={selectedImportRows.has(index) ? 'Selected' : 'Not selected'}
+                              >
+                                {selectedImportRows.has(index) ? <CheckSquare size={14} /> : <Square size={14} />}
+                              </button>
+                            </td>
                             <td className="px-2 py-1.5 text-slate-500">{index + 1}</td>
                             <td className="px-2 py-1.5">{(staffMember as any).firstName} {(staffMember as any).lastName}</td>
                             <td className="px-2 py-1.5">{(staffMember as any).role || '-'}</td>
+                            <td className="px-2 py-1.5">
+                              {Array.isArray((staffMember as any).customFields) && (staffMember as any).customFields.length > 0
+                                ? `${(staffMember as any).customFields.length} custom`
+                                : '-'}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
-                  <div className="flex justify-between pt-2">
+                  <div className="flex shrink-0 justify-between pt-2">
                     <div className="flex-1 max-w-40">
                       {isImporting && (
                         <>
                           <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${importProgress}%` }} />
+                            <div className="h-full transition-all" style={{ width: `${importProgress}%`, backgroundColor: 'var(--solid-emerald)' }} />
                           </div>
                           <p className="mt-1 text-[11px] text-slate-500">{importProgress}% imported</p>
                         </>
                       )}
                     </div>
-                    <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
-                    <button onClick={executeImport} disabled={isImporting} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
-                      {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check size={14} />}
-                      {isImporting ? 'Importing...' : `Import ${importPreview.length}`}
-                    </button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button onClick={() => setImportStep('map')} className="btn btn-secondary py-1.5 px-3 text-sm" disabled={isImporting}>Back</button>
+                      {staffLimitNotice && (
+                        <button onClick={proceedWithAvailableStaffImport} disabled={isImporting || availableStaffImportCount === 0} className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60">
+                          Import available for plan ({availableStaffImportCount})
+                          {skippedStaffImportCount > 0 ? `, skip ${skippedStaffImportCount}` : ''}
+                        </button>
+                      )}
+                      <button onClick={() => executeImport()} disabled={isImporting || selectedImportCount === 0} className="btn btn-primary py-1.5 px-3 text-sm flex items-center gap-1 disabled:opacity-70">
+                        {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check size={14} />}
+                        {isImporting ? 'Importing...' : `Import selected (${selectedImportCount})`}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1355,6 +1937,14 @@ export default function StaffPage() {
           )}
         </div>
       </DropdownModal>
+      <OperationProgressPopup
+        open={operationProgress.open}
+        title={operationProgress.title}
+        detail={operationProgress.detail}
+        progress={operationProgress.progress}
+        processed={operationProgress.processed}
+        total={operationProgress.total}
+      />
     </div>
   );
 }

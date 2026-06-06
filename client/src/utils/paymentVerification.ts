@@ -9,6 +9,7 @@ import {
 } from './plans';
 import { EMBEDDED_ACCESS_GRANTS, PAYMENT_ACCESS_HASH_SALT, EmbeddedAccessGrant } from './accessGrants';
 import { createVerifiedPlanProof } from './planProof';
+import { isUnlockedRelease } from './releaseChannel';
 
 const USED_CODES_KEY = 'schofy_used_payment_verification_codes';
 const TERMINATED_CODES_KEY = 'schofy_terminated_payment_verification_codes';
@@ -51,6 +52,18 @@ function cycleMonths(cycle: BillingCycle) {
 
 function normalizeVerificationCode(code: string) {
   return code.trim();
+}
+
+function compactVerificationCode(code: string) {
+  return code.trim().toUpperCase().replace(/[\s-]+/g, '');
+}
+
+function getVerificationCodeCandidates(code: string) {
+  return Array.from(new Set([
+    normalizeVerificationCode(code),
+    normalizeVerificationCode(code).toUpperCase(),
+    compactVerificationCode(code),
+  ].filter(Boolean)));
 }
 
 export async function hashVerificationCode(code: string) {
@@ -137,9 +150,30 @@ export async function redeemPaymentVerificationCode(
 
   try {
     const online = typeof navigator === 'undefined' ? true : navigator.onLine;
-    const codeHash = await hashVerificationCode(code);
-    const grant = EMBEDDED_ACCESS_GRANTS.find((item) => item.codeHash === codeHash);
+    if (!online) {
+      return {
+        status: 'error',
+        message: 'Connect to the internet the first time you activate a Schofy code. After it verifies, this device can continue offline.',
+      };
+    }
+
+    const candidateHashes = await Promise.all(
+      getVerificationCodeCandidates(code).map(async (candidate) => ({
+        candidate,
+        hash: await hashVerificationCode(candidate),
+      }))
+    );
+    const matched = candidateHashes.find(({ hash }) => EMBEDDED_ACCESS_GRANTS.some((item) => item.codeHash === hash));
+    const codeHash = matched?.hash || candidateHashes[0]?.hash || '';
+    const grant = codeHash ? EMBEDDED_ACCESS_GRANTS.find((item) => item.codeHash === codeHash) : undefined;
     if (!grant) return { status: 'invalid', message: 'This verification code is not valid.' };
+    if (grant.planId === 'unlimited' && !isUnlockedRelease) {
+      return {
+        status: 'invalid',
+        message: 'This Unlimited code works only in the Schofy Unlimited desktop version. Install the Unlimited version, then activate this code online once.',
+        grant,
+      };
+    }
 
     const terminated = await loadTerminatedVerificationCodeHashes();
     if (terminated.includes(codeHash)) {
@@ -211,34 +245,6 @@ export async function redeemPaymentVerificationCode(
       subscriptionReceipt: receipt,
     };
 
-    if (supabase && online) {
-      const { error: subError } = await supabase.from('subscriptions').insert({
-        id: crypto.randomUUID(),
-        school_id: tenantId,
-        user_id: authUserId || tenantId,
-        plan: plan.id,
-        status: 'active',
-        starts_at: remoteVerifiedAt,
-        ends_at: expiry.toISOString(),
-        metadata,
-        created_at: remoteVerifiedAt,
-        updated_at: remoteVerifiedAt,
-      });
-      if (subError) throw subError;
-
-      const { error: settingsError } = await supabase.from('settings').upsert(
-        Object.entries(settingsPayload).map(([key, value]) => ({
-          school_id: tenantId,
-          key,
-          value,
-          created_at: remoteVerifiedAt,
-          updated_at: remoteVerifiedAt,
-        })),
-        { onConflict: 'school_id,key' }
-      );
-      if (settingsError) throw settingsError;
-    }
-
     writeHashList(USED_CODES_KEY, nextUsed);
     localStorage.setItem('schofy_plan_remote_verified_at', remoteVerifiedAt);
     localStorage.setItem('schofy_plan_verification_code_hash', codeHash);
@@ -257,12 +263,52 @@ export async function redeemPaymentVerificationCode(
       verificationCodeHash: codeHash,
       source: 'verification_code',
     });
-
     void dataService.saveSettings(tenantId, settingsPayload);
+
+    if (supabase && online) {
+      try {
+        const { error: subError } = await supabase.from('subscriptions').insert({
+          id: crypto.randomUUID(),
+          school_id: tenantId,
+          user_id: authUserId || tenantId,
+          plan: plan.id,
+          status: 'active',
+          starts_at: remoteVerifiedAt,
+          ends_at: expiry.toISOString(),
+          metadata,
+          created_at: remoteVerifiedAt,
+          updated_at: remoteVerifiedAt,
+        });
+        if (subError) throw subError;
+
+        const { error: settingsError } = await supabase.from('settings').upsert(
+          Object.entries(settingsPayload).map(([key, value]) => ({
+            school_id: tenantId,
+            key,
+            value,
+            created_at: remoteVerifiedAt,
+            updated_at: remoteVerifiedAt,
+          })),
+          { onConflict: 'school_id,key' }
+        );
+        if (settingsError) throw settingsError;
+      } catch (syncError) {
+        console.warn('Payment verification activated locally; cloud sync will retry when available:', syncError);
+        void dataService.create(tenantId, 'subscriptions', {
+          schoolId: tenantId,
+          userId: authUserId || tenantId,
+          plan: plan.id,
+          status: 'active',
+          startsAt: remoteVerifiedAt,
+          endsAt: expiry.toISOString(),
+          metadata,
+        } as any);
+      }
+    }
 
     return {
       status: 'valid',
-      message: `${plan.name} access verified${online ? '' : ' offline on this device'}. Your plan is active until ${expiry.toLocaleDateString()}.`,
+      message: `${plan.name} access verified on this device. Your plan is active until ${expiry.toLocaleDateString()} and can continue offline here.`,
       grant,
       expiryDate: expiry.toISOString(),
     };

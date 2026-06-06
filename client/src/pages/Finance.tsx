@@ -80,9 +80,9 @@ export default function Finance() {
   const [ledgerTemplate, setLedgerTemplate] = useState<LedgerTemplate>(() => {
     try {
       const saved = localStorage.getItem('schofy_ledger_template');
-      if (saved) return { textColor: '#0f172a', headerColor: '#4f46e5', accentColor: '#10b981', logo: '', labels: {}, ...JSON.parse(saved) };
+      if (saved) return { textColor: '#0f172a', headerColor: 'var(--primary-color)', accentColor: '#10b981', logo: '', labels: {}, ...JSON.parse(saved) };
     } catch {}
-    return { textColor: '#0f172a', headerColor: '#4f46e5', accentColor: '#10b981', logo: '', labels: {} };
+    return { textColor: '#0f172a', headerColor: 'var(--primary-color)', accentColor: '#10b981', logo: '', labels: {} };
   });
   // Payment modal state
   const [payModal, setPayModal] = useState<{ feeId: string; studentId: string; amount: number; studentName: string; description: string } | null>(null);

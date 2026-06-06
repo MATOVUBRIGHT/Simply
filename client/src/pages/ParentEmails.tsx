@@ -385,7 +385,12 @@ export default function ParentEmails() {
               </thead>
               <tbody>
                 {listLoading ? (
-                  <tr><td colSpan={7} className="py-12 text-center text-slate-400">Loading emails...</td></tr>
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-400">
+                      <span className="mx-auto mb-3 block h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-transparent" style={{ borderTopColor: 'var(--primary-color)' }} />
+                      <span className="text-sm font-semibold">Loading emails...</span>
+                    </td>
+                  </tr>
                 ) : emailRows.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-12 text-center">

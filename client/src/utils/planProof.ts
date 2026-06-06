@@ -1,5 +1,8 @@
+import { isUnlockedRelease } from './releaseChannel';
+
 const PROOF_KEY_PREFIX = 'schofy_verified_plan_backup_';
 const DEVICE_SECRET_KEY = 'schofy_plan_device_secret';
+const PLAN_CACHE_PREFIX = 'schofy_plan_cache_';
 
 export type VerifiedPlanProofValues = {
   schofy_sub_expiry: string;
@@ -63,6 +66,12 @@ export async function readVerifiedPlanProof(tenantId: string): Promise<StoredVer
     const parsed = JSON.parse(localStorage.getItem(verifiedPlanProofKey(tenantId)) || 'null') as StoredVerifiedPlanProof | null;
     if (!parsed?.values || !parsed.proof) return null;
     if (parsed.values.tenantId !== tenantId) return null;
+    if (
+      parsed.values.schofy_sub_plan === 'unlimited' &&
+      (!isUnlockedRelease || parsed.values.source !== 'verification_code' || !parsed.values.verificationCodeHash)
+    ) {
+      return null;
+    }
     const expected = await sha256Hex(`${getOrCreateDeviceSecret()}::${stablePayload(parsed.values)}`);
     if (expected !== parsed.proof) return null;
     const expiry = new Date(parsed.values.schofy_sub_expiry);
@@ -84,5 +93,19 @@ export async function restoreVerifiedPlanProof(tenantId: string) {
   localStorage.setItem('schofy_sub_status', values.schofy_sub_status);
   localStorage.setItem('schofy_sub_plan', values.schofy_sub_plan);
   localStorage.setItem('schofy_sub_pending', values.schofy_sub_pending);
+  localStorage.setItem('schofy_plan_remote_verified_at', values.remoteVerifiedAt);
+  if (values.verificationCodeHash) {
+    localStorage.setItem('schofy_plan_verification_code_hash', values.verificationCodeHash);
+  }
+  localStorage.setItem(`${PLAN_CACHE_PREFIX}${tenantId}`, JSON.stringify({
+    selectedPlanId: values.schofy_sub_plan,
+    expiryDate: values.schofy_sub_expiry,
+    status: values.schofy_sub_status,
+    daysRemaining: Math.max(1, Math.ceil((new Date(values.schofy_sub_expiry).getTime() - Date.now()) / (24 * 60 * 60 * 1000))),
+    used: 0,
+    pending: values.schofy_sub_pending === '1',
+    proofRestored: true,
+    cachedAt: new Date().toISOString(),
+  }));
   return true;
 }

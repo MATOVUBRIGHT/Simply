@@ -73,9 +73,7 @@ export default function RealtimeStatus() {
     <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
       <div className="flex items-center gap-1">
         {isOnline && isSyncEnabled ? (
-          <Activity
-            className={`w-4 h-4 ${getStatusColor()} ${recentlyActive ? 'animate-pulse' : ''}`}
-          />
+          <Activity className={`w-4 h-4 ${getStatusColor()}`} />
         ) : (
           <WifiOff className={`w-4 h-4 ${getStatusColor()}`} />
         )}

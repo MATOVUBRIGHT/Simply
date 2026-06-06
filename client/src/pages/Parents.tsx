@@ -118,7 +118,7 @@ export default function Parents() {
               {listLoading ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-slate-400">
-                    <span className="mx-auto mb-2 block h-7 w-7 rounded-full border-2 border-slate-300 border-t-transparent animate-spin" />
+                    <span className="mx-auto mb-2 block h-7 w-7 rounded-full border-2 border-slate-300 border-t-transparent animate-spin" style={{ borderTopColor: 'var(--primary-color)' }} />
                     Loading parents...
                   </td>
                 </tr>

@@ -71,7 +71,7 @@ export const DEFAULT_INVOICE_LABELS: InvoiceLabels = {
   addressLabel: 'Address',
   textColor: '#0f172a',
   mutedTextColor: '#64748b',
-  accentColor: '#6366f1',
+  accentColor: 'var(--primary-color)',
   tableHeaderBg: '#0f172a',
   tableHeaderTextColor: '#ffffff',
   logo: '',
@@ -90,6 +90,8 @@ interface InvoiceTemplateProps {
     name: string;
     id: string;
     class: string;
+    stream?: string;
+    boardingStatus?: string;
     guardian: string;
     address: string;
     phone: string;
@@ -165,6 +167,8 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
         name: 'Student Name',
         id: 'Student ID',
         class: 'Class Name',
+        stream: 'Stream',
+        boardingStatus: 'Day / Boarding',
         guardian: '',
         address: 'Student Address',
         phone: 'Student Phone',
@@ -334,7 +338,12 @@ const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
             </h4>
             <h3 className="text-2xl font-black mb-1" style={textStyle}>{templateStudent.name}</h3>
             <p className="font-bold mb-3" style={mutedStyle}>
-              {[templateStudent.id ? `ID: ${templateStudent.id}` : '', templateStudent.class ? `Class: ${templateStudent.class}` : ''].filter(Boolean).join(' | ')}
+              {[
+                templateStudent.id ? `ID: ${templateStudent.id}` : '',
+                templateStudent.class ? `Class: ${templateStudent.class}` : '',
+                templateStudent.stream ? `Stream: ${templateStudent.stream}` : '',
+                templateStudent.boardingStatus ? `Type: ${templateStudent.boardingStatus}` : '',
+              ].filter(Boolean).join(' | ')}
             </p>
             <div className="space-y-1 text-sm font-medium" style={mutedStyle}>
               <p>{templateStudent.address || 'Address not provided'}</p>

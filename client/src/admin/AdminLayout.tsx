@@ -217,7 +217,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </header>
 
         <main className="flex-1 p-4 lg:p-6 overflow-auto scroll-x-mobile">
-          {children}
+          <div key={location.pathname} className="page-shell page-shell-enter admin-page-content">
+            {children}
+          </div>
         </main>
       </div>
     </div>

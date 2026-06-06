@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Building2, CreditCard, Eye, EyeOff, FileText, Plus, Save, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,9 +37,11 @@ export default function PaymentAccounts() {
   const { user, schoolId } = useAuth();
   const { addToast } = useToast();
   const sid = schoolId || user?.id || '';
-  const { data: settingsData } = useTableData(sid, 'settings');
+  const { data: settingsData, loading: settingsLoading } = useTableData(sid, 'settings');
   const [accounts, setAccounts] = useState<AccountDraft[]>(defaultAccounts);
   const [saving, setSaving] = useState(false);
+  const hydratedSettingsKeyRef = useRef('');
+  const editedRef = useRef(false);
 
   const settingsMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -48,6 +50,23 @@ export default function PaymentAccounts() {
   }, [settingsData]);
 
   useEffect(() => {
+    if (!sid) return;
+    if (settingsLoading && settingsData.length === 0) return;
+    if (settingsData.length === 0 && hydratedSettingsKeyRef.current) return;
+    const settingsKey = JSON.stringify({
+      paymentAccountsJson: settingsMap.paymentAccountsJson || '',
+      legacy: accountSuffixes.map(suffix => [
+        settingsMap[`bankAccountName${suffix}`] || '',
+        settingsMap[`bankAccountNumber${suffix}`] || '',
+        settingsMap[`bankName${suffix}`] || '',
+        settingsMap[`bankBranch${suffix}`] || '',
+        settingsMap[`paymentMethod${suffix}`] || '',
+        settingsMap[`paymentAccountHidden${suffix}`] || '',
+      ]),
+    });
+    if (hydratedSettingsKeyRef.current === settingsKey) return;
+    if (editedRef.current && !settingsMap.paymentAccountsJson && settingsData.length === 0) return;
+
     try {
       const saved = settingsMap.paymentAccountsJson ? JSON.parse(settingsMap.paymentAccountsJson) : null;
       if (Array.isArray(saved) && saved.length > 0) {
@@ -59,6 +78,8 @@ export default function PaymentAccounts() {
           accountNumber: isCash(account.paymentMethod || '') ? '' : account.accountNumber || '',
           hidden: Boolean(account.hidden),
         })));
+        hydratedSettingsKeyRef.current = settingsKey;
+        editedRef.current = false;
         return;
       }
     } catch {
@@ -74,9 +95,12 @@ export default function PaymentAccounts() {
       paymentMethod: settingsMap[`paymentMethod${suffix}`] || defaultAccounts[index].paymentMethod,
       hidden: settingsMap[`paymentAccountHidden${suffix}`] === 'true',
     })));
-  }, [settingsMap]);
+    hydratedSettingsKeyRef.current = settingsKey;
+    editedRef.current = false;
+  }, [settingsData.length, settingsLoading, settingsMap, sid]);
 
   function updateAccount(index: number, updates: Partial<AccountDraft>) {
+    editedRef.current = true;
     setAccounts(prev => prev.map((account, i) => {
       if (i !== index) return account;
       const next = { ...account, ...updates };
@@ -87,10 +111,12 @@ export default function PaymentAccounts() {
   }
 
   function addAccount() {
+    editedRef.current = true;
     setAccounts(prev => [...prev, { ...blankAccount }]);
   }
 
   function deleteAccount(index: number) {
+    editedRef.current = true;
     setAccounts(prev => prev.filter((_, i) => i !== index));
   }
 
@@ -118,6 +144,18 @@ export default function PaymentAccounts() {
         payload[`paymentAccountHidden${suffix}`] = account.hidden ? 'true' : 'false';
       });
       await dataService.saveSettings(sid, payload);
+      hydratedSettingsKeyRef.current = JSON.stringify({
+        paymentAccountsJson: payload.paymentAccountsJson,
+        legacy: accountSuffixes.map(suffix => [
+          payload[`bankAccountName${suffix}`] || '',
+          payload[`bankAccountNumber${suffix}`] || '',
+          payload[`bankName${suffix}`] || '',
+          payload[`bankBranch${suffix}`] || '',
+          payload[`paymentMethod${suffix}`] || '',
+          payload[`paymentAccountHidden${suffix}`] || '',
+        ]),
+      });
+      editedRef.current = false;
       window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'settings' } }));
       addToast('Payment accounts saved', 'success');
     } catch {

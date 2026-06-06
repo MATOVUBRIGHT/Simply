@@ -80,9 +80,9 @@ export default function Subscription() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center" style={{ background: 'linear-gradient(135deg, var(--primary-color-50), #ffffff)' }}>
         <div className="text-center">
-          <div className="h-14 w-14 mx-auto animate-spin rounded-full border-4 border-indigo-500/30 border-t-indigo-500" />
+          <div className="mx-auto h-14 w-14 animate-spin rounded-full border-4 border-slate-200 border-t-transparent" style={{ borderTopColor: 'var(--primary-color)' }} />
           <p className="mt-4 text-slate-600">Loading...</p>
         </div>
       </div>
@@ -90,7 +90,7 @@ export default function Subscription() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+    <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, var(--primary-color-50), #ffffff)' }}>
       {/* Header */}
       <header className="bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -126,9 +126,10 @@ export default function Subscription() {
                 onClick={() => setBillingCycle(cycle)}
                 className={`px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${
                   billingCycle === cycle
-                    ? 'bg-indigo-600 text-white shadow-md'
+                    ? 'text-white shadow-md'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                 }`}
+                style={billingCycle === cycle ? { backgroundColor: 'var(--primary-color)' } : undefined}
               >
                 {cycle === 'yearly' ? 'Yearly' : cycle === 'term' ? 'Per Term' : 'Monthly'}
               </button>
@@ -144,14 +145,15 @@ export default function Subscription() {
               <div
                 key={plan.id}
                 className={`relative flex flex-col rounded-2xl border-2 bg-white transition-all hover:shadow-xl hover:-translate-y-1 ${
-                  plan.popular ? 'border-indigo-500 shadow-lg shadow-indigo-500/10' :
+                  plan.popular ? 'shadow-lg' :
                   isCurrentPlan ? 'border-green-500' :
                   'border-slate-200 hover:border-slate-300'
                 }`}
+                style={plan.popular ? { borderColor: 'var(--primary-color)', boxShadow: '0 14px 35px color-mix(in srgb, var(--primary-color) 12%, transparent)' } : undefined}
               >
                 {plan.popular && (
                   <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                    <span className="bg-indigo-500 text-white text-xs font-bold px-5 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg">
+                    <span className="flex items-center gap-1.5 rounded-full px-5 py-1.5 text-xs font-bold text-white shadow-lg" style={{ backgroundColor: 'var(--primary-color)' }}>
                       <Zap size={12} /> RECOMMENDED
                     </span>
                   </div>
@@ -168,7 +170,7 @@ export default function Subscription() {
                     <span className="text-4xl font-extrabold text-slate-900">{getPrice(plan)}</span>
                     {billingCycle !== 'yearly' && <span className="text-slate-500 ml-1">/{billingCycle === 'monthly' ? 'mo' : 'term'}</span>}
                   </div>
-                  <p className="text-indigo-600 font-semibold mb-6">{plan.limitLabel || `Up to ${plan.studentLimit} students`}</p>
+                  <p className="mb-6 font-semibold" style={{ color: 'var(--primary-color)' }}>{plan.limitLabel || `Up to ${plan.studentLimit} students`}</p>
 
                   <div className="space-y-3 flex-grow">
                     {plan.features.map((f, i) => (
@@ -188,7 +190,8 @@ export default function Subscription() {
                     {isCurrentPlan ? (
                       <button
                         onClick={() => handleSubscribe(plan.id)}
-                        className="w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/30"
+                        className="flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-semibold text-white shadow-lg transition-all hover:brightness-110"
+                        style={{ backgroundColor: 'var(--primary-color)', boxShadow: '0 10px 22px var(--primary-color-shadow)' }}
                       >
                         <RefreshCw size={18} /> Renew Plan
                       </button>
@@ -197,9 +200,10 @@ export default function Subscription() {
                         onClick={() => handleSubscribe(plan.id)}
                         className={`w-full py-3.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
                           billingCycle === 'yearly' || plan.contactOnly ? 'bg-amber-500 hover:bg-amber-600 text-white' :
-                          plan.popular ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/30' :
+                          plan.popular ? 'text-white shadow-lg hover:brightness-110' :
                           'bg-slate-900 hover:bg-slate-800 text-white'
                         }`}
+                        style={plan.popular ? { backgroundColor: 'var(--primary-color)', boxShadow: '0 10px 22px var(--primary-color-shadow)' } : undefined}
                       >
                         {billingCycle === 'yearly' || plan.contactOnly ? <><MessageCircle size={18} /> Contact Us</> : <><CreditCard size={18} /> Subscribe</>}
                       </button>
@@ -221,7 +225,7 @@ export default function Subscription() {
         {/* FAQ Section */}
         <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-8">
           <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <HelpCircle className="text-indigo-500" size={20} />
+            <HelpCircle style={{ color: 'var(--primary-color)' }} size={20} />
             Frequently Asked Questions
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -245,11 +249,11 @@ export default function Subscription() {
         </div>
 
         {/* Contact Section */}
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-6 text-white text-center">
+        <div className="rounded-2xl p-6 text-center text-white" style={{ background: 'linear-gradient(135deg, var(--primary-color-700), var(--primary-color))' }}>
           <h3 className="text-lg font-bold mb-2">Need help choosing?</h3>
-          <p className="text-indigo-100 mb-4">Contact us for custom enterprise solutions</p>
+          <p className="mb-4 text-white/80">Contact us for custom enterprise solutions</p>
           <div className="flex justify-center gap-3">
-            <a href="https://wa.me/256750034304" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-indigo-600 font-medium hover:bg-indigo-50 transition-colors">
+            <a href="https://wa.me/256750034304" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 font-medium transition-colors hover:bg-white/90" style={{ color: 'var(--primary-color)' }}>
               <MessageCircle size={18} /> 0750034304
             </a>
             <a href="tel:0775011029" className="flex items-center gap-2 rounded-lg bg-white/20 px-5 py-2.5 font-medium hover:bg-white/30 transition-colors">
@@ -272,9 +276,9 @@ export default function Subscription() {
 
             {!paymentSubmitted ? (
               <div className="p-5 space-y-4">
-                <div className="rounded-xl bg-indigo-50 p-4">
+                <div className="rounded-xl p-4 theme-note">
                   <div className="flex justify-between text-sm"><span className="text-slate-600">Plan</span><span className="font-bold text-slate-900">{selectedPlan.name}</span></div>
-                  <div className="mt-2 flex justify-between"><span className="text-slate-600">Amount</span><span className="text-2xl font-extrabold text-indigo-600">${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}</span></div>
+                  <div className="mt-2 flex justify-between"><span className="text-slate-600">Amount</span><span className="text-2xl font-extrabold" style={{ color: 'var(--primary-color)' }}>${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}</span></div>
                 </div>
 
                 <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
@@ -290,7 +294,7 @@ export default function Subscription() {
                     value={transactionId}
                     onChange={(e) => setTransactionId(e.target.value)}
                     placeholder="Enter Airtel TID"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full rounded-xl border border-slate-300 px-4 py-3 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   />
                 </div>
 
@@ -322,7 +326,8 @@ export default function Subscription() {
                     setCurrentPlanId(usage.selectedPlanId);
                     setPaymentSubmitted(true);
                   }}
-                  className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl py-3.5 font-semibold text-white hover:brightness-110"
+                  style={{ backgroundColor: 'var(--primary-color)' }}
                 >
                   <Check size={18} /> Submit Payment
                 </button>
@@ -338,7 +343,8 @@ export default function Subscription() {
                   onClick={() => {
                     window.location.href = '/';
                   }}
-                  className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold"
+                  className="w-full rounded-xl py-3.5 font-semibold text-white hover:brightness-110"
+                  style={{ backgroundColor: 'var(--primary-color)' }}
                 >
                   Go to Dashboard
                 </button>
@@ -374,7 +380,8 @@ export default function Subscription() {
                     setPaymentSubmitted(false);
                     setTransactionId('');
                   }}
-                  className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-medium hover:bg-indigo-700"
+                  className="flex-1 rounded-xl py-3 font-medium text-white hover:brightness-110"
+                  style={{ backgroundColor: 'var(--primary-color)' }}
                 >
                   Continue
                 </button>

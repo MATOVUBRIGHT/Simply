@@ -166,7 +166,14 @@ export default function StaffProfile() {
   }
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center text-slate-400">Loading staff profile...</div>;
+    return (
+      <div className="flex h-64 items-center justify-center text-slate-400">
+        <div className="text-center">
+          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-transparent" style={{ borderTopColor: 'var(--primary-color)' }} />
+          <p className="mt-3 text-sm font-semibold">Loading staff profile...</p>
+        </div>
+      </div>
+    );
   }
 
   if (!staff) {
@@ -183,7 +190,7 @@ export default function StaffProfile() {
   const avatarColor = avatarColors[(staff.firstName || 'S').charCodeAt(0) % avatarColors.length];
 
   return (
-    <div className="space-y-6">
+    <div className="staff-profile-page space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-4">
           <button onClick={goBack} className="btn btn-ghost p-2"><ArrowLeft size={20} /></button>
@@ -213,7 +220,7 @@ export default function StaffProfile() {
               <div className="mt-2 flex flex-wrap gap-2 text-sm">
                 <span className="rounded-full bg-white/15 px-3 py-1 font-semibold">{staff.employeeId}</span>
                 <span className="rounded-full bg-white/15 px-3 py-1 capitalize">{String(staff.role).replace(/_/g, ' ')}</span>
-                <span className={`rounded-full px-3 py-1 font-semibold ${staff.status === 'active' ? 'bg-emerald-400/25' : 'bg-rose-400/25'}`}>{staff.status}</span>
+                <span className={`rounded-full px-3 py-1 font-semibold text-white ${staff.status === 'active' ? 'bg-[var(--solid-emerald)]' : 'bg-[var(--card-accent-4)]'}`}>{staff.status}</span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm md:w-80">
@@ -305,7 +312,7 @@ export default function StaffProfile() {
               ) : (
                 <div className="mt-2 space-y-2">
                   {accountFields.map(field => (
-                    <div key={field.id} className="rounded-lg bg-indigo-50 p-3 text-sm dark:bg-indigo-950/30">
+                    <div key={field.id} className="rounded-lg p-3 text-sm" style={{ backgroundColor: 'var(--primary-color-50)' }}>
                       <p className="font-semibold text-slate-800 dark:text-white">{field.label}</p>
                       <p className="mt-1 break-words text-slate-500 dark:text-slate-300">{field.value}</p>
                     </div>
@@ -364,7 +371,7 @@ export default function StaffProfile() {
                     <td className="px-4 py-3 font-semibold text-slate-800 dark:text-white">{monthLabel(payment)}</td>
                     <td className="px-4 py-3 font-bold text-slate-900 dark:text-white">{formatMoney(Number(payment.amount || 0))}</td>
                     <td className="px-4 py-3">
-                      <span className={`rounded-full px-2 py-1 text-xs font-bold capitalize ${payment.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : payment.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                      <span className={`rounded-full px-2 py-1 text-xs font-bold capitalize text-white ${payment.status === 'paid' ? 'bg-[var(--solid-emerald)]' : payment.status === 'pending' ? 'bg-[var(--card-accent-3)]' : 'bg-[var(--primary-color)]'}`}>
                         {payment.status}
                       </span>
                     </td>

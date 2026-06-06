@@ -118,6 +118,206 @@ function countsTowardCapacity(student: Pick<Student, 'status'>) {
   return student.status !== 'completed';
 }
 
+function normalizeClassToken(value: unknown): string {
+  const wordNumbers: Record<string, string> = {
+    baby: 'baby',
+    middle: 'middle',
+    top: 'top',
+    nursery: 'nursery',
+    kg: 'kg',
+    kindergarten: 'kg',
+    reception: 'reception',
+    zero: '0',
+    one: '1',
+    first: '1',
+    two: '2',
+    second: '2',
+    three: '3',
+    third: '3',
+    four: '4',
+    fourth: '4',
+    five: '5',
+    fifth: '5',
+    six: '6',
+    sixth: '6',
+    seven: '7',
+    seventh: '7',
+    eight: '8',
+    eighth: '8',
+    nine: '9',
+    ninth: '9',
+    ten: '10',
+    tenth: '10',
+    eleven: '11',
+    eleventh: '11',
+    twelve: '12',
+    twelfth: '12',
+    thirteen: '13',
+    thirteenth: '13',
+  };
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\b(class|grade|level|standard|std|year)\b/g, '')
+    .replace(/\b(primary|pri|pry)\b/g, 'p')
+    .replace(/\b(senior secondary|secondary|senior)\b/g, 's')
+    .replace(/\bjunior secondary\b/g, 'jss')
+    .replace(/\b(baby class)\b/g, 'baby')
+    .replace(/\b([a-z]+)\b/g, part => wordNumbers[part] || part)
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function addClassAlias(aliases: Map<string, string>, candidate: unknown, classId: string, prefer = false) {
+  const key = normalizeClassToken(candidate);
+  if (key && (prefer || !aliases.has(key))) aliases.set(key, classId);
+}
+
+function addClassCandidate(candidates: Map<string, Set<string>>, candidate: unknown, classId: string) {
+  const key = normalizeClassToken(candidate);
+  if (!key) return;
+  if (!candidates.has(key)) candidates.set(key, new Set());
+  candidates.get(key)!.add(classId);
+}
+
+function addLevelAliases(
+  preferredAliases: Map<string, string>,
+  exactAliases: Map<string, string>,
+  ambiguousAliases: Map<string, Set<string>>,
+  classId: string,
+  level: number,
+  stream?: string,
+) {
+  if (!Number.isFinite(level) || level <= 0) return;
+  const baseAliases: string[] = [];
+  if (level <= 6) {
+    baseAliases.push(`${level}`, `p${level}`, `p.${level}`, `p ${level}`, `p-${level}`, `primary ${level}`, `primary.${level}`, `primary-${level}`);
+  } else if (level <= 9) {
+    const n = level - 6;
+    baseAliases.push(`jss${n}`, `jss ${n}`, `jss.${n}`, `jss-${n}`, `junior secondary ${n}`);
+  } else if (level <= 12) {
+    const n = level - 9;
+    baseAliases.push(`s${n}`, `s.${n}`, `s ${n}`, `ss${n}`, `ss ${n}`, `ss.${n}`, `secondary ${n}`, `senior ${n}`);
+  }
+
+  for (const alias of baseAliases) {
+    if (!stream) addClassAlias(preferredAliases, alias, classId, true);
+    addClassCandidate(ambiguousAliases, alias, classId);
+    if (stream) {
+      addClassAlias(exactAliases, `${alias} ${stream}`, classId, true);
+      addClassAlias(exactAliases, `${alias} stream ${stream}`, classId, true);
+    }
+  }
+}
+
+export function resolveClassIdFromText(
+  rawValue: unknown,
+  classes: Pick<Class, 'id' | 'name' | 'stream' | 'level'>[] = [],
+  streamValue?: unknown,
+) {
+  const normalized = normalizeClassToken(rawValue);
+  const normalizedStream = normalizeClassToken(streamValue);
+  if (!normalized && !normalizedStream) return '';
+
+  const exactAliases = new Map<string, string>();
+  const preferredBaseAliases = new Map<string, string>();
+  const ambiguousBaseAliases = new Map<string, Set<string>>();
+  for (const classItem of classes) {
+    const name = classItem.name || '';
+    const stream = String((classItem as any).stream || '').trim();
+    addClassAlias(exactAliases, classItem.id, classItem.id, true);
+    if (!stream) addClassAlias(preferredBaseAliases, name, classItem.id, true);
+    addClassCandidate(ambiguousBaseAliases, name, classItem.id);
+    [
+      stream ? `${name} ${stream}` : '',
+      stream ? `${name} stream ${stream}` : '',
+      stream ? `${name} - ${stream}` : '',
+      stream ? `${name} - Stream ${stream}` : '',
+    ].forEach(candidate => addClassAlias(exactAliases, candidate, classItem.id, true));
+
+    const primaryMatch = name.match(/(?:^p\.?\s*|primary\s*)(\d+)/i);
+    if (primaryMatch) {
+      [`p${primaryMatch[1]}`, `p.${primaryMatch[1]}`, `primary ${primaryMatch[1]}`].forEach(candidate => {
+        if (!stream) addClassAlias(preferredBaseAliases, candidate, classItem.id, true);
+        addClassCandidate(ambiguousBaseAliases, candidate, classItem.id);
+      });
+    }
+
+    const jssMatch = name.match(/(?:^jss\s*|junior\s*secondary\s*)(\d+)/i);
+    if (jssMatch) {
+      [`jss${jssMatch[1]}`, `jss.${jssMatch[1]}`, `junior secondary ${jssMatch[1]}`].forEach(candidate => {
+        if (!stream) addClassAlias(preferredBaseAliases, candidate, classItem.id, true);
+        addClassCandidate(ambiguousBaseAliases, candidate, classItem.id);
+      });
+    }
+
+    const secondaryMatch = name.match(/(?:^s\.?\s*|^ss\s*|secondary\s*)(\d+)/i);
+    if (secondaryMatch) {
+      [`s${secondaryMatch[1]}`, `ss${secondaryMatch[1]}`, `secondary ${secondaryMatch[1]}`].forEach(candidate => {
+        if (!stream) addClassAlias(preferredBaseAliases, candidate, classItem.id, true);
+        addClassCandidate(ambiguousBaseAliases, candidate, classItem.id);
+      });
+    }
+
+    addLevelAliases(preferredBaseAliases, exactAliases, ambiguousBaseAliases, classItem.id, Number((classItem as any).level || 0), stream);
+  }
+
+  const exactLookupKeys = [
+    normalized && normalizedStream ? normalizeClassToken(`${rawValue} ${streamValue}`) : '',
+    normalized && normalizedStream ? normalizeClassToken(`${rawValue} stream ${streamValue}`) : '',
+  ].filter(Boolean);
+
+  for (const key of exactLookupKeys) {
+    const match = exactAliases.get(key);
+    if (match) return match;
+  }
+
+  const idMatch = exactAliases.get(normalized);
+  if (idMatch) return idMatch;
+
+  const preferredBaseMatch = preferredBaseAliases.get(normalized);
+  if (preferredBaseMatch) return preferredBaseMatch;
+
+  const candidates = ambiguousBaseAliases.get(normalized);
+  if (candidates && candidates.size === 1) return Array.from(candidates)[0];
+
+  return '';
+}
+
+function getStudentClassHints(student: any): unknown[] {
+  return [
+    student.classId,
+    student.className,
+    student.class,
+    student.grade,
+    student.level,
+    student.form,
+    student.currentClass,
+    student.assignedClass,
+  ].filter(value => String(value ?? '').trim());
+}
+
+async function getOrCreateUnassignedClass(userId: string, classes: Class[]): Promise<Class> {
+  const existing = classes.find(classItem =>
+    normalizeClassToken(classItem.name) === normalizeClassToken('Unassigned') ||
+    normalizeClassToken(classItem.id) === normalizeClassToken('unassigned')
+  );
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const newClass: Class = {
+    id: 'unassigned',
+    schoolId: userId,
+    name: 'Unassigned',
+    level: 0,
+    stream: '',
+    capacity: 100000,
+    createdAt: now,
+  };
+  await dataService.create(userId, 'classes', newClass);
+  classes.push(newClass);
+  return newClass;
+}
+
 
 export function getClassDisplayName(
   classId: string | null | undefined,
@@ -210,40 +410,115 @@ export async function validateStudentClassAssignments(userId: string) {
   ]);
 
   const classIds = new Set(classes.map(c => c.id));
-  const validAssignments = students.filter(s => !s.classId || classIds.has(s.classId));
+  const validAssignments = students.filter(s => s.classId && classIds.has(s.classId));
   const invalidAssignments = students.filter(s => s.classId && !classIds.has(s.classId));
+  const unassignedStudents = students.filter(s => !s.classId);
+  const studentsNeedingClassFix = [...invalidAssignments, ...unassignedStudents];
+  const repairableAssignments = invalidAssignments
+    .map(student => ({
+      student,
+      classId: resolveClassIdFromText(student.classId, classes, (student as any).stream),
+    }))
+    .filter(item => item.classId);
+  const repairableUnassigned = unassignedStudents
+    .map(student => {
+      const classId = getStudentClassHints(student)
+        .map(hint => resolveClassIdFromText(hint, classes, (student as any).stream))
+        .find(Boolean) || '';
+      return { student, classId };
+    })
+    .filter(item => item.classId);
 
   return {
     totalStudents: students.length,
     validAssignments: validAssignments.length,
-    invalidAssignments: invalidAssignments.length,
-    invalidStudents: invalidAssignments,
+    invalidAssignments: studentsNeedingClassFix.length,
+    missingAssignments: unassignedStudents.length,
+    brokenAssignments: invalidAssignments.length,
+    repairableAssignments: repairableAssignments.length + repairableUnassigned.length,
+    unrepairableAssignments: studentsNeedingClassFix.length - repairableAssignments.length - repairableUnassigned.length,
+    invalidStudents: studentsNeedingClassFix,
+    repairableStudents: [...repairableAssignments, ...repairableUnassigned],
     availableClasses: classes,
   };
 }
 
 /**
- * Fixes invalid class assignments by setting them to null
+ * Fixes invalid class assignments by matching known class formats first, then moving unmatched records to Unassigned.
  */
-export async function fixInvalidClassAssignments(userId: string) {
+export async function fixInvalidClassAssignments(
+  userId: string,
+  onProgress?: (progress: number, processed: number, total: number, detail: string) => void,
+) {
   const validation = await validateStudentClassAssignments(userId);
   
   if (validation.invalidAssignments === 0) {
-    return { fixed: 0, message: 'All class assignments are valid' };
+    onProgress?.(100, 0, 0, 'All class assignments are valid');
+    return { fixed: 0, repaired: 0, assignedFallback: 0, cleared: 0, message: 'All class assignments are valid' };
   }
 
-  let fixed = 0;
+  let repaired = 0;
+  let assignedFallback = 0;
+  let cleared = 0;
+  const failures: Array<{ studentId: string; error: unknown }> = [];
+  const fallbackClass = validation.unrepairableAssignments > 0
+    ? await getOrCreateUnassignedClass(userId, validation.availableClasses)
+    : null;
+  const repairByStudentId = new Map(validation.repairableStudents.map(item => [item.student.id, item.classId]));
+  const total = validation.invalidStudents.length;
+  let processed = 0;
+  onProgress?.(5, 0, total, 'Preparing class fixes');
+
+  const updateStudentClass = async (student: Student, classId: string | null) => {
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await dataService.update(userId, 'students', student.id, { classId } as any);
+        return;
+      } catch (error) {
+        lastError = error;
+        await new Promise(resolve => setTimeout(resolve, attempt * 120));
+      }
+    }
+    throw lastError;
+  };
+
   for (const student of validation.invalidStudents) {
+    const repairedClassId = repairByStudentId.get(student.id);
+    const targetClassId = repairedClassId || fallbackClass?.id || null;
+    const detailName = `${student.firstName || ''} ${student.lastName || ''}`.trim() || student.studentId || student.id;
+
     try {
-      await dataService.update(userId, 'students', student.id, { classId: null } as any);
-      fixed++;
+      await updateStudentClass(student, targetClassId);
+      if (repairedClassId) repaired++;
+      else if (fallbackClass) assignedFallback++;
+      else cleared++;
     } catch (error) {
       console.error(`Failed to fix class assignment for student ${student.id}:`, error);
+      failures.push({ studentId: student.id, error });
+    } finally {
+      processed++;
+      onProgress?.(Math.max(5, Math.round((processed / total) * 100)), processed, total, `Fixed class for ${detailName}`);
+      await new Promise(resolve => setTimeout(resolve, 0));
     }
   }
 
+  const finalValidation = await validateStudentClassAssignments(userId);
+  if (failures.length > 0 || finalValidation.invalidAssignments > 0) {
+    throw new Error(`Could not fix ${Math.max(failures.length, finalValidation.invalidAssignments)} class assignment${Math.max(failures.length, finalValidation.invalidAssignments) === 1 ? '' : 's'}. Please try again.`);
+  }
+
+  const parts: string[] = [];
+  if (repaired > 0) parts.push(`${repaired} matched to existing class${repaired === 1 ? '' : 'es'}`);
+  if (assignedFallback > 0) parts.push(`${assignedFallback} moved to Unassigned`);
+  if (cleared > 0) parts.push(`${cleared} set to No class`);
+  onProgress?.(100, total, total, 'Class fixes complete');
+
   return { 
-    fixed, 
-    message: `Fixed ${fixed} invalid class assignments` 
+    fixed: repaired + assignedFallback + cleared,
+    repaired,
+    assignedFallback,
+    cleared,
+    message: parts.length > 0 ? `Fixed class assignments: ${parts.join(', ')}` : 'No class assignments were changed',
   };
 }

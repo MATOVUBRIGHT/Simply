@@ -94,7 +94,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       {pending && (
         <Portal>
           <div
-            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+            className="fixed inset-0 z-[1000000] flex items-center justify-center p-4"
             style={{
               backgroundColor: visible ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0)',
               WebkitBackdropFilter: visible ? 'blur(4px)' : 'blur(0px)',

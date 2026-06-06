@@ -16,6 +16,7 @@ import { useTableData } from '../lib/store';
 import { useCurrency } from '../hooks/useCurrency';
 import { v4 as uuidv4 } from 'uuid';
 import { getSubjectDisplayCode } from '../utils/subjects';
+import { getBoardingStatus } from '../utils/studentBoarding';
 
 const PAYMENT_METHODS = [
   { value: 'cash', label: 'Cash' },
@@ -280,7 +281,14 @@ export default function StudentProfile() {
   }
 
   function getClassName(classId: string) {
-    return classes.find(c => c.id === classId)?.name || classId;
+    const classItem = classes.find(c => c.id === classId);
+    if (!classItem) return classId || 'Not assigned';
+    return classItem.stream ? `${classItem.name} - Stream ${classItem.stream}` : classItem.name;
+  }
+
+  function getClassStream(classId: string) {
+    const classItem = classes.find(c => c.id === classId);
+    return String((student as any)?.stream || classItem?.stream || '').trim();
   }
 
   function fmtDate(d: string) {
@@ -345,6 +353,9 @@ export default function StudentProfile() {
     if (classSubjects.length > 0) return classSubjects.filter((subject: any) => !classOptionalSubjectIds.has(String(subject.id)));
     return [];
   }, [classSubjects, classOptionalSubjectIds]);
+  const boardingStatus = student ? getBoardingStatus(student) : 'day';
+  const boardingLabel = boardingStatus === 'boarding' ? 'Boarding' : 'Day';
+  const classStream = student ? getClassStream(student.classId) : '';
 
   useEffect(() => {
     if (!student) return;
@@ -419,7 +430,7 @@ export default function StudentProfile() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="student-profile-page space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link to="/students" className="btn btn-ghost p-2"><ArrowLeft size={20} /></Link>
@@ -427,6 +438,7 @@ export default function StudentProfile() {
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">{student.firstName} {student.lastName}</h1>
           <div className="flex flex-wrap items-center gap-2 mt-1">
             <p className="text-sm text-slate-500">ID: {student.studentId || student.admissionNo} · {getClassName(student.classId)}</p>
+            {classStream && <span className="badge badge-info">Stream {classStream}</span>}
             {hasFullBursary && <span className="badge badge-success">Full bursary</span>}
             {!hasFullBursary && bursaryAmount > 0 && <span className="badge badge-warning">On bursary: {formatMoney(bursaryAmount)}</span>}
             {studentDiscounts.length > 0 && <span className="badge badge-info">Discount: {discountPercent > 0 ? `${discountPercent}%` : formatMoney(discountAmount)}</span>}
@@ -489,6 +501,8 @@ export default function StudentProfile() {
                 <div><p className="text-xs text-slate-500 mb-1">Date of Birth</p><div className="flex items-center gap-2"><Calendar size={14} className="text-slate-400" /><p className="text-sm font-medium">{student.dob ? new Date(student.dob).toLocaleDateString() : 'N/A'}</p></div></div>
                 <div><p className="text-xs text-slate-500 mb-1">Gender</p><div className="flex items-center gap-2"><User size={14} className="text-slate-400" /><p className="text-sm font-medium capitalize">{student.gender}</p></div></div>
                 <div><p className="text-xs text-slate-500 mb-1">Class</p><div className="flex items-center gap-2"><GraduationCap size={14} className="text-slate-400" /><p className="text-sm font-medium">{getClassName(student.classId)}</p></div></div>
+                <div><p className="text-xs text-slate-500 mb-1">Stream</p><p className="text-sm font-medium">{classStream || 'N/A'}</p></div>
+                <div><p className="text-xs text-slate-500 mb-1">Day / Boarding</p><p className="text-sm font-medium">{boardingLabel}</p></div>
                 <div><p className="text-xs text-slate-500 mb-1">ID Number</p><p className="text-sm font-medium font-mono">{student.studentId || student.admissionNo || 'N/A'}</p></div>
                 <div><p className="text-xs text-slate-500 mb-1">Fee Status</p>
                   <span className={`badge ${statusBadge[overallStatus]}`}>{statusLabel[overallStatus]}</span>

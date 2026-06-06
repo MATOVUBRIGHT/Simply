@@ -46,7 +46,7 @@ import { compressImageFile } from '../utils/imageCompression';
 import GlobalSearch from './GlobalSearch';
 import InstallPWA from './InstallPWA';
 import { useStaffAuth } from '../contexts/StaffAuthContext';
-import { getSubscriptionAccessState, SubscriptionAccessState, UNLIMITED_PLAN_LABEL } from '../utils/plans';
+import { getSubscriptionAccessState, SubscriptionAccessState } from '../utils/plans';
 import { getRecycleBin } from '../utils/recycleBin';
 import RealtimeStatus from './RealtimeStatus';
 import SchofyAssistant from './SchofyAssistant';
@@ -123,6 +123,7 @@ const menuItems = [
 ];
 
 const ORGANIZED_SIDEBAR_KEY = 'schofy_organized_sidebar';
+const SIDEBAR_OPEN_KEY = 'schofy_sidebar_open';
 
 const sidebarSections = [
   { label: 'People', pages: ['/students', '/parents', '/admission', '/staff'] },
@@ -134,7 +135,7 @@ const sidebarSections = [
 ];
 
 function Layout({ children }: LayoutProps) {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false');
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -163,6 +164,7 @@ function Layout({ children }: LayoutProps) {
   const { user, schoolId, logout, isOnline } = useAuth();
   const { isStaffMode, staffSession, staffLogout } = useStaffAuth();
   const tenantId = schoolId || user?.id;
+  const profileImageKey = useMemo(() => tenantId ? `schofy_profile_image_${tenantId}` : '', [tenantId]);
   const { isSyncing, syncNow, isSyncEnabled } = useSync();
   const { addToast } = useToast();
   const confirm = useConfirm();
@@ -507,13 +509,18 @@ function Layout({ children }: LayoutProps) {
     return () => window.removeEventListener('settingsUpdated', handleSettingsUpdate);
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_OPEN_KEY, sidebarOpen ? 'true' : 'false');
+  }, [sidebarOpen]);
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (file && profileImageKey) {
       const result = await compressImageFile(file, 800, 0.82);
       setProfileImage(result);
-      localStorage.setItem('profileImage', result);
+      localStorage.setItem(profileImageKey, result);
     }
+    e.target.value = '';
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -528,14 +535,27 @@ function Layout({ children }: LayoutProps) {
   };
 
   useEffect(() => {
-    const savedImage = localStorage.getItem('profileImage');
+    if (!profileImageKey) {
+      setProfileImage(DEFAULT_PROFILE_IMAGE);
+      return;
+    }
+    const legacyImage = localStorage.getItem('profileImage');
+    if (legacyImage && !localStorage.getItem(profileImageKey) && !/^https?:\/\//i.test(legacyImage)) {
+      localStorage.setItem(profileImageKey, legacyImage);
+    }
+    if (legacyImage) {
+      localStorage.removeItem('profileImage');
+    }
+    const savedImage = localStorage.getItem(profileImageKey);
     if (savedImage && !/^https?:\/\//i.test(savedImage)) {
       setProfileImage(savedImage);
     } else if (savedImage) {
-      localStorage.removeItem('profileImage');
+      localStorage.removeItem(profileImageKey);
+      setProfileImage(DEFAULT_PROFILE_IMAGE);
+    } else {
       setProfileImage(DEFAULT_PROFILE_IMAGE);
     }
-  }, []);
+  }, [profileImageKey]);
 
   useEffect(() => {
     if (syncedOrganizedSidebar !== 'true' && syncedOrganizedSidebar !== 'false') return;
@@ -742,9 +762,9 @@ function Layout({ children }: LayoutProps) {
   };
 
   const isLocalOnlyAccount = Boolean(user?.localOnly || localStorage.getItem('schofy_local_only_session') === 'true');
-  const planLabel = isUnlockedRelease ? UNLIMITED_PLAN_LABEL : isLocalOnlyAccount ? (subscriptionState?.plan?.name ?? 'Verified offline plan required') : subscriptionState?.plan?.name ?? 'No subscription';
+  const planLabel = isUnlockedRelease ? (subscriptionState?.plan?.name ?? 'Activation required') : isLocalOnlyAccount ? (subscriptionState?.plan?.name ?? 'Verified offline plan required') : subscriptionState?.plan?.name ?? 'No subscription';
   const planStatusLabel = (() => {
-    if (isUnlockedRelease) return `${releaseChannelLabel} - works offline without plan checks`;
+    if (isUnlockedRelease && !subscriptionState?.plan) return `${releaseChannelLabel} - activate once online`;
     if (isLocalOnlyAccount) return isOnline ? 'Local desktop account. Plan still required.' : 'Offline account. Verified plan code required.';
     if (!subscriptionState) return 'No plan selected';
     if (subscriptionState.status === 'incomplete') return 'Choose a plan';
@@ -953,9 +973,9 @@ function Layout({ children }: LayoutProps) {
         }}
         onMouseEnter={() => !sidebarOpen && setSidebarHovered(true)}
         onMouseLeave={() => setSidebarHovered(false)}
-        className={`app-sidebar fixed top-0 h-screen inset-y-0 left-0 z-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none transition-[width,transform] duration-150 ${
+        className={`app-sidebar fixed top-0 h-screen inset-y-0 left-0 z-[1100] bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none transition-[width,transform] duration-150 ${
           mobileSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
-        } ${!mobileSidebarOpen && (sidebarOpen || sidebarHovered ? 'w-64' : 'lg:w-20')}`}
+        } ${!mobileSidebarOpen && (showSidebarText ? 'w-64' : 'lg:w-20')}`}
       >
         <div className="h-full flex flex-col">
           {/* School Header */}
@@ -971,7 +991,7 @@ function Layout({ children }: LayoutProps) {
               </div>
               <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
             </label>
-            <div className={`flex-1 min-w-0 ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100' : 'opacity-0 w-0 hidden'}`}>
+            <div className={`flex-1 min-w-0 ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0 hidden'}`}>
               <h2 className="font-bold text-sm leading-tight text-slate-800 dark:text-white truncate">
                 {schoolName}
               </h2>
@@ -1113,13 +1133,13 @@ function Layout({ children }: LayoutProps) {
 
           {/* Sidebar Footer: Minimize Button & Powered By on same line */}
           <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0">
-            <div className={`transition-all duration-300 ${sidebarOpen || sidebarHovered || mobileSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}>
+            <div className={`transition-all duration-300 ${showSidebarText ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}>
               <p className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Powered by <span className="font-medium">Schofy</span> · {APP_VERSION}</p>
             </div>
             
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className={`p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-all ${!sidebarOpen && !sidebarHovered && !mobileSidebarOpen ? 'w-full flex justify-center' : ''}`}
+              className={`p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-all ${!showSidebarText ? 'w-full flex justify-center' : ''}`}
               title={sidebarOpen ? "Minimize Sidebar" : "Expand Sidebar"}
             >
               <div className={`transition-transform duration-300 ${!sidebarOpen ? 'rotate-180' : ''}`}>
@@ -1133,7 +1153,7 @@ function Layout({ children }: LayoutProps) {
       {/* Main Content -- offset by sidebar width on large screens */}
       <div className={`flex-1 flex flex-col min-w-0 transition-[margin] duration-150 ${sidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}`}>
         {/* Header/Top Bar -- sticky at top of main column */}
-        <header ref={headerRef} className="sticky top-0 shrink-0 z-30 border-b" style={{ backgroundColor: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}>
+        <header ref={headerRef} className="sticky top-0 shrink-0 z-[1000] border-b" style={{ backgroundColor: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}>
           {/* Main header row */}
           <div className="flex items-center gap-2 px-3 sm:px-6 h-16">
             {/* Hamburger */}
@@ -1145,7 +1165,7 @@ function Layout({ children }: LayoutProps) {
             </button>
 
             {/* Search -- always visible, grows to fill space */}
-            <div className="flex-1 min-w-0">
+            <div className="min-w-[9rem] flex-1 sm:min-w-[16rem]">
               <GlobalSearch />
             </div>
 
@@ -1180,7 +1200,7 @@ function Layout({ children }: LayoutProps) {
                 className="relative p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all"
                 title="Notifications"
               >
-                <Bell size={18} className={`text-[#f68818] ${unreadCount > 0 ? 'animate-[shake_0.5s_ease-in-out_infinite]' : 'opacity-80'}`} />
+                <Bell size={18} className={`text-[#f68818] ${unreadCount > 0 ? 'opacity-100' : 'opacity-80'}`} />
                 {unreadCount > 0 && (
                   <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-[9px] font-bold text-white">
                     {unreadCount > 9 ? '9+' : unreadCount}
@@ -1237,7 +1257,7 @@ function Layout({ children }: LayoutProps) {
                   ) : notifications.slice(0, 5).map(notif => (
                     <div key={notif.id} onClick={() => void openNotification(notif)} className={`px-4 py-3 border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer group ${!notif.read ? 'bg-indigo-50/50 dark:bg-indigo-900/20' : ''}`}>
                       <div className="flex items-start gap-3">
-                        {!notif.read && <div className="w-2 h-2 bg-indigo-600 rounded-full mt-1.5 shrink-0 animate-pulse" />}
+                        {!notif.read && <div className="w-2 h-2 bg-indigo-600 rounded-full mt-1.5 shrink-0" />}
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{notif.title}</p>
                           <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{notif.message}</p>
@@ -1273,7 +1293,7 @@ function Layout({ children }: LayoutProps) {
                   <p className="font-bold text-slate-800 dark:text-white">{user?.firstName || user?.email?.split('@')[0] || 'User'}</p>
                   <p className="text-xs text-slate-500 mt-0.5 truncate">{user?.email || ''}</p>
                   <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5">
-                    <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${isUnlockedRelease ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : isLocalOnlyAccount ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700'}`}>{isUnlockedRelease ? `Unlocked: ${UNLIMITED_PLAN_LABEL}` : isLocalOnlyAccount ? planLabel : `Plan: ${planLabel}`}</span>
+                    <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${isUnlockedRelease ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : isLocalOnlyAccount ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700'}`}>{isUnlockedRelease ? `Desktop: ${planLabel}` : isLocalOnlyAccount ? planLabel : `Plan: ${planLabel}`}</span>
                     <span className="text-[10px] font-medium uppercase px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600">Admin</span>
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1">{planStatusLabel}</p>
@@ -1367,10 +1387,10 @@ function Layout({ children }: LayoutProps) {
       </div>
 
       {/* Mobile Overlay */}
-      {sidebarOpen && (
+      {mobileSidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-30 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-[1080] bg-black/60 lg:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
         />
       )}
 

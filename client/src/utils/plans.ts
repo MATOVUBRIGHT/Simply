@@ -1,6 +1,5 @@
 import type { Notification, Student } from '@schofy/shared';
 import { dataService } from '../lib/database/SupabaseDataService';
-import { isUnlockedRelease, releaseChannelLabel } from './releaseChannel';
 
 export interface PlanDefinition {
   id: string;
@@ -13,6 +12,7 @@ export interface PlanDefinition {
   notIncluded: string[];
   popular: boolean;
   studentLimit: number;
+  staffLimit?: number;
   contactOnly?: boolean;
   priceLabel?: string;
   limitLabel?: string;
@@ -20,7 +20,7 @@ export interface PlanDefinition {
 
 export type BillingCycle = 'monthly' | 'term' | 'yearly';
 export type SubscriptionStatus = 'incomplete' | 'active' | 'expiring' | 'expired';
-export const UNLIMITED_PLAN_LABEL = '⭐ Unlimited';
+export const UNLIMITED_PLAN_LABEL = 'Unlimited';
 
 export interface SubscriptionAccessState {
   plan: PlanDefinition | null;
@@ -52,6 +52,7 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     notIncluded: ['Advanced analytics', 'Bulk SMS', 'Payroll'],
     popular: false,
     studentLimit: 100,
+    staffLimit: 15,
   },
   {
     id: 'professional',
@@ -71,6 +72,7 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     notIncluded: ['Payroll', 'Custom domains'],
     popular: true,
     studentLimit: 300,
+    staffLimit: 45,
   },
   {
     id: 'enterprise',
@@ -91,6 +93,7 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     notIncluded: [],
     popular: false,
     studentLimit: 500,
+    staffLimit: 75,
   },
   {
     id: 'unlimited',
@@ -110,6 +113,7 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     notIncluded: [],
     popular: false,
     studentLimit: Number.MAX_SAFE_INTEGER,
+    staffLimit: Number.MAX_SAFE_INTEGER,
     contactOnly: true,
     priceLabel: 'Contact Us',
     limitLabel: 'Unlimited students',
@@ -172,6 +176,15 @@ export function getPlanById(planId: string | null | undefined) {
   return PLAN_DEFINITIONS.find(plan => plan.id === planId) || null;
 }
 
+export function getPlanStaffLimit(plan: PlanDefinition | null | undefined) {
+  if (!plan) return 0;
+  if (typeof plan.staffLimit === 'number') return plan.staffLimit;
+  if (!Number.isFinite(plan.studentLimit) || plan.studentLimit >= Number.MAX_SAFE_INTEGER) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return Math.max(1, Math.floor(plan.studentLimit * 0.15));
+}
+
 export function countsTowardPlan(student: Pick<Student, 'status'> | { status?: string }) {
   return student.status !== 'completed';
 }
@@ -200,39 +213,6 @@ export async function persistPlanEligibility(tenantId: string, eligible: boolean
 }
 
 const EXPIRING_DAYS_THRESHOLD = 14;
-
-function getUnlockedPlanState(tenantId: string, used = 0): SubscriptionAccessState {
-  const plan = getPlanById('unlimited') || PLAN_DEFINITIONS[PLAN_DEFINITIONS.length - 1];
-  const expiryDate = '2099-12-31T23:59:59.999Z';
-  localStorage.setItem('schofy_release_channel', releaseChannelLabel);
-  localStorage.setItem('schofy_sub_plan', plan.id);
-  localStorage.setItem('schofy_sub_status', 'active');
-  localStorage.setItem('schofy_sub_pending', '0');
-  localStorage.setItem('schofy_sub_expiry', expiryDate);
-  if (tenantId) {
-    localStorage.setItem(planCacheKey(tenantId), JSON.stringify({
-      selectedPlanId: plan.id,
-      expiryDate,
-      status: 'active',
-      daysRemaining: 9999,
-      used,
-      pending: false,
-      unlockedRelease: true,
-      cachedAt: new Date().toISOString(),
-    }));
-  }
-  return {
-    plan,
-    selectedPlanId: plan.id,
-    used,
-    remaining: Number.MAX_SAFE_INTEGER,
-    eligible: true,
-    expiryDate,
-    status: 'active',
-    daysRemaining: 9999,
-    requiresPlanAction: false,
-  };
-}
 
 function pickEndsAt(row: Record<string, unknown> | null | undefined): string | null {
   if (!row) return null;
@@ -358,10 +338,6 @@ export async function getSubscriptionAccessState(
   planId?: string,
   opts?: { authUserId?: string }
 ): Promise<SubscriptionAccessState> {
-  if (isUnlockedRelease) {
-    const used = await getPlanStudentCount(tenantId).catch(() => 0);
-    return getUnlockedPlanState(tenantId, used);
-  }
   const authUserId = opts?.authUserId || tenantId;
   const subRow = await getLatestLocalSubscription(tenantId, authUserId);
   const subStatus = subRow?.status != null ? String(subRow.status) : '';

@@ -125,7 +125,14 @@ export const OptimizedStudentList = memo(function OptimizedStudentList({
   );
 
   if (loading) {
-    return <div className="p-4">Loading...</div>;
+    return (
+      <div className="flex min-h-[220px] items-center justify-center p-4">
+        <div className="text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-transparent" style={{ borderTopColor: 'var(--primary-color)' }} />
+          <p className="mt-3 text-sm font-semibold text-slate-400">Loading students...</p>
+        </div>
+      </div>
+    );
   }
 
   return (

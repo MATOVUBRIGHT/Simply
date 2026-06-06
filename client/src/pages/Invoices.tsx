@@ -23,6 +23,7 @@ import { FitStatValue } from '../components/FitStatValue';
 import { shouldSaveOnEnter } from '../utils/keyboard';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
 import { PortalSelect } from '../components/PortalSelect';
+import { getBoardingStatus } from '../utils/studentBoarding';
 
 const LARGE_TABLE_RENDER_LIMIT = 300;
 
@@ -75,6 +76,28 @@ function isBeforeTerm(fee: Pick<Fee, 'term' | 'year'>, term: string, year: strin
   const selectedYear = Number(year || 0);
   if (feeYear !== selectedYear) return feeYear < selectedYear;
   return termRank(fee.term) < termRank(term);
+}
+
+function normalizePaymentMethodValue(value: unknown) {
+  const raw = String(value || '').trim();
+  if (!raw) return PaymentMethod.CASH;
+  const normalized = raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  if (normalized === 'cash') return PaymentMethod.CASH;
+  if (normalized === 'bank' || normalized === 'bank_transfer' || normalized === 'transfer') return PaymentMethod.BANK_TRANSFER;
+  if (normalized === 'card' || normalized === 'credit_card' || normalized === 'debit_card') return PaymentMethod.CARD;
+  if (normalized === 'other') return PaymentMethod.OTHER;
+  return normalized || PaymentMethod.CASH;
+}
+
+function paymentMethodLabel(value: unknown) {
+  const normalized = normalizePaymentMethodValue(value);
+  if (normalized === PaymentMethod.CASH) return 'Cash';
+  if (normalized === PaymentMethod.BANK_TRANSFER) return 'Bank Transfer';
+  if (normalized === PaymentMethod.CARD) return 'Card';
+  if (normalized === PaymentMethod.OTHER) return 'Other';
+  return String(value || normalized)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
 }
 
 export default function Invoices() {
@@ -147,7 +170,7 @@ export default function Invoices() {
   const [expiredTerm, setExpiredTerm] = useState('');
   const [recordingPaymentId, setRecordingPaymentId] = useState<string | null>(null);
   const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
-  const [paymentDraft, setPaymentDraft] = useState({ amount: '', method: PaymentMethod.CASH });
+  const [paymentDraft, setPaymentDraft] = useState<{ amount: string; method: string }>({ amount: '', method: PaymentMethod.CASH });
   const [showAccountsModal, setShowAccountsModal] = useState(false);
   const [isInvoiceTemplateEditing, setIsInvoiceTemplateEditing] = useState(false);
   const [invoiceTemplateLabels, setInvoiceTemplateLabels] = useState<InvoiceLabels>(DEFAULT_INVOICE_LABELS);
@@ -265,6 +288,20 @@ export default function Invoices() {
     }
     return accounts;
   }, [settingsData]);
+  const paymentMethodOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    const addMethod = (value: unknown, label?: string) => {
+      const normalized = normalizePaymentMethodValue(value);
+      if (!normalized) return;
+      options.set(normalized, label || paymentMethodLabel(value));
+    };
+    addMethod(PaymentMethod.CASH, 'Cash');
+    bankAccounts.forEach(account => addMethod(account.paymentMethod));
+    addMethod(PaymentMethod.BANK_TRANSFER, 'Bank Transfer');
+    addMethod(PaymentMethod.CARD, 'Card');
+    addMethod(PaymentMethod.OTHER, 'Other');
+    return Array.from(options.entries()).map(([value, label]) => ({ value, label }));
+  }, [bankAccounts]);
 
   const schoolSettings = useMemo(() => {
     const obj: Record<string, string> = {};
@@ -1140,7 +1177,7 @@ export default function Invoices() {
   function openPaymentModal(invoice: Invoice) {
     const remainingAmount = Math.max(0, invoice.amount - invoice.paidAmount);
     setPaymentInvoice(invoice);
-    setPaymentDraft({ amount: String(remainingAmount), method: PaymentMethod.CASH });
+    setPaymentDraft({ amount: String(remainingAmount), method: normalizePaymentMethodValue(PaymentMethod.CASH) });
   }
 
   async function saveInvoicePayment() {
@@ -1153,6 +1190,8 @@ export default function Invoices() {
       return;
     }
 
+    const method = normalizePaymentMethodValue(paymentDraft.method);
+    const methodOption = paymentMethodOptions.find(option => option.value === method);
     setRecordingPaymentId(paymentInvoice.id);
     try {
       await dataService.create(id, 'payments', {
@@ -1160,7 +1199,8 @@ export default function Invoices() {
         feeId: paymentInvoice.id,
         studentId: paymentInvoice.studentId,
         amount,
-        method: paymentDraft.method,
+        method,
+        methodLabel: methodOption?.label || paymentMethodLabel(method),
         date: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       } as any);
@@ -1794,7 +1834,7 @@ export default function Invoices() {
                 Student View
               </button>
             </div>
-            <div className="relative min-w-[170px] flex-1 basis-[220px]">
+            <div className="relative min-w-[180px] flex-1 basis-[220px] lg:max-w-[360px] xl:max-w-[420px]">
               <Search size={18} className="search-input-icon" />
               <input
                 type="text"
@@ -1812,7 +1852,7 @@ export default function Invoices() {
                   setShowStatusFilter(!showStatusFilter);
                   setShowTermFilter(false);
                 }}
-                className={`btn btn-secondary flex items-center gap-2 ${filterStatus !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
+                className={`btn btn-secondary h-10 w-[96px] justify-center gap-1.5 px-2 text-sm sm:w-[108px] ${filterStatus !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
               >
                 <Filter size={16} />
                 <span className="hidden sm:inline">
@@ -1878,7 +1918,7 @@ export default function Invoices() {
                   setShowTermFilter(!showTermFilter);
                   setShowStatusFilter(false);
                 }}
-                className={`btn btn-secondary flex items-center gap-2 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
+                className={`btn btn-secondary h-10 w-[82px] justify-center gap-1.5 px-2 text-sm sm:w-[96px] ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
               >
                 <span className="hidden sm:inline">
                   {filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}
@@ -1919,8 +1959,8 @@ export default function Invoices() {
               )}
               {viewMode === 'invoices' && (
                 <>
-                  <PortalSelect className="h-10 w-[118px] max-w-full text-sm" value={filterClassId} onChange={setFilterClassId} options={[{ value: 'all', label: 'All Classes' }, ...classes.map(cls => ({ value: cls.id, label: cls.name }))]} />
-                  <PortalSelect className="h-10 w-[128px] max-w-full text-sm" value={filterStructure} onChange={setFilterStructure} options={[{ value: 'all', label: 'All Fee Items' }, ...invoiceStructureOptions.map(name => ({ value: name, label: name }))]} />
+                  <PortalSelect className="h-10 w-[170px] max-w-full text-sm sm:w-[190px] xl:w-[210px]" value={filterClassId} onChange={setFilterClassId} options={[{ value: 'all', label: 'All Classes' }, ...classes.map(cls => ({ value: cls.id, label: cls.name }))]} />
+                  <PortalSelect className="h-10 w-[180px] max-w-full text-sm sm:w-[200px] xl:w-[220px]" value={filterStructure} onChange={setFilterStructure} options={[{ value: 'all', label: 'All Fee Items' }, ...invoiceStructureOptions.map(name => ({ value: name, label: name }))]} />
                   {(filterClassId !== 'all' || filterStructure !== 'all') && (
                     <button
                       onClick={() => { setFilterClassId('all'); setFilterStructure('all'); }}
@@ -2197,7 +2237,8 @@ export default function Invoices() {
       {paymentInvoice && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={() => !recordingPaymentId && setPaymentInvoice(null)}>
           <div
-            className="modal-card w-full max-w-md"
+            className="modal-card popup-card-centered w-full"
+            style={{ width: 'min(25rem, calc(100vw - 2rem))', maxWidth: '25rem' }}
             onClick={e => e.stopPropagation()}
             onKeyDown={e => {
               if (!shouldSaveOnEnter(e)) return;
@@ -2237,13 +2278,8 @@ export default function Invoices() {
                 <label className="form-label">Payment Method</label>
                 <PortalSelect
                   value={paymentDraft.method}
-                  onChange={value => setPaymentDraft(prev => ({ ...prev, method: value as PaymentMethod }))}
-                  options={[
-                    { value: PaymentMethod.CASH, label: 'Cash' },
-                    { value: PaymentMethod.BANK_TRANSFER, label: 'Bank Transfer' },
-                    { value: PaymentMethod.CARD, label: 'Card' },
-                    { value: PaymentMethod.OTHER, label: 'Other' },
-                  ]}
+                  onChange={value => setPaymentDraft(prev => ({ ...prev, method: normalizePaymentMethodValue(value) }))}
+                  options={paymentMethodOptions}
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
@@ -3194,7 +3230,10 @@ export default function Invoices() {
           <div onClick={e => e.stopPropagation()} className="w-full">
             {(() => {
               const studentRecord: any = allStudents.find((student: any) => student.id === selectedStudentForView.id) || {};
-              const className = classes.find(cls => cls.id === (selectedStudentForView.classId || studentRecord.classId))?.name || 'Class not assigned';
+              const classItem = classes.find(cls => cls.id === (selectedStudentForView.classId || studentRecord.classId)) as any;
+              const className = classItem?.stream ? `${classItem.name} - Stream ${classItem.stream}` : classItem?.name || 'Class not assigned';
+              const classStream = String(studentRecord.stream || classItem?.stream || '').trim();
+              const boardingLabel = getBoardingStatus(studentRecord) === 'boarding' ? 'Boarding' : 'Day';
               const studentFees = fees.filter(fee => fee.studentId === selectedStudentForView.id);
               const previousFees = studentFees.filter((fee: any) => isBeforeTerm(fee, activeInvoiceTerm, activeInvoiceYear));
               const currentFees = studentFees
@@ -3232,6 +3271,8 @@ export default function Invoices() {
                     name: selectedStudentForView.studentName,
                     id: selectedStudentForView.admissionNo || studentRecord.studentId || selectedStudentForView.id,
                     class: className,
+                    stream: classStream,
+                    boardingStatus: boardingLabel,
                     guardian: studentRecord.guardianName || '',
                     address: studentRecord.address || '',
                     phone: studentRecord.guardianPhone || studentRecord.phone || '',

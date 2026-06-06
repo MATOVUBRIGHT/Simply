@@ -81,7 +81,6 @@ class DataStore {
     if (existing) return existing;
 
     const req = (async () => {
-      // NEVER show loading spinner — data either comes from cache instantly or loads silently
       if (s.data.length === 0) this.set(sid, table, { loading: true, error: null });
       try {
         const data = await dataService.getAll(sid, table, force);

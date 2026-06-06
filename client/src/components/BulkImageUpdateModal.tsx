@@ -150,7 +150,7 @@ export function BulkImageUpdateModal({ title, entityLabel, records, onClose, onA
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onMouseDown={(event) => {
+    <div className="fixed inset-0 z-[800000] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !processing) onClose();
     }}>
       <div className="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-2xl dark:bg-slate-900">
@@ -200,7 +200,7 @@ export function BulkImageUpdateModal({ title, entityLabel, records, onClose, onA
             {processing && (
               <div className="mt-4">
                 <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                  <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
+                  <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, backgroundColor: 'var(--solid-emerald)' }} />
                 </div>
                 <p className="mt-2 text-xs font-semibold text-slate-500">Updating images... {progress}%</p>
               </div>

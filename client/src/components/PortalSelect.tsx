@@ -30,6 +30,8 @@ export function PortalSelect({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const selected = options.find(option => option.value === value);
+  const allOption = options.find(option => /^(all|any)\b/i.test(option.label.trim()) && (option.value === '' || option.value === 'all'));
+  const filterActive = Boolean(allOption && value && value !== allOption.value);
 
   function updatePosition() {
     const rect = buttonRef.current?.getBoundingClientRect();
@@ -93,7 +95,7 @@ export function PortalSelect({
         type="button"
         disabled={disabled}
         onClick={toggleOpen}
-        className={`form-input flex min-w-0 items-center justify-between gap-2 text-left disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
+        className={`form-input flex min-w-0 items-center justify-between gap-2 text-left disabled:cursor-not-allowed disabled:opacity-60 ${filterActive ? 'filter-input-active' : ''} ${className}`}
       >
         <span className={`min-w-0 truncate ${selected ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400'}`}>
           {selected?.label || placeholder}

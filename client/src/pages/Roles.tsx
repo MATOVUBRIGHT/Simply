@@ -69,6 +69,7 @@ export default function Roles() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffUser | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -95,7 +96,7 @@ export default function Roles() {
     try {
       const [staffRes, logRes] = await Promise.all([
         supabase.from('school_staff_users').select('*').eq('school_id', tenantId).order('created_at', { ascending: false }),
-        supabase.from('staff_activity_log').select('*').eq('school_id', tenantId).order('created_at', { ascending: false }).limit(300),
+        supabase.from('staff_activity_log').select('*').eq('school_id', tenantId).order('created_at', { ascending: false }),
       ]);
       const staffRows = staffRes.data || [];
       cacheStaffUsersForOffline(tenantId, staffRows);
@@ -219,6 +220,48 @@ export default function Roles() {
     await supabase.from('school_staff_users').delete().eq('id', s.id);
     await logStaffActivity(tenantId, user?.id || '', 'admin', 'delete_staff', 'Deleted: ' + s.staffId);
     await loadData();
+  }
+
+  async function deleteActivityLog(logId: string) {
+    if (!supabase) return;
+    const ok = await confirm({
+      title: 'Delete Log Entry',
+      description: 'Delete this staff activity log entry?',
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setDeletingLogId(logId);
+    try {
+      await supabase.from('staff_activity_log').delete().eq('school_id', tenantId).eq('id', logId);
+      setActivityLog(logs => logs.filter(log => log.id !== logId));
+      setSuccess('Log entry deleted');
+    } catch (e: any) {
+      setError(e.message || 'Failed to delete log entry');
+    } finally {
+      setDeletingLogId(null);
+    }
+  }
+
+  async function clearActivityLog() {
+    if (!supabase || activityLog.length === 0) return;
+    const ok = await confirm({
+      title: 'Clear Staff Activity Log',
+      description: `Delete all ${activityLog.length} staff activity log entries? This cannot be undone.`,
+      confirmLabel: 'Clear Log',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    setDeletingLogId('__all__');
+    try {
+      await supabase.from('staff_activity_log').delete().eq('school_id', tenantId);
+      setActivityLog([]);
+      setSuccess('Staff activity log cleared');
+    } catch (e: any) {
+      setError(e.message || 'Failed to clear staff activity log');
+    } finally {
+      setDeletingLogId(null);
+    }
   }
 
   function timeAgo(iso: string | null) {
@@ -439,9 +482,19 @@ export default function Roles() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
               <History size={15} className="text-primary-500" />Activity History
             </h2>
-            <button onClick={loadData} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg">
-              <RefreshCw size={14} className="text-slate-400" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={clearActivityLog}
+                disabled={activityLog.length === 0 || deletingLogId === '__all__'}
+                className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Clear activity log"
+              >
+                <Trash2 size={14} className="text-slate-400 hover:text-red-500" />
+              </button>
+              <button onClick={loadData} disabled={loading} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg disabled:opacity-50" title="Refresh activity log">
+                <RefreshCw size={14} className={`text-slate-400 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -451,11 +504,12 @@ export default function Roles() {
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Action</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Description</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Time</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Delete</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {activityLog.length === 0 ? (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-400">No activity recorded yet</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-400">No activity recorded yet</td></tr>
                 ) : activityLog.map(log => (
                   <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
                     <td className="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-300">{log.staffId || 'admin'}</td>
@@ -466,6 +520,16 @@ export default function Roles() {
                     </td>
                     <td className="px-4 py-2.5 text-xs text-slate-700 dark:text-slate-300">{log.description}</td>
                     <td className="px-4 py-2.5 text-xs text-slate-400">{new Date(log.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={() => deleteActivityLog(log.id)}
+                        disabled={deletingLogId === log.id || deletingLogId === '__all__'}
+                        className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-slate-400 hover:text-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Delete log entry"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

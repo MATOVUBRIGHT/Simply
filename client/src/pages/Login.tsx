@@ -17,7 +17,6 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { useTheme } from '../contexts/ThemeContext';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { useConfirm } from '../components/ConfirmModal';
@@ -140,7 +139,6 @@ export default function Login() {
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
 
   const { login, register, loginOffline, registerOffline, continueLocally, sendPasswordReset, user, isOnline } = useAuth();
-  const { primaryColor } = useTheme();
   const confirm = useConfirm();
   const navigate = useNavigate();
 
@@ -499,7 +497,7 @@ export default function Login() {
           </div>
           <h1 className="mt-5 text-2xl font-bold text-slate-950">Welcome to Schofy</h1>
           <p className="mt-2 text-sm text-slate-500">Preparing your school workspace...</p>
-          <Loader2 className="mx-auto mt-5 animate-spin text-blue-600" size={24} />
+          <Loader2 className="mx-auto mt-5 animate-spin text-primary-600" size={24} />
         </div>
       </div>
     );
@@ -509,7 +507,7 @@ export default function Login() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
         <div className="w-full max-w-md text-center">
-          <div className="mx-auto mb-6 flex h-20 w-20 animate-pulse items-center justify-center rounded-lg" style={{ backgroundColor: primaryColor }}>
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--primary-color)' }}>
             {syncStatus.step === 'complete' ? (
               <CheckCircle size={40} className="text-white" />
             ) : syncStatus.step === 'error' ? (
@@ -523,9 +521,9 @@ export default function Login() {
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
             {syncStatus.step === 'complete' ? 'Access verified' : syncStatus.step === 'syncing' ? 'Checking secure access' : 'Creating account'}
           </h2>
-          <p className="mt-2 font-medium" style={{ color: 'var(--solid-emerald)' }}>{syncStatus.message}</p>
+          <p className="mt-2 font-medium" style={{ color: 'var(--primary-color)' }}>{syncStatus.message}</p>
           <div className="mt-6 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${syncStatus.progress}%`, backgroundColor: primaryColor }} />
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${syncStatus.progress}%`, backgroundColor: 'var(--primary-color)' }} />
           </div>
         </div>
       </div>
@@ -548,14 +546,14 @@ export default function Login() {
               <h1 className="mt-8 max-w-lg text-4xl font-bold leading-tight">A calm, reliable workspace for modern schools.</h1>
               <p className="mt-4 max-w-md text-sm leading-6 text-slate-700">
                 {isUnlockedRelease
-                  ? 'Unlocked release: unlimited local access, offline-first records, and no plan gate in this build.'
+                  ? 'Desktop release: offline-first records after one online Schofy code or approved plan activation.'
                   : 'Manage students, finance, attendance, reports, and school operations with offline support and cloud sync.'}
               </p>
               {isUnlockedRelease && (
                 <div className="mt-6 max-w-md border-l-4 border-emerald-500 bg-white/58 px-4 py-3 text-sm text-slate-750 shadow-sm backdrop-blur-sm">
-                  <p className="font-bold text-slate-950">{UNLIMITED_PLAN_LABEL} stays free in this unlocked release.</p>
+                  <p className="font-bold text-slate-950">{UNLIMITED_PLAN_LABEL} stays saved after first activation.</p>
                   <p className="mt-2 leading-6 text-slate-700">
-                    Online accounts sync across devices when internet is available. Offline accounts work without internet on this device, but they stay separate from online accounts and do not sync until you create or use an online account.
+                    First activation needs internet and a Schofy code or approved plan. After that, offline accounts work without internet on this device.
                   </p>
                 </div>
               )}
@@ -582,7 +580,7 @@ export default function Login() {
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{isRegister ? 'Create account' : 'Welcome back'}</h2>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    {isUnlockedRelease ? `${releaseChannelLabel}: unlimited offline access.` : offlineAuthMode ? 'Create or sign in to a local desktop account. A Schofy code unlocks the plan offline.' : isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}
+                    {isUnlockedRelease ? `${releaseChannelLabel}: activate once online, then use offline.` : offlineAuthMode ? 'Create or sign in to a local desktop account. A Schofy code unlocks the plan after first online activation.' : isRegister ? 'Start your school workspace.' : 'Sign in with your email address.'}
                   </p>
                 </div>
               </div>
@@ -886,7 +884,7 @@ export default function Login() {
 
             <div className="mt-6 flex items-center justify-center gap-2 border-t border-slate-200 pt-5 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
               <Cloud size={16} className={isOnline ? 'text-emerald-500' : 'text-amber-500'} />
-              <span>{isUnlockedRelease ? `Unlocked release - ${UNLIMITED_PLAN_LABEL} plan, works offline` : offlineAuthMode ? 'Local desktop account - activate with a Schofy code' : isOnline ? 'Connected to cloud' : 'Offline local account available on desktop'}</span>
+              <span>{isUnlockedRelease ? `Desktop release - ${UNLIMITED_PLAN_LABEL} after first activation` : offlineAuthMode ? 'Local desktop account - activate with a Schofy code' : isOnline ? 'Connected to cloud' : 'Offline local account available on desktop'}</span>
             </div>
           </section>
         </div>

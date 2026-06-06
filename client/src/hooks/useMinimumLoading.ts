@@ -1,17 +1,38 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export function useMinimumLoading(active: boolean, delayMs = 2000) {
-  const [delayed, setDelayed] = useState(active);
+  const [visible, setVisible] = useState(active);
+  const startedAtRef = useRef<number | null>(active ? Date.now() : null);
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
     if (active) {
-      setDelayed(true);
-      return;
+      startedAtRef.current = Date.now();
+      setVisible(true);
+      return () => {
+        if (timer) clearTimeout(timer);
+      };
     }
 
-    const timer = window.setTimeout(() => setDelayed(false), delayMs);
-    return () => window.clearTimeout(timer);
+    const startedAt = startedAtRef.current;
+    if (!startedAt) {
+      setVisible(false);
+      return () => {
+        if (timer) clearTimeout(timer);
+      };
+    }
+
+    const remaining = Math.max(0, delayMs - (Date.now() - startedAt));
+    timer = setTimeout(() => {
+      startedAtRef.current = null;
+      setVisible(false);
+    }, remaining);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [active, delayMs]);
 
-  return delayed;
+  return visible;
 }

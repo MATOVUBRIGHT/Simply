@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AlertTriangle, CreditCard, LogOut, RefreshCw, Clock, MessageCircle, Phone, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { cachePlanStateLocally, getSubscriptionAccessState, SubscriptionAccessState, PLAN_DEFINITIONS, UNLIMITED_PLAN_LABEL } from '../utils/plans';
+import { cachePlanStateLocally, getSubscriptionAccessState, SubscriptionAccessState, PLAN_DEFINITIONS } from '../utils/plans';
 import { supabase } from '../lib/supabase';
 import { cacheReady } from '../lib/database/SupabaseDataService';
 import { createVerifiedPlanProof, readVerifiedPlanProof, restoreVerifiedPlanProof } from '../utils/planProof';
@@ -18,6 +18,7 @@ const OFFLINE_EXPIRY_KEY   = 'schofy_sub_expiry';
 const OFFLINE_STATUS_KEY   = 'schofy_sub_status';
 const OFFLINE_PLAN_KEY     = 'schofy_sub_plan';
 const OFFLINE_PENDING_KEY  = 'schofy_sub_pending'; // payment submitted but not yet approved
+const UNLIMITED_PLAN_ID = 'unlimited';
 
 export function cacheSubscriptionLocally(state: SubscriptionAccessState, pending = false) {
   const hasActiveCurrentPlan = state.status === 'active' || state.status === 'expiring';
@@ -79,6 +80,37 @@ function hasAdminApproval(meta: Record<string, any>) {
   return Boolean(meta.approvedByAdmin || meta.grantedByAdmin || meta.extendedByAdmin || meta.approvedByCode);
 }
 
+function stateNeedsCodeProof(state: SubscriptionAccessState) {
+  return state.selectedPlanId === UNLIMITED_PLAN_ID || state.plan?.id === UNLIMITED_PLAN_ID;
+}
+
+function isUnlimitedCodeProofUsable(
+  proof: Awaited<ReturnType<typeof readVerifiedPlanProof>> | null,
+  tenantId: string
+) {
+  return Boolean(
+    isUnlockedRelease &&
+    proof?.values.tenantId === tenantId &&
+    proof.values.schofy_sub_plan === UNLIMITED_PLAN_ID &&
+    proof.values.source === 'verification_code' &&
+    proof.values.verificationCodeHash
+  );
+}
+
+function makeIncompleteUnlimitedState(state: SubscriptionAccessState): SubscriptionAccessState {
+  const unlimitedPlan = PLAN_DEFINITIONS.find(plan => plan.id === UNLIMITED_PLAN_ID) || state.plan;
+  return {
+    ...state,
+    plan: unlimitedPlan,
+    selectedPlanId: UNLIMITED_PLAN_ID,
+    remaining: 0,
+    eligible: false,
+    status: 'incomplete',
+    daysRemaining: null,
+    requiresPlanAction: true,
+  };
+}
+
 function isReloadNavigation() {
   if (typeof performance === 'undefined') return false;
   const navEntry = performance.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined;
@@ -102,25 +134,31 @@ export default function SubscriptionGate({ children }: Props) {
   const [verifyingCode, setVerifyingCode] = useState(false);
   const [verificationNotice, setVerificationNotice] = useState<{ type: 'success' | 'error'; message: string; reason?: string } | null>(null);
   const skipRemotePlanCheckOnRefresh = useRef(isReloadNavigation());
+  const accessLoaderShownRef = useRef(false);
 
   const isAllowedRoute = ALLOWED_ROUTES.some(r => location.pathname.startsWith(r));
 
   const checkSubscription = useCallback(async (options: { forceRemote?: boolean } = {}) => {
-    setCheckProgress(18);
-    if (!user) { setChecking(false); return; }
-    if (isUnlockedRelease) {
-      const state = await getSubscriptionAccessState(schoolId || user.id, undefined, { authUserId: user.id });
-      cacheSubscriptionLocally(state, false);
-      setPlanName(state.plan?.name || UNLIMITED_PLAN_LABEL);
-      setExpiryDate(state.expiryDate);
-      setPendingTid(null);
-      setBlocked(false);
-      setBlockReason('incomplete');
-      setCheckProgress(100);
+    const showAccessLoader = !accessLoaderShownRef.current && !isAllowedRoute;
+    if (showAccessLoader) {
+      accessLoaderShownRef.current = true;
+      setChecking(true);
+      setCheckProgress(18);
+    } else {
       setChecking(false);
-      return;
     }
-    if (isAllowedRoute) { setBlocked(false); setChecking(false); return; }
+
+    const completeAccessCheck = (delay = 180) => {
+      if (showAccessLoader) {
+        setCheckProgress(100);
+        window.setTimeout(() => setChecking(false), delay);
+      } else {
+        setChecking(false);
+      }
+    };
+
+    if (!user) { completeAccessCheck(80); return; }
+    if (isAllowedRoute) { setBlocked(false); completeAccessCheck(80); return; }
     const online = typeof navigator === 'undefined' ? true : navigator.onLine;
 
     // Wait briefly for IndexedDB, but never let offline startup hang on secure access.
@@ -128,7 +166,7 @@ export default function SubscriptionGate({ children }: Props) {
       cacheReady,
       new Promise((resolve) => setTimeout(resolve, online ? 1500 : 250)),
     ]);
-    setCheckProgress(55);
+    if (showAccessLoader) setCheckProgress(55);
 
     const tenantId = schoolId || user.id;
 
@@ -137,9 +175,8 @@ export default function SubscriptionGate({ children }: Props) {
 
     const applyLocalState = (
       pendingFlag = localStorage.getItem(OFFLINE_PENDING_KEY) === '1',
-      options: { enforcePlanLimit?: boolean } = {}
+      _options: { enforcePlanLimit?: boolean } = {}
     ) => {
-      const enforcePlanLimit = options.enforcePlanLimit ?? true;
       const hasActiveCurrentPlan = state.status === 'active' || state.status === 'expiring';
       const pending = pendingFlag && !hasActiveCurrentPlan;
       cacheSubscriptionLocally(state, pendingFlag);
@@ -154,9 +191,6 @@ export default function SubscriptionGate({ children }: Props) {
       } else if (state.status === 'expired' || state.status === 'incomplete') {
         setBlocked(true);
         setBlockReason(state.status as BlockReason);
-      } else if (enforcePlanLimit && state.plan && state.used > state.plan.studentLimit) {
-        setBlocked(true);
-        setBlockReason('limit');
       } else {
         setBlocked(false);
       }
@@ -164,7 +198,9 @@ export default function SubscriptionGate({ children }: Props) {
 
     if (skipRemotePlanCheckOnRefresh.current && !options.forceRemote) {
       const proof = await readVerifiedPlanProof(tenantId);
-      const hasSavedAccess = Boolean(proof) || state.status === 'active' || state.status === 'expiring';
+      const hasSavedAccess = stateNeedsCodeProof(state)
+        ? isUnlimitedCodeProofUsable(proof, tenantId)
+        : Boolean(proof) || state.status === 'active' || state.status === 'expiring';
 
       if (hasSavedAccess) {
         if (proof) {
@@ -172,8 +208,7 @@ export default function SubscriptionGate({ children }: Props) {
           state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
         }
         applyLocalState(localStorage.getItem(OFFLINE_PENDING_KEY) === '1', { enforcePlanLimit: false });
-        setCheckProgress(100);
-        setChecking(false);
+        completeAccessCheck();
         return;
       }
     }
@@ -186,15 +221,16 @@ export default function SubscriptionGate({ children }: Props) {
         setPlanName(null);
         setExpiryDate(null);
         setPendingTid(null);
-        setCheckProgress(100);
-        setChecking(false);
+        completeAccessCheck();
         return;
       }
       await restoreVerifiedPlanProof(tenantId);
       state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
+      if (stateNeedsCodeProof(state) && !isUnlimitedCodeProofUsable(proof, tenantId)) {
+        state = makeIncompleteUnlimitedState(state);
+      }
       applyLocalState(false, { enforcePlanLimit: false });
-      setCheckProgress(100);
-      setChecking(false);
+      completeAccessCheck();
       return;
     }
 
@@ -205,13 +241,20 @@ export default function SubscriptionGate({ children }: Props) {
       let tid: string | null = null;
 
       if (supabase && online) {
-        setCheckProgress(72);
-        const { data: subRows } = await supabase
-          .from('subscriptions')
-          .select('status, ends_at, metadata, plan')
-          .eq('school_id', tenantId)
-          .order('updated_at', { ascending: false })
-          .limit(1);
+        if (showAccessLoader) setCheckProgress(72);
+        const subscriptionLookup = await Promise.race([
+          supabase
+            .from('subscriptions')
+            .select('status, ends_at, metadata, plan')
+            .eq('school_id', tenantId)
+            .order('updated_at', { ascending: false })
+            .limit(1),
+          new Promise<{ data: null; error: Error }>(resolve =>
+            window.setTimeout(() => resolve({ data: null, error: new Error('Secure access check timed out') }), 6500)
+          ),
+        ]);
+        if ((subscriptionLookup as any).error) throw (subscriptionLookup as any).error;
+        const subRows = (subscriptionLookup as any).data;
 
         const sub = subRows?.[0];
         if (sub) {
@@ -227,7 +270,18 @@ export default function SubscriptionGate({ children }: Props) {
             const remotePlan = PLAN_DEFINITIONS.find(p => p.id === sub.plan) || (isFreeTier || meta.grantedByAdmin || meta.approvedByAdmin ? PLAN_DEFINITIONS[0] : null);
             const remoteExpiry = classifyRemoteExpiry(sub.ends_at || null);
             if (remotePlan) {
-              if (remoteExpiry.expiryDate && (remoteExpiry.status === 'active' || remoteExpiry.status === 'expiring')) {
+              const remoteIsUnlimited = remotePlan.id === UNLIMITED_PLAN_ID;
+              const remoteCodeHash = typeof meta.verificationCodeHash === 'string' ? meta.verificationCodeHash : undefined;
+              const unlimitedCodeAllowed = !remoteIsUnlimited || (isUnlockedRelease && Boolean(remoteCodeHash) && Boolean(meta.approvedByCode));
+
+              if (!unlimitedCodeAllowed) {
+                state = makeIncompleteUnlimitedState({
+                  ...state,
+                  plan: remotePlan,
+                  selectedPlanId: remotePlan.id,
+                });
+              } else {
+                if (remoteExpiry.expiryDate && (remoteExpiry.status === 'active' || remoteExpiry.status === 'expiring')) {
                 const verifiedAt = meta.activatedAt || meta.approvedAt || meta.grantedAt || meta.extendedAt || new Date().toISOString();
                 await createVerifiedPlanProof({
                   tenantId,
@@ -236,21 +290,23 @@ export default function SubscriptionGate({ children }: Props) {
                   schofy_sub_plan: remotePlan.id,
                   schofy_sub_pending: '0',
                   remoteVerifiedAt: String(verifiedAt),
-                  verificationCodeHash: typeof meta.verificationCodeHash === 'string' ? meta.verificationCodeHash : undefined,
-                  source: meta.approvedByCode ? 'verification_code' : 'remote_subscription',
+                  verificationCodeHash: remoteCodeHash,
+                  source: meta.approvedByCode || remoteCodeHash ? 'verification_code' : 'remote_subscription',
                 });
+                  if (remoteCodeHash) localStorage.setItem('schofy_plan_verification_code_hash', remoteCodeHash);
+                }
+                state = {
+                  ...state,
+                  plan: remotePlan,
+                  selectedPlanId: remotePlan.id,
+                  expiryDate: remoteExpiry.expiryDate,
+                  status: remoteExpiry.status,
+                  daysRemaining: remoteExpiry.daysRemaining,
+                  remaining: Math.max(0, remotePlan.studentLimit - state.used),
+                  eligible: state.used < remotePlan.studentLimit && (remoteExpiry.status === 'active' || remoteExpiry.status === 'expiring'),
+                  requiresPlanAction: remoteExpiry.status === 'expired' || remoteExpiry.status === 'incomplete',
+                };
               }
-              state = {
-                ...state,
-                plan: remotePlan,
-                selectedPlanId: remotePlan.id,
-                expiryDate: remoteExpiry.expiryDate,
-                status: remoteExpiry.status,
-                daysRemaining: remoteExpiry.daysRemaining,
-                remaining: Math.max(0, remotePlan.studentLimit - state.used),
-                eligible: state.used < remotePlan.studentLimit && (remoteExpiry.status === 'active' || remoteExpiry.status === 'expiring'),
-                requiresPlanAction: remoteExpiry.status === 'expired' || remoteExpiry.status === 'incomplete',
-              };
             }
           }
         } else {
@@ -268,7 +324,7 @@ export default function SubscriptionGate({ children }: Props) {
       }
 
       // Cache for offline
-      setCheckProgress(90);
+      if (showAccessLoader) setCheckProgress(90);
       const hasActiveCurrentPlan = state.status === 'active' || state.status === 'expiring';
       cacheSubscriptionLocally(state, isPending);
       if (tid) localStorage.setItem('schofy_sub_tid', tid);
@@ -290,12 +346,6 @@ export default function SubscriptionGate({ children }: Props) {
         setPlanName(state.plan?.name || null);
         setExpiryDate(state.expiryDate);
         setPendingTid(null);
-      } else if (state.plan && state.used > state.plan.studentLimit) {
-        setBlocked(true);
-        setBlockReason('limit');
-        setPlanName(state.plan.name);
-        setExpiryDate(state.expiryDate);
-        setPendingTid(null);
       } else {
         setBlocked(false);
         setPendingTid(null);
@@ -304,8 +354,7 @@ export default function SubscriptionGate({ children }: Props) {
       // Offline — use the local state we already loaded above
       applyLocalState(localStorage.getItem(OFFLINE_PENDING_KEY) === '1', { enforcePlanLimit: online });
     } finally {
-      setCheckProgress(100);
-      setTimeout(() => setChecking(false), 120);
+      completeAccessCheck();
     }
   }, [user, schoolId, isAllowedRoute]);
 
@@ -323,6 +372,15 @@ export default function SubscriptionGate({ children }: Props) {
   const handleVerifyCode = async () => {
     const tenantId = schoolId || user?.id;
     if (!tenantId || verifyingCode) return;
+    const online = typeof navigator === 'undefined' ? true : navigator.onLine;
+    if (!online) {
+      setVerificationNotice({
+        type: 'error',
+        message: 'Connect to the internet the first time you activate a Schofy code.',
+        reason: 'After the code verifies once, this device can keep using the activated plan offline.',
+      });
+      return;
+    }
     setVerifyingCode(true);
     setVerificationNotice(null);
     try {
@@ -360,13 +418,39 @@ export default function SubscriptionGate({ children }: Props) {
 
   if (checking && !isAllowedRoute) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
-        <div className="w-full max-w-sm rounded-2xl border bg-white p-6 text-center shadow-xl dark:bg-slate-900" style={{ borderColor: 'rgba(45, 163, 45, 0.35)' }}>
-          <RefreshCw size={30} className="mx-auto mb-3 animate-spin" style={{ color: 'var(--solid-emerald)' }} />
-          <p className="text-sm font-semibold" style={{ color: 'var(--solid-emerald)' }}>Checking secure access...</p>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Verifying your plan, account status, and device sync.</p>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-            <div className="h-full rounded-full transition-all duration-150" style={{ width: `${checkProgress}%`, backgroundColor: 'var(--solid-emerald)' }} />
+      <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-slate-50 px-4 py-12 dark:bg-slate-950">
+        <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-slate-200 to-transparent dark:via-slate-800" />
+        <div className="relative flex w-full max-w-md flex-col items-center text-center">
+          <div className="relative mb-7 h-32 w-32">
+            <div className="absolute inset-0 rounded-full opacity-15 blur-xl" style={{ backgroundColor: 'var(--primary-color)' }} />
+            <div className="absolute inset-1 rounded-full border border-slate-200 dark:border-slate-800" />
+            <div className="absolute inset-4 animate-ping rounded-full border" style={{ borderColor: 'color-mix(in srgb, var(--primary-color) 30%, transparent)' }} />
+            <div className="absolute inset-7 rounded-full border-2 border-transparent animate-spin" style={{ borderTopColor: 'var(--primary-color)', borderRightColor: 'color-mix(in srgb, var(--primary-color) 35%, transparent)' }} />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg shadow-slate-300/30 dark:shadow-black/30" style={{ backgroundColor: 'var(--primary-color)' }}>
+                <ShieldCheck size={30} />
+              </div>
+            </div>
+            <RefreshCw size={16} className="absolute right-5 top-7 animate-spin" style={{ color: 'var(--primary-color)' }} />
+          </div>
+
+          <p className="text-sm font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--primary-color)' }}>Secure access</p>
+          <h2 className="mt-2 text-2xl font-black text-slate-900 dark:text-white">Checking your account</h2>
+          <p className="mt-2 max-w-sm text-sm font-medium text-slate-500 dark:text-slate-400">
+            Verifying your plan, account status, and device sync.
+          </p>
+
+          <div className="mt-8 w-full max-w-xs">
+            <div className="mb-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-slate-400">
+              <span>Access check</span>
+              <span>{Math.round(checkProgress)}%</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+              <div
+                className="h-full rounded-full transition-all duration-300 ease-out"
+                style={{ width: `${checkProgress}%`, backgroundColor: 'var(--primary-color)' }}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -456,14 +540,14 @@ export default function SubscriptionGate({ children }: Props) {
                 </div>
               )}
 
-              {blockReason === 'pending' && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-left">
+              {(blockReason === 'pending' || blockReason === 'incomplete' || blockReason === 'expired' || blockReason === 'limit') && (
+                <div className="rounded-xl p-3 text-left theme-note">
                   <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                    <KeyRound size={16} className="text-emerald-600" />
+                    <KeyRound size={16} className="text-primary-600" />
                     Verification code
                   </h3>
                   <p className="mt-1 text-xs text-slate-600">
-                    Already received your one-time Schofy code? Enter it here to activate immediately.
+                    Enter your one-time Schofy code while online. After activation, this device can continue offline.
                   </p>
                   <div className="mt-3 flex gap-2">
                     <input
@@ -472,7 +556,7 @@ export default function SubscriptionGate({ children }: Props) {
                       onChange={(event) => setVerificationCode(event.target.value)}
                       onKeyDown={(event) => { if (event.key === 'Enter') void handleVerifyCode(); }}
                       placeholder="Enter verification code"
-                      className="min-w-0 flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
                       autoComplete="off"
                       spellCheck={false}
                     />
@@ -480,7 +564,8 @@ export default function SubscriptionGate({ children }: Props) {
                       type="button"
                       onClick={() => void handleVerifyCode()}
                       disabled={verifyingCode}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+                      style={{ backgroundColor: 'var(--primary-color)' }}
                     >
                       {verifyingCode ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
                       Verify
@@ -489,7 +574,7 @@ export default function SubscriptionGate({ children }: Props) {
                   {verificationNotice && (
                     <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
                       verificationNotice.type === 'success'
-                        ? 'border-emerald-200 bg-white text-emerald-700'
+                        ? 'theme-note'
                         : 'border-red-200 bg-red-50 text-red-700'
                     }`}>
                       <p className="font-semibold">{verificationNotice.message}</p>
@@ -534,7 +619,8 @@ export default function SubscriptionGate({ children }: Props) {
                   href={whatsappMsg()}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-all"
+                  className="w-full py-3 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition hover:brightness-110"
+                  style={{ backgroundColor: 'var(--primary-color)' }}
                 >
                   <MessageCircle size={18} />
                   WhatsApp Admin

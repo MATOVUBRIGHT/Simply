@@ -299,10 +299,10 @@ export default function Dashboard() {
   }
 
   const dashboardStatsCards = [
-    { key: 'totalStudents', label: 'Total Students', subtext: 'Enrolled this term', icon: Users, cardClass: 'card-solid-indigo', iconClass: 'text-white', path: '/students' },
-    { key: 'totalStaff', label: 'Teachers & Staff', subtext: 'Active profiles', icon: UserCheck, cardClass: 'card-solid-emerald', iconClass: 'text-white', path: '/staff' },
-    { key: 'attendanceRate', label: 'Attendance Rate', subtext: 'Live today', icon: TrendingUp, cardClass: 'card-solid-violet', iconClass: 'text-white', path: '/attendance' },
-    { key: 'feesPending', label: 'Outstanding', subtext: 'Pending collection', icon: AlertCircle, cardClass: 'card-solid-rose', iconClass: 'text-white', path: '/invoices' },
+    { key: 'totalStudents', label: 'Total Students', subtext: 'Enrolled this term', message: 'Open student records', icon: Users, cardClass: 'card-solid-cyan', iconClass: 'text-white', path: '/students' },
+    { key: 'totalStaff', label: 'Teachers & Staff', subtext: 'Active profiles', message: 'Review staff list', icon: UserCheck, cardClass: 'card-solid-emerald', iconClass: 'text-white', path: '/staff' },
+    { key: 'attendanceRate', label: 'Attendance Rate', subtext: 'Live today', message: attendanceRate >= 90 ? 'Attendance is strong' : 'Check absent learners', icon: TrendingUp, cardClass: 'card-solid-violet', iconClass: 'text-white', path: '/attendance' },
+    { key: 'feesPending', label: 'Outstanding Balance', subtext: 'Pending collection', message: feesPending > 0 ? 'Collect or follow up' : 'Balances are clear', icon: AlertCircle, cardClass: 'card-solid-red', iconClass: 'text-white', path: '/invoices' },
   ];
 
   return (
@@ -313,7 +313,7 @@ export default function Dashboard() {
           <h1 className="text-4xl font-extrabold text-slate-800 tracking-tight">{timeGreeting}, {userName}</h1>
           <p className="mt-1 min-h-[1.5rem] text-sm font-semibold text-slate-500">
             {dashboardEncouragement}
-            <span className="ml-0.5 inline-block h-4 w-px translate-y-0.5 animate-pulse bg-slate-400" aria-hidden="true" />
+            <span className="ml-0.5 inline-block h-4 w-px translate-y-0.5 bg-slate-400" aria-hidden="true" />
           </p>
         </div>
         <div className="bg-white px-6 py-2 rounded-xl border border-slate-200 shadow-sm self-start md:self-auto">
@@ -361,7 +361,7 @@ export default function Dashboard() {
       })()}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {dashboardStatsCards.map((stat) => {
           let value: string | number = dashboardStats ? (dashboardStats as any)[stat.key] : 0;
           if (stat.key === 'feesPending') value = formatMoney(dashboardStats?.feesPending || 0);
@@ -371,18 +371,21 @@ export default function Dashboard() {
             <div 
               key={stat.key} 
               onClick={() => navigate(stat.path)}
-              className={`${stat.cardClass} p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all cursor-pointer`}
+              className={`${stat.cardClass} rounded-xl p-4 shadow-lg transition-all hover:shadow-xl cursor-pointer`}
             >
-              <div className="flex items-start gap-4">
-                <div className={`w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0`}>
-                  <stat.icon size={24} className={stat.iconClass} />
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/20">
+                  <stat.icon size={21} className={stat.iconClass} />
                 </div>
                 <div>
                   <p className="text-white/80 text-sm font-medium">{stat.label}</p>
                   <FitStatValue className="font-black mt-1">
-                    {loading ? <span className="animate-pulse">...</span> : value}
+                    {loading ? <span>...</span> : value}
                   </FitStatValue>
                   <p className="text-xs text-white/60 font-medium mt-1">{stat.subtext}</p>
+                  <p className="mt-2 inline-flex rounded-lg bg-white/15 px-2.5 py-1 text-[11px] font-bold text-white/90">
+                    {stat.message}
+                  </p>
                 </div>
               </div>
             </div>
@@ -391,16 +394,19 @@ export default function Dashboard() {
       </div>
 
       {/* Main Grid - 4 equal cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {/* Finance Overview */}
         <div 
           onClick={() => navigate('/finance')}
-          className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 cursor-pointer hover:shadow-md transition-shadow"
+          className="cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
         >
           <h2 className="text-lg font-bold text-slate-800 mb-4">Finance Overview</h2>
           {loading ? (
             <div className="flex items-center justify-center h-24">
-              <div className="animate-pulse text-slate-400">Loading...</div>
+              <div className="text-center">
+                <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-transparent" style={{ borderTopColor: 'var(--primary-color)' }} />
+                <p className="mt-2 text-xs font-semibold text-slate-400">Loading...</p>
+              </div>
             </div>
           ) : totalFinanceAmount === 0 ? (
             <div className="flex items-center justify-center h-24 text-slate-400 text-sm">
@@ -454,20 +460,23 @@ export default function Dashboard() {
         {/* Gender Diversity */}
         <div 
           onClick={() => navigate('/students')}
-          className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 cursor-pointer hover:shadow-md transition-shadow"
+          className="cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
         >
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-slate-800">Gender Diversity</h2>
             <button 
               onClick={(e) => { e.stopPropagation(); navigate('/students'); }}
-              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+              className="text-xs font-medium text-sky-600 hover:text-sky-700"
             >
               View All
             </button>
           </div>
           {loading ? (
             <div className="flex items-center justify-center h-24">
-              <div className="animate-pulse text-slate-400">Loading...</div>
+              <div className="text-center">
+                <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-transparent" style={{ borderTopColor: 'var(--primary-color)' }} />
+                <p className="mt-2 text-xs font-semibold text-slate-400">Loading...</p>
+              </div>
             </div>
           ) : students === 0 ? (
             <div className="flex items-center justify-center h-24 text-slate-400 text-sm">
@@ -493,7 +502,7 @@ export default function Dashboard() {
                       animationDuration={1000}
                       animationEasing="ease-out"
                     >
-                      <Cell fill="#4F46E5" />
+                      <Cell fill="var(--primary-color)" />
                       <Cell fill="#ec4899" />
                     </Pie>
                   </PieChart>
@@ -504,7 +513,7 @@ export default function Dashboard() {
               </div>
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-sky-500" />
                   <p className="text-xs text-slate-600">Boys: <span className="font-bold text-slate-800">{maleCount}</span></p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -517,15 +526,15 @@ export default function Dashboard() {
         </div>
 
         {/* Upcoming Events */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-              <Megaphone size={18} className="text-indigo-600" />
+              <Megaphone size={18} className="text-amber-600" />
               Upcoming Events
             </h2>
             <button 
               onClick={() => navigate('/announcements')}
-              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+              className="text-xs font-medium text-amber-600 hover:text-amber-700"
             >
               View All
             </button>
@@ -557,10 +566,10 @@ export default function Dashboard() {
         </div>
 
         {/* Quick Stats */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-slate-800">Quick Stats</h2>
-            <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">
+            <span className="rounded-full bg-teal-50 px-2 py-1 text-[10px] font-medium text-teal-700">
               {termSettings.academicYear || new Date().getFullYear()} T{termSettings.currentTerm || '1'}
             </span>
           </div>
@@ -851,7 +860,10 @@ export default function Dashboard() {
               <p className="text-xs text-slate-500 mb-3 font-medium">Enrollment Trend</p>
               {loading ? (
                 <div className="h-[120px] flex items-center justify-center">
-                  <div className="animate-pulse text-slate-400">Loading...</div>
+                  <div className="text-center">
+                    <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-transparent" style={{ borderTopColor: 'var(--primary-color)' }} />
+                    <p className="mt-2 text-xs font-semibold text-slate-400">Loading...</p>
+                  </div>
                 </div>
               ) : enrollmentDataArray.length > 0 ? (
                 <>
@@ -861,7 +873,7 @@ export default function Dashboard() {
                       <XAxis dataKey="term" tick={{ fontSize: 10 }} stroke="#94a3b8" />
                       <YAxis tick={{ fontSize: 10 }} stroke="#94a3b8" />
                       <Tooltip />
-                      <Line type="monotone" dataKey="students" stroke="#4F46E5" strokeWidth={2} dot={{ r: 3 }} name="Students" isAnimationActive={true} animationDuration={2500} animationBegin={0} />
+                      <Line type="monotone" dataKey="students" stroke="var(--primary-color)" strokeWidth={2} dot={{ r: 3 }} name="Students" isAnimationActive={true} animationDuration={2500} animationBegin={0} />
                       <Line type="monotone" dataKey="staff" stroke="#2da32d" strokeWidth={2} dot={{ r: 3 }} name="Staff" isAnimationActive={true} animationDuration={2500} animationBegin={500} />
                     </LineChart>
                   </ResponsiveContainer>
@@ -888,7 +900,10 @@ export default function Dashboard() {
               <p className="text-xs text-slate-500 mb-3 font-medium">Fee Collection</p>
               {loading ? (
                 <div className="h-[100px] flex items-center justify-center">
-                  <div className="animate-pulse text-slate-400">Loading...</div>
+                  <div className="text-center">
+                    <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-transparent" style={{ borderTopColor: 'var(--primary-color)' }} />
+                    <p className="mt-2 text-xs font-semibold text-slate-400">Loading...</p>
+                  </div>
                 </div>
               ) : feeCollectionArray.length > 0 ? (
                 <>
@@ -935,7 +950,7 @@ export default function Dashboard() {
             {loading ? (
               <div className="grid grid-cols-2 gap-4">
                 {[1,2,3,4].map(i => (
-                  <div key={i} className="p-4 bg-slate-50 rounded-xl border animate-pulse">
+                  <div key={i} className="p-4 bg-slate-50 rounded-xl border">
                     <div className="h-3 bg-slate-200 rounded w-20 mb-2" />
                     <div className="h-8 bg-slate-200 rounded w-16" />
                   </div>

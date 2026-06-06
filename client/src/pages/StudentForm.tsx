@@ -12,7 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { ClassOption, getClassCapacityState, getStudentClassOptions } from '../utils/classroom';
 import { generateStudentId, getSavedIdFormat, saveIdFormat, getPresetFormats, generateExampleId, extractFormatFromId, IdFormat } from '../utils/idFormat';
-import { getSubscriptionAccessState } from '../utils/plans';
+import { countsTowardPlan, getSubscriptionAccessState } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { BoardingStatus, getBoardingStatus, withBoardingStatus } from '../utils/studentBoarding';
 import { useBackOrFallback } from '../utils/navigation';
@@ -55,6 +55,7 @@ export default function StudentForm() {
   const [newCustomField, setNewCustomField] = useState({ label: '', value: '' });
   const [newRequirement, setNewRequirement] = useState('');
   const [tempId] = useState(uuidv4());
+  const [originalStatus, setOriginalStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isEditing = !!id;
 
@@ -87,6 +88,7 @@ export default function StudentForm() {
           customFields: student.customFields || [],
           attachments: student.attachments || [],
         } as any);
+        setOriginalStatus(student.status || 'active');
         setStudentId(student.studentId || student.admissionNo || '');
       }
     } catch { addToast('Failed to load student data', 'error'); }
@@ -164,6 +166,31 @@ export default function StudentForm() {
     setFormData(prev => ({ ...prev, attachments: (prev.attachments || []).filter(a => a.id !== aid) }));
   }
 
+  async function ensureStudentPlanCapacity(idAuth: string) {
+    const nextStatus = formData.status || 'active';
+    const addsCountedStudent = !isEditing
+      ? countsTowardPlan({ status: nextStatus })
+      : !countsTowardPlan({ status: originalStatus || 'active' }) && countsTowardPlan({ status: nextStatus });
+
+    if (!addsCountedStudent) return true;
+
+    const access = await getSubscriptionAccessState(idAuth, undefined, { authUserId: user?.id });
+    const currentPlan = access.plan?.name || 'No active plan';
+    if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
+      addToast(`Choose an active plan before adding available students. Current plan: ${currentPlan}. Upgrade to continue.`, 'error');
+      navigate('/plans');
+      return false;
+    }
+
+    if (access.plan.studentLimit > 0 && access.remaining <= 0) {
+      addToast(`Current plan: ${access.plan.name}. Student limit reached (${access.used}/${access.plan.studentLimit} available students). Upgrade your plan to add more.`, 'error');
+      navigate('/plans');
+      return false;
+    }
+
+    return true;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!formData.firstName?.trim()) { addToast('First name is required', 'error'); return; }
@@ -176,15 +203,7 @@ export default function StudentForm() {
     const idAuth = schoolId || user?.id;
     if (!idAuth) { setLoading(false); return; }
     try {
-      // Check plan limit for new students only
-      if (!isEditing) {
-        const access = await getSubscriptionAccessState(idAuth, undefined, { authUserId: user?.id });
-        if (access.plan && access.plan.studentLimit > 0 && access.remaining <= 0) {
-          addToast(`Plan limit reached (${access.used}/${access.plan.studentLimit} students). Upgrade your plan to add more.`, 'error');
-          setLoading(false);
-          return;
-        }
-      }
+      if (!(await ensureStudentPlanCapacity(idAuth))) return;
       const now = new Date().toISOString();
       const finalId = studentId.trim() || generateStudentId(formData.firstName || 'ST', formData.lastName || 'UD', []);
       if (isEditing) {
@@ -263,7 +282,8 @@ export default function StudentForm() {
                 label="Student Photo"
                 value={formData.photoUrl}
                 onChange={(base64) => setFormData(prev => ({ ...prev, photoUrl: base64 as any }))}
-                className="w-36 shrink-0"
+                className="w-full sm:w-44 md:w-48 shrink-0"
+                square
               />
               <div className="flex-1 space-y-3">
                 <div>

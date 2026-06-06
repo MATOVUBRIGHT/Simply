@@ -12,7 +12,7 @@ export default function ImageModal({ src, alt, isOpen, onClose }: ImageModalProp
 
   return (
     <div 
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-white/95 dark:bg-slate-900/95 animate-backdrop-in"
+      className="fixed inset-0 z-[800000] flex items-center justify-center p-4 bg-white/95 dark:bg-slate-900/95 animate-backdrop-in"
       onClick={onClose}
     >
       <button 

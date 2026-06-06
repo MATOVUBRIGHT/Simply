@@ -14,8 +14,8 @@ export function LargeDataSpinner({
   return (
     <div className={`flex flex-col items-center justify-center text-center ${compact ? 'gap-2 py-6' : 'gap-3 py-12'}`}>
       <div className="relative">
-        <div className="h-12 w-12 rounded-full border-4 border-primary-100 dark:border-slate-700" />
-        <Loader2 className="absolute inset-0 m-auto h-7 w-7 animate-spin text-primary-600 dark:text-primary-400" />
+        <div className="h-12 w-12 rounded-full border-4 border-slate-200 dark:border-slate-700" />
+        <Loader2 className="absolute inset-0 m-auto h-7 w-7 animate-spin" style={{ color: 'var(--primary-color)' }} />
       </div>
       <div>
         <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{label}</p>

@@ -49,7 +49,7 @@ export default function DropdownModal({
 
   return (
     <div 
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[800000] flex items-center justify-center p-4"
       style={{ animation: 'fadeIn 0.2s ease-out' }}
     >
       <div 

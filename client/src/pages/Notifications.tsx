@@ -19,8 +19,8 @@ interface SchoolReply {
 }
 
 const typeConfig: Record<string, { bg: string; text: string; icon: any }> = {
-  info: { bg: 'bg-blue-50', text: 'text-blue-600', icon: Info },
-  success: { bg: 'bg-green-50', text: 'text-green-600', icon: CheckCircle },
+  info: { bg: 'bg-primary-50', text: 'text-primary-600', icon: Info },
+  success: { bg: 'bg-primary-50', text: 'text-primary-600', icon: CheckCircle },
   warning: { bg: 'bg-amber-50', text: 'text-amber-600', icon: AlertTriangle },
   error: { bg: 'bg-red-50', text: 'text-red-600', icon: AlertCircle },
 };
@@ -175,7 +175,7 @@ export default function Notifications() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-3">
-            <Bell className="text-indigo-600" size={28} />
+            <Bell className="text-primary-600" size={28} />
             Notifications
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage your notifications</p>
@@ -213,7 +213,10 @@ export default function Notifications() {
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="animate-pulse text-slate-400">Loading...</div>
+          <div className="text-center">
+            <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-transparent" style={{ borderTopColor: 'var(--primary-color)' }} />
+            <p className="mt-3 text-sm font-semibold text-slate-400">Loading notifications...</p>
+          </div>
         </div>
       ) : notifications.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
@@ -232,7 +235,7 @@ export default function Notifications() {
               <div 
                 key={notif.id} 
                 id={`notification-${notif.id}`}
-                className={`flex items-start gap-4 p-4 hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-b-0 ${!notif.read ? 'bg-blue-50/30' : ''} ${selectedId === notif.id ? 'ring-2 ring-inset ring-indigo-500 bg-indigo-50/70' : ''}`}
+                className={`flex items-start gap-4 border-b border-slate-100 p-4 transition-colors last:border-b-0 hover:bg-slate-50 ${!notif.read ? 'bg-primary-50/30' : ''} ${selectedId === notif.id ? 'bg-primary-50/70 ring-2 ring-inset ring-primary-500' : ''}`}
               >
                 <div className={`w-10 h-10 rounded-full ${config.bg} flex items-center justify-center shrink-0`}>
                   <Icon size={20} className={config.text} />
@@ -241,7 +244,7 @@ export default function Notifications() {
                   <div className="flex items-center gap-2">
                     <p className="font-semibold text-slate-800">{notif.title}</p>
                     {!notif.read && (
-                      <span className="w-2 h-2 bg-indigo-600 rounded-full"></span>
+                      <span className="h-2 w-2 rounded-full bg-primary-600"></span>
                     )}
                   </div>
                   <p className="text-sm text-slate-600 mt-1">{notif.message}</p>
@@ -252,7 +255,7 @@ export default function Notifications() {
                     <button
                       type="button"
                       onClick={() => void openExternalLink(linkMeta.actionUrl)}
-                      className="mt-3 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                      className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary-600 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-700"
                     >
                       <ExternalLink size={16} />
                       Open update link
@@ -294,7 +297,7 @@ export default function Notifications() {
                   {linkMeta?.allowReply && (
                     <button
                       onClick={() => { setReplyTarget(notif); setReplyBody(''); }}
-                      className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                      className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-primary-50 hover:text-primary-600"
                       title="Reply to Schofy assistant"
                     >
                       <MessageSquare size={18} />
@@ -325,10 +328,10 @@ export default function Notifications() {
       {replyTarget && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) setReplyTarget(null); }}>
           <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-slate-200 bg-indigo-600 px-5 py-4 text-white">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-primary-600 px-5 py-4 text-white">
               <div>
                 <h2 className="font-bold">Reply to Schofy assistant</h2>
-                <p className="text-xs text-indigo-100">{replyTarget.title}</p>
+                <p className="text-xs text-white/75">{replyTarget.title}</p>
               </div>
               <button onClick={() => setReplyTarget(null)} className="rounded-lg p-1 hover:bg-white/15"><X size={18} /></button>
             </div>
@@ -356,7 +359,7 @@ export default function Notifications() {
                 value={replyBody}
                 onChange={e => setReplyBody(e.target.value)}
                 rows={4}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500"
                 placeholder="Write your reply..."
                 autoFocus
               />
@@ -365,7 +368,7 @@ export default function Notifications() {
                 <button
                   onClick={sendReply}
                   disabled={sendingReply || !replyBody.trim()}
-                  className="flex-1 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                  className="flex-1 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60"
                 >
                   {sendingReply ? 'Sending...' : <span className="inline-flex items-center gap-2"><Send size={15} /> Send Reply</span>}
                 </button>

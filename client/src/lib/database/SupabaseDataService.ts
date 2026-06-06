@@ -51,6 +51,21 @@ export interface SyncHealthStatus {
   missingTables: string[];
 }
 
+const PLAN_STUDENT_LIMITS: Record<string, { name: string; studentLimit: number }> = {
+  starter: { name: 'Starter', studentLimit: 100 },
+  professional: { name: 'Professional', studentLimit: 300 },
+  enterprise: { name: 'Enterprise', studentLimit: 500 },
+  unlimited: { name: 'Unlimited', studentLimit: Number.MAX_SAFE_INTEGER },
+};
+
+function countsTowardStudentPlan(record: any) {
+  return String(record?.status || 'active').toLowerCase() !== 'completed';
+}
+
+function countsTowardStaffPlan(record: any) {
+  return String(record?.status || 'active').toLowerCase() !== 'inactive';
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function camelToSnake(s: string) {
@@ -782,7 +797,7 @@ function recordBelongsToSchool(record: any, schoolId: string, tableName: string)
 function cacheGet(sid: string, table: string): any[] | null {
   const e = memCache.get(cacheKey(sid, table));
   if (!e) return null;
-  return removeSmokeRecords(e.data);
+  return filterDeleted(sid, table, removeSmokeRecords(e.data));
 }
 
 function cacheGetAny(sid: string, table: string): any[] | null {
@@ -790,7 +805,7 @@ function cacheGetAny(sid: string, table: string): any[] | null {
 }
 
 function cacheSet(sid: string, table: string, data: any[]) {
-  const cleanData = removeSmokeRecords(data);
+  const cleanData = filterDeleted(sid, table, removeSmokeRecords(data));
   memCache.set(cacheKey(sid, table), { data: cleanData, ts: Date.now() });
   persistCache();
   void mirrorTableToDesktopDB(sid, table, cleanData);
@@ -860,6 +875,15 @@ async function deleteFromDesktopDB(sid: string, table: string, id: string): Prom
   }
 }
 
+async function clearDesktopDBTable(sid: string, table: string): Promise<void> {
+  if (!isDesktopApp() || !sid || !table) return;
+  try {
+    await userDBManager.clear(sid, table);
+  } catch {
+    // Store not present or already empty.
+  }
+}
+
 async function hydrateCacheFromDesktopDB(sid: string): Promise<void> {
   if (!isDesktopApp() || !sid) return;
   try {
@@ -869,15 +893,33 @@ async function hydrateCacheFromDesktopDB(sid: string): Promise<void> {
   }
 
   for (const table of ALL_SYNC_TABLES) {
-    if (memCache.has(cacheKey(sid, table))) continue;
     try {
       const rows = await userDBManager.getAll(sid, table);
-      const cleanRows = removeSmokeRecords(rows);
+      const cleanRows = filterDeleted(sid, table, removeSmokeRecords(rows));
       if (cleanRows.length !== rows.length) {
         await Promise.all(rows.filter(isSmokeRecord).map(row => row?.id ? userDBManager.delete(sid, table, row.id) : Promise.resolve()));
       }
-      if (cleanRows.length > 0) {
+      if (cleanRows.length === 0) continue;
+
+      const current = cacheGet(sid, table) || [];
+      if (current.length === 0) {
         memCache.set(cacheKey(sid, table), { data: cleanRows, ts: Date.now() });
+        continue;
+      }
+
+      if (cleanRows.length > current.length) {
+        const merged = new Map(current.map(record => [record.id, record]));
+        for (const desktopRecord of cleanRows) {
+          const existing = merged.get(desktopRecord.id);
+          if (!existing) {
+            merged.set(desktopRecord.id, desktopRecord);
+            continue;
+          }
+          const desktopTs = new Date(desktopRecord.updatedAt || desktopRecord.createdAt || 0).getTime();
+          const currentTs = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+          if (desktopTs > currentTs) merged.set(desktopRecord.id, desktopRecord);
+        }
+        memCache.set(cacheKey(sid, table), { data: Array.from(merged.values()), ts: Date.now() });
       }
     } catch {
       // Store not present for this table in the local desktop DB.
@@ -891,6 +933,7 @@ const inflight = new Map<string, Promise<any[]>>();
 
 // Update in-memory cache optimistically for offline writes
 function cacheApplyCreate(sid: string, tableName: string, record: any) {
+  if (record?.id && getDeletedIds(sid, tableName).has(record.id)) return;
   const existing = cacheGet(sid, tableName) || [];
   const idx = existing.findIndex(r => r.id === record.id);
   if (idx >= 0) existing[idx] = record;
@@ -898,6 +941,10 @@ function cacheApplyCreate(sid: string, tableName: string, record: any) {
   cacheSet(sid, tableName, existing);
 }
 function cacheApplyUpdate(sid: string, tableName: string, id: string, data: any) {
+  if (getDeletedIds(sid, tableName).has(id)) {
+    cacheApplyDelete(sid, tableName, id);
+    return true;
+  }
   const cached = cacheGet(sid, tableName);
   if (!cached) return false;
   const existing = cached;
@@ -932,6 +979,53 @@ function notifyUI(table: string, options: { forceRefresh?: boolean } = {}) {
 
 // ── service ───────────────────────────────────────────────────────────────────
 
+function getCurrentStaffSessionForLog(): any | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('schofy_staff_session') || 'null');
+    return parsed?.staffMember?.id && parsed?.staffMember?.schoolId ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function describeStaffAction(op: string, tableName: string, details?: { id?: string; count?: number }) {
+  const label = tableName.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').toLowerCase();
+  if (details?.count && details.count > 1) return `${op} ${details.count} ${label} records`;
+  return `${op} ${label}${details?.id ? ` record ${details.id}` : ''}`;
+}
+
+function logCurrentStaffDataAction(
+  sid: string,
+  op: 'create' | 'update' | 'delete' | 'bulk_delete' | 'bulk_create' | 'save_settings' | 'clear',
+  tableName: string,
+  details?: { id?: string; count?: number }
+) {
+  const session = getCurrentStaffSessionForLog();
+  const staff = session?.staffMember;
+  if (!staff || staff.schoolId !== sid || tableName === 'staff_activity_log') return;
+
+  const db = getActiveSupabaseClient();
+  if (!db) return;
+
+  const action = op === 'save_settings' ? 'update_settings' : `${op}_${tableName}`;
+  const staffName = `${staff.firstName || ''} ${staff.lastName || ''}`.trim() || staff.staffId || 'Staff';
+  const description = `${staffName} ${describeStaffAction(op.replace(/_/g, ' '), tableName, details)}`;
+
+  void (async () => {
+    try {
+      await db.from('staff_activity_log').insert({
+        id: generateUUID(),
+        school_id: sid,
+        staff_user_id: staff.id,
+        staff_id: staff.staffId,
+        action,
+        description,
+        created_at: new Date().toISOString(),
+      });
+    } catch {}
+  })();
+}
+
 const ALL_SYNC_TABLES = [
   'students', 'staff', 'classes', 'subjects', 'fees', 'payments',
   'announcements', 'attendance', 'feeStructures',
@@ -958,6 +1052,7 @@ function getRealtimeFilter(table: string, sid: string): string | undefined {
 
 const BOOTSTRAP_PULL_TABLES = ['settings', 'schools', 'users', 'subscriptions'];
 const REMOTE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_QUEUE_ITEMS_PER_FLUSH = 50;
 const FORCED_REMOTE_FETCH_MIN_MS = 5 * 60 * 1000;
 
 class SupabaseDataService {
@@ -1009,6 +1104,103 @@ class SupabaseDataService {
   private queueWrites(items: Array<Omit<QueueItem, 'id' | 'ts'>>, sid: string) {
     enqueueMany(items);
     this.scheduleBackgroundSync(sid);
+  }
+
+  private getCachedSetting(sid: string, key: string): any {
+    const settings = cacheGet(sid, 'settings') || [];
+    return settings.find((row: any) => row?.key === key)?.value;
+  }
+
+  private getCurrentPlanLimit(sid: string): { name: string; studentLimit: number } | null {
+    const eligible = this.getCachedSetting(sid, 'subscriptionPlanEligible');
+    const expiryRaw = this.getCachedSetting(sid, 'subscriptionExpiryDate');
+    const planId = String(this.getCachedSetting(sid, 'subscriptionPlanId') || '').trim();
+    const explicitLimit = Number(this.getCachedSetting(sid, 'subscriptionPlanLimit'));
+    const explicitName = String(this.getCachedSetting(sid, 'subscriptionPlanName') || '').trim();
+    const plan = PLAN_STUDENT_LIMITS[planId] || null;
+
+    if (eligible === false || eligible === 'false') return null;
+    if (expiryRaw && Number.isFinite(new Date(String(expiryRaw)).getTime()) && new Date(String(expiryRaw)).getTime() <= Date.now()) {
+      return null;
+    }
+    if (Number.isFinite(explicitLimit) && explicitLimit > 0) {
+      return { name: explicitName || plan?.name || 'Current plan', studentLimit: explicitLimit };
+    }
+    return plan;
+  }
+
+  private async getPlanCount(sid: string, tableName: 'students' | 'staff'): Promise<number> {
+    const cached = cacheGet(sid, tableName) || [];
+    const localCount = tableName === 'students'
+      ? cached.filter(countsTowardStudentPlan).length
+      : cached.filter(countsTowardStaffPlan).length;
+
+    if (!isCloudSyncEnabled() || !isOnline() || !this.ok || !canUseRemoteTable(tableName)) {
+      return localCount;
+    }
+
+    try {
+      const rt = getSupabaseTable(tableName);
+      let q = applyScope(this.db.from(rt).select('id', { count: 'exact', head: true }), rt, sid);
+      q = tableName === 'students' ? q.neq('status', 'completed') : q.neq('status', 'inactive');
+      const { count, error } = await q;
+      if (error) throw error;
+      return Math.max(localCount, Number(count || 0));
+    } catch {
+      return localCount;
+    }
+  }
+
+  private async filterCreatesByPlanCapacity<T extends any>(
+    sid: string,
+    tableName: string,
+    records: T[],
+  ): Promise<{ allowed: T[]; skipped: number; message?: string }> {
+    if (tableName !== 'students' && tableName !== 'staff') {
+      return { allowed: records, skipped: 0 };
+    }
+    const plan = this.getCurrentPlanLimit(sid);
+    if (!plan) {
+      const checked = tableName === 'students' ? records.filter(countsTowardStudentPlan) : records.filter(countsTowardStaffPlan);
+      if (checked.length === 0) return { allowed: records, skipped: 0 };
+      return {
+        allowed: records.filter(record => tableName === 'students' ? !countsTowardStudentPlan(record) : !countsTowardStaffPlan(record)),
+        skipped: checked.length,
+        message: 'Choose an active plan before adding records.',
+      };
+    }
+
+    const limit = tableName === 'staff'
+      ? Math.max(1, Math.floor(plan.studentLimit * 0.15))
+      : plan.studentLimit;
+    if (!Number.isFinite(limit) || limit >= Number.MAX_SAFE_INTEGER) {
+      return { allowed: records, skipped: 0 };
+    }
+
+    const used = await this.getPlanCount(sid, tableName as 'students' | 'staff');
+    let remaining = Math.max(0, limit - used);
+    const allowed: T[] = [];
+    let skipped = 0;
+
+    for (const record of records) {
+      const counts = tableName === 'students' ? countsTowardStudentPlan(record) : countsTowardStaffPlan(record);
+      if (!counts) {
+        allowed.push(record);
+      } else if (remaining > 0) {
+        allowed.push(record);
+        remaining--;
+      } else {
+        skipped++;
+      }
+    }
+
+    return {
+      allowed,
+      skipped,
+      message: skipped > 0
+        ? `Current plan: ${plan.name}. ${tableName === 'staff' ? 'Staff' : 'Student'} limit reached (${limit.toLocaleString()}). Upgrade your plan to add more.`
+        : undefined,
+    };
   }
 
   private scheduleBackgroundSync(sid: string) {
@@ -1274,6 +1466,11 @@ class SupabaseDataService {
           
           if (!record) return;
           const localRecord = mapToLocal(record);
+          if (localRecord?.id && getDeletedIds(sid, tableName).has(localRecord.id)) {
+            cacheApplyDelete(sid, tableName, localRecord.id);
+            notifyUI(tableName);
+            return;
+          }
 
           let needsRefresh = false;
 
@@ -1373,6 +1570,7 @@ class SupabaseDataService {
 
   async getAll(userId: string, tableName: string, forceRefresh = false): Promise<any[]> {
     const sid = this.sid(userId);
+    await cacheReady;
 
     // 1. Instant Return from Cache (Offline-Ready)
     const cached = cacheGet(sid, tableName);
@@ -1456,15 +1654,15 @@ class SupabaseDataService {
 
         if (!data || data.length === 0) {
           if (fullRefresh) {
-            const pendingLocal = local.filter(record => pendingIds.has(record.id));
-            cacheSet(sid, tableName, pendingLocal);
+            cacheSet(sid, tableName, local);
             notifyUI(tableName);
-            return pendingLocal;
+            return local;
           }
           cacheSet(sid, tableName, local);
           return local;
         }
 
+        const deletedIds = getDeletedIds(sid, tableName);
         const remoteRecords = filterDeleted(sid, tableName, data.map(mapToLocal));
         
         // 2. Conflict Resolution: Use updated_at to merge
@@ -1472,11 +1670,37 @@ class SupabaseDataService {
         let changed = false;
 
         if (fullRefresh) {
-          const remoteMap = new Map(remoteRecords.map(r => [r.id, r]));
-          const pendingLocalById = new Map(local.filter(record => pendingIds.has(record.id)).map(record => [record.id, record]));
-          const mergedRemote = remoteRecords.map(record => pendingLocalById.get(record.id) || record);
-          const pendingOnlyLocal = Array.from(pendingLocalById.values()).filter(record => !remoteMap.has(record.id));
-          const final = [...mergedRemote, ...pendingOnlyLocal];
+          const pendingLocalById = new Map(
+            local
+              .filter(record => !deletedIds.has(record.id))
+              .filter(record => pendingIds.has(record.id))
+              .map(record => [record.id, record])
+          );
+          const mergedById = new Map(
+            local
+              .filter(record => !deletedIds.has(record.id))
+              .map(record => [record.id, record])
+          );
+
+          for (const remote of remoteRecords) {
+            const pendingLocal = pendingLocalById.get(remote.id);
+            if (pendingLocal) {
+              mergedById.set(remote.id, pendingLocal);
+              continue;
+            }
+
+            const existing = mergedById.get(remote.id);
+            if (!existing) {
+              mergedById.set(remote.id, remote);
+              continue;
+            }
+
+            const remoteTs = new Date(remote.updatedAt || remote.createdAt || 0).getTime();
+            const localTs = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+            if (remoteTs > localTs) mergedById.set(remote.id, remote);
+          }
+
+          const final = Array.from(mergedById.values());
           const beforeIds = local.map(record => record.id).sort().join('|');
           const afterIds = final.map(record => record.id).sort().join('|');
           const beforeTs = local.map(record => `${record.id}:${record.updatedAt || record.updated_at || record.createdAt || ''}`).sort().join('|');
@@ -1616,7 +1840,10 @@ class SupabaseDataService {
       if (student?.id) byId.set(String(student.id), student);
     });
 
-    const createdRecords = creates.map(raw => {
+    const capacity = await this.filterCreatesByPlanCapacity(sid, 'students', creates);
+    const allowedCreates = capacity.allowed;
+
+    const createdRecords = allowedCreates.map(raw => {
       const requestedId = typeof raw?.id === 'string' ? raw.id : '';
       const id = isUUID(requestedId) && !byId.has(requestedId) ? requestedId : generateUUID();
       const displayId = raw?.studentId || raw?.admissionNo || requestedId || id;
@@ -1653,6 +1880,11 @@ class SupabaseDataService {
 
     cacheSet(sid, 'students', Array.from(byId.values()));
     notifyUI('students');
+    if (capacity.skipped > 0) {
+      window.dispatchEvent(new CustomEvent('schofyPlanLimitBlocked', {
+        detail: { table: 'students', skipped: capacity.skipped, message: capacity.message },
+      }));
+    }
 
     if (isCloudSyncEnabled() && canUseRemoteTable('students')) {
       enqueueMany([
@@ -1667,6 +1899,7 @@ class SupabaseDataService {
       savedLocally: true,
       imported: createdRecords.length,
       replaced: updatedRecords.length,
+      error: capacity.message,
       records: [...createdRecords, ...updatedRecords],
     };
   }
@@ -1690,11 +1923,26 @@ class SupabaseDataService {
       if (!safeData.endDate && !safeData.end_date) safeData.endDate = now.split('T')[0];
     }
 
+    const capacity = await this.filterCreatesByPlanCapacity(sid, tableName, [safeData]);
+    if (capacity.allowed.length === 0) {
+      window.dispatchEvent(new CustomEvent('schofyPlanLimitBlocked', {
+        detail: { table: tableName, skipped: capacity.skipped, message: capacity.message },
+      }));
+      return {
+        success: false,
+        syncedRemotely: false,
+        savedLocally: false,
+        error: capacity.message || 'Plan limit reached.',
+      };
+    }
+    safeData = capacity.allowed[0];
+
     const record = { ...safeData, id, schoolId: safeData.schoolId || sid, createdAt: now, updatedAt: now, syncStatus: 'pending' };
 
     // Always update cache optimistically
     cacheApplyCreate(sid, tableName, record);
     notifyUI(tableName);
+    logCurrentStaffDataAction(sid, 'create', tableName, { id });
 
     // If offline, queue for later
     if (!isCloudSyncEnabled()) {
@@ -1760,7 +2008,10 @@ class SupabaseDataService {
       if (record?.id) byId.set(String(record.id), record);
     });
 
-    const preparedRecords = records.map(raw => {
+    const capacity = await this.filterCreatesByPlanCapacity(sid, tableName, records);
+    const allowedRecords = capacity.allowed;
+
+    const preparedRecords = allowedRecords.map(raw => {
       const requestedId = typeof raw?.id === 'string' ? raw.id : '';
       const id = isUUID(requestedId) && !byId.has(requestedId) ? requestedId : generateUUID();
       let safeData = { ...raw };
@@ -1792,6 +2043,12 @@ class SupabaseDataService {
 
     cacheSet(sid, tableName, Array.from(byId.values()));
     notifyUI(tableName);
+    logCurrentStaffDataAction(sid, 'bulk_create', tableName, { count: preparedRecords.length });
+    if (capacity.skipped > 0) {
+      window.dispatchEvent(new CustomEvent('schofyPlanLimitBlocked', {
+        detail: { table: tableName, skipped: capacity.skipped, message: capacity.message },
+      }));
+    }
 
     if (isCloudSyncEnabled() && canUseRemoteTable(tableName)) {
       enqueueMany(preparedRecords.map(record => ({
@@ -1806,6 +2063,7 @@ class SupabaseDataService {
       success: true,
       syncedRemotely: false,
       savedLocally: true,
+      error: capacity.message,
       imported: preparedRecords.length,
       records: preparedRecords,
     };
@@ -1818,6 +2076,7 @@ class SupabaseDataService {
     // Optimistic cache update
     const appliedOptimisticUpdate = cacheApplyUpdate(sid, tableName, id, record);
     notifyUI(tableName, { forceRefresh: !appliedOptimisticUpdate });
+    logCurrentStaffDataAction(sid, 'update', tableName, { id });
 
     if (!isCloudSyncEnabled()) {
       return { success: true, syncedRemotely: false, savedLocally: true, record };
@@ -1892,6 +2151,7 @@ class SupabaseDataService {
     }
     cacheApplyDelete(sid, tableName, id);
     notifyUI(tableName);
+    logCurrentStaffDataAction(sid, 'delete', tableName, { id });
 
     if (!isCloudSyncEnabled()) {
       return { success: true, syncedRemotely: false, savedLocally: true };
@@ -1935,17 +2195,19 @@ class SupabaseDataService {
   async batchDelete(userId: string, tableName: string, ids: string[]): Promise<SyncResult> {
     if (!ids.length) return { success: true, syncedRemotely: true, savedLocally: true };
     const sid = this.sid(userId);
+    const idSet = new Set(ids);
 
     // Register all as deleted FIRST — prevents re-appearing from any future sync
     markBatchDeleted(sid, tableName, ids);
 
     // Optimistic cache delete
     const existing = cacheGet(sid, tableName) || [];
-    cacheSet(sid, tableName, existing.filter(r => !ids.includes(r.id)));
+    cacheSet(sid, tableName, existing.filter(r => !idSet.has(r.id)));
     for (const id of ids) {
       void deleteFromDesktopDB(sid, tableName, id);
     }
     notifyUI(tableName);
+    logCurrentStaffDataAction(sid, 'bulk_delete', tableName, { count: ids.length });
 
     if (!isCloudSyncEnabled()) {
       return { success: true, syncedRemotely: false, savedLocally: true };
@@ -2003,6 +2265,7 @@ class SupabaseDataService {
     }
     cacheSet(sid, 'settings', updated);
     notifyUI('settings');
+    logCurrentStaffDataAction(sid, 'save_settings', 'settings');
 
     if (!isCloudSyncEnabled()) {
       return { success: true, syncedRemotely: false, savedLocally: true };
@@ -2195,7 +2458,38 @@ class SupabaseDataService {
     };
   }
   async cleanupDuplicates(_: string) { return {}; }
-  async clear(_u: string, _t: string) {}
+  async clear(userId: string, tableName: string): Promise<SyncResult> {
+    const sid = this.sid(userId);
+    const cached = cacheGet(sid, tableName) || [];
+    let records = cached;
+
+    if (canUseRemoteTable(tableName) && isCloudSyncEnabled() && isOnline() && this.ok) {
+      try {
+        const fresh = await this.getAll(userId, tableName, true);
+        const byId = new Map<string, any>();
+        for (const record of [...cached, ...fresh]) {
+          if (record?.id) byId.set(record.id, record);
+        }
+        records = Array.from(byId.values());
+      } catch {
+        records = cached;
+      }
+    }
+
+    const ids = records.map(record => record?.id).filter(Boolean);
+    if (ids.length > 0) markBatchDeleted(sid, tableName, ids);
+
+    cacheSet(sid, tableName, []);
+    await clearDesktopDBTable(sid, tableName);
+    notifyUI(tableName);
+    logCurrentStaffDataAction(sid, 'clear', tableName, { count: ids.length });
+
+    if (ids.length > 0 && isCloudSyncEnabled() && canUseRemoteTable(tableName)) {
+      this.queueWrites(ids.map(id => ({ op: 'delete' as const, userId, tableName, recordId: id })), sid);
+    }
+
+    return { success: true, syncedRemotely: false, savedLocally: true };
+  }
 
   /** Ensures the school record exists in Supabase so foreign keys don't fail */
   private async ensureSchoolExists(sid: string): Promise<void> {
@@ -2252,7 +2546,7 @@ class SupabaseDataService {
     }
 
     this._syncInProgress = true;
-    console.log(`[offline] Flushing ${queue.length} queued operations`);
+    console.log(`[offline] Flushing up to ${MAX_QUEUE_ITEMS_PER_FLUSH} of ${queue.length} queued operations`);
 
     const MAX_RETRIES = 3;
 
@@ -2269,9 +2563,10 @@ class SupabaseDataService {
       // Deduplicate queue: only process the LATEST operation for each record
       // to save API calls and prevent race conditions.
       const dedupedQueue = this._deduplicateQueue(queue);
+      const queueSlice = dedupedQueue.slice(0, MAX_QUEUE_ITEMS_PER_FLUSH);
 
-      for (let queueIndex = 0; queueIndex < dedupedQueue.length; queueIndex++) {
-        const item = dedupedQueue[queueIndex];
+      for (let queueIndex = 0; queueIndex < queueSlice.length; queueIndex++) {
+        const item = queueSlice[queueIndex];
         if (queueIndex > 0 && queueIndex % 8 === 0) await yieldToUI();
         if (!canUseRemoteTable(item.tableName)) {
           dequeue(item.id);
@@ -2290,6 +2585,12 @@ class SupabaseDataService {
             const rt = getSupabaseTable(item.tableName);
             
             if (item.op === 'create' && item.data) {
+              const capacity = await this.filterCreatesByPlanCapacity(sid, item.tableName, [item.data]);
+              if (capacity.allowed.length === 0) {
+                deadLetter(item, capacity.message || 'Plan limit reached before cloud sync.');
+                unrecoverable = true;
+                break;
+              }
               const payload = toRemote(item.data, rt, sid);
               const { error: upsertError } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
               if (upsertError) throw upsertError;

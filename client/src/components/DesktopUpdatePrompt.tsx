@@ -166,7 +166,7 @@ export default function DesktopUpdatePrompt() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm print:hidden"
+      className="fixed inset-0 z-[800000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm print:hidden"
       onClick={() => {
         if (!update.required) dismiss();
       }}

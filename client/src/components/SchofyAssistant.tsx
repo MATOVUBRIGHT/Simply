@@ -391,9 +391,21 @@ export default function SchofyAssistant() {
   return createPortal(
     <>
       {!open && !launcherHidden && showDailyHint && (
-        <div className="fixed bottom-[34px] right-[100px] z-[9998] max-w-[230px] animate-dropdown-in rounded-[10px] border border-emerald-200 bg-gradient-to-br from-white via-emerald-50 to-indigo-50 px-3.5 py-2.5 text-sm font-semibold text-slate-800 shadow-xl ring-1 ring-white/70 backdrop-blur dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-emerald-950 dark:text-slate-100 dark:ring-slate-700/60">
+        <div
+          className="fixed bottom-[34px] right-[100px] z-[9998] max-w-[230px] animate-dropdown-in rounded-[10px] border bg-white px-3.5 py-2.5 text-sm font-semibold shadow-xl dark:bg-slate-900"
+          style={{
+            borderColor: 'color-mix(in srgb, var(--primary-color) 28%, transparent)',
+            color: 'var(--primary-color-800)',
+            boxShadow: '0 18px 45px color-mix(in srgb, var(--primary-color) 18%, transparent)',
+          }}
+        >
           {dailyLauncherText}
-          <span className="absolute -right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 border-r border-t border-emerald-200 bg-emerald-50 dark:border-slate-700 dark:bg-slate-900" />
+          <span
+            className="absolute -right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 border-r border-t bg-white dark:bg-slate-900"
+            style={{
+              borderColor: 'color-mix(in srgb, var(--primary-color) 28%, transparent)',
+            }}
+          />
         </div>
       )}
       <button

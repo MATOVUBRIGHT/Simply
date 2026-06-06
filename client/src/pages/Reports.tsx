@@ -10,6 +10,7 @@ import { openPrintPreview } from '../utils/printPreview';
 import { matchesTextSearch } from '../utils/searchMatch';
 import { computeProfitSummary } from '../utils/profit';
 import { PortalSelect } from '../components/PortalSelect';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
 
 type ReportType = 'terms' | 'students' | 'fees' | 'payments' | 'attendance' | 'staff' | 'classes' | 'academic' | 'bursaries' | 'discounts' | 'invoices';
 type ReportRow = Record<string, string | number>;
@@ -113,21 +114,21 @@ export default function Reports() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
-  const { data: studentsData } = useTableData(sid, 'students');
-  const { data: staffData } = useTableData(sid, 'staff');
-  const { data: classesData } = useTableData(sid, 'classes');
-  const { data: feesData } = useTableData(sid, 'fees');
-  const { data: paymentsData } = useTableData(sid, 'payments');
-  const { data: attendanceData } = useTableData(sid, 'attendance');
-  const { data: examsData } = useTableData(sid, 'exams');
-  const { data: examResultsData } = useTableData(sid, 'examResults');
-  const { data: subjectsData } = useTableData(sid, 'subjects');
-  const { data: bursariesData } = useTableData(sid, 'bursaries');
-  const { data: discountsData } = useTableData(sid, 'discounts');
-  const { data: invoicesData } = useTableData(sid, 'invoices');
-  const { data: salaryPaymentsData } = useTableData(sid, 'salaryPayments');
-  const { data: expensesData } = useTableData(sid, 'expenses');
-  const { data: settingsData } = useTableData(sid, 'settings');
+  const { data: studentsData, loading: studentsLoading } = useTableData(sid, 'students');
+  const { data: staffData, loading: staffLoading } = useTableData(sid, 'staff');
+  const { data: classesData, loading: classesLoading } = useTableData(sid, 'classes');
+  const { data: feesData, loading: feesLoading } = useTableData(sid, 'fees');
+  const { data: paymentsData, loading: paymentsLoading } = useTableData(sid, 'payments');
+  const { data: attendanceData, loading: attendanceLoading } = useTableData(sid, 'attendance');
+  const { data: examsData, loading: examsLoading } = useTableData(sid, 'exams');
+  const { data: examResultsData, loading: examResultsLoading } = useTableData(sid, 'examResults');
+  const { data: subjectsData, loading: subjectsLoading } = useTableData(sid, 'subjects');
+  const { data: bursariesData, loading: bursariesLoading } = useTableData(sid, 'bursaries');
+  const { data: discountsData, loading: discountsLoading } = useTableData(sid, 'discounts');
+  const { data: invoicesData, loading: invoicesLoading } = useTableData(sid, 'invoices');
+  const { data: salaryPaymentsData, loading: salaryPaymentsLoading } = useTableData(sid, 'salaryPayments');
+  const { data: expensesData, loading: expensesLoading } = useTableData(sid, 'expenses');
+  const { data: settingsData, loading: settingsLoading } = useTableData(sid, 'settings');
 
   const settings = useMemo(() => getSettingsMap(settingsData as any[]), [settingsData]);
   const students = studentsData as any[];
@@ -144,6 +145,8 @@ export default function Reports() {
   const invoices = invoicesData as any[];
   const salaryPayments = salaryPaymentsData as any[];
   const expenses = expensesData as any[];
+  const dataLoading = studentsLoading || staffLoading || classesLoading || feesLoading || paymentsLoading || attendanceLoading || examsLoading || examResultsLoading || subjectsLoading || bursariesLoading || discountsLoading || invoicesLoading || salaryPaymentsLoading || expensesLoading || settingsLoading;
+  const reportLoading = useMinimumLoading(previewLoading || dataLoading, 1500);
   const bankAccounts = useMemo(() => {
     try {
       const saved = settings.paymentAccountsJson ? JSON.parse(settings.paymentAccountsJson) : null;
@@ -602,10 +605,13 @@ export default function Reports() {
                 <tr>{columns.map(column => <th key={column.key}>{column.label}</th>)}</tr>
               </thead>
               <tbody>
-                {previewLoading ? (
+                {reportLoading ? (
                   <tr>
                     <td colSpan={Math.max(columns.length, 1)} className="text-center py-12 text-slate-400">
-                      <span className="mx-auto mb-3 block h-9 w-9 rounded-full border-4 border-primary-200 border-t-primary-500 animate-spin" />
+                      <span
+                        className="mx-auto mb-3 block h-9 w-9 rounded-full border-4 border-slate-200 border-t-transparent animate-spin"
+                        style={{ borderTopColor: 'var(--primary-color)' }}
+                      />
                       Preparing report records...
                     </td>
                   </tr>

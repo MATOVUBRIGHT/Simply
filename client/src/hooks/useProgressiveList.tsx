@@ -71,7 +71,7 @@ export function ProgressiveListLoader({
     <div ref={ref} className="flex items-center justify-center gap-2 border-t border-slate-100 bg-slate-50 px-4 py-4 text-sm font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
       {loadingMore ? (
         <>
-          <span className="h-4 w-4 rounded-full border-2 border-slate-300 border-t-transparent animate-spin" />
+          <span className="h-4 w-4 rounded-full border-2 border-slate-300 border-t-transparent animate-spin" style={{ borderTopColor: 'var(--primary-color)' }} />
           Loading more...
         </>
       ) : (

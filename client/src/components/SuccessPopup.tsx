@@ -33,7 +33,7 @@ export function SuccessPopup({ message, subMessage, onClose, duration = 2000 }: 
   return (
     <Portal>
       <div
-        className="fixed inset-0 z-[10000] flex items-center justify-center"
+        className="fixed inset-0 z-[850000] flex items-center justify-center"
         style={{
           WebkitBackdropFilter: visible ? 'blur(6px)' : 'blur(0px)',
           backdropFilter: visible ? 'blur(6px)' : 'blur(0px)',

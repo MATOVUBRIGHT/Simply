@@ -11,6 +11,7 @@ import { useToast } from '../contexts/ToastContext';
 import LiveEditable from '../components/LiveEditable';
 import { openPrintPreview } from '../utils/printPreview';
 import { getSubjectDisplayCode, normalizeSubjectCode } from '../utils/subjects';
+import { getBoardingStatus } from '../utils/studentBoarding';
 
 // ΓöÇΓöÇ Grade helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function ordinal(n: number): string {
@@ -245,7 +246,10 @@ export default function ReportCard() {
   }, [exams, examId, student?.classId]);
 
   const classItem = classes.find((c: any) => c.id === student?.classId);
-  const className = classItem?.name || '';
+  const className = classItem?.stream ? `${classItem.name} - Stream ${classItem.stream}` : classItem?.name || '';
+  const classStream = String((student as any)?.stream || classItem?.stream || '').trim();
+  const boardingStatus = student ? getBoardingStatus(student) : 'day';
+  const boardingLabel = boardingStatus === 'boarding' ? 'Boarding' : 'Day';
 
   const settingsMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -609,6 +613,8 @@ export default function ReportCard() {
               ['named.studentName', 'Student Name', `${student?.firstName || ''} ${student?.lastName || ''}`.trim() || '-'],
               ['named.studentId', 'Student ID', student?.studentId || student?.admissionNo || '-'],
               ['named.class', 'Class', className || '-'],
+              ['named.stream', 'Stream', classStream || '-'],
+              ['named.boardingStatus', 'Day / Boarding', boardingLabel],
               ['named.exam', 'Exam', exam?.name || '-'],
               ['named.academicYear', 'Academic Year', academicYear],
               ['named.position', 'Position', classPosition ? `${classPosition.position}${ordinal(classPosition.position)} of ${classPosition.outOf}` : '-'],
@@ -1017,6 +1023,8 @@ export default function ReportCard() {
                   { key: 'modern.studentName', label: 'Student Name:', value: `${student.firstName} ${student.lastName}` },
                   { key: 'modern.studentId', label: 'Student ID:', value: student.studentId || student.admissionNo },
                   { key: 'modern.class', label: 'Class:', value: className },
+                  { key: 'modern.stream', label: 'Stream:', value: classStream || '-' },
+                  { key: 'modern.boardingStatus', label: 'Day / Boarding:', value: boardingLabel },
                   { key: 'modern.academicYear', label: 'Academic Year:', value: academicYear },
                   { key: 'modern.exam', label: 'Exam:', value: exam?.name || '-' },
                   { key: 'modern.term', label: 'Term:', value: `Term ${exam?.term} - ${exam?.year}` },
@@ -1183,6 +1191,14 @@ export default function ReportCard() {
                     <div>
                       <label className="text-xs font-bold block mb-1">{editableText('high.gradeLabel', 'Grade:')}</label>
                       <div className="border border-slate-300 rounded px-3 py-1.5 text-sm bg-slate-50 min-h-[38px] flex items-center">{className}</div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold block mb-1">{editableText('high.streamLabel', 'Stream:')}</label>
+                      <div className="border border-slate-300 rounded px-3 py-1.5 text-sm bg-slate-50 min-h-[38px] flex items-center">{classStream || '-'}</div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold block mb-1">{editableText('high.boardingStatusLabel', 'Day / Boarding:')}</label>
+                      <div className="border border-slate-300 rounded px-3 py-1.5 text-sm bg-slate-50 min-h-[38px] flex items-center">{boardingLabel}</div>
                     </div>
                     <div>
                       <label className="text-xs font-bold block mb-1">{editableText('high.schoolYearLabel', 'School Year:')}</label>
@@ -1363,6 +1379,8 @@ export default function ReportCard() {
                   { key: 'classic.gender', label: 'Gender:', value: student.gender || 'N/A' },
                   { key: 'classic.schoolYear', label: 'School Year:', value: `${academicYear}-${Number(academicYear)+1}` },
                   { key: 'classic.gradeSection', label: 'Grade & Section:', value: className },
+                  { key: 'classic.stream', label: 'Stream:', value: classStream || '-' },
+                  { key: 'classic.boardingStatus', label: 'Day / Boarding:', value: boardingLabel },
                 ].map(({ key, label, value }) => (
                   <div key={label} className="flex items-end gap-2">
                     <span className="text-xs font-black uppercase w-32 shrink-0">{editableText(key, label)}</span>

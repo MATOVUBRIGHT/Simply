@@ -95,7 +95,6 @@ const offlinePageWarmers = [
   () => import('./pages/NotFound'),
 ];
 
-const REFRESH_LOADER_MS = 300;
 const STAFF_ADMIN_ONLY_PATHS = ['/plans', '/subscribe'];
 const ROUTE_LABELS: Array<[string, string]> = [
   ['/plans', 'Plans & Billing'],
@@ -144,13 +143,26 @@ function getRouteLabel(pathname: string) {
 
 function FullScreenLoader({ label = 'Loading...' }: { label?: string }) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4">
+    <div className="flex min-h-[320px] items-center justify-center bg-slate-50 px-4 dark:bg-slate-950">
       <div className="flex flex-col items-center gap-3 text-center">
         <div className="relative w-16 h-16">
           <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800" />
-          <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-primary-500 animate-spin" />
+          <div className="absolute inset-0 rounded-full border-4 border-transparent animate-spin" style={{ borderTopColor: 'var(--primary-color)' }} />
         </div>
         <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+function PageLoadingSpinner({ label = 'Loading page...' }: { label?: string }) {
+  return (
+    <div className="page-shell page-shell-enter">
+      <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-slate-200 bg-white/80 p-8 dark:border-slate-700 dark:bg-slate-900/70">
+        <div className="text-center">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-transparent dark:border-slate-700" style={{ borderTopColor: 'var(--primary-color)' }} />
+          <p className="mt-3 text-sm font-semibold text-slate-500 dark:text-slate-400">{label}</p>
+        </div>
       </div>
     </div>
   );
@@ -171,6 +183,18 @@ function MainApp() {
   // Wire global error interceptor
   useEffect(() => {
     initErrorInterceptor(addToast);
+  }, [addToast]);
+
+  useEffect(() => {
+    const onPlanLimitBlocked = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string; skipped?: number; table?: string }>).detail;
+      const fallback = detail?.skipped
+        ? `${detail.skipped.toLocaleString()} ${detail.table || 'record'} record${detail.skipped === 1 ? '' : 's'} skipped because the plan limit is reached.`
+        : 'Plan limit reached. Upgrade your plan to continue.';
+      addToast(detail?.message || fallback, 'error');
+    };
+    window.addEventListener('schofyPlanLimitBlocked', onPlanLimitBlocked);
+    return () => window.removeEventListener('schofyPlanLimitBlocked', onPlanLimitBlocked);
   }, [addToast]);
 
   useEffect(() => {
@@ -277,8 +301,8 @@ function MainApp() {
           <StaffRoleGate>
             <SubscriptionGate>
             <Layout>
-              <Suspense fallback={<FullScreenLoader label="Loading..." />}>
-                <div className="page-shell">
+              <Suspense fallback={<PageLoadingSpinner />}>
+                <div key={location.pathname} className="page-shell page-shell-enter">
                   <Routes location={location}>
                     <Route path="/" element={<ErrorBoundary inline><Dashboard /></ErrorBoundary>} />
                     <Route path="/dashboard" element={<Navigate to="/" replace />} />
@@ -343,27 +367,17 @@ function App() {
   const { user, loading } = useAuth();
   const location = useLocation();
   const hasSession = !!localStorage.getItem('schofy_session');
-  const [showRefreshLoader, setShowRefreshLoader] = useState(true);
   const restoredRoute = useMemo(() => {
     const stored = window.sessionStorage.getItem('lastRoute') || window.localStorage.getItem('schofy_last_route') || '/';
     return stored && !stored.startsWith('/login') && !stored.startsWith('/subscribe') ? stored : '/';
   }, [user?.id]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setShowRefreshLoader(false), REFRESH_LOADER_MS);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  if (showRefreshLoader) {
-    return <FullScreenLoader label="Loading..." />;
-  }
 
   // No session at all — show login
   if (!hasSession && !user) {
     if (loading) return <FullScreenLoader label="Loading..." />;
     return (
       <>
-        <Suspense fallback={<FullScreenLoader label="Loading..." />}>
+        <Suspense fallback={<PageLoadingSpinner />}>
           <div className="page-shell">
             <Routes location={location}>
               <Route path="/login" element={<Login />} />
@@ -379,7 +393,7 @@ function App() {
   // Has session or user — render app
   return (
     <>
-      <Suspense fallback={<FullScreenLoader label="Loading..." />}>
+      <Suspense fallback={<PageLoadingSpinner />}>
         <Routes>
           <Route path="/login" element={user ? <Navigate to={restoredRoute} replace /> : <Login />} />
           <Route path="/*" element={<MainApp />} />

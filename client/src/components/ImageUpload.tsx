@@ -7,9 +7,10 @@ interface ImageUploadProps {
   onChange: (base64: string | null) => void;
   label?: string;
   className?: string;
+  square?: boolean;
 }
 
-export default function ImageUpload({ value, onChange, label = 'Photo', className = '' }: ImageUploadProps) {
+export default function ImageUpload({ value, onChange, label = 'Photo', className = '', square = false }: ImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(value || null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState('');
@@ -54,7 +55,7 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
     <div className={className}>
       <label className="form-label">{label}</label>
       <div
-        className={`relative border-2 border-dashed rounded-xl transition-all duration-200 ${
+        className={`relative border-2 border-dashed rounded-xl p-1.5 transition-all duration-200 ${square ? 'aspect-square' : ''} ${
           isDragging
             ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
             : preview
@@ -70,9 +71,9 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
             <img
               src={preview}
               alt="Preview"
-              className="w-full h-40 object-cover rounded-xl"
+              className={`${square ? 'h-full' : 'h-40'} w-full rounded-lg object-cover`}
             />
-            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-center justify-center gap-2">
+            <div className="absolute inset-1.5 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
               <button
                 type="button"
                 onClick={() => inputRef.current?.click()}
@@ -91,7 +92,7 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
           </div>
         ) : (
           <div
-            className="flex flex-col items-center justify-center py-8 cursor-pointer"
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-lg px-4 ${square ? 'h-full py-4' : 'py-9'}`}
             onClick={() => inputRef.current?.click()}
           >
             <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mb-3">

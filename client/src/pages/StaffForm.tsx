@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { useBackOrFallback } from '../utils/navigation';
+import { getPlanStaffLimit, getSubscriptionAccessState } from '../utils/plans';
 
 interface CustomField { id: string; label: string; value: string; }
 
@@ -145,6 +146,20 @@ export default function StaffForm() {
         const finalEmployeeId = employeeId.trim() || await generateEmployeeId();
         await dataService.update(authId, 'staff', id!, { ...formData, employeeId: finalEmployeeId, updatedAt: now } as any);
       } else {
+        const access = await getSubscriptionAccessState(authId, undefined, { authUserId: user?.id });
+        if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
+          addToast(`Choose an active plan before adding staff. Current plan: ${access.plan?.name || 'No active plan'}. Upgrade to continue.`, 'error');
+          navigate('/plans');
+          return;
+        }
+        const staffLimit = getPlanStaffLimit(access.plan);
+        const existingStaff = await dataService.getAll(authId, 'staff');
+        const activeStaffCount = existingStaff.filter((member: Staff) => member.status !== 'inactive').length;
+        if (activeStaffCount >= staffLimit) {
+          addToast(`Staff limit reached on ${access.plan.name}. This plan allows ${staffLimit.toLocaleString()} staff (15% of student plan size). Upgrade to add more staff.`, 'error');
+          navigate('/plans');
+          return;
+        }
         const finalEmployeeId = employeeId.trim() || await generateEmployeeId();
         const newStaff: Staff = { id: uuidv4(), schoolId: authId, employeeId: finalEmployeeId, ...formData, createdAt: now, updatedAt: now } as Staff;
         await dataService.create(authId, 'staff', newStaff as any);

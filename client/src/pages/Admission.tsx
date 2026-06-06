@@ -45,7 +45,7 @@ export default function Admission() {
 
   const [form, setForm] = useState({
     admissionNo: '', firstName: '', lastName: '', dob: '',
-    gender: Gender.MALE, classId: '', address: '',
+    gender: Gender.MALE, classId: '', stream: '', address: '',
     guardianName: '', guardianPhone: '', guardianEmail: '',
     guardianRelation: 'Parent', guardianOccupation: '',
     medicalInfo: '', photoUrl: '',
@@ -132,14 +132,15 @@ export default function Admission() {
     try {
       // Check plan limit before admitting
       const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
+      const currentPlan = access.plan?.name || 'No active plan';
       if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
-        addToast('Choose an active plan before admitting students.', 'error');
+        addToast(`Choose an active plan before admitting students. Current plan: ${currentPlan}. Upgrade to continue.`, 'error');
         navigate('/plans');
         setLoading(false);
         return;
       }
       if (access.plan.studentLimit > 0 && access.remaining <= 0) {
-        addToast(`Plan limit reached (${access.used}/${access.plan.studentLimit} students). Upgrade your plan to admit more.`, 'error');
+        addToast(`Current plan: ${access.plan.name}. Student limit reached (${access.used}/${access.plan.studentLimit} available students). Upgrade your plan to admit more.`, 'error');
         navigate('/plans');
         setLoading(false);
         return;
@@ -156,7 +157,7 @@ export default function Admission() {
         admissionNo, studentId: admissionNo,
         firstName: form.firstName, lastName: form.lastName,
         dob: form.dob, gender: form.gender,
-        classId: form.classId, address: form.address,
+        classId: form.classId, stream: form.stream.trim(), address: form.address,
         guardianName: form.guardianName, guardianPhone: form.guardianPhone,
         guardianEmail: form.guardianEmail || undefined,
         medicalInfo: form.medicalInfo || undefined,
@@ -182,6 +183,7 @@ export default function Admission() {
   }
 
   const selectedClass = classes.find(c => c.id === form.classId);
+  const getAdmissionClassLabel = (name: string) => String(name || '').replace(/\s+-\s*Stream\s+.+$/i, '').trim() || name;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -237,7 +239,8 @@ export default function Admission() {
             <div className="flex flex-col sm:flex-row gap-5">
               <ImageUpload label="Photo" value={form.photoUrl}
                 onChange={(b64) => setForm(p => ({ ...p, photoUrl: b64 as string }))}
-                className="w-32 shrink-0" />
+                className="w-full sm:w-44 md:w-48 shrink-0"
+                square />
               <div className="flex-1 space-y-3">
                 <div>
                   <label className="form-label">Student ID / Admission No *</label>
@@ -288,9 +291,20 @@ export default function Admission() {
                     { value: '', label: 'Select Class' },
                     ...classes.map(c => ({
                       value: c.id,
-                      label: `${c.name} (${c.enrolled}/${c.capacity})${c.isFull ? ' - increase capacity or ignore' : ''}`,
+                      label: `${getAdmissionClassLabel(c.name)} (${c.enrolled}/${c.capacity})${c.isFull ? ' - increase capacity or ignore' : ''}`,
                     })),
                   ]}
+                />
+              </div>
+              <div>
+                <label className="form-label">Stream</label>
+                <input
+                  type="text"
+                  name="stream"
+                  value={form.stream}
+                  onChange={handleChange}
+                  className="form-input"
+                  placeholder="A, B, Blue..."
                 />
               </div>
               <div>
@@ -428,7 +442,8 @@ export default function Admission() {
                   { label: 'Name', value: `${form.firstName} ${form.lastName}` },
                   { label: 'Gender', value: form.gender },
                   { label: 'DOB', value: form.dob || '-' },
-                  { label: 'Class', value: selectedClass?.name || '-' },
+                  { label: 'Class', value: selectedClass ? getAdmissionClassLabel(selectedClass.name) : '-' },
+                  { label: 'Stream', value: form.stream.trim() || '-' },
                   { label: 'Type', value: form.boardingStatus === 'boarding' ? 'Boarding' : 'Day' },
                   { label: 'Address', value: form.address || '-' },
                 ].map(({ label, value }) => (

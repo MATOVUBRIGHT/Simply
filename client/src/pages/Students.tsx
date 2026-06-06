@@ -2,7 +2,7 @@
 import { createPortal } from 'react-dom';
 import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, Settings, Edit, ImagePlus } from 'lucide-react';
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, Settings, Edit, ImagePlus, Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import type { Class, Student } from '@schofy/shared';
 import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
@@ -11,7 +11,7 @@ import ImageModal from '../components/ImageModal';
 import { useStudents } from '../contexts/StudentsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
-import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments, sortClassesBySectionThenLevel } from '../utils/classroom';
+import { getClassDisplayName, validateStudentClassAssignments, fixInvalidClassAssignments, resolveClassIdFromText, sortClassesBySectionThenLevel } from '../utils/classroom';
 import { addToRecycleBin } from '../utils/recycleBin';
 import { generateUUID } from '../utils/uuid';
 import { useTableData } from '../lib/store';
@@ -21,13 +21,15 @@ import { useConfirm } from '../components/ConfirmModal';
 import { PortalDropdown } from '../components/PortalDropdown';
 import { BulkEditClassModal } from '../components/BulkEditClassModal';
 import { FullscreenButton } from '../components/FullscreenButton';
-import { getSubscriptionAccessState } from '../utils/plans';
-import { deleteInThirtyPercentBatches } from '../utils/bulkDelete';
+import { countsTowardPlan, getSubscriptionAccessState } from '../utils/plans';
+import { deleteInFortyPercentBatches } from '../utils/bulkDelete';
 import { FitStatValue } from '../components/FitStatValue';
 import { LargeDataSpinner } from '../components/LargeDataSpinner';
 import { sortStudentsForList } from '../utils/studentOrdering';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
 import { BulkImageUpdateModal, type BulkImageRecord } from '../components/BulkImageUpdateModal';
+import { OperationProgressPopup } from '../components/OperationProgressPopup';
+import { getImportCellText, parseImportFile } from '../utils/importParser';
 
 const avatarColors = [
   'bg-rose-500',
@@ -42,6 +44,8 @@ const avatarColors = [
 const DEFAULT_STUDENTS_PAGE_SIZE = 10;
 const LARGE_SHOW_ALL_THRESHOLD = 500;
 const LARGE_SHOW_ALL_PAGE_FRACTION = 0.2;
+const SHOW_ALL_TRANSITION_MS = 1500;
+const SHOW_ALL_SWAP_DELAY_MS = 260;
 
 function getAvatarColor(name: string) {
   const index = name.charCodeAt(0) % avatarColors.length;
@@ -49,15 +53,19 @@ function getAvatarColor(name: string) {
 }
 
 const expectedFields = [
-  { key: 'firstName', label: 'First Name', required: true },
-  { key: 'lastName', label: 'Last Name', required: true },
-  { key: 'gender', label: 'Gender (male/female)', required: true },
-  { key: 'dob', label: 'Date of Birth (YYYY-MM-DD)', required: false },
-  { key: 'classId', label: 'Class', required: true },
-  { key: 'address', label: 'Address', required: false },
-  { key: 'guardianName', label: 'Guardian Name', required: false },
-  { key: 'guardianPhone', label: 'Guardian Phone', required: false },
-  { key: 'guardianEmail', label: 'Guardian Email', required: false },
+  { key: 'studentId', label: 'Student ID', required: false, aliases: ['id', 'student no', 'student number', 'id number', 'learner id'] },
+  { key: 'admissionNo', label: 'Admission No', required: false, aliases: ['admission number', 'adm no', 'adm', 'admission id', 'adm id'] },
+  { key: 'firstName', label: 'First Name', required: true, aliases: ['firstname', 'given name', 'forename', 'name', 'student name', 'learner name', 'full name'] },
+  { key: 'lastName', label: 'Last Name', required: true, aliases: ['lastname', 'surname', 'family name'] },
+  { key: 'gender', label: 'Gender (male/female)', required: true, aliases: ['sex'] },
+  { key: 'dob', label: 'Date of Birth (YYYY-MM-DD)', required: false, aliases: ['date of birth', 'birth date', 'birthday'] },
+  { key: 'classId', label: 'Class', required: true, aliases: ['class name', 'grade', 'level', 'form'] },
+  { key: 'stream', label: 'Stream', required: false, aliases: ['section', 'section number', 'section no', 'arm', 'arm number', 'arm no', 'class stream', 'stream name', 'stream number', 'stream no', 'division', 'group', 'track'] },
+  { key: 'address', label: 'Address', required: false, aliases: ['home address'] },
+  { key: 'guardianName', label: 'Guardian Name', required: false, aliases: ['parent name', 'parent/guardian', 'guardian'] },
+  { key: 'guardianPhone', label: 'Guardian Phone', required: false, aliases: ['parent phone', 'phone', 'contact'] },
+  { key: 'guardianEmail', label: 'Guardian Email', required: false, aliases: ['parent email', 'parent email address', 'guardian email address'] },
+  { key: 'studentEmail', label: 'Student Email', required: false, aliases: ['email', 'email address', 'learner email', 'student email address'] },
 ];
 
 function generateStudentId(firstName: string, lastName: string): string {
@@ -65,6 +73,30 @@ function generateStudentId(firstName: string, lastName: string): string {
   const ln = (lastName || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 2);
   const digits = Math.floor(100 + Math.random() * 900);
   return `${fn}${ln}${digits}`;
+}
+
+function studentMatchesTextSearch(student: Student, term: string, classes: Class[]) {
+  const query = term.trim().toLowerCase();
+  if (!query) return true;
+  const fullName = `${student.firstName || ''} ${student.lastName || ''}`.toLowerCase();
+  const className = getClassDisplayName(student.classId, classes).toLowerCase();
+  return [
+    fullName,
+    student.firstName,
+    student.lastName,
+    student.studentId,
+    student.admissionNo,
+    student.guardianName,
+    student.guardianPhone,
+    student.guardianEmail,
+    student.gender,
+    student.status,
+    className,
+  ].some(value => String(value || '').toLowerCase().includes(query));
+}
+
+function normalizeImportHeader(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
 function StudentActions({
@@ -194,9 +226,17 @@ export default function Students() {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
+  const [customFieldMapping, setCustomFieldMapping] = useState<Record<string, string>>({});
   const [importPreview, setImportPreview] = useState<Partial<Student>[]>([]);
+  const [isPreviewingImport, setIsPreviewingImport] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [operationProgress, setOperationProgress] = useState<{ open: boolean; title: string; detail: string; progress: number; processed?: number; total?: number }>({
+    open: false,
+    title: '',
+    detail: '',
+    progress: 0,
+  });
   const [flaggedItems, setFlaggedItems] = useState<Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }>>({});
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
@@ -209,6 +249,7 @@ export default function Students() {
   const [completedYearFilter, setCompletedYearFilter] = useState<string>('');
   const [planLimitMessage, setPlanLimitMessage] = useState<string | null>(null);
   const [importRemaining, setImportRemaining] = useState<number | null>(null);
+  const [importPlanName, setImportPlanName] = useState<string>('your current plan');
   const navigate = useNavigate();
   const statusFilterRef = useRef<HTMLDivElement>(null);
   const classFilterRef = useRef<HTMLDivElement>(null);
@@ -216,7 +257,7 @@ export default function Students() {
   const classFilterButtonRef = useRef<HTMLButtonElement>(null);
   const [statusDropdownPos, setStatusDropdownPos] = useState({ top: 0, left: 0 });
   const [classDropdownPos, setClassDropdownPos] = useState({ top: 0, left: 0 });
-  const listLoading = useMinimumLoading(loading || studentsStoreLoading || showAllTransitioning, 2000);
+  const listLoading = useMinimumLoading(loading || studentsStoreLoading, 1600);
 
   const getImportStatus = () => {
     switch (viewFilter) {
@@ -232,7 +273,10 @@ export default function Students() {
     flags: Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }> = flaggedItems,
   ) => {
     const flagged = flags[index];
-    if (flagged?.action === 'skip' || flagged?.action === 'replace') return false;
+    if (flagged?.action === 'skip') return false;
+    if (flagged?.action === 'replace') {
+      return flagged.existingStudent?.status === 'completed' && getImportStatus() !== 'completed';
+    }
     return getImportStatus() !== 'completed';
   };
 
@@ -257,6 +301,7 @@ export default function Students() {
     }
   }, [flaggedItems, importPreview, importRemaining, importStep, newEnrolledImportCount]);
   const isReloadingRef = useRef(false);
+  const hasLoadedListRef = useRef(false);
 
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
@@ -276,7 +321,7 @@ export default function Students() {
   const loadData = useCallback(async () => {
     const id = schoolId || user?.id;
     if (!id) return;
-    setLoading(true);
+    setLoading(!hasLoadedListRef.current);
     try {
       // Load classes first
       await loadClasses();
@@ -305,6 +350,7 @@ export default function Students() {
     } catch (error) {
       console.error('Failed to load students:', error);
     } finally {
+      hasLoadedListRef.current = true;
       setLoading(false);
     }
   }, [user?.id, schoolId, debouncedSearch, selectedClass, viewFilter, currentPage, itemsPerPage, loadPage, searchStudents, loadClasses]);
@@ -314,17 +360,21 @@ export default function Students() {
   }, [loadData]);
 
   function handleToggleShowAll() {
+    if (showAllTransitioning) return;
     setShowAllTransitioning(true);
     setCurrentPage(1);
-    setShowAll(value => !value);
-    window.setTimeout(() => setShowAllTransitioning(false), 2000);
+    window.setTimeout(() => {
+      setShowAll(value => !value);
+    }, SHOW_ALL_SWAP_DELAY_MS);
+    window.setTimeout(() => setShowAllTransitioning(false), SHOW_ALL_TRANSITION_MS);
   }
 
   useEffect(() => {
     const handleStudentsUpdated = (event?: Event) => {
-      const table = (event as CustomEvent<{ table?: string }> | undefined)?.detail?.table;
+      const detail = (event as CustomEvent<{ table?: string; localOnly?: boolean }> | undefined)?.detail;
+      const table = detail?.table;
       if (table && table !== 'students') return;
-      refreshStudents();
+      if (!detail?.localOnly) refreshStudents();
       void loadData();
     };
 
@@ -457,8 +507,27 @@ export default function Students() {
 
   const totalPages = Math.ceil(totalCount / itemsPerPage);
   const paginatedStudents = students;
-  const allVisibleStudentsSelected = paginatedStudents.length > 0 && selectedStudents.size === paginatedStudents.length;
-  const selectedStudentImageRecords = useMemo<BulkImageRecord[]>(() => paginatedStudents
+  const allFilteredStudents = useMemo(() => {
+    const filtered = (allStudents || []).filter((student: Student) => {
+      const matchesSearch = studentMatchesTextSearch(student, debouncedSearch, classes);
+      const matchesClass = !selectedClass || student.classId === selectedClass;
+      const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
+      const matchesCompletedYear = viewFilter !== 'completed' || !completedYearFilter || (student as any).completedYear?.toString() === completedYearFilter;
+      return matchesSearch && matchesClass && matchesView && matchesCompletedYear;
+    });
+    return sortStudentsForList(filtered);
+  }, [allStudents, classes, debouncedSearch, selectedClass, viewFilter, completedYearFilter]);
+  const filteredStudentIds = useMemo(() => allFilteredStudents.map(student => student.id), [allFilteredStudents]);
+  const selectedFilteredCount = useMemo(
+    () => filteredStudentIds.reduce((count, id) => count + (selectedStudents.has(id) ? 1 : 0), 0),
+    [filteredStudentIds, selectedStudents]
+  );
+  const allFilteredStudentsSelected = filteredStudentIds.length > 0 && selectedFilteredCount === filteredStudentIds.length;
+  const selectedStudentRecords = useMemo(
+    () => (allStudents || []).filter((student: Student) => selectedStudents.has(student.id)),
+    [allStudents, selectedStudents]
+  );
+  const selectedStudentImageRecords = useMemo<BulkImageRecord[]>(() => selectedStudentRecords
     .filter(student => selectedStudents.has(student.id))
     .map(student => ({
       id: student.id,
@@ -467,7 +536,34 @@ export default function Students() {
       primaryId: student.studentId || student.admissionNo,
       secondaryId: student.admissionNo,
       label: `${student.firstName} ${student.lastName}`,
-    })), [paginatedStudents, selectedStudents]);
+    })), [selectedStudentRecords, selectedStudents]);
+
+  async function ensureAvailableStudentCapacity(countToAdd: number) {
+    const id = schoolId || user?.id;
+    if (!id || countToAdd <= 0) return true;
+
+    const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
+    const currentPlan = access.plan?.name || 'No active plan';
+    if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
+      const message = `Choose an active plan before restoring available students. Current plan: ${currentPlan}. Upgrade to continue.`;
+      setPlanLimitMessage(message);
+      addToast(message, 'error');
+      navigate('/plans');
+      return false;
+    }
+
+    if (access.plan.studentLimit > 0 && countToAdd > access.remaining) {
+      const available = Math.max(0, access.remaining);
+      const message = `Current plan: ${access.plan.name}. You have ${available} available student${available === 1 ? '' : 's'} remaining, but this action adds ${countToAdd}. Upgrade your plan to continue.`;
+      setPlanLimitMessage(message);
+      addToast(message, 'error');
+      navigate('/plans');
+      return false;
+    }
+
+    setPlanLimitMessage(null);
+    return true;
+  }
 
   useEffect(() => {
     const lastPage = Math.max(1, totalPages);
@@ -525,6 +621,12 @@ export default function Students() {
         cleanedCount += orphanedAttendanceIds.length;
       }
 
+      if (duplicateIds.length > 0 || cleanedCount > 0) {
+        await refreshStudents();
+        await loadData();
+        window.dispatchEvent(new CustomEvent('studentsUpdated', { detail: { table: 'students', localOnly: true } }));
+      }
+
       const parts: string[] = [];
       if (duplicateIds.length > 0) parts.push(`${duplicateIds.length} duplicate student${duplicateIds.length > 1 ? 's' : ''} removed`);
       if (cleanedCount > 0) parts.push(`${cleanedCount} orphaned record${cleanedCount > 1 ? 's' : ''} removed`);
@@ -539,26 +641,60 @@ export default function Students() {
     const id = schoolId || user?.id;
     if (!id) return;
     try {
-      addToast('Checking class assignments...', 'info');
+      setOperationProgress({
+        open: true,
+        title: 'Checking class assignments',
+        detail: 'Checking students and classes.',
+        progress: 5,
+        processed: 0,
+        total: 0,
+      });
       const validation = await validateStudentClassAssignments(id);
+      setOperationProgress({
+        open: true,
+        title: validation.invalidAssignments > 0 ? 'Fixing class assignments' : 'Checking class assignments',
+        detail: validation.invalidAssignments > 0
+          ? `Found ${validation.invalidAssignments} student${validation.invalidAssignments === 1 ? '' : 's'} to fix.`
+          : 'All class assignments are valid.',
+        progress: validation.invalidAssignments > 0 ? 10 : 100,
+        processed: 0,
+        total: validation.invalidAssignments,
+      });
       if (validation.invalidAssignments > 0) {
-        const ok = await confirm({
-          title: 'Fix Class Assignments',
-          description: `Found ${validation.invalidAssignments} student${validation.invalidAssignments > 1 ? 's' : ''} assigned to classes that no longer exist. Mark them as "Not assigned"?`,
-          confirmLabel: 'Fix Now',
-          variant: 'warning',
+        const result = await fixInvalidClassAssignments(id, (progress, processed, total, detail) => {
+          setOperationProgress({
+            open: true,
+            title: 'Fixing class assignments',
+            detail,
+            progress,
+            processed,
+            total,
+          });
         });
-        if (ok) {
-          const result = await fixInvalidClassAssignments(id);
-          addToast(result.message, result.fixed > 0 ? 'success' : 'info');
-          await loadData();
-        }
+        setOperationProgress({
+          open: true,
+          title: 'Fixing class assignments',
+          detail: result.message,
+          progress: 100,
+          processed: result.fixed,
+          total: validation.invalidAssignments,
+        });
+        addToast(result.message, result.fixed > 0 ? 'success' : 'info');
+        await loadData();
       } else {
         addToast('All class assignments are valid', 'success');
       }
     } catch (error) {
       console.error('Class assignment check error:', error);
-      addToast('Failed to check class assignments', 'error');
+      addToast(error instanceof Error ? error.message : 'Failed to check class assignments', 'error');
+    } finally {
+      window.setTimeout(() => {
+        setOperationProgress(prev => (
+          prev.title === 'Fixing class assignments' || prev.title === 'Checking class assignments'
+            ? { ...prev, open: false }
+            : prev
+        ));
+      }, 700);
     }
   }
 
@@ -671,6 +807,10 @@ export default function Students() {
   async function handleMarkActive(studentId: string) {
     const id = schoolId || user?.id;
     if (!id) return;
+    const student = allStudents.find(s => s.id === studentId) || students.find(s => s.id === studentId);
+    if (!student || !countsTowardPlan(student)) {
+      if (!(await ensureAvailableStudentCapacity(1))) return;
+    }
     try {
       await dataService.update(id, 'students', studentId, { status: 'active' } as any);
       addToast('Student reactivated', 'success');
@@ -695,10 +835,17 @@ export default function Students() {
   }
 
   function handleSelectAll() {
-    if (selectedStudents.size === paginatedStudents.length) {
+    if (filteredStudentIds.length === 0) {
+      setSelectedStudents(new Set());
+      return;
+    }
+    if (allFilteredStudentsSelected) {
       setSelectedStudents(new Set());
     } else {
-      setSelectedStudents(new Set(paginatedStudents.map(s => s.id)));
+      setSelectMode(true);
+      setSelectedStudents(new Set(filteredStudentIds));
+      setShowSelectionBar(true);
+      addToast(`${filteredStudentIds.length} student${filteredStudentIds.length === 1 ? '' : 's'} selected`, 'success');
     }
   }
 
@@ -717,7 +864,7 @@ export default function Students() {
       const now = new Date().toISOString();
       const idsToDelete = Array.from(selectedStudents);
       const recycleItems = idsToDelete
-        .map(studentId => students.find(s => s.id === studentId))
+        .map(studentId => selectedStudentRecords.find(s => s.id === studentId) || allStudents.find(s => s.id === studentId))
         .filter(Boolean) as Student[];
 
       recycleItems.forEach(student => {
@@ -729,7 +876,24 @@ export default function Students() {
           deletedAt: now
         });
       });
-      const deletedCount = await deleteInThirtyPercentBatches(id, 'students', idsToDelete);
+      setOperationProgress({
+        open: true,
+        title: 'Deleting students',
+        detail: 'Removing selected records in 40% batches.',
+        progress: 5,
+        processed: 0,
+        total: idsToDelete.length,
+      });
+      const deletedCount = await deleteInFortyPercentBatches(id, 'students', idsToDelete, (_deletedIds, deletedTotal, total) => {
+        setOperationProgress({
+          open: true,
+          title: 'Deleting students',
+          detail: 'Removing selected records in 40% batches.',
+          progress: Math.round((deletedTotal / total) * 100),
+          processed: deletedTotal,
+          total,
+        });
+      });
 
       if (deletedCount > 0) {
         window.dispatchEvent(new Event('studentsUpdated'));
@@ -741,6 +905,10 @@ export default function Students() {
     } catch (error) {
       console.error('Bulk delete error:', error);
       addToast('Failed to delete students', 'error');
+    } finally {
+      window.setTimeout(() => {
+        setOperationProgress(prev => prev.title === 'Deleting students' ? { ...prev, open: false } : prev);
+      }, 350);
     }
   }
 
@@ -794,6 +962,12 @@ export default function Students() {
     const id = schoolId || user?.id;
     if (!id) return;
     if (selectedStudents.size === 0) return;
+    const selectedRecords = Array.from(selectedStudents)
+      .map(studentId => selectedStudentRecords.find(s => s.id === studentId) || allStudents.find(s => s.id === studentId))
+      .filter(Boolean) as Student[];
+    const missingRecords = selectedStudents.size - selectedRecords.length;
+    const countToRestore = selectedRecords.filter(student => !countsTowardPlan(student)).length + missingRecords;
+    if (!(await ensureAvailableStudentCapacity(countToRestore))) return;
     
     try {
       const now = new Date().toISOString();
@@ -833,7 +1007,7 @@ export default function Students() {
   }
 
   function handleBulkSendEmail() {
-    const selectedList = students.filter(s => selectedStudents.has(s.id) && s.guardianEmail);
+    const selectedList = selectedStudentRecords.filter(s => selectedStudents.has(s.id) && s.guardianEmail);
     if (selectedList.length === 0) {
       addToast('No students with guardian email selected', 'warning');
       return;
@@ -937,11 +1111,13 @@ export default function Students() {
         case 'lastName': return 'Doe';
         case 'gender': return 'male';
         case 'dob': return '2010-01-15';
-        case 'classId': return 'primary-1';
+        case 'classId': return 'Primary 1';
+        case 'stream': return 'A';
         case 'address': return '123 Main Street';
         case 'guardianName': return 'Jane Doe';
         case 'guardianPhone': return '0771234567';
         case 'guardianEmail': return 'jane@example.com';
+        case 'studentEmail': return 'john@example.com';
         default: return '';
       }
     });
@@ -962,7 +1138,9 @@ export default function Students() {
     setCsvHeaders([]);
     setCsvData([]);
     setFieldMapping({});
+    setCustomFieldMapping({});
     setImportPreview([]);
+    setIsPreviewingImport(false);
     setPlanLimitMessage(null);
     setImportRemaining(null);
     setIsImporting(false);
@@ -977,53 +1155,37 @@ export default function Students() {
     if (!file) return;
 
     try {
-      let headers: string[] = [];
-      let data: string[][] = [];
-
-      if (/\.(xlsx|xls)$/i.test(file.name)) {
-        const { read, utils } = await import('xlsx');
-        const workbook = read(await file.arrayBuffer(), { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' })
-          .filter(row => row.some(cell => String(cell ?? '').trim()));
-        if (rows.length < 2) {
-          addToast('Excel file must have headers and at least one data row', 'error');
-          return;
-        }
-        headers = rows[0].map(cell => String(cell ?? '').trim());
-        data = rows.slice(1).map(row => headers.map((_, index) => String(row[index] ?? '').trim()));
-      } else {
-        const text = await file.text();
-        const lines = text.split('\n').filter(line => line.trim());
-        if (lines.length < 2) {
-          addToast('CSV file must have headers and at least one data row', 'error');
-          return;
-        }
-        headers = parseCSVHeaders(lines[0]);
-        data = lines.slice(1).map(line => parseCSVLine(line));
-      }
+      const { headers, data } = await parseImportFile(file);
       
       setCsvHeaders(headers);
       setCsvData(data);
       
       const autoMapping: Record<string, string> = {};
+      const normalizedHeaders = headers.map(header => ({ header, normalized: normalizeImportHeader(header) }));
       expectedFields.forEach(field => {
-        const matchingHeader = headers.find(h => 
-          h.toLowerCase() === field.label.toLowerCase() ||
-          h.toLowerCase() === field.key.toLowerCase() ||
-          h.toLowerCase().includes(field.key.toLowerCase()) ||
-          field.label.toLowerCase().includes(h.toLowerCase())
+        const candidates = [
+          field.key,
+          field.label,
+          ...((field as any).aliases || []),
+        ].map(normalizeImportHeader).filter(Boolean);
+        const matching = normalizedHeaders.find(({ normalized }) =>
+          candidates.some(candidate => normalized === candidate || normalized.includes(candidate) || candidate.includes(normalized))
         );
-        if (matchingHeader) {
-          autoMapping[field.key] = matchingHeader;
-        }
+        if (matching) autoMapping[field.key] = matching.header;
+      });
+      const mappedHeaders = new Set(Object.values(autoMapping).filter(Boolean));
+      const autoCustomMapping: Record<string, string> = {};
+      headers.forEach(header => {
+        if (!header || mappedHeaders.has(header)) return;
+        autoCustomMapping[header] = header;
       });
       setFieldMapping(autoMapping);
+      setCustomFieldMapping(autoCustomMapping);
       setImportStep('map');
       setShowImportModal(true);
     } catch (error) {
       console.error('File read error:', error);
-      addToast('Failed to read import file', 'error');
+      addToast(error instanceof Error ? error.message : 'Failed to read import file', 'error');
     }
 
     event.target.value = '';
@@ -1069,6 +1231,129 @@ export default function Students() {
     return result;
   }
 
+  function normalizeImportToken(value: unknown): string {
+    const wordNumbers: Record<string, string> = {
+      baby: 'baby',
+      middle: 'middle',
+      top: 'top',
+      nursery: 'nursery',
+      kg: 'kg',
+      kindergarten: 'kg',
+      reception: 'reception',
+      zero: '0',
+      one: '1',
+      first: '1',
+      two: '2',
+      second: '2',
+      three: '3',
+      third: '3',
+      four: '4',
+      fourth: '4',
+      five: '5',
+      fifth: '5',
+      six: '6',
+      sixth: '6',
+      seven: '7',
+      seventh: '7',
+      eight: '8',
+      eighth: '8',
+      nine: '9',
+      ninth: '9',
+      ten: '10',
+      tenth: '10',
+      eleven: '11',
+      eleventh: '11',
+      twelve: '12',
+      twelfth: '12',
+      thirteen: '13',
+      thirteenth: '13',
+    };
+    return String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\b(class|grade|level|standard|std|year)\b/g, '')
+      .replace(/\b(primary|pri|pry)\b/g, 'p')
+      .replace(/\b(senior secondary|secondary|senior)\b/g, 's')
+      .replace(/\bjunior secondary\b/g, 'jss')
+      .replace(/\b(baby class)\b/g, 'baby')
+      .replace(/\b([a-z]+)\b/g, part => wordNumbers[part] || part)
+      .replace(/[^a-z0-9]+/g, '');
+  }
+
+  function normalizeImportId(value: unknown): string {
+    return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
+  function getImportClassesForMatching(): Class[] {
+    const availableImportClasses = classes.length > 0 ? classes : (classesStoreData as Class[]);
+    return availableImportClasses.length > 0
+      ? availableImportClasses
+      : [
+        { id: 'primary-1', name: 'Primary 1', level: 1, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'primary-2', name: 'Primary 2', level: 2, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'primary-3', name: 'Primary 3', level: 3, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'primary-4', name: 'Primary 4', level: 4, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'primary-5', name: 'Primary 5', level: 5, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'primary-6', name: 'Primary 6', level: 6, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'jss-1', name: 'JSS 1', level: 7, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'jss-2', name: 'JSS 2', level: 8, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'jss-3', name: 'JSS 3', level: 9, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'ss-1', name: 'SS 1', level: 10, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'ss-2', name: 'SS 2', level: 11, capacity: 40, schoolId: sid, createdAt: '' },
+        { id: 'ss-3', name: 'SS 3', level: 12, capacity: 40, schoolId: sid, createdAt: '' },
+      ] as Class[];
+  }
+
+  function resolveImportClassId(rawValue: unknown, streamValue?: unknown): string {
+    return resolveClassIdFromText(rawValue, getImportClassesForMatching(), streamValue);
+  }
+
+  function inferImportStream(rawClassValue: unknown, explicitStreamValue: unknown, matchedClass?: Class): string {
+    const explicitStream = getImportCellText(explicitStreamValue);
+    if (explicitStream) return explicitStream;
+
+    const rawClass = getImportCellText(rawClassValue);
+    if (!rawClass) return '';
+
+    const matchedStream = getImportCellText((matchedClass as any)?.stream);
+    if (matchedStream && normalizeImportToken(rawClass).includes(normalizeImportToken(matchedStream))) {
+      return matchedStream;
+    }
+
+    const suffixPatterns = [
+      /^(?:class|grade|level|standard|std|form|year)?\s*(?:p(?:rimary)?|pri|pry|jss|ss|s)?\s*\.?\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen)\s*(?:-|\/|\\|\s+|stream\s+|section\s+|arm\s+)+([a-z0-9][a-z0-9 ._-]*)$/i,
+      /^(?:p|primary|pri|pry|jss|ss|s)\s*\.?\s*\d+\s*([a-z])$/i,
+    ];
+
+    for (const pattern of suffixPatterns) {
+      const match = rawClass.match(pattern);
+      const stream = getImportCellText(match?.[1]).replace(/^(stream|section|arm)\s+/i, '').trim();
+      if (stream) return stream.toUpperCase();
+    }
+
+    return '';
+  }
+
+  function getKnownMappedHeaders(mapping: Record<string, string> = fieldMapping) {
+    return new Set(Object.values(mapping).filter(Boolean));
+  }
+
+  function updateKnownFieldMapping(fieldKey: string, header: string) {
+    setFieldMapping(prev => {
+      const next = { ...prev, [fieldKey]: header };
+      const used = getKnownMappedHeaders(next);
+      setCustomFieldMapping(customPrev => {
+        const customNext = { ...customPrev };
+        csvHeaders.forEach(csvHeader => {
+          if (used.has(csvHeader)) delete customNext[csvHeader];
+          else if (customNext[csvHeader] === undefined) customNext[csvHeader] = csvHeader;
+        });
+        return customNext;
+      });
+      return next;
+    });
+  }
+
   function processMapping() {
     const mappedData: Partial<Student>[] = [];
     const newFlaggedItems: Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }> = {};
@@ -1077,22 +1362,72 @@ export default function Students() {
       key: field.key,
       index: fieldMapping[field.key] ? headerIndexByName.get(fieldMapping[field.key]) ?? -1 : -1,
     }));
+    const customFieldIndexes = Object.entries(customFieldMapping)
+      .map(([header, label]) => ({
+        header,
+        label: label.trim(),
+        index: headerIndexByName.get(header) ?? -1,
+      }))
+      .filter(item => item.label && item.index !== -1);
     const existingByName = new Map(
       allStudents.map(student => [
         `${student.firstName || ''}|${student.lastName || ''}`.toLowerCase(),
         student,
       ])
     );
+    const existingByImportId = new Map<string, Student>();
+    allStudents.forEach(student => {
+      [student.id, student.studentId, student.admissionNo].forEach(value => {
+        const key = normalizeImportId(value);
+        if (key && !existingByImportId.has(key)) existingByImportId.set(key, student);
+      });
+    });
     
     for (let i = 0; i < csvData.length; i++) {
       const row = csvData[i];
       const student: Partial<Student> = {};
       
       fieldIndexes.forEach(field => {
-        if (field.index !== -1 && row[field.index]) {
-          (student as any)[field.key] = row[field.index];
+        if (field.index !== -1) {
+          const value = getImportCellText(row[field.index]);
+          if (value) {
+            (student as any)[field.key] = value;
+          }
         }
       });
+      if ((student as any).firstName && !(student as any).lastName) {
+        const mappedFirstHeader = fieldMapping.firstName || '';
+        const looksLikeFullName = ['name', 'studentname', 'learnername', 'fullname'].includes(normalizeImportHeader(mappedFirstHeader));
+        if (looksLikeFullName) {
+          const parts = getImportCellText((student as any).firstName).split(/\s+/).filter(Boolean);
+          if (parts.length > 1) {
+            (student as any).firstName = parts.shift() || '';
+            (student as any).lastName = parts.join(' ');
+          }
+        }
+      }
+      const customFields = customFieldIndexes
+        .map(field => ({
+          id: generateUUID(),
+          label: field.label,
+          value: getImportCellText(row[field.index]),
+        }))
+        .filter(field => field.value);
+      if (customFields.length > 0) {
+        (student as any).customFields = customFields;
+      }
+      const importedId = (student as any).studentId || (student as any).admissionNo || (student as any).id;
+      const resolvedClassId = resolveImportClassId((student as any).classId, (student as any).stream);
+      const matchedClass = getImportClassesForMatching().find(classItem => classItem.id === resolvedClassId);
+      const inferredStream = inferImportStream((student as any).classId, (student as any).stream, matchedClass);
+      if (inferredStream) {
+        (student as any).stream = inferredStream;
+      }
+      if ((student as any).classId && resolvedClassId) {
+        (student as any).classId = resolvedClassId;
+      } else if ((student as any).classId) {
+        (student as any).classId = '';
+      }
       
       if (student.firstName || student.lastName) {
         const fn = (student.firstName as string) || '';
@@ -1101,11 +1436,11 @@ export default function Students() {
         
         (student as any).id = generatedId;
         
-        const existingStudent = existingByName.get(`${fn}|${ln}`.toLowerCase());
+        const existingStudent = existingByImportId.get(normalizeImportId(importedId)) || existingByName.get(`${fn}|${ln}`.toLowerCase());
         
         if (existingStudent) {
           newFlaggedItems[i] = {
-            action: 'skip',
+            action: 'replace',
             existingId: existingStudent.id,
             existingStudent: existingStudent
           };
@@ -1121,15 +1456,32 @@ export default function Students() {
     const id = schoolId || user?.id;
     if (id) {
       void getSubscriptionAccessState(id, undefined, { authUserId: user?.id }).then(access => {
+        setImportPlanName(access.plan?.name || 'No active plan');
         setImportRemaining(access.remaining);
         const importable = countNewEnrolledImports(mappedData, newFlaggedItems);
-        if (access.plan && importable > access.remaining) {
+        if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
+          setPlanLimitMessage(`Choose an active plan before importing students. Current plan: ${access.plan?.name || 'No active plan'}. Upgrade to continue.`);
+        } else if (importable > access.remaining) {
           const available = Math.max(0, access.remaining);
-          setPlanLimitMessage(`Only ${available} student${available === 1 ? '' : 's'} remaining on ${access.plan.name}. This file has ${importable} new enrolled student${importable === 1 ? '' : 's'}. Use Import Available to add the first ${available} allowed student${available === 1 ? '' : 's'}, or upgrade your plan.`);
+          setPlanLimitMessage(`Current plan: ${access.plan.name}. Only ${available} student${available === 1 ? '' : 's'} remaining, but this file has ${importable} new enrolled student${importable === 1 ? '' : 's'}. Use Import Available to add the allowed students, or upgrade your plan.`);
         }
-      }).catch(() => setImportRemaining(null));
+      }).catch(() => {
+        setImportRemaining(null);
+        setImportPlanName('your current plan');
+      });
     }
     setImportStep('preview');
+  }
+
+  async function previewImportWithDelay() {
+    if (isPreviewingImport) return;
+    setIsPreviewingImport(true);
+    try {
+      await new Promise(resolve => window.setTimeout(resolve, 2000));
+      processMapping();
+    } finally {
+      setIsPreviewingImport(false);
+    }
   }
 
   async function handleBulkStudentImages(updates: Array<{ id: string; photoUrl: string }>) {
@@ -1168,6 +1520,14 @@ export default function Students() {
     if (isImporting) return;
     setIsImporting(true);
     setImportProgress(0);
+    setOperationProgress({
+      open: true,
+      title: 'Importing students',
+      detail: 'Preparing records in 40% phase.',
+      progress: 5,
+      processed: 0,
+      total: importPreview.length,
+    });
 
     try {
       const now = new Date().toISOString();
@@ -1179,32 +1539,43 @@ export default function Students() {
       const newEnrolledCount = countNewEnrolledImports();
 
       let remaining = importRemaining;
-      let activePlanName = 'your plan';
+      let activePlanName = importPlanName || 'your current plan';
       if (remaining === null) {
         const access = await getSubscriptionAccessState(id, undefined, { authUserId: user?.id });
         if (!access.plan || access.status === 'incomplete' || access.status === 'expired') {
-          addToast('Choose an active plan before importing students.', 'error');
-          setPlanLimitMessage('Choose an active plan before importing students.');
+          const message = `Choose an active plan before importing students. Current plan: ${access.plan?.name || 'No active plan'}. Upgrade to continue.`;
+          addToast(message, 'error');
+          setPlanLimitMessage(message);
           navigate('/plans');
           setIsImporting(false);
           return;
         }
         remaining = access.remaining;
         activePlanName = access.plan.name;
+        setImportPlanName(activePlanName);
       }
       if (newEnrolledCount > remaining) {
         const available = Math.max(0, remaining);
         if (!importAvailableOnly || available <= 0) {
-          const message = `Plan limit reached. You can add ${available} more enrolled student${available === 1 ? '' : 's'} on ${activePlanName}, but this import adds ${newEnrolledCount}. Use Import Available or upgrade your plan.`;
+          const message = `Current plan: ${activePlanName}. Plan limit exceeded: you can add ${available} more enrolled student${available === 1 ? '' : 's'}, but this import adds ${newEnrolledCount}. Upgrade your plan to continue.`;
           setPlanLimitMessage(message);
           addToast(message, 'error');
+          navigate('/plans');
           setIsImporting(false);
           return;
         }
-        setPlanLimitMessage(`Importing ${available} available student${available === 1 ? '' : 's'} now. ${newEnrolledCount - available} extra student${newEnrolledCount - available === 1 ? '' : 's'} will be skipped until you upgrade.`);
+        setPlanLimitMessage(`Current plan: ${activePlanName}. Importing ${available} available student${available === 1 ? '' : 's'} now. ${newEnrolledCount - available} extra student${newEnrolledCount - available === 1 ? '' : 's'} will be skipped until you upgrade.`);
       }
 
       setImportProgress(20);
+      setOperationProgress({
+        open: true,
+        title: 'Importing students',
+        detail: 'Matching classes and IDs.',
+        progress: 20,
+        processed: 0,
+        total: importPreview.length,
+      });
       const creates: Student[] = [];
       const updates: Array<{ id: string; data: Partial<Student> }> = [];
       let newEnrolledReserved = 0;
@@ -1224,11 +1595,14 @@ export default function Students() {
           lastName: (data.lastName as string) || 'Unknown',
           dob: (data.dob as string) || '2000-01-01',
           gender: validGender,
-          classId: (data.classId as string) || 'primary-1',
+          classId: (data.classId as string) || '',
+          ...(((data as any).stream as string) ? { stream: (data as any).stream as string } : {}),
           address: (data.address as string) || '',
           guardianName: (data.guardianName as string) || '',
           guardianPhone: (data.guardianPhone as string) || '',
           guardianEmail: data.guardianEmail as string | undefined,
+          ...(((data as any).studentEmail as string) ? { studentEmail: (data as any).studentEmail as string, email: (data as any).studentEmail as string } : {}),
+          customFields: ((data as any).customFields || []) as any,
           status: importStatus as any,
           completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
           completedTerm: importStatus === 'completed' ? 'Final' : undefined,
@@ -1240,22 +1614,58 @@ export default function Students() {
       const toUpdatePayload = (data: Partial<Student>): Partial<Student> => {
         const genderValue = ((data as any).gender as string)?.toLowerCase();
         const validGender = genderValue === 'female' ? Gender.FEMALE : genderValue === 'other' ? Gender.OTHER : Gender.MALE;
-
-        return {
-          firstName: (data.firstName as string) || 'Unknown',
-          lastName: (data.lastName as string) || 'Unknown',
-          dob: (data.dob as string) || '2000-01-01',
-          gender: validGender,
-          classId: (data.classId as string) || 'primary-1',
-          address: (data.address as string) || '',
-          guardianName: (data.guardianName as string) || '',
-          guardianPhone: (data.guardianPhone as string) || '',
-          guardianEmail: data.guardianEmail as string | undefined,
-          status: importStatus as any,
-          completedYear: importStatus === 'completed' ? new Date().getFullYear() : undefined,
-          completedTerm: importStatus === 'completed' ? 'Final' : undefined,
+        const payload: Partial<Student> = {
           updatedAt: now,
+        } as Partial<Student>;
+
+        const assignIfValue = (key: string, value: unknown) => {
+          if (value === undefined || value === null) return;
+          const text = typeof value === 'string' ? value.trim() : value;
+          if (typeof text === 'string' && text === '') return;
+          (payload as any)[key] = text;
         };
+
+        assignIfValue('studentId', (data as any).studentId);
+        assignIfValue('admissionNo', (data as any).admissionNo);
+        assignIfValue('firstName', data.firstName);
+        assignIfValue('lastName', data.lastName);
+        assignIfValue('dob', data.dob);
+        if ((data as any).gender) assignIfValue('gender', validGender);
+        assignIfValue('classId', data.classId);
+        assignIfValue('stream', (data as any).stream);
+        assignIfValue('address', data.address);
+        assignIfValue('guardianName', data.guardianName);
+        assignIfValue('guardianPhone', data.guardianPhone);
+        assignIfValue('guardianEmail', data.guardianEmail);
+        assignIfValue('studentEmail', (data as any).studentEmail);
+        assignIfValue('email', (data as any).studentEmail);
+        if (Array.isArray((data as any).customFields) && (data as any).customFields.length > 0) {
+          (payload as any).customFields = (data as any).customFields;
+        }
+        assignIfValue('status', importStatus);
+        if (importStatus === 'completed') {
+          payload.completedYear = new Date().getFullYear();
+          payload.completedTerm = 'Final';
+        }
+        return payload;
+      };
+
+      const mergeCustomFields = (existingStudent: Partial<Student> | undefined, incomingFields: any[] = []) => {
+        const byLabel = new Map<string, any>();
+        ((existingStudent as any)?.customFields || []).forEach((field: any) => {
+          const key = String(field?.label || '').trim().toLowerCase();
+          if (key) byLabel.set(key, field);
+        });
+        incomingFields.forEach((field: any) => {
+          const label = String(field?.label || '').trim();
+          if (!label) return;
+          byLabel.set(label.toLowerCase(), {
+            id: byLabel.get(label.toLowerCase())?.id || field.id || generateUUID(),
+            label,
+            value: String(field?.value ?? '').trim(),
+          });
+        });
+        return Array.from(byLabel.values());
       };
 
       for (let i = 0; i < importPreview.length; i++) {
@@ -1286,10 +1696,14 @@ export default function Students() {
             reservedIds.add(newId);
             creates.push(toStudentPayload(data, newId));
           } else if (flagged.action === 'replace' && flagged.existingId) {
-            updates.push({ id: flagged.existingId, data: toUpdatePayload(data) });
+            const updatePayload = toUpdatePayload(data);
+            if (Array.isArray((data as any).customFields) && (data as any).customFields.length > 0) {
+              (updatePayload as any).customFields = mergeCustomFields(flagged.existingStudent, (data as any).customFields);
+            }
+            updates.push({ id: flagged.existingId, data: updatePayload });
           }
         } else {
-          let studentIdLocal = (data as any).id || generateStudentId((data.firstName as string) || '', (data.lastName as string) || '');
+          let studentIdLocal = (data as any).studentId || (data as any).admissionNo || (data as any).id || generateStudentId((data.firstName as string) || '', (data.lastName as string) || '');
           while (reservedIds.has(studentIdLocal)) studentIdLocal = generateUUID();
           reservedIds.add(studentIdLocal);
           creates.push(toStudentPayload(data, studentIdLocal));
@@ -1297,10 +1711,26 @@ export default function Students() {
       }
 
       setImportProgress(70);
+      setOperationProgress({
+        open: true,
+        title: 'Importing students',
+        detail: 'Saving records locally.',
+        progress: 70,
+        processed: creates.length + updates.length,
+        total: importPreview.length,
+      });
       const result = await dataService.bulkImportStudents(id, creates, updates);
       successCount = result.imported;
       replacedCount = result.replaced;
       setImportProgress(100);
+      setOperationProgress({
+        open: true,
+        title: 'Importing students',
+        detail: 'Import complete.',
+        progress: 100,
+        processed: successCount + replacedCount,
+        total: importPreview.length,
+      });
 
       const parts: string[] = [];
       if (successCount > 0) parts.push(`${successCount} imported`);
@@ -1309,15 +1739,18 @@ export default function Students() {
       
       addToast(parts.join(', ') || 'Import complete', 'success');
       closeImportModal();
-      window.dispatchEvent(new CustomEvent('studentsUpdated'));
-      window.dispatchEvent(new CustomEvent('dataRefresh'));
-      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'students' } }));
+      window.dispatchEvent(new CustomEvent('studentsUpdated', { detail: { table: 'students', localOnly: true } }));
+      window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'students', localOnly: true } }));
+      window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'students', localOnly: true } }));
       void loadData();
     } catch (error) {
       console.error('Import error:', error);
       addToast('Failed to import students', 'error');
     } finally {
       setIsImporting(false);
+      window.setTimeout(() => {
+        setOperationProgress(prev => prev.title === 'Importing students' ? { ...prev, open: false } : prev);
+      }, 450);
     }
   }
 
@@ -1682,16 +2115,16 @@ export default function Students() {
           {showSelectionBar && selectedStudents.size > 0 && viewFilter !== 'completed' && (
             <div className="px-4 py-3 bg-indigo-50 dark:bg-indigo-900/20 border-b border-indigo-200 dark:border-indigo-800 flex items-center justify-between overflow-hidden transition-all duration-300 ease-out" style={{ maxHeight: selectMode ? '200px' : '0', opacity: selectMode ? 1 : 0 }}>
               <span className="text-sm text-indigo-700 dark:text-indigo-300 font-medium animate-selection-content-in">
-                {selectedStudents.size} selected
+                {selectedStudents.size} selected{selectedStudents.size > paginatedStudents.length ? ` across ${filteredStudentIds.length.toLocaleString()} shown by filters` : ''}
               </span>
               <div className="flex items-center gap-2 flex-wrap animate-selection-content-in">
                 <button
                   onClick={handleSelectAll}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
                 >
-                  {selectedStudents.size === paginatedStudents.length ? 'Deselect All' : 'Select All'}
+                  {allFilteredStudentsSelected ? 'Deselect All' : `Select All (${filteredStudentIds.length.toLocaleString()})`}
                 </button>
-                {allVisibleStudentsSelected && (
+                {selectedStudents.size > 0 && (
                   <button
                     onClick={() => setShowBulkImageModal(true)}
                     className="px-3 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
@@ -1763,16 +2196,16 @@ export default function Students() {
           {showSelectionBar && selectedStudents.size > 0 && viewFilter === 'completed' && (
             <div className="px-4 py-3 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-800 flex items-center justify-between overflow-hidden transition-all duration-300 ease-out" style={{ maxHeight: selectMode ? '200px' : '0', opacity: selectMode ? 1 : 0 }}>
               <span className="text-sm text-violet-700 dark:text-violet-300 font-medium animate-selection-content-in">
-                {selectedStudents.size} selected (School Records)
+                {selectedStudents.size} selected (School Records){selectedStudents.size > paginatedStudents.length ? ` across ${filteredStudentIds.length.toLocaleString()} shown by filters` : ''}
               </span>
               <div className="flex items-center gap-2 flex-wrap animate-selection-content-in">
                 <button
                   onClick={handleSelectAll}
                   className="text-xs text-violet-600 dark:text-violet-400 hover:underline"
                 >
-                  {selectedStudents.size === paginatedStudents.length ? 'Deselect All' : 'Select All'}
+                  {allFilteredStudentsSelected ? 'Deselect All' : `Select All (${filteredStudentIds.length.toLocaleString()})`}
                 </button>
-                {allVisibleStudentsSelected && (
+                {selectedStudents.size > 0 && (
                   <button
                     onClick={() => setShowBulkImageModal(true)}
                     className="px-3 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
@@ -1837,6 +2270,12 @@ export default function Students() {
             </div>
           )}
           
+          <div className={`students-show-all-stage ${showAllTransitioning ? 'students-show-all-stage-transitioning' : ''}`}>
+            {showAllTransitioning && (
+              <div className="students-show-all-progress" aria-hidden="true">
+                <span />
+              </div>
+            )}
           {viewFilter !== 'completed' ? (
             <table>
               <thead>
@@ -1844,7 +2283,7 @@ export default function Students() {
                   <th className="w-10">#</th>
                   {selectMode && <th className="w-10">
                     <button onClick={handleSelectAll} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">
-                      {selectedStudents.size === paginatedStudents.length && paginatedStudents.length > 0 ? (
+                      {allFilteredStudentsSelected ? (
                         <CheckSquare size={16} className="text-primary-600" />
                       ) : (
                         <Square size={16} className="text-slate-400" />
@@ -2100,10 +2539,11 @@ export default function Students() {
               )}
             </div>
           )}
+          </div>
         </div>
 
         {viewFilter !== 'completed' && (
-          <div className="px-4 py-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+          <div className={`px-4 py-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 students-show-all-footer ${showAllTransitioning ? 'students-show-all-footer-transitioning' : ''}`}>
             <p className="text-sm text-slate-500">
               {showAll && !isLargeShowAllList ? (
                 <><span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students shown</>
@@ -2120,7 +2560,7 @@ export default function Students() {
               className="inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors disabled:opacity-70"
             >
               {showAllTransitioning && <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-transparent animate-spin" />}
-              {showAllTransitioning ? (showAll ? 'Loading all...' : 'Loading pages...') : showAll ? 'Show Pages' : 'Show All'}
+              {showAllTransitioning ? (showAll ? 'Returning to pages...' : 'Opening all students...') : showAll ? 'Show Pages' : 'Show All'}
             </button>
           </div>
         )}
@@ -2268,15 +2708,15 @@ export default function Students() {
                   <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg">
                     <table className="w-full text-xs">
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {expectedFields.filter(f => f.required).map(field => (
+                        {expectedFields.map(field => (
                           <tr key={field.key}>
                             <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-medium whitespace-nowrap">
-                              {field.label}*
+                              {field.label}{field.required ? '*' : ''}
                             </td>
                             <td className="px-2 py-1.5">
                               <select
                                 value={fieldMapping[field.key] || ''}
-                                onChange={(e) => setFieldMapping(prev => ({ ...prev, [field.key]: e.target.value }))}
+                                onChange={(e) => updateKnownFieldMapping(field.key, e.target.value)}
                                 className="w-full form-input py-1 px-2 text-xs"
                               >
                                 <option value="">-- Skip --</option>
@@ -2291,10 +2731,36 @@ export default function Students() {
                     </table>
                   </div>
 
+                  {csvHeaders.filter(header => !getKnownMappedHeaders().has(header)).length > 0 && (
+                    <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                      <div className="px-3 py-2 bg-slate-50 dark:bg-slate-700/50">
+                        <h4 className="text-xs font-bold text-slate-700 dark:text-slate-200">Extra fields</h4>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">Rename detected columns to save them as custom student fields, or clear the name to skip.</p>
+                      </div>
+                      <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+                        {csvHeaders.filter(header => !getKnownMappedHeaders().has(header)).map(header => (
+                          <div key={header} className="grid grid-cols-[1fr,1.2fr] gap-2 px-3 py-2 items-center">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{header}</p>
+                              <p className="text-[10px] text-slate-400">Detected column</p>
+                            </div>
+                            <input
+                              value={customFieldMapping[header] ?? ''}
+                              onChange={(e) => setCustomFieldMapping(prev => ({ ...prev, [header]: e.target.value }))}
+                              className="form-input py-1 px-2 text-xs"
+                              placeholder="Skip or rename"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex justify-end gap-2 pt-2">
                     <button onClick={closeImportModal} disabled={isImporting} className="btn btn-secondary py-1.5 px-3 text-sm">Cancel</button>
-                    <button onClick={processMapping} className="py-1.5 px-3 rounded-lg bg-sky-600 text-white hover:bg-sky-700 text-sm font-medium flex items-center gap-1 transition-colors">
-                      Preview <ArrowRight size={14} />
+                    <button onClick={previewImportWithDelay} disabled={isPreviewingImport} className="py-1.5 px-3 rounded-lg bg-sky-600 text-white hover:bg-sky-700 text-sm font-medium flex items-center gap-1 transition-colors disabled:opacity-70">
+                      {isPreviewingImport ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
+                      {isPreviewingImport ? 'Loading preview...' : 'Preview'}
                     </button>
                   </div>
                 </div>
@@ -2304,9 +2770,9 @@ export default function Students() {
                 <div data-preview-fullscreen-root className="flex flex-col h-[calc(86vh-56px)] -m-5 bg-white dark:bg-slate-800">
                   <div className="flex items-center gap-4 px-5 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
                     <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 1</span>
+                      <span className="px-1.5 py-0.5 text-white rounded flex items-center gap-1" style={{ backgroundColor: 'var(--solid-emerald)' }}><Check size={10} /> 1</span>
                       <ArrowRight size={12} />
-                      <span className="px-1.5 py-0.5 bg-green-600 text-white rounded flex items-center gap-1"><Check size={10} /> 2</span>
+                      <span className="px-1.5 py-0.5 text-white rounded flex items-center gap-1" style={{ backgroundColor: 'var(--solid-emerald)' }}><Check size={10} /> 2</span>
                       <ArrowRight size={12} />
                       <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded font-medium">3 Review</span>
                     </div>
@@ -2375,6 +2841,9 @@ export default function Students() {
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {importPreview.map((student, index) => {
                           const flagged = flaggedItems[index];
+                          const resolvedClassLabel = (student as any).classId
+                            ? getClassDisplayName((student as any).classId, classes.length > 0 ? classes : (classesStoreData as Class[]))
+                            : '-';
                           return (
                             <tr key={index} className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 ${flagged ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}>
                               <td className="px-4 py-2.5 text-slate-500">{index + 1}</td>
@@ -2385,11 +2854,17 @@ export default function Students() {
                                   </div>
                                   <div>
                                     <p className="font-medium text-slate-800 dark:text-white">{(student as any).firstName} {(student as any).lastName}</p>
-                                    <p className="text-[10px] text-slate-400">ID: {(student as any).id}</p>
+                                    <p className="text-[10px] text-slate-400">ID: {(student as any).studentId || (student as any).admissionNo || (student as any).id}</p>
+                                    {Array.isArray((student as any).customFields) && (student as any).customFields.length > 0 && (
+                                      <p className="text-[10px] text-sky-500">{(student as any).customFields.length} custom field{(student as any).customFields.length === 1 ? '' : 's'}</p>
+                                    )}
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-4 py-2.5">{(student as any).classId || '-'}</td>
+                              <td className="px-4 py-2.5">
+                                <div className="text-slate-700 dark:text-slate-200">{resolvedClassLabel}</div>
+                                {(student as any).stream && <div className="text-[10px] text-slate-400">Stream {(student as any).stream}</div>}
+                              </td>
                               <td className="px-4 py-2.5">
                                 {flagged ? (
                                   <div>
@@ -2436,7 +2911,7 @@ export default function Students() {
                       {isImporting && (
                         <>
                           <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${importProgress}%` }} />
+                            <div className="h-full transition-all" style={{ width: `${importProgress}%`, backgroundColor: 'var(--solid-emerald)' }} />
                           </div>
                           <p className="mt-1 text-xs text-slate-500">{importProgress}% imported</p>
                         </>
@@ -2447,7 +2922,8 @@ export default function Students() {
                       <button
                         onClick={() => executeImport(true)}
                         disabled={isImporting}
-                        className="py-2 px-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+                        className="py-2 px-4 rounded-lg text-white font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+                        style={{ backgroundColor: 'var(--solid-emerald)' }}
                       >
                         {isImporting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check size={16} />}
                         {isImporting ? 'Importing...' : `Import Available (${allowedNewImportCount})`}
@@ -2521,6 +2997,14 @@ export default function Students() {
           currentClassId={selectedStudents.size === 1 ? students.find(s => selectedStudents.has(s.id))?.classId : undefined}
         />
       )}
+      <OperationProgressPopup
+        open={operationProgress.open}
+        title={operationProgress.title}
+        detail={operationProgress.detail}
+        progress={operationProgress.progress}
+        processed={operationProgress.processed}
+        total={operationProgress.total}
+      />
     </div>
   );
 }

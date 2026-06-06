@@ -12,12 +12,12 @@ import { getSubscriptionAccessState } from '../utils/plans';
 import { isDesktopApp, setCloudSyncEnabled } from '../utils/desktopSyncPreference';
 import { loginLocal, registerLocal } from '../lib/auth/LocalAuth';
 import { createVerifiedPlanProof, readVerifiedPlanProof, restoreVerifiedPlanProof } from '../utils/planProof';
+import { isUnlockedRelease } from '../utils/releaseChannel';
 import {
   clearStorageEncryption,
   unlockStorageEncryption,
   unlockStorageEncryptionFromDesktopBackup,
 } from '../lib/database/StorageCrypto';
-import { isUnlockedRelease } from '../utils/releaseChannel';
 
 export interface LocalUser {
   id: string;
@@ -74,6 +74,8 @@ async function backupVerifiedPlan(tenantId: string | null | undefined) {
   const active = status === 'active' || status === 'expiring';
   const notExpired = expiry && !Number.isNaN(expiry.getTime()) && expiry.getTime() > Date.now();
   if (!active || pending || !plan || !notExpired) return;
+  const verificationCodeHash = localStorage.getItem('schofy_plan_verification_code_hash') || undefined;
+  if (plan === 'unlimited' && (!isUnlockedRelease || !verificationCodeHash)) return;
 
   await createVerifiedPlanProof({
     tenantId,
@@ -82,8 +84,8 @@ async function backupVerifiedPlan(tenantId: string | null | undefined) {
     schofy_sub_plan: plan!,
     schofy_sub_pending: '0',
     remoteVerifiedAt: localStorage.getItem('schofy_plan_remote_verified_at') || new Date().toISOString(),
-    verificationCodeHash: localStorage.getItem('schofy_plan_verification_code_hash') || undefined,
-    source: localStorage.getItem('schofy_plan_verification_code_hash') ? 'verification_code' : 'remote_subscription',
+    verificationCodeHash,
+    source: verificationCodeHash ? 'verification_code' : 'remote_subscription',
   });
 }
 
@@ -467,7 +469,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const localResult = await loginLocal(email.toLowerCase().trim(), password, { syncToCloud: false });
         if (localResult.success && localResult.user) {
           const userData = mapLocalAccount(localResult.user);
-          if (!isUnlockedRelease && !(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
+          if (!(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
             return { success: false, error: 'Offline login requires an active Schofy plan already verified by code on this device. Connect to internet, send payment by WhatsApp, then enter your verification code on Plans.' };
           }
           await unlockStorageEncryption({
@@ -630,8 +632,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       void userDBManager.openDatabase(userData.schoolId).catch(() => {});
       
-      // If online, perform a full blocking sync before letting the user in
-      // This ensures "unlimited offline access" is ready immediately
+      // If online, perform a full blocking sync before letting the user in.
+      // Verified plan proof is restored locally so the account can continue offline later.
       if (isOnline) {
         initializeSyncForUser(userData, { wait: true });
         if ((userData as any)._bootstrapPromise) {
@@ -828,7 +830,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       setCloudSyncEnabled(false);
       markLocalUnlimitedAccess(userData);
-      localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, isUnlockedRelease ? 'unlocked_local_registration' : 'locked_local_registration_pending_plan');
+      localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'locked_local_registration_pending_plan');
       saveSession(userData);
       setUser(userData);
       setSchoolId(userData.schoolId);
@@ -848,7 +850,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const loginResult = await loginLocal(cleanEmail, cleanPassword, { syncToCloud: false });
       if (loginResult.success && loginResult.user) {
         const userData = mapLocalAccount(loginResult.user);
-        if (!isUnlockedRelease && !(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
+        if (!(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
           return { success: false, error: 'This local account has no active verified plan. Connect to internet, open Plans, send payment by WhatsApp, then enter your Schofy verification code for offline access.' };
         }
         await unlockStorageEncryption({
@@ -891,7 +893,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const userData = mapLocalAccount(result.user);
-    if (!isUnlockedRelease && !(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
+    if (!(await hasUsableVerifiedPlanBackup(userData.schoolId))) {
       return { success: false, error: 'This local account has no active verified plan. Connect to internet, open Plans, send payment by WhatsApp, then enter your Schofy verification code for offline access.' };
     }
     await unlockStorageEncryption({
@@ -927,7 +929,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     setCloudSyncEnabled(false);
     markLocalUnlimitedAccess(userData);
-    localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, isUnlockedRelease ? 'unlocked_offline_registration' : 'locked_offline_registration_pending_plan');
+    localStorage.setItem(LOCAL_FALLBACK_REASON_KEY, 'locked_offline_registration_pending_plan');
     saveSession(userData);
     setUser(userData);
     setSchoolId(userData.schoolId);
