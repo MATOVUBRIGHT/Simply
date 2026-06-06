@@ -16,6 +16,7 @@ import { useSync } from './contexts/SyncContext';
 import { initErrorInterceptor } from './lib/errorInterceptor';
 import { supabaseAnonKey, supabaseUrl } from './lib/supabase';
 import { useConfirm } from './components/ConfirmModal';
+import { useTheme } from './contexts/ThemeContext';
 
 // Lazy load pages for performance
 const Login = lazy(() => import('./pages/Login'));
@@ -169,13 +170,17 @@ function PageLoadingSpinner({ label = 'Loading page...' }: { label?: string }) {
 }
 
 function DesktopTitleBar() {
+  const { primaryColor } = useTheme();
   const isDesktop = typeof window !== 'undefined' && Boolean(window.electronAPI);
+  useEffect(() => {
+    if (isDesktop) void window.electronAPI?.setTitleBarColor?.(primaryColor);
+  }, [isDesktop, primaryColor]);
   if (!isDesktop) return null;
   const control = (action: 'minimize' | 'maximize' | 'close') => {
     void window.electronAPI?.windowControl?.(action);
   };
   return (
-    <div className="desktop-titlebar">
+    <div className="desktop-titlebar" style={{ backgroundColor: primaryColor }}>
       <div className="desktop-titlebar-brand">
         <img src="/schofy.logo.png" alt="" className="desktop-titlebar-logo" />
         <span>Schofy - School Management System</span>
