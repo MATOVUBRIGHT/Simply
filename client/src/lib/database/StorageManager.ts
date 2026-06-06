@@ -431,6 +431,37 @@ export async function markBatchDeleted(sid: string, tableName: string, ids: stri
   }
 }
 
+/** Remove a single ID from the deleted registry so restored records can appear again */
+export async function unmarkDeleted(sid: string, tableName: string, id: string): Promise<void> {
+  const key = `${sid}:${tableName}`;
+  const reg = _loadDeletedLS();
+  if (reg[key]) {
+    reg[key] = reg[key].filter(existingId => existingId !== id);
+    if (reg[key].length === 0) delete reg[key];
+    try { localStorage.setItem(DELETED_LS_KEY, JSON.stringify(reg)); } catch {}
+    void writeElectronBackup(DELETED_BACKUP_KEY, reg);
+  }
+
+  try {
+    const db = await getStorageDB();
+    const existing = await new Promise<string[]>((resolve) => {
+      const tx = db.transaction(DELETED_STORE, 'readonly');
+      const getReq = tx.objectStore(DELETED_STORE).get(key);
+      getReq.onsuccess = async () => resolve(await decryptJson<string[]>(getReq.result) || []);
+      getReq.onerror = () => resolve([]);
+    });
+    const updated = existing.filter(existingId => existingId !== id);
+    const tx = db.transaction(DELETED_STORE, 'readwrite');
+    if (updated.length > 0) {
+      tx.objectStore(DELETED_STORE).put(await encryptJson(updated), key);
+    } else {
+      tx.objectStore(DELETED_STORE).delete(key);
+    }
+  } catch {
+    // localStorage/native backup already updated above
+  }
+}
+
 /** Filter records, removing any whose IDs are in the deleted registry */
 export async function filterDeleted(sid: string, tableName: string, records: any[]): Promise<any[]> {
   const deleted = await getDeletedIds(sid, tableName);

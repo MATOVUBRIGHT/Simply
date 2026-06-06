@@ -23,6 +23,7 @@ import {
   loadQueue,
   markDeleted as _markDeleted,
   markBatchDeleted as _markBatchDeleted,
+  unmarkDeleted as _unmarkDeleted,
   filterDeleted as _filterDeleted,
   getDeletedIds as _getDeletedIds,
   writeElectronBackup,
@@ -465,6 +466,20 @@ function markBatchDeleted(sid: string, tableName: string, ids: string[]) {
     if (!reg[memKey].includes(id)) reg[memKey].push(id);
   }
   saveDeletedRegistry(reg);
+}
+
+function unmarkDeleted(sid: string, tableName: string, id: string) {
+  const memKey = `${sid}:${tableName}`;
+  _deletedMemory.get(memKey)?.delete(id);
+
+  const reg = loadDeletedRegistry();
+  if (reg[memKey]) {
+    reg[memKey] = reg[memKey].filter(existingId => existingId !== id);
+    if (reg[memKey].length === 0) delete reg[memKey];
+    saveDeletedRegistry(reg);
+  }
+
+  void _unmarkDeleted(sid, tableName, id);
 }
 
 function getDeletedIds(sid: string, tableName: string): Set<string> {
@@ -1996,6 +2011,13 @@ class SupabaseDataService {
       enqueue({ op: 'create', userId, tableName, data: record });
       return { success: true, syncedRemotely: false, savedLocally: true, record };
     }
+  }
+
+  async restoreDeleted(userId: string, tableName: string, data: any): Promise<SyncResult> {
+    const sid = this.sid(userId);
+    const originalId = data?.id;
+    if (originalId) unmarkDeleted(sid, tableName, String(originalId));
+    return this.create(userId, tableName, data);
   }
 
   async bulkCreate(userId: string, tableName: string, records: any[]): Promise<SyncResult & { imported: number; records: any[] }> {

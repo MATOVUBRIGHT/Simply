@@ -77,7 +77,8 @@ export default function RecycleBin() {
           loadDeletedItems();
           addToast(`${item.type} already exists, removed from recycle bin`, 'info');
         } else {
-          await dataService.create(authId, storeName, item.data as any);
+          const result = await dataService.restoreDeleted(authId, storeName, item.data as any);
+          if (!result.success) throw new Error(result.error || 'Restore failed');
           removeFromRecycleBin(authId, id);
           loadDeletedItems();
           addToast(`${item.type.charAt(0).toUpperCase() + item.type.slice(1)} restored successfully`, 'success');
