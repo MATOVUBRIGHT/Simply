@@ -150,17 +150,7 @@ function sanitizeTitleBarColor(color) {
 function applyTitleBarColor(color = DEFAULT_TITLE_BAR_COLOR) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const safeColor = sanitizeTitleBarColor(color);
-  if (typeof mainWindow.setTitleBarOverlay === 'function') {
-    try {
-      mainWindow.setTitleBarOverlay({
-        color: safeColor,
-        symbolColor: '#FFFFFF',
-        height: 39,
-      });
-    } catch {
-      // Native title-bar overlays are platform dependent.
-    }
-  }
+  mainWindow.setBackgroundColor(safeColor);
 }
 
 function getAppUserModelId() {

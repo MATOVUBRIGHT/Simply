@@ -43,6 +43,11 @@ const UGANDA_HOLIDAYS: { month: number; day: number; name: string }[] = [
   { month: 11, day: 26, name: "Boxing Day" },
 ];
 
+function capitalizeDisplayName(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}` : trimmed;
+}
+
 export default function Dashboard() {
   const { user, schoolId } = useAuth();
   const { staffSession, isStaffMode } = useStaffAuth();
@@ -269,10 +274,10 @@ export default function Dashboard() {
   const userName = useMemo(() => {
     if (isStaffMode && staffSession?.staffMember) {
       const staffName = `${staffSession.staffMember.firstName || ''} ${staffSession.staffMember.lastName || ''}`.trim();
-      return staffName || staffSession.staffMember.staffId || 'Staff';
+      return capitalizeDisplayName(staffName || staffSession.staffMember.staffId || 'Staff');
     }
     const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
-    return fullName || user?.email?.split('@')[0] || 'Admin';
+    return capitalizeDisplayName(fullName || user?.email?.split('@')[0] || 'Admin');
   }, [isStaffMode, staffSession, user]);
   const timeGreeting = useMemo(() => {
     const hour = calendarToday.getHours();
