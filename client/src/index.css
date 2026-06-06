@@ -118,10 +118,6 @@ body {
   transition: background-color 0.2s, color 0.2s;
 }
 
-.desktop-titlebar {
-  display: none;
-}
-
 .desktop-titlebar-brand {
   display: flex;
   align-items: center;
@@ -141,13 +137,13 @@ body {
   object-fit: contain;
 }
 
-body:has(.desktop-titlebar) .desktop-titlebar {
+.desktop-titlebar {
   display: flex;
   height: 39px;
   align-items: center;
   justify-content: space-between;
   padding: 0 0 0 0.625rem;
-  background-color: var(--primary-color);
+  background-color: var(--primary-color, #0082FC) !important;
   color: #ffffff;
   -webkit-app-region: drag;
   user-select: none;
@@ -178,7 +174,7 @@ body:has(.desktop-titlebar) .desktop-titlebar {
   background-color: #dc2626;
 }
 
-body:has(.desktop-titlebar) .desktop-shell {
+.desktop-shell {
   min-height: 100vh;
   background-color: #ffffff;
 }

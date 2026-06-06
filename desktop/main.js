@@ -239,7 +239,7 @@ function createWindow() {
     title: 'Schofy',
     frame: false,
     autoHideMenuBar: true,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: DEFAULT_TITLE_BAR_COLOR,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
