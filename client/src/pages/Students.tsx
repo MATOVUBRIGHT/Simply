@@ -46,6 +46,7 @@ const LARGE_SHOW_ALL_THRESHOLD = 500;
 const LARGE_SHOW_ALL_PAGE_FRACTION = 0.2;
 const SHOW_ALL_TRANSITION_MS = 1500;
 const SHOW_ALL_SWAP_DELAY_MS = 260;
+const IMPORT_PREVIEW_RENDER_LIMIT = 300;
 
 function getAvatarColor(name: string) {
   const index = name.charCodeAt(0) % avatarColors.length;
@@ -290,6 +291,8 @@ export default function Students() {
     : Math.min(countNewEnrolledImports(), Math.max(0, importRemaining));
   const newEnrolledImportCount = countNewEnrolledImports();
   const hasImportOverflow = importRemaining !== null && newEnrolledImportCount > importRemaining;
+  const visibleImportPreview = importPreview.slice(0, IMPORT_PREVIEW_RENDER_LIMIT);
+  const hiddenImportPreviewCount = Math.max(0, importPreview.length - visibleImportPreview.length);
 
   useEffect(() => {
     if (importStep !== 'preview' || importRemaining === null) return;
@@ -2818,6 +2821,13 @@ export default function Students() {
                           </p>
                         </div>
                       )}
+                      {hiddenImportPreviewCount > 0 && (
+                        <div className="bg-slate-100 dark:bg-slate-700 rounded-lg px-3 py-1">
+                          <p className="text-sm text-slate-700 dark:text-slate-300">
+                            Showing <strong>{visibleImportPreview.length}</strong> of <strong>{importPreview.length}</strong>
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -2848,7 +2858,7 @@ export default function Students() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.map((student, index) => {
+                        {visibleImportPreview.map((student, index) => {
                           const flagged = flaggedItems[index];
                           const resolvedClassLabel = (student as any).classId
                             ? getClassDisplayName((student as any).classId, classes.length > 0 ? classes : (classesStoreData as Class[]))

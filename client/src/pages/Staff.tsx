@@ -26,6 +26,8 @@ import { OperationProgressPopup } from '../components/OperationProgressPopup';
 import { getPlanStaffLimit, getSubscriptionAccessState } from '../utils/plans';
 import { getImportCellText, parseImportFile } from '../utils/importParser';
 
+const IMPORT_PREVIEW_RENDER_LIMIT = 300;
+
 const avatarColors = [
   'bg-violet-500',
   'bg-teal-500',
@@ -438,7 +440,7 @@ export default function StaffPage() {
       label: `${member.firstName} ${member.lastName}`,
     })), [filteredStaff, selectedStaff]);
   const filteredTeachers = useMemo(() => filteredStaff.filter(s => s.role === StaffRole.TEACHER), [filteredStaff]);
-  const staffProgress = useProgressiveList(filteredStaff, { initialCount: 120, step: 120, delayMs: 2000 });
+  const staffProgress = useProgressiveList(filteredStaff, { initialCount: 120, step: 120, delayMs: 180 });
   const visibleStaff = staffProgress.visibleItems;
   const listLoading = useMinimumLoading(loading, 2000);
 
@@ -1164,6 +1166,8 @@ export default function StaffPage() {
   const availableNewActiveImportCount = availableStaffImportRows.filter(member => isNewActiveImportRow(member)).length;
   const skippedStaffImportCount = Math.max(0, selectedImportCount - availableStaffImportCount);
   const remainingStaffSlots = importPlanCapacity ? Math.max(0, importPlanCapacity.limit - importPlanCapacity.activeStaff) : 0;
+  const visibleImportPreview = importPreview.slice(0, IMPORT_PREVIEW_RENDER_LIMIT);
+  const hiddenImportPreviewCount = Math.max(0, importPreview.length - visibleImportPreview.length);
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -1704,6 +1708,11 @@ export default function StaffPage() {
                     <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                       Choose exactly what to import, or use available slots only.
                     </span>
+                    {hiddenImportPreviewCount > 0 && (
+                      <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        Showing {visibleImportPreview.length} of {importPreview.length} preview rows. All selected rows still import.
+                      </span>
+                    )}
                   </div>
                   <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
                     <div className="h-full overflow-y-auto">
@@ -1718,7 +1727,7 @@ export default function StaffPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {importPreview.map((staffMember, index) => (
+                        {visibleImportPreview.map((staffMember, index) => (
                           <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
                             <td className="px-2 py-1.5">
                               <button

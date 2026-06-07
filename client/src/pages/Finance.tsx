@@ -718,10 +718,10 @@ export default function Finance() {
         .filter(p => p.studentId === selectedLedgerStudentId || selectedLedgerFees.some(f => f.id === p.feeId))
         .sort((a, b) => new Date(a.date || '').getTime() - new Date(b.date || '').getTime())
     : [];
-  const studentFinanceProgress = useProgressiveList(filteredStudentFinance, { initialCount: 120, step: 120, delayMs: 2000 });
-  const ledgerProgress = useProgressiveList(ledgerRows, { initialCount: 120, step: 120, delayMs: 2000 });
-  const invoiceProgress = useProgressiveList(invoicesByStudent, { initialCount: 80, step: 80, delayMs: 2000 });
-  const paymentProgress = useProgressiveList(paymentsByStudent, { initialCount: 80, step: 80, delayMs: 2000 });
+  const studentFinanceProgress = useProgressiveList(filteredStudentFinance, { initialCount: 120, step: 120, delayMs: 180 });
+  const ledgerProgress = useProgressiveList(ledgerRows, { initialCount: 120, step: 120, delayMs: 180 });
+  const invoiceProgress = useProgressiveList(invoicesByStudent, { initialCount: 80, step: 80, delayMs: 180 });
+  const paymentProgress = useProgressiveList(paymentsByStudent, { initialCount: 80, step: 80, delayMs: 180 });
   const visibleFilteredStudentFinance = studentFinanceProgress.visibleItems;
   const visibleLedgerRows = ledgerProgress.visibleItems;
   const visibleInvoicesByStudent = invoiceProgress.visibleItems;
