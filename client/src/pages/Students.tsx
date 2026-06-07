@@ -1722,6 +1722,8 @@ export default function Students() {
       const result = await dataService.bulkImportStudents(id, creates, updates);
       successCount = result.imported;
       replacedCount = result.replaced;
+      const planSkippedCount = Math.max(0, creates.length - result.imported);
+      skippedCount += planSkippedCount;
       setImportProgress(100);
       setOperationProgress({
         open: true,
@@ -1737,8 +1739,9 @@ export default function Students() {
       if (replacedCount > 0) parts.push(`${replacedCount} replaced`);
       if (skippedCount > 0) parts.push(`${skippedCount} skipped`);
       
-      addToast(parts.join(', ') || 'Import complete', 'success');
-      closeImportModal();
+      if (planSkippedCount > 0 && result.error) setPlanLimitMessage(result.error);
+      addToast(parts.join(', ') || 'Import complete', planSkippedCount > 0 ? 'warning' : 'success');
+      if (planSkippedCount === 0) closeImportModal();
       window.dispatchEvent(new CustomEvent('studentsUpdated', { detail: { table: 'students', localOnly: true } }));
       window.dispatchEvent(new CustomEvent('dataRefresh', { detail: { table: 'students', localOnly: true } }));
       window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'students', localOnly: true } }));

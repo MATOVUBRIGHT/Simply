@@ -52,11 +52,11 @@ export interface SyncHealthStatus {
   missingTables: string[];
 }
 
-const PLAN_STUDENT_LIMITS: Record<string, { name: string; studentLimit: number }> = {
-  starter: { name: 'Starter', studentLimit: 100 },
-  professional: { name: 'Professional', studentLimit: 300 },
-  enterprise: { name: 'Enterprise', studentLimit: 500 },
-  unlimited: { name: 'Unlimited', studentLimit: Number.MAX_SAFE_INTEGER },
+const PLAN_LIMITS: Record<string, { name: string; studentLimit: number; staffLimit: number }> = {
+  starter: { name: 'Starter', studentLimit: 100, staffLimit: 15 },
+  professional: { name: 'Professional', studentLimit: 300, staffLimit: 45 },
+  enterprise: { name: 'Enterprise', studentLimit: 500, staffLimit: 75 },
+  unlimited: { name: 'Unlimited', studentLimit: Number.MAX_SAFE_INTEGER, staffLimit: Number.MAX_SAFE_INTEGER },
 };
 
 function countsTowardStudentPlan(record: any) {
@@ -1126,20 +1126,24 @@ class SupabaseDataService {
     return settings.find((row: any) => row?.key === key)?.value;
   }
 
-  private getCurrentPlanLimit(sid: string): { name: string; studentLimit: number } | null {
+  private getCurrentPlanLimit(sid: string): { name: string; studentLimit: number; staffLimit: number } | null {
     const eligible = this.getCachedSetting(sid, 'subscriptionPlanEligible');
-    const expiryRaw = this.getCachedSetting(sid, 'subscriptionExpiryDate');
-    const planId = String(this.getCachedSetting(sid, 'subscriptionPlanId') || '').trim();
+    const expiryRaw = this.getCachedSetting(sid, 'subscriptionExpiryDate') || localStorage.getItem('schofy_sub_expiry');
+    const planId = String(this.getCachedSetting(sid, 'subscriptionPlanId') || localStorage.getItem('schofy_sub_plan') || '').trim();
     const explicitLimit = Number(this.getCachedSetting(sid, 'subscriptionPlanLimit'));
+    const explicitStaffLimit = Number(this.getCachedSetting(sid, 'subscriptionStaffLimit'));
     const explicitName = String(this.getCachedSetting(sid, 'subscriptionPlanName') || '').trim();
-    const plan = PLAN_STUDENT_LIMITS[planId] || null;
+    const plan = PLAN_LIMITS[planId] || null;
 
     if (eligible === false || eligible === 'false') return null;
     if (expiryRaw && Number.isFinite(new Date(String(expiryRaw)).getTime()) && new Date(String(expiryRaw)).getTime() <= Date.now()) {
       return null;
     }
     if (Number.isFinite(explicitLimit) && explicitLimit > 0) {
-      return { name: explicitName || plan?.name || 'Current plan', studentLimit: explicitLimit };
+      const staffLimit = Number.isFinite(explicitStaffLimit) && explicitStaffLimit > 0
+        ? explicitStaffLimit
+        : plan?.staffLimit || Math.max(1, Math.floor(explicitLimit * 0.15));
+      return { name: explicitName || plan?.name || 'Current plan', studentLimit: explicitLimit, staffLimit };
     }
     return plan;
   }
@@ -1185,9 +1189,7 @@ class SupabaseDataService {
       };
     }
 
-    const limit = tableName === 'staff'
-      ? Math.max(1, Math.floor(plan.studentLimit * 0.15))
-      : plan.studentLimit;
+    const limit = tableName === 'staff' ? plan.staffLimit : plan.studentLimit;
     if (!Number.isFinite(limit) || limit >= Number.MAX_SAFE_INTEGER) {
       return { allowed: records, skipped: 0 };
     }

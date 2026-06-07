@@ -832,7 +832,7 @@ export default function StaffPage() {
       if (projectedStaff > capacity.limit) {
         const existingOrInactiveCount = mappedData.filter(member => !isNewActiveImportRow(member)).length;
         const availableRecordCount = existingOrInactiveCount + remaining;
-        setStaffLimitNotice(`Current plan: ${capacity.planName}. Staff limit is ${capacity.limit.toLocaleString()} (15% of student plan size), with ${remaining.toLocaleString()} new active staff slot${remaining === 1 ? '' : 's'} remaining. This import adds ${newActiveStaffCount.toLocaleString()} new active staff. Import available for plan: ${availableRecordCount.toLocaleString()} record${availableRecordCount === 1 ? '' : 's'}; upgrade for the rest.`);
+        setStaffLimitNotice(`Current plan: ${capacity.planName}. Staff limit is ${capacity.limit.toLocaleString()} as a separate staff benefit, with ${remaining.toLocaleString()} new active staff slot${remaining === 1 ? '' : 's'} remaining. This import adds ${newActiveStaffCount.toLocaleString()} new active staff. Import available for plan: ${availableRecordCount.toLocaleString()} record${availableRecordCount === 1 ? '' : 's'}; upgrade for the rest.`);
       }
     } else {
       setImportPlanCapacity(null);
@@ -942,7 +942,7 @@ export default function StaffPage() {
         return;
       }
       if (capacity.activeStaff >= capacity.limit) {
-        const message = `Staff limit reached on ${capacity.planName}. This plan allows ${capacity.limit.toLocaleString()} staff (15% of student plan size). Upgrade to add more staff.`;
+        const message = `Staff limit reached on ${capacity.planName}. This plan allows ${capacity.limit.toLocaleString()} staff as a separate staff benefit. Upgrade to add more staff.`;
         setStaffLimitNotice(message);
         addToast(message, 'error');
         navigate('/plans');
@@ -1062,7 +1062,7 @@ export default function StaffPage() {
       const projectedStaff = capacity.activeStaff + newActiveStaffCount;
       if (projectedStaff > capacity.limit) {
         const remaining = Math.max(0, capacity.limit - capacity.activeStaff);
-        const message = `Staff import exceeds ${capacity.planName}. This plan allows ${capacity.limit.toLocaleString()} staff (15% of student plan size), with ${remaining.toLocaleString()} slot${remaining === 1 ? '' : 's'} remaining. Upgrade your plan to import ${newActiveStaffCount.toLocaleString()} new active staff.`;
+        const message = `Staff import exceeds ${capacity.planName}. This plan allows ${capacity.limit.toLocaleString()} staff as a separate staff benefit, with ${remaining.toLocaleString()} slot${remaining === 1 ? '' : 's'} remaining. Upgrade your plan to import ${newActiveStaffCount.toLocaleString()} new active staff.`;
         setStaffLimitNotice(message);
         addToast(message, 'error');
         await promptDraftUpgrade(message);
@@ -1077,14 +1077,24 @@ export default function StaffPage() {
         processed: newStaff.length,
         total: rowsToImport.length,
       });
-      if (newStaff.length > 0) await dataService.bulkCreate(id, 'staff', newStaff as any[]);
+      let importedStaffCount = 0;
+      let skippedByPlanCount = 0;
+      if (newStaff.length > 0) {
+        const createResult = await dataService.bulkCreate(id, 'staff', newStaff as any[]);
+        importedStaffCount = createResult.imported;
+        skippedByPlanCount = Math.max(0, newStaff.length - createResult.imported);
+        if (skippedByPlanCount > 0 && createResult.error) {
+          setStaffLimitNotice(createResult.error);
+          addToast(createResult.error, 'warning');
+        }
+      }
       setImportProgress(80);
       setOperationProgress({
         open: true,
         title: 'Importing staff',
         detail: 'Replacing matching staff records.',
         progress: 80,
-        processed: newStaff.length,
+        processed: importedStaffCount,
         total: rowsToImport.length,
       });
       await runTasksInPercentBatches(
@@ -1096,7 +1106,7 @@ export default function StaffPage() {
             title: 'Importing staff',
             detail: 'Replacing matching staff records.',
             progress: Math.min(99, 80 + Math.round((processed / Math.max(1, updates.length)) * 19)),
-            processed: newStaff.length + processed,
+            processed: importedStaffCount + processed,
             total: rowsToImport.length,
           });
         },
@@ -1107,12 +1117,20 @@ export default function StaffPage() {
         title: 'Importing staff',
         detail: 'Import complete.',
         progress: 100,
-        processed: newStaff.length + updates.length,
+        processed: importedStaffCount + updates.length,
         total: rowsToImport.length,
       });
-      addToast(`Imported ${newStaff.length} staff${updates.length ? `, replaced ${updates.length}` : ''}`, 'success');
-      clearStaffImportDraft();
-      closeImportModal(false);
+      const parts: string[] = [];
+      if (importedStaffCount > 0) parts.push(`${importedStaffCount} imported`);
+      if (updates.length > 0) parts.push(`${updates.length} replaced`);
+      if (skippedByPlanCount > 0) parts.push(`${skippedByPlanCount} skipped by plan`);
+      addToast(parts.join(', ') || 'Import complete', skippedByPlanCount > 0 ? 'warning' : 'success');
+      if (skippedByPlanCount === 0) {
+        clearStaffImportDraft();
+        closeImportModal(false);
+      } else {
+        saveStaffImportDraft('Staff import draft saved with skipped rows');
+      }
       window.dispatchEvent(new CustomEvent('dataRefresh'));
       window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'staff' } }));
     } catch (error) {

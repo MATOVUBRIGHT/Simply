@@ -156,7 +156,7 @@ export default function StaffForm() {
         const existingStaff = await dataService.getAll(authId, 'staff');
         const activeStaffCount = existingStaff.filter((member: Staff) => member.status !== 'inactive').length;
         if (activeStaffCount >= staffLimit) {
-          addToast(`Staff limit reached on ${access.plan.name}. This plan allows ${staffLimit.toLocaleString()} staff (15% of student plan size). Upgrade to add more staff.`, 'error');
+          addToast(`Staff limit reached on ${access.plan.name}. This plan allows ${staffLimit.toLocaleString()} staff as a separate staff benefit. Upgrade to add more staff.`, 'error');
           navigate('/plans');
           return;
         }

@@ -5,6 +5,7 @@ import {
   SubscriptionAccessState,
   cachePlanStateLocally,
   getPlanById,
+  getPlanStaffLimit,
   getPlanStudentCount,
 } from './plans';
 import { EMBEDDED_ACCESS_GRANTS, PAYMENT_ACCESS_HASH_SALT, EmbeddedAccessGrant } from './accessGrants';
@@ -246,6 +247,8 @@ export async function redeemPaymentVerificationCode(
     };
     const settingsPayload = {
       subscriptionPlanId: plan.id,
+      subscriptionPlanLimit: plan.studentLimit,
+      subscriptionStaffLimit: getPlanStaffLimit(plan),
       subscriptionPlanEligible: true,
       subscriptionExpiryDate: expiry.toISOString(),
       subscriptionBillingCycle: grant.billingCycle,
