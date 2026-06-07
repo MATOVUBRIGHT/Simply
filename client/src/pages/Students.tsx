@@ -1175,9 +1175,9 @@ export default function Students() {
       });
       const mappedHeaders = new Set(Object.values(autoMapping).filter(Boolean));
       const autoCustomMapping: Record<string, string> = {};
-      headers.forEach(header => {
+      headers.forEach((header, index) => {
         if (!header || mappedHeaders.has(header)) return;
-        autoCustomMapping[header] = header;
+        autoCustomMapping[header] = getDefaultCustomImportLabel(header, index);
       });
       setFieldMapping(autoMapping);
       setCustomFieldMapping(autoCustomMapping);
@@ -1278,6 +1278,12 @@ export default function Students() {
       .replace(/\b(baby class)\b/g, 'baby')
       .replace(/\b([a-z]+)\b/g, part => wordNumbers[part] || part)
       .replace(/[^a-z0-9]+/g, '');
+  }
+
+  function getDefaultCustomImportLabel(header: string, index: number) {
+    const clean = String(header || '').trim();
+    if (!clean || /^column\s+\d+$/i.test(clean)) return `Generated Field ${index + 1}`;
+    return clean;
   }
 
   function normalizeImportId(value: unknown): string {

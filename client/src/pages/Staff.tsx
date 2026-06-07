@@ -654,9 +654,9 @@ export default function StaffPage() {
       });
       const mappedHeaders = new Set(Object.values(autoMapping).filter(Boolean));
       const autoCustomMapping: Record<string, string> = {};
-      headers.forEach(header => {
+      headers.forEach((header, index) => {
         if (!header || mappedHeaders.has(header)) return;
-        autoCustomMapping[header] = header;
+        autoCustomMapping[header] = getDefaultCustomImportLabel(header, index);
       });
       setFieldMapping(autoMapping);
       setCustomFieldMapping(autoCustomMapping);
@@ -705,6 +705,12 @@ export default function StaffPage() {
 
   function normalizeImportId(value: unknown): string {
     return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
+  function getDefaultCustomImportLabel(header: string, index: number) {
+    const clean = String(header || '').trim();
+    if (!clean || /^column\s+\d+$/i.test(clean)) return `Generated Field ${index + 1}`;
+    return clean;
   }
 
   function normalizeImportedStaffRole(value: unknown): StaffRole {
