@@ -61,6 +61,7 @@ interface ReportTemplate {
   headerColor: string;
   accentColor: string;
   textColor: string;
+  blackAndWhite: boolean;
   // Sections
   showBehavior: boolean;
   showGradingSystem: boolean;
@@ -115,6 +116,7 @@ const DEFAULT_TEMPLATE: ReportTemplate = {
   headerColor: '#1a5f5f',
   accentColor: '#7ecece',
   textColor: '#0f172a',
+  blackAndWhite: false,
   showBehavior: true,
   showGradingSystem: true,
   showAttendance: false,
@@ -554,19 +556,27 @@ export default function ReportCard() {
   }
 
   function getNamedTemplateStyle() {
+    const makeStyle = (title: string, table: string, score: string) => ({
+      title,
+      header: hdr,
+      accent: acc,
+      soft: reportSoftBg,
+      table,
+      score,
+    });
     switch (template.type) {
       case 'nursery':
-        return { title: 'NURSERY TEMPLATE REPORT CARD', header: '#0f766e', accent: '#f59e0b', soft: '#fff7ed', table: 'Learning Area', score: 'Progress' };
+        return makeStyle('NURSERY TEMPLATE REPORT CARD', 'Learning Area', 'Progress');
       case 'primary':
-        return { title: 'PRIMARY TEMPLATE REPORT CARD', header: '#1d4ed8', accent: '#22c55e', soft: '#eff6ff', table: 'Subject', score: 'Score' };
+        return makeStyle('PRIMARY TEMPLATE REPORT CARD', 'Subject', 'Score');
       case 'o-level':
-        return { title: 'SECONDARY TEMPLATE REPORT CARD', header: '#064e3b', accent: '#0ea5e9', soft: '#ecfdf5', table: 'Subject', score: 'Score' };
+        return makeStyle('SECONDARY TEMPLATE REPORT CARD', 'Subject', 'Score');
       case 'a-level-new-curriculum':
-        return { title: 'ADVANCED CURRICULUM TEMPLATE REPORT CARD', header: '#7f1d1d', accent: '#d97706', soft: '#fff7ed', table: 'Subject / Paper', score: 'Score' };
+        return makeStyle('ADVANCED CURRICULUM TEMPLATE REPORT CARD', 'Subject / Paper', 'Score');
       case 'secondary-default-subjects':
-        return { title: 'SECONDARY DEFAULT SUBJECTS', header: '#312e81', accent: '#14b8a6', soft: '#eef2ff', table: 'Default Subject', score: 'Status' };
+        return makeStyle('SECONDARY DEFAULT SUBJECTS', 'Default Subject', 'Status');
       default:
-        return { title: 'REPORT CARD WITH HEADTEACHER AND CLASS TEACHER SIGNATURES', header: '#1e3a5f', accent: '#16a34a', soft: '#f8fafc', table: 'Subject', score: 'Score' };
+        return makeStyle('REPORT CARD WITH HEADTEACHER AND CLASS TEACHER SIGNATURES', 'Subject', 'Score');
     }
   }
 
@@ -586,20 +596,20 @@ export default function ReportCard() {
     const showSubjectsOnly = template.type === 'secondary-default-subjects';
 
     return (
-      <div className="relative overflow-hidden p-7 text-slate-900" style={{ minHeight: '1050px' }}>
+      <div className="relative overflow-hidden p-7" style={{ minHeight: '1050px', color: reportTextColor }}>
         {renderWatermark()}
         <div className="relative z-10">
           <div className="mb-4 flex items-center justify-between gap-4 border-b-4 pb-3" style={{ borderColor: style.header }}>
             <div className="flex items-center gap-3">
-              <div className="text-slate-900">{renderLogoMark('h-16 w-16')}</div>
+              <div style={{ color: reportTextColor }}>{renderLogoMark('h-16 w-16')}</div>
               <div>
                 <h1 className="text-xl font-black uppercase leading-tight">
                   <LiveEditable value={displaySchoolName} onSave={v => updateTemplate({ schoolName: v })} isLiveEditing={isLiveEditing} />
                 </h1>
-                <p className="text-[11px] font-semibold text-slate-600">
+                <p className="text-[11px] font-semibold" style={{ color: reportTextColor }}>
                   <LiveEditable value={displayAddress || 'School address'} onSave={v => updateTemplate({ schoolAddress: v })} isLiveEditing={isLiveEditing} />
                 </p>
-                <p className="text-[10px] font-bold text-slate-500">{editableText('named.phoneLabel', 'Phone')}: {displayPhone || '-'} {displayEmail ? <> | {editableText('named.emailLabel', 'Email')}: {displayEmail}</> : ''}</p>
+                <p className="text-[10px] font-bold" style={{ color: reportTextColor }}>{editableText('named.phoneLabel', 'Phone')}: {displayPhone || '-'} {displayEmail ? <> | {editableText('named.emailLabel', 'Email')}: {displayEmail}</> : ''}</p>
               </div>
             </div>
             <div className="rounded-lg px-4 py-3 text-right text-white" style={{ backgroundColor: style.header }}>
@@ -620,7 +630,7 @@ export default function ReportCard() {
               ['named.position', 'Position', classPosition ? `${classPosition.position}${ordinal(classPosition.position)} of ${classPosition.outOf}` : '-'],
             ].map(([key, label, value]) => (
               <div key={label} className="flex items-center gap-2">
-                <span className="w-24 shrink-0 font-black uppercase text-slate-600">{editableText(String(key), String(label))}:</span>
+                <span className="w-24 shrink-0 font-black uppercase" style={{ color: reportTextColor }}>{editableText(String(key), String(label))}:</span>
                 <span className="flex-1 border-b border-slate-400 font-bold">{value}</span>
               </div>
             ))}
@@ -764,8 +774,11 @@ export default function ReportCard() {
     );
   }
 
-  const hdr = template.headerColor;
-  const acc = template.accentColor;
+  const hdr = template.blackAndWhite ? '#111827' : template.headerColor;
+  const acc = template.blackAndWhite ? '#6b7280' : template.accentColor;
+  const reportTextColor = template.blackAndWhite ? '#111827' : (template.textColor || '#0f172a');
+  const reportSoftBg = template.blackAndWhite ? '#f8fafc' : `${acc}18`;
+  const reportFieldBg = template.blackAndWhite ? '#f8fafc' : `${acc}30`;
   const currentTemplateIndex = Math.max(0, TEMPLATE_OPTIONS.findIndex(option => option.type === template.type));
   const currentTemplateOption = TEMPLATE_OPTIONS[currentTemplateIndex] || TEMPLATE_OPTIONS[0];
 
@@ -936,15 +949,19 @@ export default function ReportCard() {
                   </div>
                 </div>
               ))}
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 p-2 text-xs font-bold text-slate-600 dark:border-slate-700 dark:text-slate-200">
+                <input type="checkbox" checked={template.blackAndWhite} onChange={e => updateTemplate({ blackAndWhite: e.target.checked })} className="h-4 w-4 rounded" />
+                Black and white view
+              </label>
               <div className="grid grid-cols-4 gap-1.5">
                 {[
-                  ['#1a5f5f', '#7ecece'],
-                  ['#1d4ed8', '#22c55e'],
-                  ['#7c2222', '#d97706'],
-                  ['#1e3a5f', '#16a34a'],
-                ].map(([header, accent]) => (
-                  <button key={`${header}-${accent}`} type="button" onClick={() => updateTemplate({ headerColor: header, accentColor: accent })} className="h-8 rounded-lg border border-slate-200 p-1">
-                    <span className="block h-full rounded" style={{ background: `linear-gradient(90deg, ${header} 50%, ${accent} 50%)` }} />
+                  ['#1a5f5f', '#7ecece', '#0f172a'],
+                  ['#1d4ed8', '#22c55e', '#111827'],
+                  ['#7c2222', '#d97706', '#1f2937'],
+                  ['#111827', '#6b7280', '#111827'],
+                ].map(([header, accent, text]) => (
+                  <button key={`${header}-${accent}`} type="button" onClick={() => updateTemplate({ headerColor: header, accentColor: accent, textColor: text })} className="h-8 rounded-lg border border-slate-200 p-1">
+                    <span className="block h-full rounded" style={{ background: `linear-gradient(90deg, ${header} 0 38%, ${accent} 38% 70%, ${text} 70%)` }} />
                   </button>
                 ))}
               </div>
@@ -962,7 +979,7 @@ export default function ReportCard() {
           </aside>
         )}
 
-      <div id="report-card-print" className="bg-white mx-auto max-w-2xl shadow-xl print:shadow-none print:max-w-full overflow-hidden" style={{ fontFamily: 'Arial, sans-serif', '--report-template-text-color': template.textColor || '#0f172a' } as React.CSSProperties}>
+      <div id="report-card-print" className="bg-white mx-auto max-w-2xl shadow-xl print:shadow-none print:max-w-full overflow-hidden" style={{ fontFamily: 'Arial, sans-serif', color: reportTextColor, '--report-template-text-color': reportTextColor } as React.CSSProperties}>
         {isNamedTemplate ? (
           renderNamedTemplate()
         ) : template.type === 'modern' ? (
@@ -1031,8 +1048,8 @@ export default function ReportCard() {
                   ...(classPosition ? [{ key: 'modern.position', label: 'Position:', value: `${classPosition.position}${ordinal(classPosition.position)} out of ${classPosition.outOf}` }] : []),
                 ].map(({ key, label, value }) => (
                   <div key={label} className="flex items-center gap-2">
-                    <span className="text-[10px] font-black uppercase text-slate-600 whitespace-nowrap w-28 shrink-0">{editableText(key, label)}</span>
-                    <span className="flex-1 px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: `${acc}30` }}>{value}</span>
+                    <span className="text-[10px] font-black uppercase whitespace-nowrap w-28 shrink-0" style={{ color: reportTextColor }}>{editableText(key, label)}</span>
+                    <span className="flex-1 px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: reportFieldBg, color: reportTextColor }}>{value}</span>
                   </div>
                 ))}
               </div>
@@ -1057,15 +1074,15 @@ export default function ReportCard() {
                     {studentResults.length === 0 ? (
                       <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400 text-xs">{editableText('modern.noResults', 'No results recorded for this exam')}</td></tr>
                     ) : studentResults.map((r, i) => (
-                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? `${acc}18` : 'white' }}>
-                        <td className="px-2 py-1.5 font-medium uppercase text-slate-700">{r.subject}</td>
-                        <td className="px-2 py-1.5 text-center text-slate-700">{r.score ?? '-'}</td>
-                        <td className="px-2 py-1.5 text-center text-slate-500">{r.maxScore}</td>
-                        <td className="px-2 py-1.5 text-center text-slate-700">{r.pct ?? '-'}</td>
-                        <td className="px-2 py-1.5 text-center font-bold" style={{ color: r.grade.startsWith('D') ? '#059669' : r.grade.startsWith('F') ? '#dc2626' : hdr }}>
+                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? reportSoftBg : 'white' }}>
+                        <td className="px-2 py-1.5 font-medium uppercase" style={{ color: reportTextColor }}>{r.subject}</td>
+                        <td className="px-2 py-1.5 text-center" style={{ color: reportTextColor }}>{r.score ?? '-'}</td>
+                        <td className="px-2 py-1.5 text-center" style={{ color: reportTextColor }}>{r.maxScore}</td>
+                        <td className="px-2 py-1.5 text-center" style={{ color: reportTextColor }}>{r.pct ?? '-'}</td>
+                        <td className="px-2 py-1.5 text-center font-bold" style={{ color: template.blackAndWhite ? reportTextColor : r.grade.startsWith('D') ? '#059669' : r.grade.startsWith('F') ? '#dc2626' : hdr }}>
                           {r.grade}
                         </td>
-                        <td className="px-2 py-1.5 text-slate-500">{r.remarks || r.remark}</td>
+                        <td className="px-2 py-1.5" style={{ color: reportTextColor }}>{r.remarks || r.remark}</td>
                       </tr>
                     ))}
                     <tr style={{ backgroundColor: hdr, color: 'white' }}>
@@ -1094,8 +1111,8 @@ export default function ReportCard() {
                   ...(template.showNextTerm ? [{ label: template.nextTermLabel, value: '' }] : []),
                 ].map(({ label, value, editKey }: any) => (
                   <div key={label} className="flex items-end gap-3">
-                    <span className="text-[10px] font-bold uppercase text-slate-600 w-40 shrink-0 pb-0.5">{editKey ? editableText(editKey, label) : editableKnownLabel(label)}</span>
-                    <div className="flex-1 border-b border-slate-300 min-h-4 text-xs text-slate-600 pb-0.5">{value}</div>
+                    <span className="text-[10px] font-bold uppercase w-40 shrink-0 pb-0.5" style={{ color: reportTextColor }}>{editKey ? editableText(editKey, label) : editableKnownLabel(label)}</span>
+                    <div className="flex-1 border-b border-slate-300 min-h-4 text-xs pb-0.5" style={{ color: reportTextColor }}>{value}</div>
                   </div>
                 ))}
               </div>
@@ -1112,7 +1129,7 @@ export default function ReportCard() {
                       {template.behaviorItems.map(b => (
                         <div key={b} className="flex items-center gap-2 py-0.5 border-b border-slate-100">
                           <div className="w-6 border-b border-slate-400 text-center text-[10px]">v</div>
-                          <span className="text-[10px] uppercase text-slate-600">
+                          <span className="text-[10px] uppercase" style={{ color: reportTextColor }}>
                             <LiveEditable value={b} onSave={value => updateTemplate({ behaviorItems: template.behaviorItems.map(item => item === b ? value : item) })} isLiveEditing={isLiveEditing} />
                           </span>
                         </div>
@@ -1124,7 +1141,7 @@ export default function ReportCard() {
                       <div className="px-2 py-1 font-bold text-[10px] uppercase text-white mb-1.5" style={{ backgroundColor: hdr }}>{editableText('modern.gradingSystem', 'Grading System')}</div>
                       {template.gradingScale.map(({ grade, min, max, remark }, index) => (
                         <div key={`${grade}-${index}`} className="py-0.5 border-b border-slate-100">
-                          <span className="text-[10px] font-bold text-slate-700">
+                          <span className="text-[10px] font-bold" style={{ color: reportTextColor }}>
                             <LiveEditable value={grade} onSave={value => updateTemplateGradeScale(index, { grade: value })} isLiveEditing={isLiveEditing} /> (
                             <LiveEditable value={`${min}-${max}%`} onSave={value => {
                               const [nextMin, nextMax] = value.replace('%', '').split('-').map(part => Number(part.trim()));
@@ -1134,7 +1151,7 @@ export default function ReportCard() {
                               });
                             }} isLiveEditing={isLiveEditing} />):{' '}
                           </span>
-                          <span className="text-[10px] text-slate-600">
+                          <span className="text-[10px]" style={{ color: reportTextColor }}>
                             <LiveEditable value={remark} onSave={value => updateTemplateGradeScale(index, { remark: value })} isLiveEditing={isLiveEditing} />
                           </span>
                         </div>
@@ -1148,10 +1165,10 @@ export default function ReportCard() {
         ) : template.type === 'high-school' ? (
           <>
             {/* High School Template */}
-            <div className="text-slate-900">
+            <div style={{ color: reportTextColor }}>
               {/* Header with Dark Red Bar */}
               <div className="flex items-stretch mb-8 min-h-[80px]">
-                <div className="flex-1 bg-[#7c2222] text-white flex items-center px-8">
+                <div className="flex-1 text-white flex items-center px-8" style={{ backgroundColor: hdr }}>
                   <h1 className="text-3xl font-serif font-bold italic tracking-wide">
                     <LiveEditable 
                       value={template.reportTitle || 'High School Report Card'} 
@@ -1160,7 +1177,7 @@ export default function ReportCard() {
                     />
                   </h1>
                 </div>
-                <div className="w-1/3 bg-[#2d3748] text-white p-4 flex items-center justify-center gap-3">
+                <div className="w-1/3 text-white p-4 flex items-center justify-center gap-3" style={{ backgroundColor: acc }}>
                   <div className="w-10 h-10 flex items-center justify-center bg-white/10 rounded-lg">
                     <GraduationCap size={24} className="text-white" />
                   </div>
@@ -1182,7 +1199,7 @@ export default function ReportCard() {
               <div className="px-10 space-y-8">
                 {/* ... existing section ... */}
                 <section>
-                  <h3 className="text-lg font-serif font-bold text-[#2d3748] border-b-2 border-slate-200 pb-1 mb-4">{editableText('high.studentInformation', 'Student Information:')}</h3>
+                  <h3 className="text-lg font-serif font-bold border-b-2 border-slate-200 pb-1 mb-4" style={{ color: hdr }}>{editableText('high.studentInformation', 'Student Information:')}</h3>
                   <div className="grid grid-cols-3 gap-6">
                     <div>
                       <label className="text-xs font-bold block mb-1">{editableText('high.nameLabel', 'Name:')}</label>
@@ -1212,7 +1229,7 @@ export default function ReportCard() {
                   <div className="overflow-x-auto">
                     <table className="w-full border-collapse border border-slate-300 text-sm">
                       <thead>
-                        <tr className="bg-[#7c2222] text-white">
+                        <tr className="text-white" style={{ backgroundColor: hdr }}>
                           <th className="border border-slate-300 px-4 py-2 text-left font-bold">{editableText('high.subjectHeader', 'Subject')}</th>
                           <th className="border border-slate-300 px-4 py-2 text-center font-bold">{editableText('high.firstSemesterHeader', '1st Semester')}</th>
                           <th className="border border-slate-300 px-4 py-2 text-center font-bold">{editableText('high.secondSemesterHeader', '2nd Semester')}</th>
@@ -1236,7 +1253,7 @@ export default function ReportCard() {
                 {/* Grading & Attendance Grid */}
                 <div className="grid grid-cols-2 gap-10">
                   <section>
-                    <h3 className="text-md font-bold text-[#2d3748] mb-3">{editableText('high.gradingScale', 'Grading Scale:')}</h3>
+                    <h3 className="text-md font-bold mb-3" style={{ color: hdr }}>{editableText('high.gradingScale', 'Grading Scale:')}</h3>
                     <ul className="space-y-1 text-xs">
                       {template.gradingScale.slice(0, 5).map((s, index) => (
                         <li key={`${s.grade}-${index}`} className="flex gap-2">
@@ -1255,7 +1272,7 @@ export default function ReportCard() {
                     </ul>
                   </section>
                   <section>
-                    <h3 className="text-md font-bold text-[#2d3748] mb-3">{editableText('high.attendance', 'Attendance:')}</h3>
+                    <h3 className="text-md font-bold mb-3" style={{ color: hdr }}>{editableText('high.attendance', 'Attendance:')}</h3>
                     <ul className="space-y-1 text-xs">
                       <li className="flex gap-2">
                         <span className="font-bold">{editableText('high.daysPresent', '* Days Present:')}</span>
@@ -1275,7 +1292,7 @@ export default function ReportCard() {
 
                 {/* Comments Section */}
                 <section>
-                  <h3 className="text-md font-bold text-[#2d3748] mb-2">{editableText('high.comments', 'Comments:')}</h3>
+                  <h3 className="text-md font-bold mb-2" style={{ color: hdr }}>{editableText('high.comments', 'Comments:')}</h3>
                   <div className="border border-slate-300 p-4 rounded text-xs leading-relaxed min-h-[100px] bg-slate-50">
                     <span className="font-bold">{student.firstName}</span> <LiveEditable value={template.overallPerformanceTemplate} onSave={v => updateTemplate({ overallPerformanceTemplate: v })} isLiveEditing={isLiveEditing} />
                   </div>
@@ -1290,7 +1307,7 @@ export default function ReportCard() {
                     <div className="h-10 border-b border-slate-400 font-serif italic text-lg">
                       <LiveEditable value={template.parentSignatureName} onSave={v => updateTemplate({ parentSignatureName: v })} isLiveEditing={isLiveEditing} />
                     </div>
-                    <p className="text-[10px] text-slate-500 uppercase font-bold">
+                    <p className="text-[10px] uppercase font-bold" style={{ color: reportTextColor }}>
                       <LiveEditable value={template.parentSignatureName} onSave={v => updateTemplate({ parentSignatureName: v })} isLiveEditing={isLiveEditing} />
                     </p>
                   </div>
@@ -1301,7 +1318,7 @@ export default function ReportCard() {
                     <div className="h-10 border-b border-slate-400 font-serif italic text-lg">
                       <LiveEditable value={template.teacherSignatureName} onSave={v => updateTemplate({ teacherSignatureName: v })} isLiveEditing={isLiveEditing} />
                     </div>
-                    <p className="text-[10px] text-slate-500 uppercase font-bold">
+                    <p className="text-[10px] uppercase font-bold" style={{ color: reportTextColor }}>
                       <LiveEditable value={template.teacherSignatureName} onSave={v => updateTemplate({ teacherSignatureName: v })} isLiveEditing={isLiveEditing} />
                     </p>
                   </div>
@@ -1312,42 +1329,42 @@ export default function ReportCard() {
                     <div className="h-10 border-b border-slate-400 font-serif italic text-lg">
                       <LiveEditable value={template.principalSignatureName} onSave={v => updateTemplate({ principalSignatureName: v })} isLiveEditing={isLiveEditing} />
                     </div>
-                    <p className="text-[10px] text-slate-500 uppercase font-bold">
+                    <p className="text-[10px] uppercase font-bold" style={{ color: reportTextColor }}>
                       <LiveEditable value={template.principalSignatureName} onSave={v => updateTemplate({ principalSignatureName: v })} isLiveEditing={isLiveEditing} />
                     </p>
                   </div>
                 </div>
 
                 {/* Footer with Icons */}
-                <div className="flex justify-between items-center pt-6 border-t border-slate-200 text-[10px] font-bold text-slate-600">
+                <div className="flex justify-between items-center pt-6 border-t border-slate-200 text-[10px] font-bold" style={{ color: reportTextColor }}>
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-[#2d3748] text-white flex items-center justify-center"><Building size={12} /></div>
+                    <div className="w-6 h-6 rounded-full text-white flex items-center justify-center" style={{ backgroundColor: acc }}><Building size={12} /></div>
                     <span><LiveEditable value={displayAddress || 'Address'} onSave={v => updateTemplate({ schoolAddress: v })} isLiveEditing={isLiveEditing} /></span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-[#2d3748] text-white flex items-center justify-center"><Download size={12} /></div>
+                    <div className="w-6 h-6 rounded-full text-white flex items-center justify-center" style={{ backgroundColor: acc }}><Download size={12} /></div>
                     <span><LiveEditable value={displayPhone || 'Phone'} onSave={v => updateTemplate({ schoolPhone: v })} isLiveEditing={isLiveEditing} /></span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-[#2d3748] text-white flex items-center justify-center"><Check size={12} /></div>
+                    <div className="w-6 h-6 rounded-full text-white flex items-center justify-center" style={{ backgroundColor: acc }}><Check size={12} /></div>
                     <span><LiveEditable value={displayEmail || 'Email'} onSave={v => updateTemplate({ schoolEmail: v })} isLiveEditing={isLiveEditing} /></span>
                   </div>
                 </div>
               </div>
-              <div className="h-8 bg-[#2d3748] mt-8" />
+              <div className="h-8 mt-8" style={{ backgroundColor: acc }} />
             </div>
           </>
         ) : (
           <>
             {/* Classic Template (Silvers) */}
-            <div className="p-8 text-[#1e3a5f]">
+            <div className="p-8" style={{ color: reportTextColor }}>
               {/* Logo & Header */}
               <div className="flex flex-col items-center text-center space-y-1 mb-6">
-                <div className="w-20 h-20 rounded-full border-2 border-[#1e3a5f] p-1 mb-2 overflow-hidden flex items-center justify-center">
+                <div className="w-20 h-20 rounded-full border-2 p-1 mb-2 overflow-hidden flex items-center justify-center" style={{ borderColor: hdr }}>
                   {displayLogo && (displayLogo.startsWith('http') || displayLogo.startsWith('data:')) ? (
                     <img src={displayLogo} alt="Logo" className="w-full h-full object-contain" />
                   ) : (
-                    <span className="text-4xl font-black text-indigo-600">
+                    <span className="text-4xl font-black" style={{ color: hdr }}>
                       <LiveEditable value={displayLogo || 'S'} onSave={v => updateTemplate({ schoolLogo: v })} isLiveEditing={isLiveEditing} />
                     </span>
                   )}
@@ -1365,7 +1382,7 @@ export default function ReportCard() {
 
               {/* Report Card Title */}
               <div className="relative mb-8">
-                <h2 className="text-4xl font-black text-center tracking-[0.2em] text-[#1e3a5f] uppercase py-2 border-y-4 border-[#1e3a5f]">
+                <h2 className="text-4xl font-black text-center tracking-[0.2em] uppercase py-2 border-y-4" style={{ color: hdr, borderColor: hdr }}>
                   <LiveEditable value={template.reportTitle || 'REPORT CARD'} onSave={v => updateTemplate({ reportTitle: v })} isLiveEditing={isLiveEditing} />
                 </h2>
               </div>
@@ -1384,7 +1401,7 @@ export default function ReportCard() {
                 ].map(({ key, label, value }) => (
                   <div key={label} className="flex items-end gap-2">
                     <span className="text-xs font-black uppercase w-32 shrink-0">{editableText(key, label)}</span>
-                    <span className="flex-1 border-b-2 border-[#1e3a5f] pb-0.5 text-sm font-bold text-center px-2">{value}</span>
+                    <span className="flex-1 border-b-2 pb-0.5 text-sm font-bold text-center px-2" style={{ borderColor: hdr }}>{value}</span>
                   </div>
                 ))}
               </div>
@@ -1415,9 +1432,9 @@ export default function ReportCard() {
 
               {/* Classic Table */}
               <div className="mb-8 overflow-x-auto">
-                <table className="w-full text-xs border-2 border-[#1e3a5f]">
+                <table className="w-full text-xs border-2" style={{ borderColor: hdr }}>
                   <thead>
-                    <tr className="bg-[#1e3a5f] text-white">
+                    <tr className="text-white" style={{ backgroundColor: hdr }}>
                       <th className="border border-white/20 px-3 py-2 text-left font-black uppercase">{editableText('classic.subjectHeader', 'Subject')}</th>
                       <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">{editableText('classic.q1Header', '1st Qtr')}</th>
                       <th className="border border-white/20 px-2 py-2 text-center font-black uppercase">{editableText('classic.q2Header', '2nd Qtr')}</th>
@@ -1428,13 +1445,13 @@ export default function ReportCard() {
                   </thead>
                   <tbody>
                     {yearlyResults.map((r, i) => (
-                      <tr key={i} className={i % 2 === 0 ? 'bg-slate-50' : 'bg-white'}>
-                        <td className="border border-[#1e3a5f]/30 px-3 py-2 font-bold">{r.subject}</td>
-                        <td className="border border-[#1e3a5f]/30 px-2 py-2 text-center font-medium">{r.q1 || '-'}</td>
-                        <td className="border border-[#1e3a5f]/30 px-2 py-2 text-center font-medium">{r.q2 || '-'}</td>
-                        <td className="border border-[#1e3a5f]/30 px-2 py-2 text-center font-medium">{r.q3 || '-'}</td>
-                        <td className="border border-[#1e3a5f]/30 px-2 py-2 text-center font-medium">{r.q4 || '-'}</td>
-                        <td className="border border-[#1e3a5f]/30 px-3 py-2 text-center font-bold">{r.remark}</td>
+                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? reportSoftBg : 'white' }}>
+                        <td className="border px-3 py-2 font-bold" style={{ borderColor: `${hdr}55` }}>{r.subject}</td>
+                        <td className="border px-2 py-2 text-center font-medium" style={{ borderColor: `${hdr}55` }}>{r.q1 || '-'}</td>
+                        <td className="border px-2 py-2 text-center font-medium" style={{ borderColor: `${hdr}55` }}>{r.q2 || '-'}</td>
+                        <td className="border px-2 py-2 text-center font-medium" style={{ borderColor: `${hdr}55` }}>{r.q3 || '-'}</td>
+                        <td className="border px-2 py-2 text-center font-medium" style={{ borderColor: `${hdr}55` }}>{r.q4 || '-'}</td>
+                        <td className="border px-3 py-2 text-center font-bold" style={{ borderColor: `${hdr}55` }}>{r.remark}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1442,7 +1459,7 @@ export default function ReportCard() {
               </div>
 
               {/* Grading Reference */}
-              <div className="grid grid-cols-3 gap-8 mb-10 pt-4 border-t-2 border-[#1e3a5f]">
+              <div className="grid grid-cols-3 gap-8 mb-10 pt-4 border-t-2" style={{ borderColor: hdr }}>
                 <div>
                   <p className="text-[10px] font-black uppercase mb-2">{editableText('classic.description', 'Description')}</p>
                   <div className="space-y-1 text-[10px] font-bold">
@@ -1481,11 +1498,11 @@ export default function ReportCard() {
               </div>
 
               {/* Performance Summary */}
-              <div className="space-y-4 pt-4 border-t-2 border-[#1e3a5f]">
+              <div className="space-y-4 pt-4 border-t-2" style={{ borderColor: hdr }}>
                 <div className="flex gap-4">
                   <p className="text-xs font-black uppercase w-48 shrink-0">{editableText('classic.overallPerformance', 'Overall Performance:')}</p>
                   <p className="text-xs font-bold leading-relaxed">
-                    <span className="border-b border-[#1e3a5f] px-4 font-black">{student.firstName} {student.lastName}</span> {template.overallPerformanceTemplate}
+                    <span className="border-b px-4 font-black" style={{ borderColor: hdr }}>{student.firstName} {student.lastName}</span> {template.overallPerformanceTemplate}
                   </p>
                 </div>
                 <div className="flex gap-4">
@@ -1599,6 +1616,13 @@ export default function ReportCard() {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
+                    <div className="sm:col-span-2">
+                      <label className="form-label">Text Color</label>
+                      <div className="flex items-center gap-2">
+                        <input type="color" value={draft.textColor || '#0f172a'} onChange={e => setDraft(p => ({ ...p, textColor: e.target.value }))} className="w-10 h-9 rounded border border-slate-200 cursor-pointer shrink-0" />
+                        <input type="text" value={draft.textColor || '#0f172a'} onChange={e => setDraft(p => ({ ...p, textColor: e.target.value }))} className="form-input flex-1 font-mono text-sm" />
+                      </div>
+                    </div>
                     <div>
                       <label className="form-label">Header Color</label>
                       <div className="flex items-center gap-2">
@@ -1614,6 +1638,10 @@ export default function ReportCard() {
                       </div>
                     </div>
                   </div>
+                  <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                    <input type="checkbox" checked={draft.blackAndWhite} onChange={e => setDraft(p => ({ ...p, blackAndWhite: e.target.checked }))} className="w-4 h-4 rounded" />
+                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Black and white view</span>
+                  </label>
                   {/* Color presets */}
                   <div>
                     <label className="form-label">Color Presets</label>
@@ -1635,7 +1663,7 @@ export default function ReportCard() {
                         { name: 'Brown', hdr: '#44200a', acc: '#d4a574' },
                         { name: 'Black', hdr: '#111827', acc: '#9ca3af' },
                       ].map(({ name, hdr: h, acc: a }) => (
-                        <button key={name} onClick={() => setDraft(p => ({ ...p, headerColor: h, accentColor: a }))}
+                        <button key={name} onClick={() => setDraft(p => ({ ...p, headerColor: h, accentColor: a, textColor: name === 'Black' ? '#111827' : p.textColor || '#0f172a' }))}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium hover:border-slate-400 transition-colors ${draft.headerColor === h ? 'border-slate-500 ring-1 ring-slate-400' : 'border-slate-200'}`}>
                           <span className="w-4 h-4 rounded-full" style={{ backgroundColor: h }} />
                           <span className="w-4 h-4 rounded-full" style={{ backgroundColor: a }} />
@@ -1739,27 +1767,21 @@ export default function ReportCard() {
                     </div>
                   </div>
 
-                  {(draft.type === 'classic' || draft.type === 'high-school') && (
-                    <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-700">
-                      <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300">Template Messages</h4>
-                      <div>
-                        <label className="form-label text-xs">Overall Performance Message</label>
-                        <input value={draft.overallPerformanceTemplate} onChange={e => setDraft(p => ({ ...p, overallPerformanceTemplate: e.target.value }))} className="form-input text-sm" />
-                      </div>
-                      {draft.type === 'classic' && (
-                        <>
-                          <div>
-                            <label className="form-label text-xs">Default Strengths</label>
-                            <input value={draft.strengthsTemplate} onChange={e => setDraft(p => ({ ...p, strengthsTemplate: e.target.value }))} className="form-input text-sm" />
-                          </div>
-                          <div>
-                            <label className="form-label text-xs">Default Areas for Improvement</label>
-                            <input value={draft.improvementsTemplate} onChange={e => setDraft(p => ({ ...p, improvementsTemplate: e.target.value }))} className="form-input text-sm" />
-                          </div>
-                        </>
-                      )}
+                  <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                    <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300">Template Messages</h4>
+                    <div>
+                      <label className="form-label text-xs">Overall Performance Message</label>
+                      <input value={draft.overallPerformanceTemplate} onChange={e => setDraft(p => ({ ...p, overallPerformanceTemplate: e.target.value }))} className="form-input text-sm" />
                     </div>
-                  )}
+                    <div>
+                      <label className="form-label text-xs">Default Strengths</label>
+                      <input value={draft.strengthsTemplate} onChange={e => setDraft(p => ({ ...p, strengthsTemplate: e.target.value }))} className="form-input text-sm" />
+                    </div>
+                    <div>
+                      <label className="form-label text-xs">Default Areas for Improvement</label>
+                      <input value={draft.improvementsTemplate} onChange={e => setDraft(p => ({ ...p, improvementsTemplate: e.target.value }))} className="form-input text-sm" />
+                    </div>
+                  </div>
                 </>
               )}
 
