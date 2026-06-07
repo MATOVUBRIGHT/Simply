@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, BedDouble, Eye, Home, Users, Search, GraduationCap, Save } from 'lucide-react';
 import { useActiveStudents } from '../contexts/StudentsContext';
@@ -9,8 +10,30 @@ import { dataService } from '../lib/database/SupabaseDataService';
 import { getBoardingStatus } from '../utils/studentBoarding';
 import { matchesStudentSearch } from '../utils/studentSearch';
 import { useBackOrFallback } from '../utils/navigation';
+import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
 
 const HOSTEL_KEYS = ['hosteldormitory', 'hostel', 'dormitory', 'dorm', 'boardinghouse'];
+
+function ProgressiveStudentPanel({
+  items,
+  renderItem,
+}: {
+  items: any[];
+  renderItem: (student: any, index: number) => ReactNode;
+}) {
+  const progress = useProgressiveList(items, { initialCount: 80, step: 80, delayMs: 180 });
+  return (
+    <>
+      {progress.visibleItems.map(renderItem)}
+      <ProgressiveListLoader hasMore={progress.hasMore} loadingMore={progress.loadingMore} onVisible={progress.loadMore} />
+      {progress.hasMore && (
+        <div className="px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-300">
+          Showing {progress.visibleItems.length.toLocaleString()} of {items.length.toLocaleString()}. Scroll down to load more.
+        </div>
+      )}
+    </>
+  );
+}
 
 export default function DayBoarding() {
   const { user, schoolId } = useAuth();
@@ -97,38 +120,43 @@ export default function DayBoarding() {
       <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-[420px] overflow-y-auto">
         {list.length === 0 ? (
           <p className="px-4 py-6 text-sm text-slate-500 text-center">No students</p>
-        ) : list.map((student, index) => (
-          <div key={student.id} className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500 dark:bg-slate-700 dark:text-slate-300">{index + 1}</span>
-                <Link to={`/students/${student.id}`} className="min-w-0">
-                  <p className="font-medium text-slate-800 dark:text-white truncate">{student.firstName} {student.lastName}</p>
-                  <p className="text-xs text-slate-500 truncate">{student.studentId || student.admissionNo || 'No ID'} - {className(student.classId)}</p>
-                </Link>
-              </div>
-              <GraduationCap size={16} className="text-slate-400 shrink-0" />
-            </div>
-            {showHostel && (
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
-                <input
-                  value={hostelDrafts[student.id] ?? getHostel(student)}
-                  onChange={e => setHostelDrafts(prev => ({ ...prev, [student.id]: e.target.value }))}
-                  className="form-input"
-                  placeholder="Assign dormitory / hostel"
-                />
-                <button
-                  onClick={() => handleAssignHostel(student)}
-                  disabled={savingHostelId === student.id}
-                  className="btn btn-secondary justify-center disabled:opacity-70"
-                >
-                  {savingHostelId === student.id ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Save size={16} />}
-                  {savingHostelId === student.id ? 'Saving...' : 'Save'}
-                </button>
+        ) : (
+          <ProgressiveStudentPanel
+            items={list}
+            renderItem={(student, index) => (
+              <div key={student.id} className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500 dark:bg-slate-700 dark:text-slate-300">{index + 1}</span>
+                    <Link to={`/students/${student.id}`} className="min-w-0">
+                      <p className="font-medium text-slate-800 dark:text-white truncate">{student.firstName} {student.lastName}</p>
+                      <p className="text-xs text-slate-500 truncate">{student.studentId || student.admissionNo || 'No ID'} - {className(student.classId)}</p>
+                    </Link>
+                  </div>
+                  <GraduationCap size={16} className="text-slate-400 shrink-0" />
+                </div>
+                {showHostel && (
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+                    <input
+                      value={hostelDrafts[student.id] ?? getHostel(student)}
+                      onChange={e => setHostelDrafts(prev => ({ ...prev, [student.id]: e.target.value }))}
+                      className="form-input"
+                      placeholder="Assign dormitory / hostel"
+                    />
+                    <button
+                      onClick={() => handleAssignHostel(student)}
+                      disabled={savingHostelId === student.id}
+                      className="btn btn-secondary justify-center disabled:opacity-70"
+                    >
+                      {savingHostelId === student.id ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Save size={16} />}
+                      {savingHostelId === student.id ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        ))}
+          />
+        )}
       </div>
     </div>
   );

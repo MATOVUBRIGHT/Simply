@@ -17,6 +17,7 @@ import { FitStatValue } from '../components/FitStatValue';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
 import { runTasksInThirtyPercentBatches } from '../utils/bulkDelete';
 import { PortalSelect } from '../components/PortalSelect';
+import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
 
 type ImportAttendanceRow = {
   date: string;
@@ -96,6 +97,8 @@ export default function Attendance() {
       ? all.filter(s => s.classId === selectedClass && s.status !== 'completed')
       : all.filter(s => s.status !== 'completed');
   }, [studentsData, selectedClass]);
+  const attendanceProgress = useProgressiveList(students, { initialCount: 120, step: 120, delayMs: 180 });
+  const visibleAttendanceStudents = attendanceProgress.visibleItems;
 
   const studentsForImportTemplate = useMemo(() => {
     if (!importTemplateClassId) return [];
@@ -738,7 +741,7 @@ export default function Attendance() {
                     </div>
                   </td>
                 </tr>
-              ) : students.map((s, index) => (
+              ) : visibleAttendanceStudents.map((s, index) => (
                 <tr key={s.id}>
                   <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                   <td>
@@ -803,6 +806,12 @@ export default function Attendance() {
               ))}
             </tbody>
           </table>
+          <ProgressiveListLoader hasMore={attendanceProgress.hasMore} loadingMore={attendanceProgress.loadingMore} onVisible={attendanceProgress.loadMore} />
+          {attendanceProgress.hasMore && (
+            <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+              Showing {visibleAttendanceStudents.length.toLocaleString()} of {students.length.toLocaleString()} students. Scroll down to load more.
+            </div>
+          )}
         </div>
       </div>
 

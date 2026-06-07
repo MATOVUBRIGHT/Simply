@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, GraduationCap, Mail, Phone, Search, Users } from 'lucide-react';
+import { GraduationCap, Mail, Phone, Search, Users } from 'lucide-react';
 import type { Class, Student } from '@schofy/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { useTableData } from '../lib/store';
 import { getClassDisplayName } from '../utils/classroom';
 import { matchesStudentSearch } from '../utils/studentSearch';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
+import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
 
 export default function Parents() {
   const { user, schoolId } = useAuth();
@@ -16,8 +17,6 @@ export default function Parents() {
   const students = studentsData as Student[];
   const classes = classesData as Class[];
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
   const listLoading = useMinimumLoading(loading, 2000);
 
   const parentRows = useMemo(() => students
@@ -28,10 +27,8 @@ export default function Parents() {
       student.guardianEmail,
       getClassDisplayName(student.classId, classes),
     ])), [students, classes, search]);
-  const pageSize = 25;
-  const totalPages = Math.max(1, Math.ceil(parentRows.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const visibleParentRows = showAll ? parentRows : parentRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const parentProgress = useProgressiveList(parentRows, { initialCount: 80, step: 80, delayMs: 180 });
+  const visibleParentRows = parentProgress.visibleItems;
   const parentStats = useMemo(() => ({
     parents: parentRows.length,
     phones: parentRows.filter((student: any) => student.guardianPhone).length,
@@ -39,13 +36,8 @@ export default function Parents() {
     classes: new Set(parentRows.map((student: any) => student.classId).filter(Boolean)).size,
   }), [parentRows]);
 
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
-
   function handleSearch(value: string) {
     setSearch(value);
-    setPage(1);
   }
 
   function cellText(value: string) {
@@ -131,7 +123,7 @@ export default function Parents() {
                 </tr>
               ) : visibleParentRows.map((student: any, index) => (
                 <tr key={student.id}>
-                  <td className="text-center text-xs font-semibold text-slate-400">{showAll ? index + 1 : (currentPage - 1) * pageSize + index + 1}</td>
+                  <td className="text-center text-xs font-semibold text-slate-400">{index + 1}</td>
                   <td className="min-w-0 font-semibold text-slate-800 dark:text-white">{cellText(student.guardianName || '-')}</td>
                   <td className="min-w-0">
                     <Link to={`/students/${student.id}`} className="font-medium text-primary-600 hover:underline">
@@ -170,30 +162,14 @@ export default function Parents() {
               ))}
             </tbody>
           </table>
+          <ProgressiveListLoader hasMore={parentProgress.hasMore} loadingMore={parentProgress.loadingMore} onVisible={parentProgress.loadMore} />
         </div>
-        {!listLoading && parentRows.length > pageSize && (
+        {!listLoading && parentRows.length > visibleParentRows.length && (
           <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm font-semibold text-slate-500">
               Showing {visibleParentRows.length} of {parentRows.length} parents
             </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="button" onClick={() => setShowAll(value => !value)} className="btn btn-secondary py-1.5 text-sm">
-                {showAll ? 'Show Pages' : 'Show All'}
-              </button>
-              {!showAll && (
-                <>
-                  <button type="button" onClick={() => setPage(value => Math.max(1, value - 1))} disabled={currentPage <= 1} className="btn btn-secondary py-1.5 text-sm disabled:opacity-50">
-                    <ChevronLeft size={15} /> Prev
-                  </button>
-                  <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                    {currentPage} / {totalPages}
-                  </span>
-                  <button type="button" onClick={() => setPage(value => Math.min(totalPages, value + 1))} disabled={currentPage >= totalPages} className="btn btn-secondary py-1.5 text-sm disabled:opacity-50">
-                    Next <ChevronRight size={15} />
-                  </button>
-                </>
-              )}
-            </div>
+            <p className="text-xs font-semibold text-slate-400">Scroll down to load more.</p>
           </div>
         )}
       </div>

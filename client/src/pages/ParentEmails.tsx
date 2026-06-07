@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, GraduationCap, Mail, Search, Send, Square, Users } from 'lucide-react';
+import { Check, ChevronDown, Copy, GraduationCap, Mail, Search, Send, Square, Users } from 'lucide-react';
 import type { Class, Student } from '@schofy/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -10,6 +10,7 @@ import { getClassDisplayName } from '../utils/classroom';
 import { matchesStudentSearch } from '../utils/studentSearch';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
 import { PortalSelect } from '../components/PortalSelect';
+import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
 
 type EmailMode = 'parents' | 'students' | 'both';
 type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink';
@@ -65,8 +66,6 @@ export default function ParentEmails() {
   const [showColorMenu, setShowColorMenu] = useState(false);
   const [colorMenuRect, setColorMenuRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [marksReady, setMarksReady] = useState(false);
-  const [page, setPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const listLoading = useMinimumLoading(loading, 2000);
@@ -125,18 +124,11 @@ export default function ParentEmails() {
     selected: selectedRows.length,
     marked: emailRows.filter((student: any) => markedIds.has(student.id)).length,
   }), [emailRows, selectedRows.length, markedIds]);
-  const pageSize = 25;
-  const totalPages = Math.max(1, Math.ceil(emailRows.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const visibleEmailRows = showAll ? emailRows : emailRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+  const emailProgress = useProgressiveList(emailRows, { initialCount: 80, step: 80, delayMs: 180 });
+  const visibleEmailRows = emailProgress.visibleItems;
 
   function handleSearch(value: string) {
     setSearch(value);
-    setPage(1);
   }
 
   function updateColorMenuPosition() {
@@ -303,7 +295,7 @@ export default function ParentEmails() {
               </div>
               <PortalSelect
                 value={filterClassId}
-                onChange={value => { setFilterClassId(value); setPage(1); }}
+                onChange={value => { setFilterClassId(value); }}
                 className="h-11"
                 options={[
                   { value: 'all', label: 'All Classes' },
@@ -322,7 +314,6 @@ export default function ParentEmails() {
                     onClick={() => {
                       setEmailMode(mode);
                       setSelectedIds(new Set());
-                      setPage(1);
                     }}
                     className={`flex min-w-0 items-center justify-center gap-1 px-2 transition-colors ${emailMode === mode ? 'bg-primary-600 text-white' : 'text-slate-500 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700'}`}
                   >
@@ -422,30 +413,14 @@ export default function ParentEmails() {
                 })}
               </tbody>
             </table>
+            <ProgressiveListLoader hasMore={emailProgress.hasMore} loadingMore={emailProgress.loadingMore} onVisible={emailProgress.loadMore} />
           </div>
-          {!listLoading && emailRows.length > pageSize && (
+          {!listLoading && emailRows.length > visibleEmailRows.length && (
             <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm font-semibold text-slate-500">
                 Showing {visibleEmailRows.length} of {emailRows.length} rows
               </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => setShowAll(value => !value)} className="btn btn-secondary py-1.5 text-sm">
-                  {showAll ? 'Show Pages' : 'Show All'}
-                </button>
-                {!showAll && (
-                  <>
-                    <button type="button" onClick={() => setPage(value => Math.max(1, value - 1))} disabled={currentPage <= 1} className="btn btn-secondary py-1.5 text-sm disabled:opacity-50">
-                      <ChevronLeft size={15} /> Prev
-                    </button>
-                    <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      {currentPage} / {totalPages}
-                    </span>
-                    <button type="button" onClick={() => setPage(value => Math.min(totalPages, value + 1))} disabled={currentPage >= totalPages} className="btn btn-secondary py-1.5 text-sm disabled:opacity-50">
-                      Next <ChevronRight size={15} />
-                    </button>
-                  </>
-                )}
-              </div>
+              <p className="text-xs font-semibold text-slate-400">Scroll down to load more.</p>
             </div>
           )}
         </section>

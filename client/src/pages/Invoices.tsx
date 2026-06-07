@@ -24,8 +24,7 @@ import { shouldSaveOnEnter } from '../utils/keyboard';
 import { useMinimumLoading } from '../hooks/useMinimumLoading';
 import { PortalSelect } from '../components/PortalSelect';
 import { getBoardingStatus } from '../utils/studentBoarding';
-
-const LARGE_TABLE_RENDER_LIMIT = 300;
+import { ProgressiveListLoader, useProgressiveList } from '../hooks/useProgressiveList';
 
 interface Invoice {
   id: string;
@@ -182,6 +181,7 @@ export default function Invoices() {
   const [savingAccounts, setSavingAccounts] = useState(false);
 
   const students = useActiveStudents();
+  const bulkStudentProgress = useProgressiveList(students, { initialCount: 120, step: 120, delayMs: 180 });
   const { students: allStudents } = useStudents();
   const sid = schoolId || user?.id || '';
   const { data: feesData, loading: feesLoading, refresh: refreshFees } = useTableData(sid, 'fees');
@@ -1416,8 +1416,10 @@ export default function Invoices() {
     }
     return true;
   }), [invoices, filterStatus, filterTerm, filterClassId, filterStructure, deferredSearchTerm, classById]);
-  const visibleFilteredStudentSummary = filteredStudentSummary.slice(0, LARGE_TABLE_RENDER_LIMIT);
-  const visibleFilteredInvoices = filteredInvoices.slice(0, LARGE_TABLE_RENDER_LIMIT);
+  const studentSummaryProgress = useProgressiveList(filteredStudentSummary, { initialCount: 120, step: 120, delayMs: 180 });
+  const invoiceListProgress = useProgressiveList(filteredInvoices, { initialCount: 120, step: 120, delayMs: 180 });
+  const visibleFilteredStudentSummary = studentSummaryProgress.visibleItems;
+  const visibleFilteredInvoices = invoiceListProgress.visibleItems;
   const listLoading = useMinimumLoading(feesLoading || paymentsLoading, 2000);
 
   const currentTermBursaries = useMemo(() => {
@@ -2101,9 +2103,10 @@ export default function Invoices() {
                 ))}
               </tbody>
             </table>
-            {filteredStudentSummary.length > visibleFilteredStudentSummary.length && (
+            <ProgressiveListLoader hasMore={studentSummaryProgress.hasMore} loadingMore={studentSummaryProgress.loadingMore} onVisible={studentSummaryProgress.loadMore} />
+            {studentSummaryProgress.hasMore && (
               <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-                Showing first {visibleFilteredStudentSummary.length.toLocaleString()} of {filteredStudentSummary.length.toLocaleString()} students to keep the page responsive. Use search or filters to narrow the list.
+                Showing {visibleFilteredStudentSummary.length.toLocaleString()} of {filteredStudentSummary.length.toLocaleString()} students. Scroll down to load more.
               </div>
             )}
             </>
@@ -2224,9 +2227,10 @@ export default function Invoices() {
                 })}
               </tbody>
             </table>
-            {filteredInvoices.length > visibleFilteredInvoices.length && (
+            <ProgressiveListLoader hasMore={invoiceListProgress.hasMore} loadingMore={invoiceListProgress.loadingMore} onVisible={invoiceListProgress.loadMore} />
+            {invoiceListProgress.hasMore && (
               <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-                Showing first {visibleFilteredInvoices.length.toLocaleString()} of {filteredInvoices.length.toLocaleString()} invoices to prevent lag. Export still uses all matching invoices.
+                Showing {visibleFilteredInvoices.length.toLocaleString()} of {filteredInvoices.length.toLocaleString()} invoices. Scroll down to load more; export still uses all matching invoices.
               </div>
             )}
             </>
@@ -2393,7 +2397,7 @@ export default function Invoices() {
                         <span className="font-medium text-sm">Select All Students</span>
                       </label>
                     </div>
-                    {students.map((student, index) => (
+                    {bulkStudentProgress.visibleItems.map((student, index) => (
                       <label key={student.id} className="flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer border-b border-slate-100 dark:border-slate-700 last:border-0">
                         <span className="w-6 text-xs font-bold text-slate-400">{index + 1}.</span>
                         <input
@@ -2418,6 +2422,12 @@ export default function Invoices() {
                       <div className="p-6 text-center text-slate-500">
                         <Users size={32} className="mx-auto mb-2 opacity-50" />
                         <p>No active students found</p>
+                      </div>
+                    )}
+                    <ProgressiveListLoader hasMore={bulkStudentProgress.hasMore} loadingMore={bulkStudentProgress.loadingMore} onVisible={bulkStudentProgress.loadMore} />
+                    {bulkStudentProgress.hasMore && (
+                      <div className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-300">
+                        Showing {bulkStudentProgress.visibleItems.length.toLocaleString()} of {students.length.toLocaleString()}. Scroll down to load more.
                       </div>
                     )}
                   </div>

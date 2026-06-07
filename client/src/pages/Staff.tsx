@@ -276,11 +276,15 @@ export default function StaffPage() {
   }
 
   function handleSelectAll() {
-    if (selectedStaff.size === filteredStaff.length) {
-      setSelectedStaff(new Set());
-    } else {
-      setSelectedStaff(new Set(filteredStaff.map(s => s.id)));
-    }
+    setSelectedStaff(prev => {
+      const next = new Set(prev);
+      if (allFilteredStaffSelected) {
+        filteredStaffIds.forEach(id => next.delete(id));
+      } else {
+        filteredStaffIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
   }
 
   async function handleBulkDelete() {
@@ -428,7 +432,12 @@ export default function StaffPage() {
   const filteredStaff = useMemo(() => staff.filter((s) =>
     matchesTextSearch([s.firstName, s.lastName, `${s.firstName} ${s.lastName}`, `${s.lastName} ${s.firstName}`, s.employeeId, s.email, s.phone, getStaffSubjectSummary(s)], search)
   ), [staff, search, getStaffSubjectSummary]);
-  const allFilteredStaffSelected = filteredStaff.length > 0 && selectedStaff.size === filteredStaff.length;
+  const filteredStaffIds = useMemo(() => filteredStaff.map(member => member.id), [filteredStaff]);
+  const selectedFilteredStaffCount = useMemo(
+    () => filteredStaffIds.reduce((count, id) => count + (selectedStaff.has(id) ? 1 : 0), 0),
+    [filteredStaffIds, selectedStaff]
+  );
+  const allFilteredStaffSelected = filteredStaffIds.length > 0 && selectedFilteredStaffCount === filteredStaffIds.length;
   const selectedStaffImageRecords = useMemo<BulkImageRecord[]>(() => filteredStaff
     .filter(member => selectedStaff.has(member.id))
     .map(member => ({
@@ -1349,7 +1358,7 @@ export default function StaffPage() {
                   onClick={handleSelectAll}
                   className="text-xs text-violet-600 dark:text-violet-400 hover:underline"
                 >
-                  {selectedStaff.size === filteredStaff.length ? 'Deselect All' : 'Select All'}
+                  {allFilteredStaffSelected ? 'Deselect All' : `Select All (${filteredStaffIds.length.toLocaleString()})`}
                 </button>
                 {allFilteredStaffSelected && (
                   <button
@@ -1389,7 +1398,7 @@ export default function StaffPage() {
                 <th className="w-10">#</th>
                 {selectMode && <th className="w-10">
                   <button onClick={handleSelectAll} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">
-                    {selectedStaff.size === filteredStaff.length && filteredStaff.length > 0 ? (
+                    {allFilteredStaffSelected ? (
                       <CheckSquare size={16} className="text-primary-600" />
                     ) : (
                       <Square size={16} className="text-slate-400" />
