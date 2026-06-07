@@ -2,29 +2,53 @@ import { useState, useEffect } from 'react';
 import { CheckCircle, Sparkles, X } from 'lucide-react';
 import { appLogoFileName, releaseChannelLabel } from '../utils/releaseChannel';
 
-// Bump this version string whenever you deploy new features.
-// The popup shows once per version and release channel.
-const APP_VERSION = 'Version1.1';
-const STORAGE_KEY = `schofy_seen_update_popup_${releaseChannelLabel}_${APP_VERSION}`;
+const APP_VERSION = 'Version 1.1';
+const STORAGE_KEY = `schofy_seen_update_items_${releaseChannelLabel}`;
+const LEGACY_STORAGE_KEY = `schofy_seen_update_popup_${releaseChannelLabel}_Version1.1`;
 const assetBase = import.meta.env.BASE_URL || '/';
 const APP_LOGO = `${assetBase.endsWith('/') ? assetBase : `${assetBase}/`}${appLogoFileName}`;
 
 const CHANGELOG = [
-  { text: 'New report card templates with school logo watermark and PDF export.' },
-  { text: 'Classes & Timetables now includes colored timetable blocks, full screen editing, room, exam, event, and free-time support.' },
-  { text: 'Student profiles now include Subjects, optional OPs, and S5/S6 combinations.' },
-  { text: 'Finance adds expenses, profit reporting, payment accounts, invoice improvements, and one-time verification codes.' },
-  { text: 'Parents & Emails, Assignments, custom grading, sidebar organization, and assistant read-aloud are now available.' },
-  { text: 'Sync, offline queue handling, list performance, imports, searches, filters, and responsive scrolling were improved.' },
+  { id: '2026-06-07-unlimited-codes', text: 'Unlimited verification codes were updated from the private verification workbook and now work in the Schofy Unlimited desktop release.' },
+  { id: '2026-06-07-staff-plan-limits', text: 'Plan limits now keep students and staff separate, for example Starter allows 100 students and 15 staff.' },
+  { id: '2026-06-07-staff-import-exact', text: 'Staff imports now show the exact imported, replaced, and plan-skipped numbers.' },
+  { id: '2026-06-07-student-import-exact', text: 'Student imports now report exact accepted and skipped counts when a plan limit is reached.' },
+  { id: '2026-06-07-recycle-bulk-restore', text: 'Recycle Bin restores deleted students in bulk while preserving the exact restored records.' },
+  { id: '2026-06-07-release-refresh', text: 'Version 1.1 release installers were refreshed in the dated release folder.' },
+  { id: '2026-06-06-imports', text: 'Student and staff import previews gained better field detection, custom mapping, draft recovery, and progress feedback.' },
+  { id: '2026-06-06-theme', text: 'Themes, loaders, notifications, plan highlights, and page transitions were adjusted to follow the selected app theme.' },
+  { id: '2026-06-06-finance', text: 'Invoices and payment methods were improved with a smaller record-payment popup and safer saved payment-method data.' },
+  { id: '2026-06-06-access', text: 'Secure access and offline plan checks were improved for first-time online activation and later offline use.' },
+  { id: '2026-06-06-dashboard', text: 'Dashboard cards, figures, colors, and search display behavior were refined.' },
+  { id: '2026-06-06-records', text: 'Class detection, stream fields, day/boarding fields, profile labels, duplicate cleanup, backup import, and bulk delete/restore flows were improved.' },
+  { id: '2026-06-01-v11-core', text: 'Version 1.1 added report card templates, timetable improvements, student profile subjects, finance tools, verification codes, imports, search, sync, and offline performance fixes.' },
 ];
+
+function readSeenUpdateIds() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function saveSeenUpdateIds(ids: string[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(new Set(ids))));
+  localStorage.setItem(`${STORAGE_KEY}_last_seen_at`, new Date().toISOString());
+  localStorage.removeItem(LEGACY_STORAGE_KEY);
+}
 
 export default function UpdateBanner() {
   const [visible, setVisible] = useState(false);
+  const [itemsToShow, setItemsToShow] = useState(CHANGELOG);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (!localStorage.getItem(STORAGE_KEY)) {
-        localStorage.setItem(STORAGE_KEY, '1');
+      const seenIds = readSeenUpdateIds();
+      const unseenItems = CHANGELOG.filter(item => !seenIds.has(item.id));
+      if (unseenItems.length > 0) {
+        setItemsToShow(unseenItems);
         setVisible(true);
       }
     }, 1200);
@@ -32,7 +56,7 @@ export default function UpdateBanner() {
   }, []);
 
   function dismiss() {
-    localStorage.setItem(STORAGE_KEY, '1');
+    saveSeenUpdateIds(CHANGELOG.map(item => item.id));
     setVisible(false);
   }
 
@@ -48,10 +72,10 @@ export default function UpdateBanner() {
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-base font-bold leading-tight text-white">Schofy updated to {APP_VERSION}</p>
+                <p className="text-base font-bold leading-tight text-white">Schofy updates - {APP_VERSION}</p>
                 <Sparkles size={15} className="text-white/85" />
               </div>
-              <p className="mt-0.5 text-xs font-medium text-white/75">{releaseChannelLabel} updates and improvements</p>
+              <p className="mt-0.5 text-xs font-medium text-white/75">{itemsToShow.length} new {releaseChannelLabel} change{itemsToShow.length === 1 ? '' : 's'}</p>
             </div>
           </div>
           <button
@@ -67,8 +91,8 @@ export default function UpdateBanner() {
 
         <div className="max-h-[68vh] overflow-y-auto px-5 py-4">
           <div className="space-y-3">
-            {CHANGELOG.map((item) => (
-              <div key={item.text} className="flex gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/70">
+            {itemsToShow.map((item) => (
+              <div key={item.id} className="flex gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/70">
                 <CheckCircle size={16} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                 <p className="text-sm leading-5 text-slate-600 dark:text-slate-300">{item.text}</p>
               </div>
