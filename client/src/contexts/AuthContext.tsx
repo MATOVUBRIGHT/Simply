@@ -12,7 +12,7 @@ import { getSubscriptionAccessState } from '../utils/plans';
 import { isDesktopApp, setCloudSyncEnabled } from '../utils/desktopSyncPreference';
 import { loginLocal, registerLocal } from '../lib/auth/LocalAuth';
 import { createVerifiedPlanProof, readVerifiedPlanProof, restoreVerifiedPlanProof } from '../utils/planProof';
-import { isUnlockedRelease } from '../utils/releaseChannel';
+import { canUseUnlimitedAccountAccess } from '../utils/unlimitedAccess';
 import {
   clearStorageEncryption,
   unlockStorageEncryption,
@@ -75,7 +75,8 @@ async function backupVerifiedPlan(tenantId: string | null | undefined) {
   const notExpired = expiry && !Number.isNaN(expiry.getTime()) && expiry.getTime() > Date.now();
   if (!active || pending || !plan || !notExpired) return;
   const verificationCodeHash = localStorage.getItem('schofy_plan_verification_code_hash') || undefined;
-  if (plan === 'unlimited' && (!isUnlockedRelease || !verificationCodeHash)) return;
+  const proofSource = verificationCodeHash ? 'verification_code' : 'remote_subscription';
+  if (!canUseUnlimitedAccountAccess({ planId: plan, source: proofSource, verificationCodeHash })) return;
 
   await createVerifiedPlanProof({
     tenantId,
@@ -85,7 +86,7 @@ async function backupVerifiedPlan(tenantId: string | null | undefined) {
     schofy_sub_pending: '0',
     remoteVerifiedAt: localStorage.getItem('schofy_plan_remote_verified_at') || new Date().toISOString(),
     verificationCodeHash,
-    source: verificationCodeHash ? 'verification_code' : 'remote_subscription',
+    source: proofSource,
   });
 }
 

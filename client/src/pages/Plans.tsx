@@ -11,13 +11,14 @@ import { supabase } from '../lib/supabase';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
 import { redeemPaymentVerificationCode } from '../utils/paymentVerification';
 import { isUnlockedRelease } from '../utils/releaseChannel';
+import { canUseUnlimitedAccountAccess, getUnlimitedAccessRequirementMessage } from '../utils/unlimitedAccess';
 import { useTypewriterText } from '../hooks/useTypewriterText';
 import { createVerifiedPlanProof, readVerifiedPlanProof } from '../utils/planProof';
 
 const faqs = [
   { q: 'How does the student limit work?', a: 'Your plan determines max enrolled students. Reach the limit to upgrade before adding more.' },
   { q: 'Can I switch plans?', a: 'Yes. Your current plan stays active while the new plan waits for admin approval.' },
-  { q: `How do I buy ${UNLIMITED_PLAN_LABEL}?`, a: 'Contact Us to arrange the one-time desktop version. It gives unlimited student access after approval.' },
+  { q: `How do I buy ${UNLIMITED_PLAN_LABEL}?`, a: 'Contact Us to arrange Unlimited access. On the web it follows the approved account; on desktop the Unlimited release needs one online code activation.' },
   { q: 'Payment methods?', a: 'Airtel Money only. Activation within 24 hours.' },
   { q: 'Refunds?', a: 'No, all payments are non-refundable.' },
 ];
@@ -241,9 +242,14 @@ export default function Plans() {
           const expiry = sub.ends_at ? new Date(sub.ends_at) : null;
           const ms = expiry && !Number.isNaN(expiry.getTime()) ? expiry.getTime() - Date.now() : 0;
           const days = ms > 0 ? Math.ceil(ms / (24 * 60 * 60 * 1000)) : 0;
-          const unlimitedRequiresCode = plan.id === 'unlimited';
-          const unlimitedHasCode = isUnlockedRelease && Boolean(meta.approvedByCode) && typeof meta.verificationCodeHash === 'string' && meta.verificationCodeHash.trim().length > 0;
-          if (unlimitedRequiresCode && !unlimitedHasCode) {
+          const remoteCodeHash = typeof meta.verificationCodeHash === 'string' ? meta.verificationCodeHash : undefined;
+          const unlimitedSource = meta.approvedByCode || remoteCodeHash ? 'verification_code' : 'remote_subscription';
+          const unlimitedAllowed = canUseUnlimitedAccountAccess({
+            planId: plan.id,
+            source: unlimitedSource,
+            verificationCodeHash: remoteCodeHash,
+          });
+          if (plan.id === 'unlimited' && !unlimitedAllowed) {
             effectiveUsage = {
               ...usage,
               plan,
@@ -256,16 +262,13 @@ export default function Plans() {
             };
             setAccessNotice({
               type: 'info',
-              message: isUnlockedRelease
-                ? 'Unlimited desktop access needs an Unlimited verification code. Enter the code online once, then it will work offline on this device.'
-                : 'Unlimited codes work only in the Schofy Unlimited desktop version.',
+              message: getUnlimitedAccessRequirementMessage(),
             });
           } else {
             const status = ms <= 0 ? 'expired' : days <= 14 ? 'expiring' : 'active';
-            const remoteCodeHash = typeof meta.verificationCodeHash === 'string' ? meta.verificationCodeHash : undefined;
-            if (ms > 0 && remoteCodeHash) {
+            if (ms > 0 && plan.id === 'unlimited') {
               const verifiedAt = meta.activatedAt || meta.approvedAt || meta.grantedAt || meta.extendedAt || new Date().toISOString();
-              localStorage.setItem('schofy_plan_verification_code_hash', remoteCodeHash);
+              if (remoteCodeHash) localStorage.setItem('schofy_plan_verification_code_hash', remoteCodeHash);
               await createVerifiedPlanProof({
                 tenantId: authId,
                 schofy_sub_expiry: expiry!.toISOString(),
@@ -274,7 +277,7 @@ export default function Plans() {
                 schofy_sub_pending: '0',
                 remoteVerifiedAt: String(verifiedAt),
                 verificationCodeHash: remoteCodeHash,
-                source: 'verification_code',
+                source: unlimitedSource,
               });
             }
             effectiveUsage = {
@@ -311,7 +314,11 @@ export default function Plans() {
 
       if (effectiveUsage.selectedPlanId === 'unlimited') {
         const proof = await readVerifiedPlanProof(authId);
-        if (!proof) {
+        const canUseAccountPlanWithoutLocalProof = canUseUnlimitedAccountAccess({
+          planId: 'unlimited',
+          source: 'remote_subscription',
+        });
+        if (!proof && !canUseAccountPlanWithoutLocalProof) {
           const unlimitedPlan = PLAN_DEFINITIONS.find(plan => plan.id === 'unlimited') || effectiveUsage.plan;
           effectiveUsage = {
             ...effectiveUsage,
@@ -325,9 +332,7 @@ export default function Plans() {
           };
           setAccessNotice({
             type: 'info',
-            message: isUnlockedRelease
-              ? 'Unlimited desktop access needs an Unlimited verification code. Enter the code online once, then this device can continue offline.'
-              : 'Unlimited plans and codes work only in the Schofy Unlimited desktop version.',
+            message: getUnlimitedAccessRequirementMessage(),
           });
         }
       }
@@ -559,7 +564,7 @@ Powered by Schofy`;
   const currentPlanLimit = cachedRealPlan?.studentLimit || 0;
   const currentPlanLimitLabel = currentPlanLimit >= Number.MAX_SAFE_INTEGER ? 'Unlimited' : currentPlanLimit || 'N/A';
   const showBackToApp = Boolean(user && isDesktopApp());
-  const contactMessage = (plan: PlanDefinition) => encodeURIComponent(`Hello,\n\nI want to buy the ${plan.name} plan.\nSchool: ${user?.email || ''}\nSchool ID: ${schoolId || user?.id || ''}\n\nPlease help me activate the one-time desktop version with unlimited students.`);
+  const contactMessage = (plan: PlanDefinition) => encodeURIComponent(`Hello,\n\nI want to buy the ${plan.name} plan.\nSchool: ${user?.email || ''}\nSchool ID: ${schoolId || user?.id || ''}\n\nPlease help me activate Unlimited access for my account.`);
   const lockedPlanMessage = useTypewriterText([
     'Your account is locked or expired. Please select a plan below to unlock all features and increase student limits.',
     'Have a code? You can use it right away to unlock the matching plan.',

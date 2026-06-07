@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase';
 import { cacheReady } from '../lib/database/SupabaseDataService';
 import { createVerifiedPlanProof, readVerifiedPlanProof, restoreVerifiedPlanProof } from '../utils/planProof';
 import { redeemPaymentVerificationCode } from '../utils/paymentVerification';
-import { isUnlockedRelease } from '../utils/releaseChannel';
+import { canUseUnlimitedAccountAccess } from '../utils/unlimitedAccess';
 
 // Routes always accessible regardless of subscription
 const ALLOWED_ROUTES = ['/plans', '/subscribe', '/login'];
@@ -89,11 +89,13 @@ function isUnlimitedCodeProofUsable(
   tenantId: string
 ) {
   return Boolean(
-    isUnlockedRelease &&
     proof?.values.tenantId === tenantId &&
     proof.values.schofy_sub_plan === UNLIMITED_PLAN_ID &&
-    proof.values.source === 'verification_code' &&
-    proof.values.verificationCodeHash
+    canUseUnlimitedAccountAccess({
+      planId: proof.values.schofy_sub_plan,
+      source: proof.values.source,
+      verificationCodeHash: proof.values.verificationCodeHash,
+    })
   );
 }
 
@@ -272,7 +274,12 @@ export default function SubscriptionGate({ children }: Props) {
             if (remotePlan) {
               const remoteIsUnlimited = remotePlan.id === UNLIMITED_PLAN_ID;
               const remoteCodeHash = typeof meta.verificationCodeHash === 'string' ? meta.verificationCodeHash : undefined;
-              const unlimitedCodeAllowed = !remoteIsUnlimited || (isUnlockedRelease && Boolean(remoteCodeHash) && Boolean(meta.approvedByCode));
+              const unlimitedSource = meta.approvedByCode || remoteCodeHash ? 'verification_code' : 'remote_subscription';
+              const unlimitedCodeAllowed = !remoteIsUnlimited || canUseUnlimitedAccountAccess({
+                planId: remotePlan.id,
+                source: unlimitedSource,
+                verificationCodeHash: remoteCodeHash,
+              });
 
               if (!unlimitedCodeAllowed) {
                 state = makeIncompleteUnlimitedState({
@@ -291,7 +298,7 @@ export default function SubscriptionGate({ children }: Props) {
                   schofy_sub_pending: '0',
                   remoteVerifiedAt: String(verifiedAt),
                   verificationCodeHash: remoteCodeHash,
-                  source: meta.approvedByCode || remoteCodeHash ? 'verification_code' : 'remote_subscription',
+                  source: unlimitedSource,
                 });
                   if (remoteCodeHash) localStorage.setItem('schofy_plan_verification_code_hash', remoteCodeHash);
                 }

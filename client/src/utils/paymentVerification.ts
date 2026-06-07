@@ -10,7 +10,7 @@ import {
 } from './plans';
 import { EMBEDDED_ACCESS_GRANTS, PAYMENT_ACCESS_HASH_SALT, EmbeddedAccessGrant } from './accessGrants';
 import { createVerifiedPlanProof } from './planProof';
-import { isUnlockedRelease } from './releaseChannel';
+import { canRedeemUnlimitedCodeInCurrentApp } from './unlimitedAccess';
 
 const USED_CODES_KEY = 'schofy_used_payment_verification_codes';
 const TERMINATED_CODES_KEY = 'schofy_terminated_payment_verification_codes';
@@ -168,10 +168,10 @@ export async function redeemPaymentVerificationCode(
     const codeHash = matched?.hash || candidateHashes[0]?.hash || '';
     const grant = codeHash ? EMBEDDED_ACCESS_GRANTS.find((item) => item.codeHash === codeHash) : undefined;
     if (!grant) return { status: 'invalid', message: 'This verification code is not valid.' };
-    if (grant.planId === 'unlimited' && !isUnlockedRelease) {
+    if (grant.planId === 'unlimited' && !canRedeemUnlimitedCodeInCurrentApp()) {
       return {
         status: 'invalid',
-        message: 'This Unlimited code works only in the Schofy Unlimited desktop version. Install the Unlimited version, then activate this code online once.',
+        message: 'This Unlimited code works only in the Schofy Unlimited desktop version on desktop. On the web, sign in online to activate it for this account.',
         grant,
       };
     }
@@ -188,7 +188,7 @@ export async function redeemPaymentVerificationCode(
       ...tenantUsedCodes,
     ]);
     const usedByAnotherTenant = supabase && online ? await isCodeUsedByAnotherTenant(codeHash, tenantId) : false;
-    const sameTenantUnlimitedCode = isUnlockedRelease
+    const sameTenantUnlimitedCode = canRedeemUnlimitedCodeInCurrentApp()
       && isUnlimitedGrant
       && (
         tenantUsedCodes.includes(codeHash)

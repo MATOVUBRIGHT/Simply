@@ -1,4 +1,4 @@
-import { isUnlockedRelease } from './releaseChannel';
+import { canUseUnlimitedAccountAccess } from './unlimitedAccess';
 
 const PROOF_KEY_PREFIX = 'schofy_verified_plan_backup_';
 const DEVICE_SECRET_KEY = 'schofy_plan_device_secret';
@@ -68,7 +68,11 @@ export async function readVerifiedPlanProof(tenantId: string): Promise<StoredVer
     if (parsed.values.tenantId !== tenantId) return null;
     if (
       parsed.values.schofy_sub_plan === 'unlimited' &&
-      (!isUnlockedRelease || parsed.values.source !== 'verification_code' || !parsed.values.verificationCodeHash)
+      !canUseUnlimitedAccountAccess({
+        planId: parsed.values.schofy_sub_plan,
+        source: parsed.values.source,
+        verificationCodeHash: parsed.values.verificationCodeHash,
+      })
     ) {
       return null;
     }
