@@ -2929,8 +2929,9 @@ export default function Students() {
                     <div className="flex-1 max-w-xs">
                       {isImporting && (
                         <>
-                          <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                            <div className="h-full transition-all" style={{ width: `${importProgress}%`, backgroundColor: 'var(--solid-emerald)' }} />
+                          <div className="relative h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
+                            <div className="h-full transition-all" style={{ width: `${Math.max(6, importProgress)}%`, backgroundColor: 'var(--solid-emerald)' }} />
+                            {importProgress < 100 && <div className="progress-sweep absolute inset-y-0 left-0 w-1/3 bg-white/50 dark:bg-white/25" />}
                           </div>
                           <p className="mt-1 text-xs text-slate-500">{importProgress}% imported</p>
                         </>

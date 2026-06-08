@@ -835,11 +835,12 @@ export default function Attendance() {
                     <span className="font-semibold text-indigo-700 dark:text-indigo-200">Importing attendance</span>
                     <span className="font-bold text-indigo-700 dark:text-indigo-200">{importPercent}%</span>
                   </div>
-                  <div className="h-2.5 rounded-full bg-white dark:bg-slate-700 overflow-hidden">
+                  <div className="relative h-2.5 overflow-hidden rounded-full bg-white dark:bg-slate-700">
                     <div
                       className="h-full bg-gradient-to-r from-indigo-500 to-cyan-500 transition-all duration-200"
-                      style={{ width: `${importPercent}%` }}
+                      style={{ width: `${Math.max(6, importPercent)}%` }}
                     />
+                    {importPercent < 100 && <div className="progress-sweep absolute inset-y-0 left-0 w-1/3 bg-white/50 dark:bg-white/25" />}
                   </div>
                   <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-300">
                     <span>{importProgress.processed}/{importProgress.total} processed</span>

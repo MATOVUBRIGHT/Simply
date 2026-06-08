@@ -35,6 +35,10 @@ export function uniqueFeeStructures(structures: FeeStructure[]): FeeStructure[] 
   return unique;
 }
 
+function yieldToBrowser(ms = 0) {
+  return new Promise<void>(resolve => window.setTimeout(resolve, ms));
+}
+
 export async function getFeeStructuresByClass(
   userId: string,
   classId: string,
@@ -171,6 +175,7 @@ export async function generateInvoicesFromStructure(
   term: string,
   year: string
 ): Promise<{ fees: Fee[]; studentsCount: number }> {
+  await yieldToBrowser();
   const structures = await getFeeStructuresByClass(userId, classId, term, year);
   if (structures.length === 0) return { fees: [], studentsCount: 0 };
 
@@ -215,7 +220,9 @@ export async function generateInvoicesFromStructure(
   const yearInt = parseInt(year);
   const fees: Fee[] = [];
 
-  for (const student of active) {
+  for (let index = 0; index < active.length; index++) {
+    if (index > 0 && index % 50 === 0) await yieldToBrowser();
+    const student = active[index];
     if (!isUUID(student.id)) continue; // skip non-UUID student ids
     const bursary = termBursaries.find((b: any) => b.studentId === student.id);
 
@@ -267,7 +274,9 @@ export async function generateInvoicesFromStructure(
     }
   }
 
-  for (const fee of fees) {
+  for (let index = 0; index < fees.length; index++) {
+    if (index > 0 && index % 20 === 0) await yieldToBrowser();
+    const fee = fees[index];
     const result = await dataService.create(userId, 'fees', fee as any);
     if (!result.success) console.error('[generateInvoices] fee create failed:', result.error);
   }

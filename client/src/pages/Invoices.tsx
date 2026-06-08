@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, CreditCard, Pencil } from 'lucide-react';
+import { Plus, FileText, Download, Printer, CheckCircle, XCircle, Clock, DollarSign, Users, ChevronDown, Upload, X, ArrowRight, Check as CheckIcon, Search, Filter, Settings, Trash2, GraduationCap, Save, Percent, Award, Search as SearchIcon, UserPlus, CreditCard, Pencil, Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { PaymentMethod, Fee, FeeStructure, FeeCategory } from '@schofy/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -63,6 +63,12 @@ interface Discount {
   term: string;
   year: string;
   createdAt: string;
+}
+
+type BulkClassInvoiceStatus = 'pending' | 'processing' | 'done' | 'skipped' | 'error';
+
+function waitForUiFrame(ms = 40) {
+  return new Promise<void>(resolve => window.setTimeout(resolve, ms));
 }
 
 function termRank(term: string) {
@@ -151,6 +157,17 @@ export default function Invoices() {
   const [showAddStructureForm, setShowAddStructureForm] = useState(false);
   const [newStructure, setNewStructure] = useState<{ name: string; category: FeeCategory; amount: number; isRequired: boolean; description: string }>({ name: '', category: FeeCategory.TUITION, amount: 0, isRequired: true, description: '' });
   const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [showBulkClassInvoiceModal, setShowBulkClassInvoiceModal] = useState(false);
+  const [bulkClassInvoiceIds, setBulkClassInvoiceIds] = useState<string[]>([]);
+  const [bulkClassInvoiceRunning, setBulkClassInvoiceRunning] = useState(false);
+  const [bulkClassInvoiceProgress, setBulkClassInvoiceProgress] = useState({
+    currentClassName: '',
+    processedClasses: 0,
+    totalClasses: 0,
+    totalInvoiced: 0,
+    classesWithInvoices: 0,
+    statuses: {} as Record<string, BulkClassInvoiceStatus>,
+  });
   const [showBursaryModal, setShowBursaryModal] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [bursaries, setBursaries] = useState<Bursary[]>([]);
@@ -1148,30 +1165,109 @@ export default function Invoices() {
     } catch { addToast('Failed to invoice student', 'error'); }
   }
 
-  // Bulk invoice all classes that have fee structures
+  function openBulkClassInvoiceModal() {
+    const classIds = classes.map(cls => cls.id).filter(Boolean);
+    setBulkClassInvoiceIds(classIds);
+    setBulkClassInvoiceProgress({
+      currentClassName: '',
+      processedClasses: 0,
+      totalClasses: classIds.length,
+      totalInvoiced: 0,
+      classesWithInvoices: 0,
+      statuses: Object.fromEntries(classIds.map(classId => [classId, 'pending' as BulkClassInvoiceStatus])),
+    });
+    setShowBulkClassInvoiceModal(true);
+  }
+
+  function toggleBulkClassInvoiceId(classId: string) {
+    if (bulkClassInvoiceRunning) return;
+    setBulkClassInvoiceIds(prev => (
+      prev.includes(classId)
+        ? prev.filter(id => id !== classId)
+        : [...prev, classId]
+    ));
+  }
+
+  // Bulk invoice selected classes one at a time so large schools stay responsive.
   async function handleBulkInvoiceAllClasses() {
     const id = schoolId || user?.id;
     if (!id) return;
-    const submitting = (window as any).__bulkInvoicing;
-    if (submitting) return;
-    (window as any).__bulkInvoicing = true;
+    if (bulkClassInvoiceRunning) return;
+    const selectedClassIds = classes
+      .filter(cls => bulkClassInvoiceIds.includes(cls.id))
+      .map(cls => cls.id);
+    if (selectedClassIds.length === 0) {
+      addToast('Select at least one class to invoice', 'error');
+      return;
+    }
+
+    setBulkClassInvoiceRunning(true);
+    setBulkClassInvoiceProgress({
+      currentClassName: '',
+      processedClasses: 0,
+      totalClasses: selectedClassIds.length,
+      totalInvoiced: 0,
+      classesWithInvoices: 0,
+      statuses: Object.fromEntries(selectedClassIds.map(classId => [classId, 'pending' as BulkClassInvoiceStatus])),
+    });
+
     try {
       let totalInvoiced = 0;
       let classesProcessed = 0;
-      const tasks = classes.map((cls) => async () => {
-        const { fees: created } = await generateInvoicesFromStructure(id, cls.id, selectedTerm, selectedYear);
-        if (created.length > 0) { totalInvoiced += created.length; classesProcessed++; }
-      });
-      await runTasksInPercentBatches(tasks, 0.4);
+      let processed = 0;
+
+      for (const classId of selectedClassIds) {
+        const cls = classes.find(item => item.id === classId);
+        const className = cls?.name || 'Class';
+        setBulkClassInvoiceProgress(prev => ({
+          ...prev,
+          currentClassName: className,
+          statuses: { ...prev.statuses, [classId]: 'processing' },
+        }));
+        await waitForUiFrame();
+
+        try {
+          const { fees: created } = await generateInvoicesFromStructure(id, classId, selectedTerm, selectedYear);
+          totalInvoiced += created.length;
+          if (created.length > 0) classesProcessed++;
+          processed++;
+          setBulkClassInvoiceProgress(prev => ({
+            ...prev,
+            currentClassName: className,
+            processedClasses: processed,
+            totalInvoiced,
+            classesWithInvoices: classesProcessed,
+            statuses: { ...prev.statuses, [classId]: created.length > 0 ? 'done' : 'skipped' },
+          }));
+        } catch (error) {
+          console.error(`Failed to invoice class ${classId}:`, error);
+          processed++;
+          setBulkClassInvoiceProgress(prev => ({
+            ...prev,
+            currentClassName: className,
+            processedClasses: processed,
+            statuses: { ...prev.statuses, [classId]: 'error' },
+          }));
+        }
+
+        await waitForUiFrame(80);
+      }
+
       if (totalInvoiced === 0) {
         addToast('No fee structures found. Set up fee structures per class first.', 'info');
         setManagementPage('structures');
       } else {
         addToast(`Invoiced ${totalInvoiced} fees across ${classesProcessed} classes`, 'success');
         refreshInvoices();
+        window.dispatchEvent(new CustomEvent('dataRefresh'));
+        window.dispatchEvent(new CustomEvent('schofyDataRefresh', { detail: { table: 'fees' } }));
       }
-    } catch { addToast('Bulk invoice failed', 'error'); }
-    finally { (window as any).__bulkInvoicing = false; }
+    } catch {
+      addToast('Bulk invoice failed', 'error');
+    } finally {
+      setBulkClassInvoiceRunning(false);
+      setBulkClassInvoiceProgress(prev => ({ ...prev, currentClassName: '' }));
+    }
   }
 
   function openPaymentModal(invoice: Invoice) {
@@ -1533,7 +1629,7 @@ export default function Invoices() {
                 <span className="hidden sm:inline">Discount</span>
               </button>
               <button
-                onClick={handleBulkInvoiceAllClasses}
+                onClick={openBulkClassInvoiceModal}
                 className="btn btn-secondary"
                 title="Invoice all students in all classes using their fee structures"
               >
@@ -2371,6 +2467,184 @@ export default function Invoices() {
         document.body
       )}
 
+      {showBulkClassInvoiceModal && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !bulkClassInvoiceRunning) setShowBulkClassInvoiceModal(false);
+          }}
+        >
+          <div className="flex max-h-[94dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl animate-modal-in dark:border-slate-700 dark:bg-slate-800 sm:max-h-[88vh] sm:rounded-2xl">
+            <div className="shrink-0 flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-700 sm:p-5">
+              <div className="min-w-0">
+                <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white">
+                  <Users size={20} className="text-primary-600" />
+                  Invoice Classes
+                </h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Select classes, then invoices are generated one class at a time.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowBulkClassInvoiceModal(false)}
+                disabled={bulkClassInvoiceRunning}
+                className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-700/50">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Selected</p>
+                  <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{bulkClassInvoiceIds.length}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-700/50">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Done</p>
+                  <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{bulkClassInvoiceProgress.processedClasses}/{bulkClassInvoiceProgress.totalClasses || bulkClassInvoiceIds.length}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-700/50">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Invoices</p>
+                  <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{bulkClassInvoiceProgress.totalInvoiced.toLocaleString()}</p>
+                </div>
+              </div>
+
+              {bulkClassInvoiceRunning && (
+                <div className="mb-4 rounded-xl border border-primary-200 bg-primary-50 p-4 dark:border-primary-800 dark:bg-primary-900/20">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-primary-800 dark:text-primary-100">
+                        Processing {bulkClassInvoiceProgress.currentClassName || 'selected classes'}...
+                      </p>
+                      <p className="mt-1 text-xs text-primary-700/80 dark:text-primary-200/80">
+                        Large classes run in small chunks so the app remains usable.
+                      </p>
+                    </div>
+                    <Loader2 size={20} className="shrink-0 animate-spin text-primary-600 dark:text-primary-300" />
+                  </div>
+                  <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-white/80 dark:bg-slate-900/50">
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.max(6, Math.min(100, Math.round((bulkClassInvoiceProgress.processedClasses / Math.max(1, bulkClassInvoiceProgress.totalClasses || bulkClassInvoiceIds.length)) * 100)))}%`,
+                        backgroundColor: 'var(--primary-color)',
+                      }}
+                    />
+                    <div className="invoice-progress-sweep absolute inset-y-0 left-0 w-1/3 bg-white/45 dark:bg-white/25" />
+                  </div>
+                </div>
+              )}
+
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  disabled={bulkClassInvoiceRunning}
+                  onClick={() => {
+                    const allIds = classes.map(cls => cls.id).filter(Boolean);
+                    setBulkClassInvoiceIds(bulkClassInvoiceIds.length === allIds.length ? [] : allIds);
+                  }}
+                  className="text-sm font-semibold text-primary-700 hover:text-primary-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-primary-300"
+                >
+                  {bulkClassInvoiceIds.length === classes.length ? 'Clear selection' : 'Select all classes'}
+                </button>
+                <span className="text-xs font-semibold text-slate-400">
+                  Term {selectedTerm} - {selectedYear}
+                </span>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
+                {classes.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-slate-500">No classes found.</div>
+                ) : classes.map(cls => {
+                  const checked = bulkClassInvoiceIds.includes(cls.id);
+                  const status = bulkClassInvoiceProgress.statuses[cls.id] || 'pending';
+                  const statusLabel = status === 'done' ? 'Done' : status === 'skipped' ? 'No new invoices' : status === 'processing' ? 'Processing' : status === 'error' ? 'Failed' : 'Pending';
+                  return (
+                    <label key={cls.id} className="flex cursor-pointer items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700/50">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={bulkClassInvoiceRunning}
+                        onChange={() => toggleBulkClassInvoiceId(cls.id)}
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-slate-800 dark:text-white">{cls.name}</p>
+                        <p className="text-xs text-slate-400">Uses this class fee structure for Term {selectedTerm}.</p>
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                        status === 'done'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                          : status === 'processing'
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                            : status === 'error'
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                              : status === 'skipped'
+                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                                : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300'
+                      }`}>
+                        {statusLabel}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="shrink-0 flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 p-4 dark:border-slate-700 sm:p-5">
+              {bulkClassInvoiceRunning ? (
+                <button onClick={() => setShowBulkClassInvoiceModal(false)} className="btn btn-secondary">
+                  Run in Background
+                </button>
+              ) : (
+                <button onClick={() => setShowBulkClassInvoiceModal(false)} className="btn btn-secondary">
+                  Cancel
+                </button>
+              )}
+              <button
+                onClick={handleBulkInvoiceAllClasses}
+                disabled={bulkClassInvoiceRunning || bulkClassInvoiceIds.length === 0}
+                className="btn btn-primary"
+              >
+                {bulkClassInvoiceRunning ? <Loader2 size={17} className="animate-spin" /> : <Users size={17} />}
+                {bulkClassInvoiceRunning ? 'Invoicing...' : `Start ${bulkClassInvoiceIds.length} Class${bulkClassInvoiceIds.length === 1 ? '' : 'es'}`}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {!showBulkClassInvoiceModal && bulkClassInvoiceRunning && createPortal(
+        <button
+          type="button"
+          onClick={() => setShowBulkClassInvoiceModal(true)}
+          className="fixed bottom-5 right-5 z-[9999] flex max-w-[min(360px,calc(100vw-2.5rem))] items-center gap-3 overflow-hidden rounded-2xl border border-primary-200 bg-white px-4 py-3 text-left shadow-2xl dark:border-primary-800 dark:bg-slate-800"
+        >
+          <Loader2 size={18} className="shrink-0 animate-spin text-primary-600 dark:text-primary-300" />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-bold text-slate-900 dark:text-white">
+              Invoicing {bulkClassInvoiceProgress.currentClassName || 'classes'}
+            </span>
+            <span className="block text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {bulkClassInvoiceProgress.processedClasses}/{bulkClassInvoiceProgress.totalClasses} classes - {bulkClassInvoiceProgress.totalInvoiced.toLocaleString()} invoices
+            </span>
+          </span>
+          <span className="absolute inset-x-0 bottom-0 h-1 bg-primary-100 dark:bg-primary-900/40">
+            <span
+              className="block h-full transition-all duration-300"
+              style={{
+                width: `${Math.max(6, Math.min(100, Math.round((bulkClassInvoiceProgress.processedClasses / Math.max(1, bulkClassInvoiceProgress.totalClasses)) * 100)))}%`,
+                backgroundColor: 'var(--primary-color)',
+              }}
+            />
+            <span className="invoice-progress-sweep absolute inset-y-0 left-0 w-1/3 bg-white/45 dark:bg-white/25" />
+          </span>
+        </button>,
+        document.body
+      )}
+
       {showCreateModal && (
         <div className="fixed inset-x-0 top-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-8 overflow-y-auto">
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden animate-modal-in border border-slate-200 dark:border-slate-700">
@@ -2617,8 +2891,9 @@ export default function Invoices() {
                     <div className="flex-1 max-w-40">
                       {isImporting && (
                         <>
-                          <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-                            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${importProgress}%` }} />
+                          <div className="relative h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
+                            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.max(6, importProgress)}%` }} />
+                            {importProgress < 100 && <div className="progress-sweep absolute inset-y-0 left-0 w-1/3 bg-white/50 dark:bg-white/25" />}
                           </div>
                           <p className="mt-1 text-[11px] text-slate-500">{importProgress}% imported</p>
                         </>

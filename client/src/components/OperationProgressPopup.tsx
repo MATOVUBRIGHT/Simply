@@ -61,8 +61,9 @@ export function OperationProgressPopup({
               </div>
             </div>
             <div className="mt-6">
-              <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
-                <div className="h-full rounded-full transition-all duration-150" style={{ width: `${safeProgress}%`, backgroundColor: 'var(--primary-color)' }} />
+              <div className="relative h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700">
+                <div className="h-full rounded-full transition-all duration-150" style={{ width: `${Math.max(6, safeProgress)}%`, backgroundColor: 'var(--primary-color)' }} />
+                {safeProgress < 100 && <div className="progress-sweep absolute inset-y-0 left-0 w-1/3 bg-white/50 dark:bg-white/25" />}
               </div>
               <div className="mt-2 flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
                 <span>{safeProgress}%</span>

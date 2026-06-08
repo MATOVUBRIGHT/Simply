@@ -716,8 +716,9 @@ export default function Transport() {
                       </button>
                     </div>
                     {isImporting && (
-                      <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-2">
-                        <div className="bg-primary-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }} />
+                      <div className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                        <div className="h-full rounded-full bg-primary-500 transition-all duration-300" style={{ width: `${Math.max(6, importProgress)}%` }} />
+                        {importProgress < 100 && <div className="progress-sweep absolute inset-y-0 left-0 w-1/3 bg-white/50 dark:bg-white/25" />}
                       </div>
                     )}
                   </div>

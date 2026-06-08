@@ -49,15 +49,10 @@ export default defineConfig(({ mode }) => ({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
+    reportCompressedSize: false,
     chunkSizeWarningLimit: 1000, // Raised to 1MB since we have good chunking
     target: 'es2020',
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: mode === 'production',
-        drop_debugger: mode === 'production',
-      },
-    },
+    minify: 'oxc',
     rollupOptions: {
       output: {
         // Granular manual chunks — keeps initial bundle tiny

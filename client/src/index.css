@@ -3023,3 +3023,17 @@ textarea.form-input {
     background: #ffffff !important;
   }
 }
+
+@keyframes progress-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+.progress-sweep,
+.invoice-progress-sweep {
+  animation: progress-sweep 1.05s linear infinite;
+}

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
@@ -13,6 +13,8 @@ import { useBackOrFallback } from '../utils/navigation';
 import { getSubjectDisplayCode } from '../utils/subjects';
 import { getGradeFromScale, getSavedGradingScale } from '../utils/grading';
 import { PortalSelect } from '../components/PortalSelect';
+import { LargeDataSpinner } from '../components/LargeDataSpinner';
+import { useMinimumLoading } from '../hooks/useMinimumLoading';
 
 function gradeColor(grade: string): string {
   if (grade.startsWith('D')) return 'text-emerald-600 font-bold';
@@ -36,11 +38,11 @@ export default function ExamMarks() {
   const goBack = useBackOrFallback('/grades');
   const sid = schoolId || user?.id || '';
 
-  const { data: classes } = useTableData(sid, 'classes');
-  const { data: subjects } = useTableData(sid, 'subjects');
-  const { data: exams } = useTableData(sid, 'exams');
-  const { data: examResults } = useTableData(sid, 'examResults');
-  const { data: settingsData } = useTableData(sid, 'settings');
+  const { data: classes, loading: classesLoading } = useTableData(sid, 'classes');
+  const { data: subjects, loading: subjectsLoading } = useTableData(sid, 'subjects');
+  const { data: exams, loading: examsLoading } = useTableData(sid, 'exams');
+  const { data: examResults, loading: examResultsLoading } = useTableData(sid, 'examResults');
+  const { data: settingsData, loading: settingsLoading } = useTableData(sid, 'settings');
   const { students: allStudents } = useStudents();
 
   const [filterClass, setFilterClass] = useState('');
@@ -58,13 +60,26 @@ export default function ExamMarks() {
     sortClassesBySectionThenLevel([...classes]),
     [classes]
   );
+  const activeClassId = filterClass || ((sortedClasses[0] as any)?.id ?? '');
+  const dataLoading = classesLoading || subjectsLoading || examsLoading || examResultsLoading || settingsLoading;
+  const initialMarksLoading = useMinimumLoading(dataLoading && (classes.length === 0 || exams.length === 0 || examResults.length === 0), 600);
+
+  useEffect(() => {
+    const firstClassId = (sortedClasses[0] as any)?.id;
+    if (!firstClassId) return;
+    const selectedStillExists = filterClass && sortedClasses.some((classItem: any) => classItem.id === filterClass);
+    if (!filterClass || !selectedStillExists) {
+      setFilterClass(firstClassId);
+      setFilterExam('');
+    }
+  }, [filterClass, sortedClasses]);
 
   const availableExams = useMemo(() => {
     return (exams as any[]).filter(e => {
       if (filterTerm && String(e.term) !== filterTerm) return false;
-      if (filterClass) {
-        if (e.classId === filterClass) return true;
-        const inClass = new Set(allStudents.filter(s => s.classId === filterClass).map(s => s.id));
+      if (activeClassId) {
+        if (e.classId === activeClassId) return true;
+        const inClass = new Set(allStudents.filter(s => s.classId === activeClassId).map(s => s.id));
         return (examResults as any[]).some(r => r.examId === e.id && inClass.has(r.studentId));
       }
       return true;
@@ -72,7 +87,7 @@ export default function ExamMarks() {
       if (String(a.year) !== String(b.year)) return String(a.year).localeCompare(String(b.year));
       return String(a.term).localeCompare(String(b.term));
     });
-  }, [exams, filterTerm, filterClass, allStudents, examResults]);
+  }, [exams, filterTerm, activeClassId, allStudents, examResults]);
 
   // Deduplicated exam options for the dropdown — group by name+term+year
   const dedupedExamOptions = useMemo(() => {
@@ -106,8 +121,8 @@ export default function ExamMarks() {
       if (student?.classId) classIdsWithResults.add(student.classId);
     }
 
-    const targetClassIds = filterClass
-      ? (classIdsWithResults.has(filterClass) ? [filterClass] : [])
+    const targetClassIds = activeClassId
+      ? (classIdsWithResults.has(activeClassId) ? [activeClassId] : [])
       : sortClassesBySectionThenLevel(
           [...classIdsWithResults].map(id => (classes as any[]).find(c => c.id === id)).filter(Boolean)
         ).map((c: any) => c.id);
@@ -208,7 +223,7 @@ export default function ExamMarks() {
       classId: string; className: string;
       classExams: any[]; allSubjects: any[]; matrix: any[]; latestExam: any;
     }[];
-  }, [activeExamIds, examResults, allStudents, subjects, classes, exams, filterClass, searchStudent, getGrade]);
+  }, [activeExamIds, examResults, allStudents, subjects, classes, exams, activeClassId, searchStudent, getGrade]);
 
   const hasResults = classGroups.some(g => g.matrix.length > 0);
 
@@ -267,6 +282,17 @@ export default function ExamMarks() {
   }
 
   const fullViewGroup = fullViewClassId ? classGroups.find(g => g.classId === fullViewClassId) : null;
+
+  if (initialMarksLoading) {
+    return (
+      <div className="min-h-[55vh] flex items-center justify-center">
+        <LargeDataSpinner
+          label="Preparing exam marks..."
+          detail="Loading class, subject, exam, and mark records."
+        />
+      </div>
+    );
+  }
 
   // Reusable table renderer
   function renderTable(group: typeof classGroups[0], compact = false) {
@@ -439,7 +465,13 @@ export default function ExamMarks() {
       <div className="card p-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(120px,150px)_minmax(105px,125px)_minmax(180px,1fr)_minmax(200px,1fr)] print:hidden">
         <div>
           <label className="form-label">Class</label>
-          <PortalSelect value={filterClass} onChange={value => { setFilterClass(value); setFilterExam(''); }} options={[{ value: '', label: 'All Classes' }, ...sortedClasses.map((c: any) => ({ value: c.id, label: c.name }))]} />
+          <PortalSelect
+            value={activeClassId}
+            onChange={value => { setFilterClass(value); setFilterExam(''); }}
+            options={sortedClasses.map((c: any) => ({ value: c.id, label: c.name }))}
+            placeholder="Select class"
+            disabled={sortedClasses.length === 0}
+          />
         </div>
         <div>
           <label className="form-label">Term</label>
