@@ -4,9 +4,47 @@
 import { Router, Request, Response } from 'express';
 import { getDatabase, saveDatabase } from '../db/init.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { asSqlString, rowToObject } from '../utils/sql.js';
+import { rowToObject } from '../utils/sql.js';
 
 const router = Router();
+const STUDENT_LIST_COLUMNS = `
+  s.id,
+  s.admission_no,
+  s.student_id,
+  s.first_name,
+  s.last_name,
+  s.gender,
+  s.class_id,
+  s.guardian_name,
+  s.guardian_phone,
+  s.guardian_email,
+  s.photo_url,
+  s.status,
+  s.created_at,
+  s.updated_at,
+  c.name as class_name
+`;
+
+const SORT_COLUMNS: Record<string, string> = {
+  created_at: 's.created_at',
+  first_name: 's.first_name',
+  last_name: 's.last_name',
+  admission_no: 's.admission_no',
+  student_id: 's.student_id',
+  class_id: 's.class_id',
+};
+
+function getSortClause(sortBy: unknown, sortOrder: unknown) {
+  const column = SORT_COLUMNS[String(sortBy || 'created_at')] || SORT_COLUMNS.created_at;
+  const direction = String(sortOrder || 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+  return `${column} ${direction}, s.id ${direction}`;
+}
+
+function mapRows(result: any[]) {
+  return result.length > 0
+    ? result[0].values.map(row => rowToObject(result[0].columns, row))
+    : [];
+}
 
 /**
  * GET /api/students/paginated
@@ -17,8 +55,7 @@ router.get('/paginated', authenticateToken, (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string) || 20));
-    const sortBy = (req.query.sortBy as string) || 'created_at';
-    const sortOrder = (req.query.sortOrder as string) || 'DESC';
+    const sortClause = getSortClause(req.query.sortBy, req.query.sortOrder);
 
     const db = getDatabase();
 
@@ -29,13 +66,15 @@ router.get('/paginated', authenticateToken, (req: Request, res: Response) => {
     // Get paginated page results
     const offset = (page - 1) * pageSize;
     const result = db.exec(
-      `SELECT * FROM students ORDER BY ${sortBy} ${sortOrder} LIMIT ? OFFSET ?`,
+      `SELECT ${STUDENT_LIST_COLUMNS}
+       FROM students s
+       LEFT JOIN classes c ON s.class_id = c.id
+       ORDER BY ${sortClause}
+       LIMIT ? OFFSET ?`,
       [pageSize, offset]
     );
 
-    const students = result.length > 0
-      ? result[0].values.map(row => rowToObject(result[0].columns, row))
-      : [];
+    const students = mapRows(result);
 
     res.json({
       success: true,
@@ -49,6 +88,67 @@ router.get('/paginated', authenticateToken, (req: Request, res: Response) => {
         },
       },
     });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to fetch students' });
+  }
+});
+
+/**
+ * GET /api/students/cursor
+ * Cursor pagination for very large lists. Cursor is a base64 JSON object:
+ * { "createdAt": "2026-01-01T00:00:00.000Z", "id": "..." }
+ */
+router.get('/cursor', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const pageSize = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 50));
+    const status = typeof req.query.status === 'string' ? req.query.status : '';
+    const classId = typeof req.query.classId === 'string' ? req.query.classId : '';
+    let cursor: { createdAt?: string; id?: string } | null = null;
+
+    if (typeof req.query.cursor === 'string' && req.query.cursor) {
+      try {
+        cursor = JSON.parse(Buffer.from(req.query.cursor, 'base64url').toString('utf8'));
+      } catch {
+        return res.status(400).json({ success: false, error: 'Invalid cursor' });
+      }
+    }
+
+    const where: string[] = [];
+    const params: any[] = [];
+    if (status) {
+      where.push('s.status = ?');
+      params.push(status);
+    }
+    if (classId) {
+      where.push('s.class_id = ?');
+      params.push(classId);
+    }
+    if (cursor?.createdAt && cursor?.id) {
+      where.push('(s.created_at < ? OR (s.created_at = ? AND s.id < ?))');
+      params.push(cursor.createdAt, cursor.createdAt, cursor.id);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const db = getDatabase();
+    const result = db.exec(
+      `SELECT ${STUDENT_LIST_COLUMNS}
+       FROM students s
+       LEFT JOIN classes c ON s.class_id = c.id
+       ${whereSql}
+       ORDER BY s.created_at DESC, s.id DESC
+       LIMIT ?`,
+      [...params, pageSize + 1]
+    );
+
+    const rows = mapRows(result);
+    const hasMore = rows.length > pageSize;
+    const items = hasMore ? rows.slice(0, pageSize) : rows;
+    const last = items[items.length - 1] as any;
+    const nextCursor = hasMore && last
+      ? Buffer.from(JSON.stringify({ createdAt: last.created_at, id: last.id })).toString('base64url')
+      : null;
+
+    res.json({ success: true, data: { items, nextCursor, hasMore } });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to fetch students' });
   }
@@ -70,28 +170,49 @@ router.get('/search', authenticateToken, (req: Request, res: Response) => {
     }
 
     const db = getDatabase();
-    const searchTerm = `%${query}%`;
+    const searchTerm = `${query.trim().replace(/["']/g, '')}*`;
+    const likeTerm = `%${query}%`;
 
     // Count matching results
     const countResult = db.exec(
-      `SELECT COUNT(*) as count FROM students 
-       WHERE first_name LIKE ? OR last_name LIKE ? OR admission_no LIKE ?`,
-      [searchTerm, searchTerm, searchTerm]
+      `SELECT COUNT(*) as count FROM students
+       WHERE first_name LIKE ? OR last_name LIKE ? OR admission_no LIKE ? OR student_id LIKE ? OR guardian_phone LIKE ?`,
+      [likeTerm, likeTerm, likeTerm, likeTerm, likeTerm]
     );
     const total = Number(countResult[0]?.values[0]?.[0]) || 0;
 
     // Get paginated results
     const offset = (page - 1) * pageSize;
-    const result = db.exec(
-      `SELECT * FROM students 
-       WHERE first_name LIKE ? OR last_name LIKE ? OR admission_no LIKE ?
-       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-      [searchTerm, searchTerm, searchTerm, pageSize, offset]
-    );
+    let students: Record<string, any>[] = [];
+    try {
+      const result = db.exec(
+        `SELECT ${STUDENT_LIST_COLUMNS}
+         FROM students s
+         LEFT JOIN classes c ON s.class_id = c.id
+         WHERE s.rowid IN (
+           SELECT rowid FROM students_fts WHERE students_fts MATCH ?
+         )
+         ORDER BY s.created_at DESC
+         LIMIT ? OFFSET ?`,
+        [searchTerm, pageSize, offset]
+      );
+      students = mapRows(result);
+    } catch {
+      students = [];
+    }
 
-    const students = result.length > 0
-      ? result[0].values.map(row => rowToObject(result[0].columns, row))
-      : [];
+    if (students.length === 0) {
+      const fallback = db.exec(
+        `SELECT ${STUDENT_LIST_COLUMNS}
+         FROM students s
+         LEFT JOIN classes c ON s.class_id = c.id
+         WHERE s.first_name LIKE ? OR s.last_name LIKE ? OR s.admission_no LIKE ? OR s.student_id LIKE ? OR s.guardian_phone LIKE ?
+         ORDER BY s.created_at DESC
+         LIMIT ? OFFSET ?`,
+        [likeTerm, likeTerm, likeTerm, likeTerm, likeTerm, pageSize, offset]
+      );
+      students = mapRows(fallback);
+    }
 
     res.json({
       success: true,
@@ -275,13 +396,16 @@ router.get('/by-class/:classId', authenticateToken, (req: Request, res: Response
 
     const offset = (page - 1) * pageSize;
     const result = db.exec(
-      'SELECT * FROM students WHERE class_id = ? ORDER BY first_name ASC LIMIT ? OFFSET ?',
+      `SELECT ${STUDENT_LIST_COLUMNS}
+       FROM students s
+       LEFT JOIN classes c ON s.class_id = c.id
+       WHERE s.class_id = ?
+       ORDER BY s.first_name ASC
+       LIMIT ? OFFSET ?`,
       [classId, pageSize, offset]
     );
 
-    const students = result.length > 0
-      ? result[0].values.map(row => rowToObject(result[0].columns, row))
-      : [];
+    const students = mapRows(result);
 
     res.json({
       success: true,

@@ -103,10 +103,10 @@ export default function Reports() {
   const [previewLoading, setPreviewLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [selectedTerm, setSelectedTerm] = useState('all');
-  const [selectedYear, setSelectedYear] = useState('all');
-  const [profitTerm, setProfitTerm] = useState('all');
-  const [profitYear, setProfitYear] = useState('all');
+  const [selectedTerm, setSelectedTerm] = useState('');
+  const [selectedYear, setSelectedYear] = useState('');
+  const [profitTerm, setProfitTerm] = useState('');
+  const [profitYear, setProfitYear] = useState('');
   const [selectedClass, setSelectedClass] = useState('all');
   const [search, setSearch] = useState('');
   const { formatMoney } = useCurrency();
@@ -131,6 +131,8 @@ export default function Reports() {
   const { data: settingsData, loading: settingsLoading } = useTableData(sid, 'settings');
 
   const settings = useMemo(() => getSettingsMap(settingsData as any[]), [settingsData]);
+  const currentTerm = String(settings.currentTerm || '1');
+  const currentYear = String(settings.academicYear || new Date().getFullYear());
   const students = studentsData as any[];
   const staff = staffData as any[];
   const classes = useMemo(() => sortClassesBySectionThenLevel(classesData as any[]), [classesData]);
@@ -198,25 +200,35 @@ export default function Reports() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (!selectedTerm && currentTerm) setSelectedTerm(currentTerm);
+    if (!profitTerm && currentTerm) setProfitTerm(currentTerm);
+  }, [currentTerm, profitTerm, selectedTerm]);
+
+  useEffect(() => {
+    if (!selectedYear && currentYear) setSelectedYear(currentYear);
+    if (!profitYear && currentYear) setProfitYear(currentYear);
+  }, [currentYear, profitYear, selectedYear]);
+
   const className = (classId?: string) => classes.find((c: any) => c.id === classId)?.name || classId || '-';
   const studentName = (student?: any) => student ? `${student.firstName || ''} ${student.lastName || ''}`.trim() : 'N/A';
   const getStudent = (studentId?: string) => students.find((s: any) => s.id === studentId);
   const getFee = (feeId?: string) => fees.find((f: any) => f.id === feeId);
 
   const termOptions = useMemo(() => {
-    const values = [settings.currentTerm || '1'];
+    const values = [currentTerm];
     [...fees, ...exams, ...bursaries, ...discounts, ...invoices].forEach((row: any) => row?.term && values.push(row.term));
     return Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)))
       .sort((a, b) => termRank(a) - termRank(b) || a.localeCompare(b));
-  }, [fees, exams, bursaries, discounts, invoices, settings.currentTerm]);
+  }, [fees, exams, bursaries, discounts, invoices, currentTerm]);
 
   const yearOptions = useMemo(() => {
-    const values = [settings.academicYear || String(new Date().getFullYear())];
+    const values = [currentYear];
     [...fees, ...exams, ...bursaries, ...discounts, ...invoices].forEach((row: any) => row?.year && values.push(row.year));
     students.forEach((row: any) => row?.completedYear && values.push(row.completedYear));
     return Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)))
       .sort((a, b) => Number(b) - Number(a) || b.localeCompare(a));
-  }, [fees, exams, bursaries, discounts, invoices, students, settings.academicYear]);
+  }, [fees, exams, bursaries, discounts, invoices, students, currentYear]);
 
   function matchesTermYear(row: any) {
     if (selectedTerm !== 'all' && String(row.term || row.completedTerm || '') !== selectedTerm) return false;
@@ -260,8 +272,8 @@ export default function Reports() {
           className: className(s.classId),
           gender: s.gender || '-',
           status: s.status || 'active',
-          term: s.status === 'completed' ? s.completedTerm || 'Final' : settings.currentTerm || '-',
-          year: s.status === 'completed' ? s.completedYear || '-' : settings.academicYear || '-',
+          term: s.status === 'completed' ? s.completedTerm || 'Final' : currentTerm || '-',
+          year: s.status === 'completed' ? s.completedYear || '-' : currentYear || '-',
           guardian: s.guardianName || '-',
           phone: s.guardianPhone || '-',
         }));
@@ -401,7 +413,7 @@ export default function Reports() {
       [...fees, ...exams, ...bursaries, ...discounts, ...invoices].forEach((row: any) => {
         if (row?.term && row?.year) keys.add(`${row.year}|${row.term}|${row.classId || 'all'}`);
       });
-      keys.add(`${settings.academicYear || new Date().getFullYear()}|${settings.currentTerm || '1'}|all`);
+      keys.add(`${currentYear}|${currentTerm}|all`);
       rows = Array.from(keys).map(key => {
         const [year, term, classId] = key.split('|');
         const termFees = fees.filter((f: any) => String(f.term) === term && String(f.year) === year && (classId === 'all' || f.classId === classId));
@@ -428,7 +440,7 @@ export default function Reports() {
     return rows.filter(searchMatch).map((row, index) => ({ no: index + 1, ...row }));
   }
 
-  const rows = useMemo(makeRows, [selectedReport, selectedTerm, selectedYear, selectedClass, search, dateFrom, dateTo, students, staff, classes, fees, payments, attendance, exams, examResults, subjects, bursaries, discounts, invoices, settings]);
+  const rows = useMemo(makeRows, [selectedReport, selectedTerm, selectedYear, selectedClass, search, dateFrom, dateTo, students, staff, classes, fees, payments, attendance, exams, examResults, subjects, bursaries, discounts, invoices, currentTerm, currentYear]);
   useEffect(() => {
     setPreviewLoading(true);
     const timer = window.setTimeout(() => setPreviewLoading(false), 2000);
@@ -461,8 +473,19 @@ export default function Reports() {
       addToast('No report rows to export', 'warning');
       return;
     }
-    const filename = `${selectedReport}-report-${selectedTerm === 'all' ? 'all-terms' : `term-${selectedTerm}`}-${selectedYear === 'all' ? 'all-years' : selectedYear}`;
-    if (kind === 'pdf') exportToPDF(reportLabel, rows, columns, filename);
+    const filename = `${selectedReport}-report-${selectedTerm === 'all' ? 'all-terms' : `term-${selectedTerm || currentTerm}`}-${selectedYear === 'all' ? 'all-years' : selectedYear || currentYear}`;
+    if (kind === 'pdf') exportToPDF(reportLabel, rows, columns, filename, {
+      schoolName: settings.schoolName || 'School',
+      schoolAddress: settings.schoolAddress,
+      schoolPhone: settings.schoolPhone,
+      schoolEmail: settings.schoolEmail,
+      schoolLogo: settings.schoolLogo,
+      headerColor: settings.reportHeaderColor || settings.primaryColor || '#2563eb',
+      accentColor: settings.reportAccentColor || '#0f172a',
+      textColor: settings.reportTextColor || '#0f172a',
+      watermarkLogo: settings.reportWatermarkLogo !== 'false',
+      preparedLabel: settings.reportDateLabel || 'Date',
+    });
     if (kind === 'csv') exportToCSV(rows, filename, columns as any);
     if (kind === 'excel') exportToExcel(rows, filename, columns as any);
     addToast(`Report exported to ${kind.toUpperCase()}`, 'success');
@@ -517,8 +540,8 @@ export default function Reports() {
             <span className="text-xs text-slate-400">Uses class/date filters plus profit term/year</span>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:w-72">
-            <PortalSelect value={profitTerm} onChange={setProfitTerm} options={[{ value: 'all', label: 'All terms' }, ...termOptions.map(term => ({ value: term, label: `Term ${term}` }))]} />
-            <PortalSelect value={profitYear} onChange={setProfitYear} options={[{ value: 'all', label: 'All years' }, ...yearOptions.map(year => ({ value: year, label: String(year) }))]} />
+            <PortalSelect value={profitTerm || currentTerm} onChange={setProfitTerm} options={[{ value: 'all', label: 'All terms' }, ...termOptions.map(term => ({ value: term, label: `Term ${term}` }))]} />
+            <PortalSelect value={profitYear || currentYear} onChange={setProfitYear} options={[{ value: 'all', label: 'All years' }, ...yearOptions.map(year => ({ value: year, label: String(year) }))]} />
           </div>
         </div>
         <div className="card-body grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -574,8 +597,8 @@ export default function Reports() {
               <Search size={16} className="input-icon" />
               <input value={search} onChange={e => setSearch(e.target.value)} className="form-input form-input-with-icon" placeholder="Search report..." />
             </div>
-            <PortalSelect value={selectedTerm} onChange={setSelectedTerm} options={[{ value: 'all', label: 'All terms' }, ...termOptions.map(term => ({ value: term, label: `Term ${term}` }))]} />
-            <PortalSelect value={selectedYear} onChange={setSelectedYear} options={[{ value: 'all', label: 'All years' }, ...yearOptions.map(year => ({ value: year, label: String(year) }))]} />
+            <PortalSelect value={selectedTerm || currentTerm} onChange={setSelectedTerm} options={[{ value: 'all', label: 'All terms' }, ...termOptions.map(term => ({ value: term, label: `Term ${term}` }))]} />
+            <PortalSelect value={selectedYear || currentYear} onChange={setSelectedYear} options={[{ value: 'all', label: 'All years' }, ...yearOptions.map(year => ({ value: year, label: String(year) }))]} />
             <PortalSelect value={selectedClass} onChange={setSelectedClass} options={[{ value: 'all', label: 'All classes' }, ...classes.map((cls: any) => ({ value: cls.id, label: cls.name }))]} />
             <div className="grid grid-cols-2 gap-2">
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="form-input" title="From date" />

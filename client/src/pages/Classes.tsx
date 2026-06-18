@@ -83,10 +83,11 @@ const ClassRow = memo(({
   onDelete: (id: string) => void;
 }) => {
   const navigate = useNavigate();
-  const pct = c.capacity > 0 ? Math.round((enrolled / c.capacity) * 100) : 0;
-  const overCapacity = c.capacity > 0 && enrolled > c.capacity;
-  const full = c.capacity > 0 && enrolled >= c.capacity;
-  const capacityHint = overCapacity ? 'Increase capacity or ignore' : full ? 'At capacity' : `${Math.max(0, c.capacity - enrolled)} left`;
+  const capacity = c.capacity ?? 0;
+  const pct = capacity > 0 ? Math.round((enrolled / capacity) * 100) : 0;
+  const overCapacity = capacity > 0 && enrolled > capacity;
+  const full = capacity > 0 && enrolled >= capacity;
+  const capacityHint = overCapacity ? 'Increase capacity or ignore' : full ? 'At capacity' : `${Math.max(0, capacity - enrolled)} left`;
   
   return (
     <div
@@ -122,7 +123,7 @@ const ClassRow = memo(({
 
       {/* Enrollment bar */}
       <div className="hidden sm:flex flex-col items-end gap-1 w-32 shrink-0">
-        <span className="text-xs text-slate-500">{enrolled}/{c.capacity} students</span>
+        <span className="text-xs text-slate-500">{enrolled}/{capacity || 'No limit'} students</span>
         <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
           <div
             className={`h-full rounded-full transition-all ${overCapacity ? 'bg-amber-500' : full ? 'bg-red-500' : 'bg-emerald-500'}`}
@@ -352,7 +353,7 @@ export default function Classes() {
 
   function handleEdit(c: Class) {
     setEditingClass(c);
-    setFormData({ name: c.name, level: c.level, stream: c.stream || '', capacity: c.capacity });
+    setFormData({ name: c.name, level: c.level, stream: c.stream || '', capacity: c.capacity ?? 40 });
     setShowForm(true);
   }
 
@@ -577,7 +578,7 @@ export default function Classes() {
   }
 
   const totalEnrolled = classes.reduce((sum, classItem) => sum + (classEnrollmentCounts[classItem.id] || 0), 0);
-  const totalCapacity = classes.reduce((sum, classItem) => sum + classItem.capacity, 0);
+  const totalCapacity = classes.reduce((sum, classItem) => sum + (classItem.capacity ?? 0), 0);
 
   return (
     <div className="space-y-6">

@@ -35,6 +35,12 @@ import {
   Info,
   Gauge,
   Zap,
+  BookMarked,
+  Library,
+  Activity,
+  DollarSign,
+  GraduationCap as GradCapIcon,
+  Archive,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSync } from '../contexts/SyncContext';
@@ -105,16 +111,22 @@ const menuItems = [
   { path: '/parents', label: 'Parents & Emails', icon: Users, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/admission', label: 'Admission', icon: UserPlus, roles: [UserRole.ADMIN] },
   { path: '/staff', label: 'Teachers & Staff', icon: Users, roles: [UserRole.ADMIN] },
+  { path: '/payroll', label: 'Payroll', icon: DollarSign, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
   { path: '/classes', label: 'Classes & Timetables', icon: Building2, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/attendance', label: 'Attendance', icon: Calendar, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/day-boarding', label: 'Day & Boarding', icon: BedDouble, roles: [UserRole.ADMIN, UserRole.TEACHER] },
+  { path: '/live-monitor', label: 'Live Monitor', icon: Activity, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/subjects', label: 'Subjects', icon: BookOpen, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/homework-tests', label: 'Assignments & Tests', icon: ClipboardList, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/grades', label: 'Exams & Grades', icon: Award, roles: [UserRole.ADMIN, UserRole.TEACHER] },
+  { path: '/exam-clearance', label: 'Exam Clearance', icon: BookMarked, roles: [UserRole.ADMIN, UserRole.TEACHER] },
+  { path: '/school-records', label: 'School Records', icon: Archive, roles: [UserRole.ADMIN] },
   { path: '/finance', label: 'Fees & Finance', icon: Receipt, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
   { path: '/payment-accounts', label: 'Payment Accounts', icon: CreditCard, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
   { path: '/expenses', label: 'Expenses', icon: WalletCards, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
   { path: '/invoices', label: 'Invoices', icon: FileBarChart, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
+  { path: '/school-budget', label: 'School Budget', icon: DollarSign, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
+  { path: '/school-library', label: 'School Library', icon: Library, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/transport', label: 'Transport', icon: Bus, roles: [UserRole.ADMIN] },
   { path: '/announcements', label: 'Announcements', icon: MessageSquare, roles: [UserRole.ADMIN, UserRole.TEACHER] },
   { path: '/reports', label: 'Reports', icon: ClipboardList, roles: [UserRole.ADMIN, UserRole.ACCOUNTANT] },
@@ -125,11 +137,40 @@ const menuItems = [
 const ORGANIZED_SIDEBAR_KEY = 'schofy_organized_sidebar';
 const SIDEBAR_OPEN_KEY = 'schofy_sidebar_open';
 
+const pageRelatedPages: Record<string, string[]> = {
+  '/': ['/students', '/staff', '/attendance', '/invoices', '/finance', '/announcements', '/settings'],
+  '/students': ['/admission', '/classes', '/finance'],
+  '/parents': [],
+  '/admission': ['/students'],
+  '/staff': ['/payroll'],
+  '/payroll': ['/staff', '/finance'],
+  '/classes': ['/subjects', '/homework-tests', '/grades', '/students', '/exam-clearance', '/school-library'],
+  '/subjects': ['/classes', '/homework-tests', '/grades'],
+  '/homework-tests': ['/classes', '/subjects', '/grades'],
+  '/grades': ['/classes', '/subjects', '/homework-tests', '/exam-clearance'],
+  '/exam-clearance': ['/grades', '/classes'],
+  '/school-records': ['/students', '/grades'],
+  '/school-library': ['/classes', '/subjects'],
+  '/live-monitor': ['/classes', '/attendance'],
+  '/attendance': ['/day-boarding', '/live-monitor'],
+  '/day-boarding': ['/attendance'],
+  '/finance': ['/payment-accounts', '/expenses', '/invoices', '/students', '/payroll', '/school-budget'],
+  '/payment-accounts': ['/finance', '/expenses', '/invoices'],
+  '/expenses': ['/finance', '/payment-accounts', '/invoices'],
+  '/invoices': ['/finance', '/payment-accounts', '/expenses'],
+  '/school-budget': ['/finance', '/expenses'],
+  '/announcements': [],
+  '/transport': ['/reports', '/roles', '/settings'],
+  '/reports': ['/transport', '/roles', '/settings'],
+  '/roles': ['/transport', '/reports', '/settings'],
+  '/settings': ['/transport', '/reports', '/roles'],
+};
+
 const sidebarSections = [
   { label: 'People', pages: ['/students', '/parents', '/admission', '/staff'] },
-  { label: 'Academics', pages: ['/classes', '/subjects', '/homework-tests', '/grades'] },
-  { label: 'Daily Records', pages: ['/attendance', '/day-boarding'] },
-  { label: 'Finance', pages: ['/finance', '/payment-accounts', '/expenses', '/invoices'] },
+  { label: 'Academics', pages: ['/classes', '/subjects', '/homework-tests', '/grades', '/exam-clearance', '/school-records', '/school-library'] },
+  { label: 'Daily Records', pages: ['/attendance', '/day-boarding', '/live-monitor'] },
+  { label: 'Finance', pages: ['/finance', '/payment-accounts', '/expenses', '/invoices', '/payroll', '/school-budget'] },
   { label: 'Communication', pages: ['/announcements'] },
   { label: 'Operations', pages: ['/transport', '/reports', '/roles', '/settings'] },
 ];
@@ -174,6 +215,7 @@ function Layout({ children }: LayoutProps) {
   const sidebarTypeaheadTimerRef = useRef<number | null>(null);
   const [sidebarTypeaheadPath, setSidebarTypeaheadPath] = useState<string | null>(null);
   const [sidebarTypeaheadLetter, setSidebarTypeaheadLetter] = useState('');
+  const [expandedSectionPath, setExpandedSectionPath] = useState<string | null>(null);
 
   // Reactive school name + logo from settings store - updates instantly when settings change
   const { data: settings } = useTableData(schoolId || user?.id || '', 'settings');
@@ -287,17 +329,19 @@ function Layout({ children }: LayoutProps) {
     if (!tenantId || !isOnline) return;
     let cancelled = false;
     const writeHeartbeat = async () => {
-      if (cancelled) return;
+      if (cancelled || document.hidden) return;
       try {
         await dataService.saveSettings(tenantId, { lastSeenAt: new Date().toISOString() });
       } catch {
         // Heartbeat is best-effort and should never interrupt school work.
       }
     };
-    void writeHeartbeat();
-    const timer = window.setInterval(writeHeartbeat, 60_000);
+    // Write once after 30s delay (not immediately) then every 5 minutes
+    const initTimer = window.setTimeout(() => { void writeHeartbeat(); }, 30_000);
+    const timer = window.setInterval(writeHeartbeat, 5 * 60_000);
     return () => {
       cancelled = true;
+      window.clearTimeout(initTimer);
       window.clearInterval(timer);
     };
   }, [tenantId, isOnline]);
@@ -384,7 +428,32 @@ function Layout({ children }: LayoutProps) {
     return () => window.removeEventListener('keydown', handleAppStatusShortcut);
   }, [refreshAppPerformance]);
 
+  // Optimize pointer detection for sidebar hover
   useEffect(() => {
+    let lastCallTime = 0;
+    const THROTTLE_MS = 50; // Throttle to every 50ms (20 times/sec max)
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!sidebarOpen && !mobileSidebarOpen) {
+        const now = performance.now();
+        if (now - lastCallTime < THROTTLE_MS) return;
+        lastCallTime = now;
+        if (e.clientX < 80) { // Near left edge
+          setSidebarHovered(prev => {
+            if (!prev) return true; // Only update if not already true
+            return prev;
+          });
+        }
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, [sidebarOpen, mobileSidebarOpen]);
+
+  useEffect(() => {
+    // Only run FPS/lag sampling when the App Status panel is actually open
+    if (!appStatusOpen) return;
+
     let lastLagCheck = performance.now();
     let cancelled = false;
     let observer: PerformanceObserver | null = null;
@@ -408,18 +477,18 @@ function Layout({ children }: LayoutProps) {
     };
 
     sampleFps();
-    const fpsTimer = window.setInterval(sampleFps, 4000);
+    const fpsTimer = window.setInterval(sampleFps, 10000);
     const lagTimer = window.setInterval(() => {
       if (document.hidden) return;
       const now = performance.now();
-      const drift = Math.max(0, now - lastLagCheck - 2000);
+      const drift = Math.max(0, now - lastLagCheck - 5000);
       lastLagCheck = now;
       setAppPerformance((prev) => {
         const nextLag = prev.eventLagMs == null ? Math.round(drift) : Math.round((prev.eventLagMs * 0.65) + (drift * 0.35));
         return { ...prev, eventLagMs: nextLag, lastChecked: new Date() };
       });
       refreshAppPerformance();
-    }, 2000);
+    }, 5000);
 
     try {
       observer = new PerformanceObserver((list) => {
@@ -437,7 +506,7 @@ function Layout({ children }: LayoutProps) {
       window.clearInterval(lagTimer);
       observer?.disconnect();
     };
-  }, [refreshAppPerformance]);
+  }, [appStatusOpen, refreshAppPerformance]);
 
   useEffect(() => {
     const hasRealSamples = appPerformance.samples >= 2 && appPerformance.score != null && appPerformance.fps != null && appPerformance.eventLagMs != null;
@@ -512,6 +581,19 @@ function Layout({ children }: LayoutProps) {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_OPEN_KEY, sidebarOpen ? 'true' : 'false');
   }, [sidebarOpen]);
+
+  // Close expanded section only when switching to a new master page
+  useEffect(() => {
+    if (expandedSectionPath) {
+      const section = getSectionForPath(expandedSectionPath);
+      const relatedPaths = pageRelatedPages[expandedSectionPath] || [];
+      const allowedPaths = [expandedSectionPath, ...relatedPaths];
+      // If new path is still in allowed paths, don't close
+      if (!allowedPaths.includes(location.pathname) && (!section || !section.pages.includes(location.pathname))) {
+        setExpandedSectionPath(null);
+      }
+    }
+  }, [location.pathname, expandedSectionPath]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -588,14 +670,14 @@ function Layout({ children }: LayoutProps) {
       const announcements = await dataService.getAll(user.id, 'announcements');
       const notifications = await dataService.getAll(user.id, 'notifications');
       const now = new Date();
-      
+
       for (const ann of announcements) {
         const eventDate = ann.eventDate ? new Date(ann.eventDate) : new Date(ann.createdAt);
         const daysUntil = Math.ceil((eventDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        
+
         if (daysUntil > 0 && daysUntil <= 7) {
           const existingNotif = notifications.find(n => n.title === `Upcoming: ${ann.title}`);
-          
+
           if (!existingNotif) {
             await dataService.create(user.id, 'notifications', {
               id: `notif-${ann.id}-${Date.now()}`,
@@ -791,6 +873,8 @@ function Layout({ children }: LayoutProps) {
   const moreMenuItems = filteredMenuItems.filter(item => item.path !== '/' && !assignedSidebarPaths.has(item.path));
   const showSidebarText = sidebarOpen || sidebarHovered || mobileSidebarOpen;
   const broadcastLinkMeta = parseAdminMessageLink(broadcastPopup?.link);
+  const getSectionForPath = (path: string) => sidebarSections.find(section => section.pages.includes(path));
+
   const visibleSidebarItems = useMemo(() => {
     if (!organizedSidebar) return filteredMenuItems;
     return [
@@ -884,10 +968,10 @@ function Layout({ children }: LayoutProps) {
   const gaugeOffset = gaugeCircumference - (gaugePercent / 100) * gaugeCircumference;
 
   return (
-    <div className="min-h-screen flex bg-[#f8fafc] dark:bg-slate-950 overflow-x-hidden">
+    <div className="h-full flex bg-[#f8fafc] dark:bg-slate-950 overflow-x-hidden overflow-y-hidden">
       {/* Mobile Sidebar Overlay */}
       {mobileSidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-slate-900/60 z-[45] lg:hidden"
           onClick={() => setMobileSidebarOpen(false)}
         />
@@ -973,7 +1057,7 @@ function Layout({ children }: LayoutProps) {
         }}
         onMouseEnter={() => !sidebarOpen && setSidebarHovered(true)}
         onMouseLeave={() => setSidebarHovered(false)}
-        className={`app-sidebar fixed top-0 h-screen inset-y-0 left-0 z-[1100] bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none transition-[width,transform] duration-150 ${
+        className={`app-sidebar fixed top-0 h-screen inset-y-0 left-0 z-[1100] bg-white dark:bg-slate-800 text-slate-800 dark:text-white outline-none ${showSidebarText ? 'transition-all duration-2000 ease-out' : 'transition-all duration-300 ease-out'} ${
           mobileSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
         } ${!mobileSidebarOpen && (showSidebarText ? 'w-64' : 'lg:w-20')}`}
       >
@@ -991,7 +1075,7 @@ function Layout({ children }: LayoutProps) {
               </div>
               <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
             </label>
-            <div className={`flex-1 min-w-0 ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0 hidden'}`}>
+            <div className={`flex-1 min-w-0 ${showSidebarText ? '' : 'hidden'}`}>
               <h2 className="font-bold text-sm leading-tight text-slate-800 dark:text-white truncate">
                 {schoolName}
               </h2>
@@ -1014,6 +1098,11 @@ function Layout({ children }: LayoutProps) {
                 const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
                 const isTypeahead = sidebarTypeaheadPath === item.path;
                 const Icon = item.icon;
+                const section = getSectionForPath(item.path);
+                const relatedPaths = pageRelatedPages[item.path] || [];
+                      const otherPagesInSection = relatedPaths.map(p => filteredMenuItems.find(mi => mi.path === p)).filter(Boolean);
+                const isExpanded = expandedSectionPath === item.path;
+
                 return (
                   <Link
                     key={item.path}
@@ -1021,11 +1110,11 @@ function Layout({ children }: LayoutProps) {
                     to={item.path}
                     onClick={() => { setMobileSidebarOpen(false); clearSidebarTypeahead(); }}
                     className={`flex items-center rounded-lg group relative h-11 ${
-                      isActive 
-                        ? 'text-white shadow-sm' 
+                      isActive
+                        ? 'text-white shadow-sm'
                         : isTypeahead
                           ? 'bg-primary-50 text-primary-700 ring-2 ring-primary-500/25 dark:bg-primary-900/25 dark:text-primary-200'
-                          : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                          : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                     }`}
                     style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
                   >
@@ -1036,8 +1125,8 @@ function Layout({ children }: LayoutProps) {
                       </span>
                     )}
                     <div className="flex items-center gap-3 h-full w-full px-4">
-                      <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : isTypeahead ? 'text-primary-600 dark:text-primary-300' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
-                      <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0'}`}>
+                      <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : isTypeahead ? 'text-primary-600 dark:text-primary-300' : 'text-slate-400 dark:text-slate-500'} ${!isActive && !isTypeahead ? 'group-hover:text-[var(--primary-color)] dark:group-hover:text-[var(--primary-color)]' : ''}`} />
+                      <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? '' : 'hidden'} ${!isActive && !isTypeahead ? 'group-hover:text-[var(--primary-color)] dark:group-hover:text-[var(--primary-color)]' : ''}`}>
                         {item.label}
                       </span>
                     </div>
@@ -1046,7 +1135,7 @@ function Layout({ children }: LayoutProps) {
               })}
               {organizedSidebar && organizedMenuSections.map(section => (
                 <div key={section.label} className="pt-3 first:pt-0">
-                  <p className={`px-4 pb-1 text-[11px] font-black uppercase tracking-wide text-slate-700 dark:text-slate-200 transition-all ${showSidebarText ? 'opacity-100' : 'h-2 overflow-hidden opacity-0'}`}>
+                  <p className={`px-4 pb-1 text-[11px] font-black uppercase tracking-wide text-slate-700 dark:text-slate-200 ${showSidebarText ? '' : 'hidden'}`}>
                     {section.label}
                   </p>
                   <div className="space-y-1">
@@ -1054,6 +1143,10 @@ function Layout({ children }: LayoutProps) {
                       const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
                       const isTypeahead = sidebarTypeaheadPath === item.path;
                       const Icon = item.icon;
+                      const relatedPaths = pageRelatedPages[item.path] || [];
+                      const otherPagesInSection = relatedPaths.map(p => filteredMenuItems.find(mi => mi.path === p)).filter(Boolean);
+                      const isExpanded = expandedSectionPath === item.path;
+
                       return (
                         <Link
                           key={item.path}
@@ -1065,7 +1158,7 @@ function Layout({ children }: LayoutProps) {
                               ? 'text-white shadow-sm'
                               : isTypeahead
                                 ? 'bg-primary-50 text-primary-700 ring-2 ring-primary-500/25 dark:bg-primary-900/25 dark:text-primary-200'
-                                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                           }`}
                           style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
                         >
@@ -1075,8 +1168,8 @@ function Layout({ children }: LayoutProps) {
                             </span>
                           )}
                           <div className="flex items-center gap-3 h-full w-full px-4">
-                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : isTypeahead ? 'text-primary-600 dark:text-primary-300' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
-                            <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0'}`}>
+                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : isTypeahead ? 'text-primary-600 dark:text-primary-300' : 'text-slate-400 dark:text-slate-500'} ${!isActive && !isTypeahead ? 'group-hover:text-[var(--primary-color)] dark:group-hover:text-[var(--primary-color)]' : ''}`} />
+                            <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? '' : 'hidden'} ${!isActive && !isTypeahead ? 'group-hover:text-[var(--primary-color)] dark:group-hover:text-[var(--primary-color)]' : ''}`}>
                               {item.label}
                             </span>
                           </div>
@@ -1088,7 +1181,7 @@ function Layout({ children }: LayoutProps) {
               ))}
               {organizedSidebar && moreMenuItems.length > 0 && (
                 <div className="pt-3">
-                  <p className={`px-4 pb-1 text-[11px] font-black uppercase tracking-wide text-slate-700 dark:text-slate-200 transition-all ${showSidebarText ? 'opacity-100' : 'h-2 overflow-hidden opacity-0'}`}>
+                  <p className={`px-4 pb-1 text-[11px] font-black uppercase tracking-wide text-slate-700 dark:text-slate-200 ${showSidebarText ? '' : 'hidden'}`}>
                     More
                   </p>
                   <div className="space-y-1">
@@ -1096,6 +1189,10 @@ function Layout({ children }: LayoutProps) {
                       const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
                       const isTypeahead = sidebarTypeaheadPath === item.path;
                       const Icon = item.icon;
+                      const relatedPaths = pageRelatedPages[item.path] || [];
+                      const otherPagesInSection = relatedPaths.map(p => filteredMenuItems.find(mi => mi.path === p)).filter(Boolean);
+                      const isExpanded = expandedSectionPath === item.path;
+
                       return (
                         <Link
                           key={item.path}
@@ -1107,7 +1204,7 @@ function Layout({ children }: LayoutProps) {
                               ? 'text-white shadow-sm'
                               : isTypeahead
                                 ? 'bg-primary-50 text-primary-700 ring-2 ring-primary-500/25 dark:bg-primary-900/25 dark:text-primary-200'
-                                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-white'
+                                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/50'
                           }`}
                           style={isActive ? { backgroundColor: 'var(--primary-color)' } : {}}
                         >
@@ -1117,8 +1214,8 @@ function Layout({ children }: LayoutProps) {
                             </span>
                           )}
                           <div className="flex items-center gap-3 h-full w-full px-4">
-                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : isTypeahead ? 'text-primary-600 dark:text-primary-300' : 'text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`} />
-                            <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? 'opacity-100' : 'opacity-0 w-0'}`}>
+                            <Icon size={20} className={`shrink-0 ${isActive ? 'text-white' : isTypeahead ? 'text-primary-600 dark:text-primary-300' : 'text-slate-400 dark:text-slate-500'} ${!isActive && !isTypeahead ? 'group-hover:text-[var(--primary-color)] dark:group-hover:text-[var(--primary-color)]' : ''}`} />
+                            <span className={`text-sm font-bold whitespace-nowrap overflow-hidden ${showSidebarText ? '' : 'hidden'} ${!isActive && !isTypeahead ? 'group-hover:text-[var(--primary-color)] dark:group-hover:text-[var(--primary-color)]' : ''}`}>
                               {item.label}
                             </span>
                           </div>
@@ -1133,16 +1230,16 @@ function Layout({ children }: LayoutProps) {
 
           {/* Sidebar Footer: Minimize Button & Powered By on same line */}
           <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0">
-            <div className={`transition-all duration-300 ${showSidebarText ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}>
+            <div className={`${showSidebarText ? '' : 'hidden'}`}>
               <p className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">Powered by <span className="font-medium">Schofy</span> · {APP_VERSION}</p>
             </div>
-            
+
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className={`p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-all ${!showSidebarText ? 'w-full flex justify-center' : ''}`}
+              className={`p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 ${!showSidebarText ? 'w-full flex justify-center' : ''}`}
               title={sidebarOpen ? "Minimize Sidebar" : "Expand Sidebar"}
             >
-              <div className={`transition-transform duration-300 ${!sidebarOpen ? 'rotate-180' : ''}`}>
+              <div className={`${sidebarOpen ? 'transition-transform duration-2000 ease-out' : 'transition-transform duration-300 ease-out'} ${!sidebarOpen ? 'rotate-180' : ''}`}>
                 <ChevronLeft size={18} />
               </div>
             </button>
@@ -1151,7 +1248,7 @@ function Layout({ children }: LayoutProps) {
       </aside>
 
       {/* Main Content -- offset by sidebar width on large screens */}
-      <div className={`flex-1 flex flex-col min-w-0 transition-[margin] duration-150 ${sidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}`}>
+      <div className={`flex-1 flex flex-col min-w-0 min-h-0 ${sidebarOpen ? 'transition-all duration-2000 ease-out' : 'transition-all duration-300 ease-out'} ${sidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}`}>
         {/* Header/Top Bar -- sticky at top of main column */}
         <header ref={headerRef} className="sticky top-0 shrink-0 z-[1000] border-b" style={{ backgroundColor: 'var(--primary-color)', borderColor: 'var(--primary-color)' }}>
           {/* Main header row */}
@@ -1235,10 +1332,12 @@ function Layout({ children }: LayoutProps) {
           </div>
 
           {/* Notifications dropdown */}
-          {notifOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
-              <div className="absolute top-16 right-2 sm:right-6 w-[calc(100vw-1rem)] sm:w-96 max-w-sm animate-dropdown-in z-50">
+          <>
+            <div
+              className={`fixed inset-0 z-40 ${notifOpen ? 'transition-opacity duration-2000 ease-out' : 'transition-opacity duration-300 ease-out'} ${notifOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+              onClick={() => setNotifOpen(false)}
+            />
+            <div className={`absolute top-16 right-2 sm:right-6 w-[calc(100vw-1rem)] sm:w-96 max-w-sm z-50 ${notifOpen ? 'transition-all duration-2000 ease-out' : 'transition-all duration-300 ease-out'} ${notifOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'}`}>
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                 <div className="px-4 py-3 flex items-center justify-between" style={{ backgroundColor: 'var(--primary-color)' }}>
                   <div className="flex items-center gap-2">
@@ -1273,14 +1372,15 @@ function Layout({ children }: LayoutProps) {
                 </div>
               </div>
             </div>
-            </>
-          )}
+          </>
 
           {/* Profile dropdown */}
-          {profileOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setProfileOpen(false)} />
-              <div className="absolute top-16 right-2 sm:right-6 w-72 animate-dropdown-in z-50">
+          <>
+            <div
+              className={`fixed inset-0 z-40 ${profileOpen ? 'transition-opacity duration-2000 ease-out' : 'transition-opacity duration-300 ease-out'} ${profileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+              onClick={() => setProfileOpen(false)}
+            />
+            <div className={`absolute top-16 right-2 sm:right-6 w-72 z-50 ${profileOpen ? 'transition-all duration-2000 ease-out' : 'transition-all duration-300 ease-out'} ${profileOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'}`}>
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[80vh] overflow-y-auto">
                 <div className="p-5 text-center border-b border-slate-100 dark:border-slate-700">
                   <div className="relative w-16 h-16 mx-auto mb-2">
@@ -1338,7 +1438,19 @@ function Layout({ children }: LayoutProps) {
                   </button>
                   <div className="border-t border-slate-100 dark:border-slate-700 my-1 mx-3" />
                   {isStaffMode && (
-                    <button onClick={() => { setProfileOpen(false); staffLogout(); }}
+                    <button onClick={async () => {
+                      setProfileOpen(false);
+                      const ok = await confirm({
+                        title: 'Are you sure you want to sign out?',
+                        description: 'We are fixing the app features. Please stay logged in to avoid login inconveniences. Thank you!',
+                        confirmLabel: 'Sign Out Anyway',
+                        cancelLabel: 'Stay Logged In',
+                        variant: 'warning',
+                      });
+                      if (ok) {
+                        staffLogout();
+                      }
+                    }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
                       <Shield size={16} className="shrink-0" />
                       <span className="font-medium text-sm">Sign Out Staff Login ({staffSession?.staffMember.staffId})</span>
@@ -1346,12 +1458,42 @@ function Layout({ children }: LayoutProps) {
                   )}
                   {!isStaffMode && (
                     <>
-                      <button onClick={() => { setProfileOpen(false); window.dispatchEvent(new CustomEvent('schofyReturnToStaffLogin')); }}
+                      <button onClick={async () => {
+                        setProfileOpen(false);
+                        const ok = await confirm({
+                          title: 'Are you sure you want to sign out?',
+                          description: 'We are fixing the app features. Please stay logged in to avoid login inconveniences. Thank you!',
+                          confirmLabel: 'Sign Out Anyway',
+                          cancelLabel: 'Stay Logged In',
+                          variant: 'warning',
+                        });
+                        if (ok) {
+                          window.dispatchEvent(new CustomEvent('schofyReturnToStaffLogin'));
+                        }
+                      }}
                         className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors">
                         <Shield size={16} className="shrink-0" />
                         <span className="font-medium text-sm">Sign Out to Staff Login</span>
                       </button>
-                      <button onClick={() => { setProfileOpen(false); logout(); }}
+                      <button onClick={async () => {
+                        setProfileOpen(false);
+                        // Only show confirm popup if offline
+                        if (!isOnline) {
+                          const ok = await confirm({
+                            title: 'Are you sure you want to sign out?',
+                            description: 'You are currently offline. Signing out may require you to reconnect to the internet to log back in. Are you sure you want to continue?',
+                            confirmLabel: 'Sign Out Anyway',
+                            cancelLabel: 'Stay Logged In',
+                            variant: 'warning',
+                          });
+                          if (ok) {
+                            logout();
+                          }
+                        } else {
+                          // Online: just sign out without popup
+                          logout();
+                        }
+                      }}
                         className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
                         <LogOut size={16} className="shrink-0" />
                         <span className="font-medium text-sm">Full Admin Sign Out</span>
@@ -1361,8 +1503,7 @@ function Layout({ children }: LayoutProps) {
                 </div>
               </div>
             </div>
-            </>
-          )}
+          </>
         </header>
 
         {!isOnline && (

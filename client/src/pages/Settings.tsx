@@ -1473,7 +1473,7 @@ export default function Settings() {
                   className="btn btn-secondary flex items-center gap-2"
                 >
                   <Download size={16} />
-                  Export Backup
+                  Export Data & Images
                 </button>
                 <button
                   type="button"
@@ -1509,7 +1509,7 @@ export default function Settings() {
                 </button>
               </div>
               <p className="text-xs text-slate-500 mt-2">
-                Export your data as JSON for backup. Cloud Backup exports the same file, asks for the Gmail account, then opens Google Drive so you can upload the backup directly.
+                Export your data and embedded images as JSON for backup. Cloud Backup exports the same file, asks for the Gmail account, then opens Google Drive so you can upload the backup directly.
               </p>
             </div>
 
@@ -1680,6 +1680,11 @@ export default function Settings() {
                     <p className="text-xs font-bold opacity-80">Pages</p>
                     <p className="text-2xl font-black">{backupPreview.tables.length.toLocaleString()}</p>
                   </div>
+                  <div className="highlight-label-indigo rounded-lg p-3">
+                    <p className="text-xs font-bold opacity-80">Images</p>
+                    <p className="text-2xl font-black">{backupPreview.imageCount.toLocaleString()}</p>
+                    <p className="text-[10px] font-semibold opacity-70">{(backupPreview.imageBytes / 1024 / 1024).toFixed(1)} MB</p>
+                  </div>
                 </div>
 
                 <label className="mt-5 flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
@@ -1795,7 +1800,7 @@ export default function Settings() {
               <Cloud size={22} className="text-primary-600" />
               <div>
                 <h2 className="font-bold text-slate-900 dark:text-white">Cloud Backup</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Export a backup and open Google Drive.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Export data and images, then open Google Drive.</p>
               </div>
             </div>
             <div className="space-y-4 p-5">
@@ -1810,7 +1815,7 @@ export default function Settings() {
                 />
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                Schofy will export your backup file first, then open Google Drive in a new tab. Upload the downloaded backup file to that Drive account to keep it safe.
+                Schofy will export your backup file first, including student/staff photos, attachments, and school logos stored in the app. Then Google Drive opens in a new tab so you can upload it.
               </div>
             </div>
             <div className="flex justify-end gap-3 px-5 pb-5">

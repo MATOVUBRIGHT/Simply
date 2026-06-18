@@ -9,13 +9,44 @@ router.get('/', (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const date = getStringParam(req.query.date);
-    let query = 'SELECT * FROM attendance';
-    if (date) query += ` WHERE date = ${asSqlString(date)}`;
+    const entityType = getStringParam(req.query.entityType);
+    const entityId = getStringParam(req.query.entityId);
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const pageSize = Math.min(500, Math.max(1, parseInt(req.query.pageSize as string) || 100));
+    const paged = req.query.paged === '1' || req.query.page !== undefined || req.query.pageSize !== undefined;
+    const where: string[] = [];
+    const params: any[] = [];
+    if (date) {
+      where.push('date = ?');
+      params.push(date);
+    }
+    if (entityType) {
+      where.push('entity_type = ?');
+      params.push(entityType);
+    }
+    if (entityId) {
+      where.push('entity_id = ?');
+      params.push(entityId);
+    }
 
-    const result = db.exec(query);
+    const whereSql = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+    const limitSql = paged ? ' ORDER BY date DESC LIMIT ? OFFSET ?' : ' ORDER BY date DESC';
+    const queryParams = paged ? [...params, pageSize, (page - 1) * pageSize] : params;
+
+    const result = db.exec(`SELECT * FROM attendance${whereSql}${limitSql}`, queryParams);
     const attendance = result.length > 0
       ? result[0].values.map(row => rowToObject(result[0].columns, row))
       : [];
+    if (paged) {
+      const count = Number(db.exec(`SELECT COUNT(*) FROM attendance${whereSql}`, params)[0]?.values[0]?.[0] || 0);
+      return res.json({
+        success: true,
+        data: {
+          items: attendance,
+          pagination: { page, pageSize, total: count, totalPages: Math.ceil(count / pageSize) },
+        },
+      });
+    }
     res.json({ success: true, data: attendance });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to fetch attendance' });

@@ -256,6 +256,47 @@ export async function redeemPaymentVerificationCode(
       subscriptionReceipt: receipt,
     };
 
+    if (!supabase || !online) {
+      return {
+        status: 'error',
+        message: 'Online Schofy verification is required before this code can unlock local access.',
+      };
+    }
+
+    try {
+      const { error: subError } = await supabase.from('subscriptions').insert({
+        id: crypto.randomUUID(),
+        school_id: tenantId,
+        user_id: authUserId || tenantId,
+        plan: plan.id,
+        status: 'active',
+        starts_at: remoteVerifiedAt,
+        ends_at: expiry.toISOString(),
+        metadata,
+        created_at: remoteVerifiedAt,
+        updated_at: remoteVerifiedAt,
+      });
+      if (subError) throw subError;
+
+      const { error: settingsError } = await supabase.from('settings').upsert(
+        Object.entries(settingsPayload).map(([key, value]) => ({
+          school_id: tenantId,
+          key,
+          value,
+          created_at: remoteVerifiedAt,
+          updated_at: remoteVerifiedAt,
+        })),
+        { onConflict: 'school_id,key' }
+      );
+      if (settingsError) throw settingsError;
+    } catch (syncError) {
+      console.warn('Payment verification rejected because remote activation could not be recorded:', syncError);
+      return {
+        status: 'error',
+        message: 'Could not record this code online. Connect to internet and try again, or contact Schofy support.',
+      };
+    }
+
     writeHashList(USED_CODES_KEY, nextUsed);
     localStorage.setItem('schofy_plan_remote_verified_at', remoteVerifiedAt);
     localStorage.setItem('schofy_plan_verification_code_hash', codeHash);
@@ -275,47 +316,6 @@ export async function redeemPaymentVerificationCode(
       source: 'verification_code',
     });
     void dataService.saveSettings(tenantId, settingsPayload);
-
-    if (supabase && online) {
-      try {
-        const { error: subError } = await supabase.from('subscriptions').insert({
-          id: crypto.randomUUID(),
-          school_id: tenantId,
-          user_id: authUserId || tenantId,
-          plan: plan.id,
-          status: 'active',
-          starts_at: remoteVerifiedAt,
-          ends_at: expiry.toISOString(),
-          metadata,
-          created_at: remoteVerifiedAt,
-          updated_at: remoteVerifiedAt,
-        });
-        if (subError) throw subError;
-
-        const { error: settingsError } = await supabase.from('settings').upsert(
-          Object.entries(settingsPayload).map(([key, value]) => ({
-            school_id: tenantId,
-            key,
-            value,
-            created_at: remoteVerifiedAt,
-            updated_at: remoteVerifiedAt,
-          })),
-          { onConflict: 'school_id,key' }
-        );
-        if (settingsError) throw settingsError;
-      } catch (syncError) {
-        console.warn('Payment verification activated locally; cloud sync will retry when available:', syncError);
-        void dataService.create(tenantId, 'subscriptions', {
-          schoolId: tenantId,
-          userId: authUserId || tenantId,
-          plan: plan.id,
-          status: 'active',
-          startsAt: remoteVerifiedAt,
-          endsAt: expiry.toISOString(),
-          metadata,
-        } as any);
-      }
-    }
 
     return {
       status: 'valid',

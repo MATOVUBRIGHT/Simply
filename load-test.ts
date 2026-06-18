@@ -3,6 +3,9 @@
  * Tests how many schools (users) the app can handle without errors
  */
 
+/// <reference types="node" />
+
+
 interface TestConfig {
   baseUrl: string;
   numSchools: number;

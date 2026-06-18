@@ -42,6 +42,8 @@ export interface BackupImportPreview {
   totalRecords: number;
   totalNewRecords: number;
   totalDuplicates: number;
+  imageCount: number;
+  imageBytes: number;
   planCheck: BackupPlanCheck | null;
 }
 
@@ -52,6 +54,18 @@ export interface BackupImportProgress {
   progress: number;
   processed: number;
   total: number;
+}
+
+interface BackupImageAsset {
+  id: string;
+  table: string;
+  recordId?: string;
+  recordLabel?: string;
+  field: string;
+  fileName: string;
+  mimeType: string;
+  bytes: number;
+  dataUrl: string;
 }
 
 interface SyncContextType {
@@ -83,19 +97,24 @@ const BACKUP_TABLES = [
   'subjects',
   'attendance',
   'fees',
+  'feeStructures',
+  'bursaries',
+  'discounts',
   'payments',
+  'invoices',
   'announcements',
   'notifications',
   'exams',
   'examResults',
-  'feeStructures',
-  'bursaries',
-  'discounts',
-  'invoices',
   'timetable',
   'transportRoutes',
   'transportAssignments',
   'salaryPayments',
+  'settings',
+  'schools',
+  'users',
+  'syncLogs',
+  'syncMeta',
   'pointTransactions',
   'inventory',
   'expenses',
@@ -158,6 +177,105 @@ function buildBackupRecordKeySet(table: string, records: any[]) {
   const keys = new Set<string>();
   records.forEach(record => backupRecordKeys(table, record).forEach(key => keys.add(key)));
   return keys;
+}
+
+function isDataUrl(value: unknown) {
+  return typeof value === 'string' && /^data:[^;,]+;base64,/i.test(value.trim());
+}
+
+function dataUrlMimeType(value: string) {
+  return value.match(/^data:([^;,]+);base64,/i)?.[1] || 'application/octet-stream';
+}
+
+function estimateDataUrlBytes(value: string) {
+  const base64 = value.split(',')[1] || '';
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+function extensionFromMimeType(mimeType: string) {
+  const known: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/avif': 'avif',
+    'image/gif': 'gif',
+    'image/bmp': 'bmp',
+    'application/pdf': 'pdf',
+  };
+  return known[mimeType] || 'bin';
+}
+
+function safeBackupFilePart(value: unknown, fallback: string) {
+  const clean = String(value || '').trim().replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '');
+  return clean || fallback;
+}
+
+function backupRecordLabel(table: string, record: any) {
+  if (table === 'students') return [record?.firstName, record?.lastName].filter(Boolean).join(' ') || record?.studentId || record?.admissionNo;
+  if (table === 'staff') return [record?.firstName, record?.lastName].filter(Boolean).join(' ') || record?.employeeId || record?.email;
+  return record?.name || record?.title || record?.id;
+}
+
+function collectBackupImages(data: Record<string, any[]>): BackupImageAsset[] {
+  const assets: BackupImageAsset[] = [];
+  const pushAsset = (table: string, record: any, field: string, dataUrl: string, nameHint = field) => {
+    if (!isDataUrl(dataUrl)) return;
+    const mimeType = dataUrlMimeType(dataUrl);
+    const ext = extensionFromMimeType(mimeType);
+    const recordId = record?.id ? String(record.id) : undefined;
+    const recordLabel = backupRecordLabel(table, record);
+    const baseName = safeBackupFilePart(recordLabel || recordId || table, table);
+    const fileName = `${safeBackupFilePart(table, 'table')}/${baseName}-${safeBackupFilePart(nameHint, field)}.${ext}`;
+    assets.push({
+      id: `${table}:${recordId || assets.length}:${field}:${assets.length}`,
+      table,
+      recordId,
+      recordLabel,
+      field,
+      fileName,
+      mimeType,
+      bytes: estimateDataUrlBytes(dataUrl),
+      dataUrl,
+    });
+  };
+
+  for (const [table, records] of Object.entries(data)) {
+    for (const record of records || []) {
+      if (!record || typeof record !== 'object') continue;
+      pushAsset(table, record, 'photoUrl', record.photoUrl);
+      pushAsset(table, record, 'photo_url', record.photo_url);
+      pushAsset(table, record, 'schoolLogo', record.schoolLogo);
+      pushAsset(table, record, 'school_logo', record.school_logo);
+
+      if (Array.isArray(record.attachments)) {
+        record.attachments.forEach((attachment: any, index: number) => {
+          const file = attachment?.file || attachment?.dataUrl || attachment?.url;
+          pushAsset(table, record, `attachments.${index}.file`, file, attachment?.name || `attachment-${index + 1}`);
+        });
+      }
+    }
+  }
+
+  return assets;
+}
+
+async function loadBackupTableData(sid: string, table: string) {
+  const [desktopRows, cacheRows] = await Promise.all([
+    userDBManager.getAll(sid, table).catch(() => []),
+    dataService.getAll(sid, table).catch(() => []),
+  ]);
+  const merged = new Map<string, any>();
+  const looseRows: any[] = [];
+  for (const record of [...desktopRows, ...cacheRows]) {
+    if (!record || typeof record !== 'object') continue;
+    if (record.id) {
+      merged.set(String(record.id), { ...(merged.get(String(record.id)) || {}), ...record });
+    } else {
+      looseRows.push(record);
+    }
+  }
+  return [...merged.values(), ...looseRows];
 }
 
 export function SyncProvider({ children }: { children: ReactNode }) {
@@ -260,7 +378,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void loadPendingCount();
-    const interval = setInterval(() => void loadPendingCount(), 12000);
+    const interval = setInterval(() => void loadPendingCount(), 60000);
     return () => clearInterval(interval);
   }, [loadPendingCount]);
 
@@ -404,18 +522,30 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
       for (const table of BACKUP_TABLES) {
         try {
-          const tableData = await userDBManager.getAll(sid, table);
-          data[table] = tableData;
+          const tableData = await loadBackupTableData(sid, table);
+          if (tableData.length > 0) data[table] = tableData;
         } catch {
           // Table might not exist
         }
       }
 
+      const imageAssets = collectBackupImages(data);
       const backup = {
-        version: 1,
+        version: 2,
         exportedAt: new Date().toISOString(),
         userId: user.id,
+        schoolId: sid,
+        format: 'schofy-full-backup',
+        includes: {
+          tables: Object.keys(data).length,
+          records: Object.values(data).reduce((sum, rows) => sum + rows.length, 0),
+          images: imageAssets.length,
+          imageBytes: imageAssets.reduce((sum, image) => sum + image.bytes, 0),
+        },
         data,
+        assets: {
+          images: imageAssets,
+        },
       };
 
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
@@ -427,7 +557,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      addToast('Backup exported', 'success');
+      addToast(`Backup exported with ${imageAssets.length.toLocaleString()} image${imageAssets.length === 1 ? '' : 's'}`, 'success');
     } catch (error) {
       console.error('Backup export failed:', error);
       addToast('Failed to export backup', 'error');
@@ -443,12 +573,13 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         const text = await file.text();
         const backup = JSON.parse(text);
 
-        if (backup.version !== 1) {
+        if (![1, 2].includes(Number(backup.version))) {
           addToast('Unsupported backup version', 'error');
           return null;
         }
 
         const backupData = backup.data && typeof backup.data === 'object' ? backup.data : {};
+        const backupImages = Array.isArray(backup.assets?.images) ? backup.assets.images : collectBackupImages(backupData);
         const supported = new Set(BACKUP_TABLES);
         const unsupportedTables = Object.keys(backupData).filter(table => !supported.has(table));
         const tables: BackupTablePreview[] = [];
@@ -557,6 +688,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
           totalRecords,
           totalNewRecords,
           totalDuplicates,
+          imageCount: backupImages.length,
+          imageBytes: backupImages.reduce((sum: number, image: any) => sum + Number(image?.bytes || 0), 0),
           planCheck,
         };
       } catch (error) {

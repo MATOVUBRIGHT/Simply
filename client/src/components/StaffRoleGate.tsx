@@ -26,6 +26,13 @@ function readSavedMainAdminSession() {
   }
 }
 
+function isReloadNavigation() {
+  if (typeof performance === 'undefined') return false;
+  const navEntry = performance.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined;
+  if (navEntry?.type === 'reload') return true;
+  return Boolean((performance as any).navigation?.type === 1);
+}
+
 export function StaffRoleGate({ children }: { children: ReactNode }) {
   const { user, schoolId, isOnline, logout } = useAuth();
   const tenantId = schoolId || user?.id || '';
@@ -48,11 +55,20 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
   const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [restoreConfirmed, setRestoreConfirmed] = useState(false);
   const [restorePromptChecked, setRestorePromptChecked] = useState(false);
+  const skipRoleGateOnRestore = isReloadNavigation() || (typeof navigator !== 'undefined' && !navigator.onLine);
 
   useEffect(() => {
     if (!tenantId) {
       setChecking(false);
       setRequiresRole(false);
+      return;
+    }
+    if (skipRoleGateOnRestore) {
+      setRequiresRole(false);
+      setChecking(false);
+      setRestorePromptChecked(true);
+      setRestoreConfirmed(true);
+      setAdminProceed(true);
       return;
     }
 
@@ -89,7 +105,7 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [tenantId, isOnline]);
+  }, [tenantId, isOnline, skipRoleGateOnRestore]);
 
   useEffect(() => {
     setRestoreConfirmed(false);
@@ -97,6 +113,12 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
   }, [tenantId, user?.id, staffSession?.staffMember.id]);
 
   useEffect(() => {
+    if (skipRoleGateOnRestore) {
+      setRestorePromptChecked(true);
+      setRestoreConfirmed(true);
+      setAdminProceed(true);
+      return;
+    }
     if (staffLoading || checking || restorePromptChecked) return;
     if (!user?.id && !staffSession) {
       setRestorePromptChecked(true);
@@ -138,7 +160,7 @@ export function StaffRoleGate({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [staffLoading, checking, restorePromptChecked, user?.id, user?.firstName, user?.lastName, staffSession, confirm, logout]);
+  }, [staffLoading, checking, restorePromptChecked, user?.id, user?.firstName, user?.lastName, staffSession, confirm, logout, skipRoleGateOnRestore]);
 
   useEffect(() => {
     if (!tenantId) {

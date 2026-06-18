@@ -2,8 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import { initDatabase } from './db/init.js';
 import { authenticateToken } from './middleware/auth.js';
+import { httpCacheHeaders, requestPerformanceLogger } from './middleware/performance.js';
 import authRoutes from './routes/auth.js';
 import studentRoutes from './routes/students.js';
+import optimizedStudentRoutes from './routes/students-optimized.js';
 import staffRoutes from './routes/staff.js';
 import classRoutes from './routes/classes.js';
 import subjectRoutes from './routes/subjects.js';
@@ -14,6 +16,7 @@ import announcementRoutes from './routes/announcements.js';
 import dashboardRoutes from './routes/dashboard.js';
 import settingsRoutes from './routes/settings.js';
 import syncRoutes from './routes/sync.js';
+import archiveRoutes from './routes/archive.js';
 
 const app = express();
 const PORT = process.env.PORT || 3334;
@@ -34,8 +37,11 @@ app.use(cors({
   },
 }));
 app.use(express.json({ limit: '1mb' }));
+app.use(requestPerformanceLogger);
+app.use(httpCacheHeaders);
 
 app.use('/api/auth', authRoutes);
+app.use('/api/students', authenticateToken, optimizedStudentRoutes);
 app.use('/api/students', authenticateToken, studentRoutes);
 app.use('/api/staff', authenticateToken, staffRoutes);
 app.use('/api/classes', authenticateToken, classRoutes);
@@ -47,6 +53,7 @@ app.use('/api/announcements', authenticateToken, announcementRoutes);
 app.use('/api/dashboard', authenticateToken, dashboardRoutes);
 app.use('/api/settings', authenticateToken, settingsRoutes);
 app.use('/api/sync', authenticateToken, syncRoutes);
+app.use('/api/archives', authenticateToken, archiveRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

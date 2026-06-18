@@ -19,7 +19,7 @@ import {
   getStorageDB,
   enqueueItem,
   enqueueItems,
-  dequeueItem,
+  dequeueItems,
   loadQueue,
   markDeleted as _markDeleted,
   markBatchDeleted as _markBatchDeleted,
@@ -712,34 +712,15 @@ interface QueueItem {
 function loadQueueSync(): QueueItem[] {
   try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; }
 }
-function saveQueueSync(q: QueueItem[]) {
-  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch {}
-}
 function enqueue(item: Omit<QueueItem, 'id' | 'ts'>) {
   const queued = { ...item, id: generateUUID(), ts: Date.now() } as QueueItem;
-  // Primary: async IDB write
   void enqueueItem(queued);
-  // Fallback: sync localStorage write
-  const q = loadQueueSync();
-  q.push(queued);
-  saveQueueSync(q);
 }
 function enqueueMany(items: Array<Omit<QueueItem, 'id' | 'ts'>>) {
   if (items.length === 0) return;
   const now = Date.now();
   const queued = items.map(item => ({ ...item, id: generateUUID(), ts: now } as QueueItem));
   void enqueueItems(queued);
-  try {
-    const q = loadQueueSync();
-    q.push(...queued);
-    saveQueueSync(q);
-  } catch {}
-}
-function dequeue(id: string) {
-  // Primary: async IDB delete
-  void dequeueItem(id);
-  // Fallback: sync localStorage delete
-  saveQueueSync(loadQueueSync().filter(i => i.id !== id));
 }
 
 function deadLetter(item: QueueItem, reason: string) {
@@ -1066,8 +1047,9 @@ function getRealtimeFilter(table: string, sid: string): string | undefined {
 }
 
 const BOOTSTRAP_PULL_TABLES = ['settings', 'schools', 'users', 'subscriptions'];
-const REMOTE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const MAX_QUEUE_ITEMS_PER_FLUSH = 50;
+const REMOTE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_QUEUE_ITEMS_PER_FLUSH = 200;
+const MAX_BATCH_ROWS_PER_REQUEST = 100;
 const FORCED_REMOTE_FETCH_MIN_MS = 5 * 60 * 1000;
 
 class SupabaseDataService {
@@ -1081,6 +1063,7 @@ class SupabaseDataService {
   private _isInitialized = false;
   private _syncInProgress = false;
   private _lastSyncAttempt = 0;
+  private _lastSyncSkipLogAt = 0;
   private _backoffDelay = 1000;
   private _backgroundSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1589,11 +1572,11 @@ class SupabaseDataService {
     const sid = this.sid(userId);
     await cacheReady;
 
-    // 1. Instant Return from Cache (Offline-Ready)
+    // 1. Local cache is the source of truth for normal reads.
     const cached = cacheGet(sid, tableName);
+    if (cached && !forceRefresh) return cached;
     
-    // 2. Fetch only when needed. Realtime handles cross-device changes, so
-    // cached data can live for hours without repeatedly spending API quota.
+    // 2. Fetch only on first missing data, explicit refresh, or sync catch-up.
     if (isCloudSyncEnabled() && isOnline() && this.ok) {
       const entry = memCache.get(cacheKey(sid, tableName));
       const hasCacheEntry = Boolean(entry);
@@ -1601,12 +1584,9 @@ class SupabaseDataService {
       const shouldFetch = forceRefresh || !hasCacheEntry || isStale;
 
       if (shouldFetch) {
-        // Trigger background fetch immediately
-        // For cloud-first, if we have never checked this table, wait for the fetch.
         if (!hasCacheEntry) {
           return await this._fetchAndMerge(sid, tableName, forceRefresh);
         } else {
-          // If we have cache, return it but kick off a background refresh
           void this._fetchAndMerge(sid, tableName, forceRefresh);
         }
       }
@@ -2201,9 +2181,6 @@ class SupabaseDataService {
       return { success: true, syncedRemotely: false, savedLocally: true };
     }
 
-    this.queueWrite({ op: 'delete', userId, tableName, recordId: id });
-    return { success: true, syncedRemotely: false, savedLocally: true };
-
     if (!isOnline() || !this.ok) {
       enqueue({ op: 'delete', userId, tableName, recordId: id });
       return { success: true, syncedRemotely: false, savedLocally: true };
@@ -2224,6 +2201,7 @@ class SupabaseDataService {
         enqueue({ op: 'delete', userId, tableName, recordId: id });
         return { success: true, syncedRemotely: false, savedLocally: true };
       }
+      this.scheduleBackgroundSync(sid);
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
       notifyCloudProblem(e);
@@ -2257,9 +2235,6 @@ class SupabaseDataService {
       return { success: true, syncedRemotely: false, savedLocally: true };
     }
 
-    this.queueWrites(ids.map(id => ({ op: 'delete' as const, userId, tableName, recordId: id })), sid);
-    return { success: true, syncedRemotely: false, savedLocally: true };
-
     if (!isOnline() || !this.ok) {
       // Queue each delete individually
       for (const id of ids) {
@@ -2283,6 +2258,7 @@ class SupabaseDataService {
         for (const id of ids) enqueue({ op: 'delete', userId, tableName, recordId: id });
         return { success: true, syncedRemotely: false, savedLocally: true };
       }
+      this.scheduleBackgroundSync(sid);
       return { success: true, syncedRemotely: true, savedLocally: true };
     } catch (e: any) {
       notifyCloudProblem(e);
@@ -2560,7 +2536,11 @@ class SupabaseDataService {
   async flushOfflineQueue(): Promise<void> {
     if (!isCloudSyncEnabled() || !isOnline() || !this.ok) return;
     if (this._syncInProgress) {
-      console.log('[offline] Sync already in progress, skipping');
+      const now = Date.now();
+      if (now - this._lastSyncSkipLogAt > 30000) {
+        console.log('[offline] Sync already in progress, skipping');
+        this._lastSyncSkipLogAt = now;
+      }
       return;
     }
 
@@ -2604,96 +2584,19 @@ class SupabaseDataService {
       // to save API calls and prevent race conditions.
       const dedupedQueue = this._deduplicateQueue(queue);
       const queueSlice = dedupedQueue.slice(0, MAX_QUEUE_ITEMS_PER_FLUSH);
+      const idsByRecord = this._queueIdsByRecord(queue);
+      const processedQueueIds = new Set<string>();
 
-      for (let queueIndex = 0; queueIndex < queueSlice.length; queueIndex++) {
-        const item = queueSlice[queueIndex];
-        if (queueIndex > 0 && queueIndex % 8 === 0) await yieldToUI();
-        if (!canUseRemoteTable(item.tableName)) {
-          dequeue(item.id);
-          continue;
-        }
+      const result = await this._flushQueueSlice(queueSlice, idsByRecord, isUnrecoverable, MAX_RETRIES);
+      result.processedQueueIds.forEach(id => processedQueueIds.add(id));
+      if (result.succeeded > 0) this._backoffDelay = Math.max(1000, this._backoffDelay - 1000);
+      if (result.shouldStop) {
+        this._backoffDelay = Math.min(this._backoffDelay * 2, 60000);
+        console.error('[offline] Will retry remaining queued operations later');
+      }
 
-        let succeeded = false;
-        let unrecoverable = false;
-
-        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-          if (attempt > 0) {
-            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
-          }
-          try {
-            const sid = this.sid(item.userId);
-            const rt = getSupabaseTable(item.tableName);
-            
-            if (item.op === 'create' && item.data) {
-              const capacity = await this.filterCreatesByPlanCapacity(sid, item.tableName, [item.data]);
-              if (capacity.allowed.length === 0) {
-                deadLetter(item, capacity.message || 'Plan limit reached before cloud sync.');
-                unrecoverable = true;
-                break;
-              }
-              const payload = toRemote(item.data, rt, sid);
-              const { error: upsertError } = await this.db.from(rt).upsert(payload, { onConflict: 'id' });
-              if (upsertError) throw upsertError;
-              
-              const { data: remoteData } = await applyScope(this.db.from(rt).select('*').eq('id', item.data.id), rt, sid).maybeSingle();
-              if (remoteData) {
-                cacheApplyCreate(sid, item.tableName, mapToLocal(remoteData));
-              }
-            } else if (item.op === 'update' && item.recordId && item.data) {
-              const payload = toRemote(item.data, rt, sid);
-              delete payload.id; delete payload.created_at;
-              const { error: updateError } = await applyScope(this.db.from(rt).update(payload).eq('id', item.recordId), rt, sid);
-              if (updateError) throw updateError;
-              
-              const { data: remoteData } = await applyScope(this.db.from(rt).select('*').eq('id', item.recordId), rt, sid).maybeSingle();
-              if (remoteData) {
-                cacheApplyUpdate(sid, item.tableName, item.recordId, mapToLocal(remoteData));
-              }
-            } else if (item.op === 'delete' && item.recordId) {
-              const { error } = await applyScope(this.db.from(rt).delete().eq('id', item.recordId), rt, sid);
-              if (error) throw error;
-            } else if (item.op === 'saveSettings' && item.settings) {
-              for (const [key, value] of Object.entries(item.settings)) {
-                const { error } = await this.db.from('settings').upsert(
-                  { school_id: sid, key, value, updated_at: new Date().toISOString() },
-                  { onConflict: 'school_id,key' }
-                );
-                if (error) throw error;
-              }
-              if (item.settings.schoolName) {
-                await this.db.from('schools').upsert({ id: sid, name: item.settings.schoolName }, { onConflict: 'id' });
-              }
-            }
-            succeeded = true;
-            break;
-          } catch (e: any) {
-            const msg = e.message || '';
-            const missing = parseMissingRemoteColumn(e, getSupabaseTable(item.tableName));
-            if (missing?.table === getSupabaseTable(item.tableName)) {
-              markRemoteColumnDisabled(missing.table, missing.column);
-              console.warn(`[offline] Remote schema is missing ${missing.table}.${missing.column}; retrying ${item.op} without that column.`);
-              continue;
-            }
-            if (isUnrecoverable(msg)) {
-              unrecoverable = true;
-              deadLetter(item, msg);
-              console.warn(`[offline] Sync item moved to failed review ${item.op} on ${item.tableName}:`, msg);
-              break;
-            }
-            console.warn(`[offline] Attempt ${attempt + 1} failed for ${item.op} on ${item.tableName}:`, msg);
-          }
-        }
-
-        if (succeeded || unrecoverable) {
-          dequeue(item.id);
-          // If we had many failures before, slowly decrease backoff on success
-          this._backoffDelay = Math.max(1000, this._backoffDelay - 1000);
-        } else {
-          // Increase backoff on persistent failure
-          this._backoffDelay = Math.min(this._backoffDelay * 2, 60000);
-          console.error(`[offline] Will retry later: ${item.op} on ${item.tableName}`);
-          break; // Stop processing queue if we hit a persistent error
-        }
+      if (processedQueueIds.size > 0) {
+        await dequeueItems(Array.from(processedQueueIds));
       }
     } finally {
       this._syncInProgress = false;
@@ -2706,7 +2609,7 @@ class SupabaseDataService {
     const latestOps = new Map<string, QueueItem>();
     
     for (const item of queue) {
-      const key = item.recordId || item.data?.id || `settings-${item.userId}`;
+      const key = this._queueRecordKey(item);
       if (!key) {
         latestOps.set(`op-${item.id}`, item);
         continue;
@@ -2732,6 +2635,161 @@ class SupabaseDataService {
     }
     
     return Array.from(latestOps.values()).sort((a, b) => a.ts - b.ts);
+  }
+
+  private _queueRecordKey(item: QueueItem): string {
+    const recordId = item.recordId || item.data?.id;
+    if (recordId) return `${item.userId}:${item.tableName}:${recordId}`;
+    if (item.op === 'saveSettings') return `${item.userId}:settings`;
+    if (item.ids?.length) return `${item.userId}:${item.tableName}:batch:${item.ids.join(',')}`;
+    return `op-${item.id}`;
+  }
+
+  private _queueIdsByRecord(queue: QueueItem[]): Map<string, string[]> {
+    const idsByRecord = new Map<string, string[]>();
+    for (const item of queue) {
+      const key = this._queueRecordKey(item);
+      const ids = idsByRecord.get(key) || [];
+      ids.push(item.id);
+      idsByRecord.set(key, ids);
+    }
+    return idsByRecord;
+  }
+
+  private async _flushQueueSlice(
+    queueSlice: QueueItem[],
+    idsByRecord: Map<string, string[]>,
+    isUnrecoverable: (msg: string) => boolean,
+    maxRetries: number,
+  ): Promise<{ processedQueueIds: Set<string>; succeeded: number; shouldStop: boolean }> {
+    const processedQueueIds = new Set<string>();
+    let succeeded = 0;
+
+    const markProcessed = (item: QueueItem) => {
+      for (const id of idsByRecord.get(this._queueRecordKey(item)) || [item.id]) processedQueueIds.add(id);
+    };
+
+    const byUserTable = new Map<string, QueueItem[]>();
+    for (const item of queueSlice) {
+      if (!canUseRemoteTable(item.tableName)) {
+        markProcessed(item);
+        continue;
+      }
+      const key = `${item.userId}:${item.tableName}`;
+      byUserTable.set(key, [...(byUserTable.get(key) || []), item]);
+    }
+
+    for (const items of byUserTable.values()) {
+      const first = items[0];
+      if (!first) continue;
+      const sid = this.sid(first.userId);
+      const tableName = first.tableName;
+      const rt = getSupabaseTable(tableName);
+
+      const creates = items.filter(item => item.op === 'create' && item.data);
+      const updates = items.filter(item => item.op === 'update' && item.recordId && item.data);
+      const deletes = items.filter(item => (item.op === 'delete' && item.recordId) || (item.op === 'batchDelete' && item.ids?.length));
+      const settings = items.filter(item => item.op === 'saveSettings' && item.settings);
+      const unsupported = items.filter(item => !creates.includes(item) && !updates.includes(item) && !deletes.includes(item) && !settings.includes(item));
+
+      unsupported.forEach(markProcessed);
+
+      const createCapacity = creates.length > 0
+        ? await this.filterCreatesByPlanCapacity(sid, tableName, creates.map(item => item.data))
+        : { allowed: [] as any[], skipped: 0 };
+      const allowedCreateIds = new Set(createCapacity.allowed.map(record => record?.id).filter(Boolean));
+      for (const item of creates) {
+        if (item.data?.id && !allowedCreateIds.has(item.data.id)) {
+          deadLetter(item, createCapacity.message || 'Plan limit reached before cloud sync.');
+          markProcessed(item);
+        }
+      }
+
+      const writeGroups: Array<{ op: 'upsert' | 'delete' | 'settings'; items: QueueItem[] }> = [];
+      const allowedCreates = creates.filter(item => item.data?.id && allowedCreateIds.has(item.data.id));
+      if (allowedCreates.length || updates.length) writeGroups.push({ op: 'upsert', items: [...allowedCreates, ...updates] });
+      if (deletes.length) writeGroups.push({ op: 'delete', items: deletes });
+      if (settings.length) writeGroups.push({ op: 'settings', items: settings });
+
+      for (const group of writeGroups) {
+        for (let start = 0; start < group.items.length; start += MAX_BATCH_ROWS_PER_REQUEST) {
+          const chunk = group.items.slice(start, start + MAX_BATCH_ROWS_PER_REQUEST);
+          if (start > 0) await yieldToUI();
+
+          let done = false;
+          let unrecoverable = false;
+          let lastMessage = '';
+
+          for (let attempt = 0; attempt < maxRetries; attempt++) {
+            if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+            try {
+              if (group.op === 'upsert') {
+                const payloads = chunk.map(item => {
+                  const record = item.op === 'update'
+                    ? { ...item.data, id: item.recordId, schoolId: item.data?.schoolId || sid }
+                    : item.data;
+                  return toRemote(record, rt, sid);
+                });
+                const { error } = await this.db.from(rt).upsert(payloads, { onConflict: 'id' });
+                if (error) throw error;
+                for (const item of chunk) {
+                  const recordId = item.recordId || item.data?.id;
+                  if (recordId) cacheApplyUpdate(sid, item.tableName, recordId, { syncStatus: 'synced' });
+                }
+              } else if (group.op === 'delete') {
+                const ids = [...new Set(chunk.flatMap(item => item.op === 'batchDelete' ? (item.ids || []) : (item.recordId ? [item.recordId] : [])))];
+                const { error } = await applyScope(this.db.from(rt).delete().in('id', ids), rt, sid);
+                if (error) throw error;
+              } else if (group.op === 'settings') {
+                const rowByKey = new Map<string, { school_id: string; key: string; value: any; updated_at: string }>();
+                for (const item of chunk) {
+                  for (const [key, value] of Object.entries(item.settings || {})) {
+                    rowByKey.set(key, { school_id: sid, key, value, updated_at: new Date().toISOString() });
+                  }
+                }
+                const rows = Array.from(rowByKey.values());
+                if (rows.length > 0) {
+                  const { error } = await this.db.from('settings').upsert(rows, { onConflict: 'school_id,key' });
+                  if (error) throw error;
+                }
+                const schoolName = [...chunk].reverse().map(item => item.settings?.schoolName).find(Boolean);
+                if (schoolName) {
+                  const { error } = await this.db.from('schools').upsert({ id: sid, name: schoolName }, { onConflict: 'id' });
+                  if (error) throw error;
+                }
+              }
+              done = true;
+              break;
+            } catch (e: any) {
+              lastMessage = e.message || String(e || '');
+              const missing = parseMissingRemoteColumn(e, rt);
+              if (missing?.table === rt) {
+                markRemoteColumnDisabled(missing.table, missing.column);
+                console.warn(`[offline] Remote schema is missing ${missing.table}.${missing.column}; retrying ${group.op} batch without that column.`);
+                continue;
+              }
+              if (isUnrecoverable(lastMessage)) {
+                unrecoverable = true;
+                chunk.forEach(item => deadLetter(item, lastMessage));
+                console.warn(`[offline] Sync batch moved to failed review ${group.op} on ${tableName}:`, lastMessage);
+                break;
+              }
+              console.warn(`[offline] Attempt ${attempt + 1} failed for ${group.op} batch on ${tableName}:`, lastMessage);
+            }
+          }
+
+          if (done || unrecoverable) {
+            chunk.forEach(markProcessed);
+            succeeded += chunk.length;
+          } else {
+            console.error(`[offline] Batch failed for ${group.op} on ${tableName}:`, lastMessage);
+            return { processedQueueIds, succeeded, shouldStop: true };
+          }
+        }
+      }
+    }
+
+    return { processedQueueIds, succeeded, shouldStop: false };
   }
 }
 

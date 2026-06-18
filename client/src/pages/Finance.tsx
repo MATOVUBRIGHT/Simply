@@ -69,7 +69,10 @@ export default function Finance() {
   const [isImporting, setIsImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
-  const [filterTerm, setFilterTerm] = useState('all');
+  const [filterTerm, setFilterTerm] = useState(() => {
+    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
+    return '1';
+  });
   const [filterYear, setFilterYear] = useState('all');
   const [showTermFilter, setShowTermFilter] = useState(false);
   const [showImportSuccess, setShowImportSuccess] = useState(false);
@@ -115,6 +118,7 @@ export default function Finance() {
     (settingsData as any[]).forEach((s: any) => { obj[s.key] = s.value; });
     return obj;
   }, [settingsData]);
+  const currentTerm = String(settingsMap.currentTerm || '1');
   const schoolPrintInfo = useMemo(() => ({
     name: String(settingsMap.schoolName || 'School').trim(),
     address: String(settingsMap.schoolAddress || '').trim(),
@@ -286,7 +290,18 @@ export default function Finance() {
       { key: 'closingBalance', label: 'Closing Balance' },
       { key: 'upfrontCredit', label: 'Upfront Credit' },
       { key: 'invoiceCount', label: 'Invoices' },
-    ], `fee-ledger-term-${ledgerTerm}-${ledgerYear}`);
+    ], `fee-ledger-term-${ledgerTerm}-${ledgerYear}`, {
+      schoolName: schoolPrintInfo.name,
+      schoolAddress: schoolPrintInfo.address,
+      schoolPhone: schoolPrintInfo.phone,
+      schoolEmail: schoolPrintInfo.email,
+      schoolLogo: ledgerTemplate.logo || schoolPrintInfo.logo,
+      headerColor: ledgerTemplate.headerColor || '#2563eb',
+      accentColor: ledgerTemplate.accentColor || '#0f172a',
+      textColor: ledgerTemplate.textColor || '#0f172a',
+      watermarkLogo: true,
+      preparedLabel: 'Date',
+    });
     addToast('Ledger exported PDF', 'success'); setShowExportMenu(false);
   }
 
@@ -464,18 +479,18 @@ export default function Finance() {
     return map;
   }, [paymentRows]);
   const termOptions = useMemo(() => {
-    const values = Array.from(new Set([settingsMap.currentTerm || '1', ...feeRows.map(f => f.term)]
+    const values = Array.from(new Set([currentTerm, ...feeRows.map(f => f.term)]
       .map(value => String(value || '').trim())
       .filter(Boolean)));
     return values.sort((a, b) => termRank(a) - termRank(b) || a.localeCompare(b));
-  }, [feeRows, settingsMap.currentTerm]);
+  }, [feeRows, currentTerm]);
   const yearOptions = useMemo(() => {
     const values = Array.from(new Set([settingsMap.academicYear || String(new Date().getFullYear()), ...feeRows.map(f => f.year)]
       .map(value => String(value || '').trim())
       .filter(Boolean)));
     return values.sort((a, b) => Number(b) - Number(a) || b.localeCompare(a));
   }, [feeRows, settingsMap.academicYear]);
-  const ledgerTerm = String(filterTerm === 'all' ? (settingsMap.currentTerm || termOptions[termOptions.length - 1] || String(new Date().getMonth() < 4 ? 1 : new Date().getMonth() < 8 ? 2 : 3)) : filterTerm);
+  const ledgerTerm = String(filterTerm === 'all' ? (currentTerm || termOptions[termOptions.length - 1] || String(new Date().getMonth() < 4 ? 1 : new Date().getMonth() < 8 ? 2 : 3)) : filterTerm);
   const ledgerYear = String(filterYear === 'all' ? (settingsMap.academicYear || yearOptions[0] || String(new Date().getFullYear())) : filterYear);
   const bursaryByStudent = useMemo(() => {
     const map = new Map<string, { amount: number; isFull: boolean; count: number }>();
@@ -872,7 +887,7 @@ export default function Finance() {
                   <button onClick={() => setShowTermFilter(!showTermFilter)}
                     className="btn btn-secondary flex items-center gap-2">
                     <Filter size={16} />
-                    <span className="hidden sm:inline">{activeTab === 'ledger' ? `Term ${ledgerTerm}` : filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}</span>
+                    <span className="hidden sm:inline">{activeTab === 'ledger' ? `Term ${ledgerTerm}` : filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm || currentTerm}`}</span>
                     <ChevronDown size={14} className={`transition-transform ${showTermFilter ? 'rotate-180' : ''}`} />
                   </button>
                   {showTermFilter && (

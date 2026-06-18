@@ -65,7 +65,10 @@ export default function Grades() {
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('all');
-  const [filterTerm, setFilterTerm] = useState('all');
+  const [filterTerm, setFilterTerm] = useState(() => {
+    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
+    return '1';
+  });
   const [showClassFilter, setShowClassFilter] = useState(false);
   const [showTermFilter, setShowTermFilter] = useState(false);
   const { addToast } = useToast();
@@ -93,6 +96,7 @@ export default function Grades() {
   const { data: examsData } = useTableData(sid, 'exams');
   const { data: allClassesData } = useTableData(sid, 'classes');
   const { data: settingsData } = useTableData(sid, 'settings');
+  const currentTerm = useMemo(() => String((settingsData as any[]).find((row: any) => row.key === 'currentTerm')?.value || '1'), [settingsData]);
 
   const activeStudents = useActiveStudents();
   const { students: allStudents } = useStudents();
@@ -104,6 +108,10 @@ export default function Grades() {
   const examById = useMemo(() => new Map((examsData as any[]).map((exam) => [exam.id, exam])), [examsData]);
   const gradingScale = useMemo(() => getSavedGradingScale(settingsData as any[]), [settingsData]);
   const getGrade = useCallback((score: number) => getGradeFromScale(score, gradingScale), [gradingScale]);
+
+  useEffect(() => {
+    if (currentTerm && (!filterTerm || filterTerm === 'all')) setFilterTerm(currentTerm);
+  }, [currentTerm, filterTerm]);
 
   const grades = useMemo(() => {
     const deduped = new Map<string, StudentGrade>();

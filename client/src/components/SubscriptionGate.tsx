@@ -163,6 +163,13 @@ export default function SubscriptionGate({ children }: Props) {
     if (isAllowedRoute) { setBlocked(false); completeAccessCheck(80); return; }
     const online = typeof navigator === 'undefined' ? true : navigator.onLine;
 
+    if (!online && !options.forceRemote) {
+      setBlocked(false);
+      setPendingTid(null);
+      completeAccessCheck(40);
+      return;
+    }
+
     // Wait briefly for IndexedDB, but never let offline startup hang on secure access.
     await Promise.race([
       cacheReady,
@@ -199,20 +206,10 @@ export default function SubscriptionGate({ children }: Props) {
     };
 
     if (skipRemotePlanCheckOnRefresh.current && !options.forceRemote) {
-      const proof = await readVerifiedPlanProof(tenantId);
-      const hasSavedAccess = stateNeedsCodeProof(state)
-        ? isUnlimitedCodeProofUsable(proof, tenantId)
-        : Boolean(proof) || state.status === 'active' || state.status === 'expiring';
-
-      if (hasSavedAccess) {
-        if (proof) {
-          await restoreVerifiedPlanProof(tenantId);
-          state = await getSubscriptionAccessState(tenantId, undefined, { authUserId: user.id });
-        }
-        applyLocalState(localStorage.getItem(OFFLINE_PENDING_KEY) === '1', { enforcePlanLimit: false });
-        completeAccessCheck();
-        return;
-      }
+      setBlocked(false);
+      setPendingTid(null);
+      completeAccessCheck(40);
+      return;
     }
 
     if (!online) {

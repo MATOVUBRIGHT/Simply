@@ -62,6 +62,8 @@ interface ReportTemplate {
   accentColor: string;
   textColor: string;
   blackAndWhite: boolean;
+  showWatermark: boolean;
+  watermarkOpacity: number;
   // Sections
   showBehavior: boolean;
   showGradingSystem: boolean;
@@ -117,6 +119,8 @@ const DEFAULT_TEMPLATE: ReportTemplate = {
   accentColor: '#7ecece',
   textColor: '#0f172a',
   blackAndWhite: false,
+  showWatermark: true,
+  watermarkOpacity: 0.07,
   showBehavior: true,
   showGradingSystem: true,
   showAttendance: false,
@@ -154,7 +158,7 @@ const DEFAULT_TEMPLATE: ReportTemplate = {
 function loadTemplate(): ReportTemplate {
   try {
     const saved = localStorage.getItem(TEMPLATE_KEY);
-    if (saved) return { ...DEFAULT_TEMPLATE, ...JSON.parse(saved) };
+    if (saved) return sanitizeTemplate({ ...DEFAULT_TEMPLATE, ...JSON.parse(saved) });
   } catch { /* ignore */ }
   return DEFAULT_TEMPLATE;
 }
@@ -162,11 +166,16 @@ function saveTemplateLocal(t: ReportTemplate) {
   localStorage.setItem(TEMPLATE_KEY, JSON.stringify(t));
 }
 
+function sanitizeTemplate(template: ReportTemplate): ReportTemplate {
+  const footerText = /generated/i.test(String(template.footerText || '')) ? '' : template.footerText;
+  return { ...template, footerText };
+}
+
 function parseTemplate(value: unknown): ReportTemplate | null {
   try {
     if (!value) return null;
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-    return { ...DEFAULT_TEMPLATE, ...(parsed as Partial<ReportTemplate>) };
+    return sanitizeTemplate({ ...DEFAULT_TEMPLATE, ...(parsed as Partial<ReportTemplate>) });
   } catch {
     return null;
   }
@@ -264,7 +273,7 @@ export default function ReportCard() {
   const displayAddress = template.schoolAddress || settingsMap.schoolAddress || '';
   const displayPhone = template.schoolPhone || settingsMap.schoolPhone || '';
   const displayEmail = template.schoolEmail || settingsMap.schoolEmail || '';
-  const displayLogo = template.schoolLogo && template.schoolLogo !== 'S' ? template.schoolLogo : settingsMap.schoolLogo || template.schoolLogo || 'S';
+  const displayLogo = settingsMap.schoolLogo || (template.schoolLogo && template.schoolLogo !== 'S' ? template.schoolLogo : template.schoolLogo || 'S');
   const academicYear = settingsMap.academicYear || new Date().getFullYear().toString();
   const schoolType = settingsMap.schoolType || settingsMap.schoolCategory || 'default';
 
@@ -541,9 +550,10 @@ export default function ReportCard() {
   }
 
   function renderWatermark() {
-    if (!displayLogo) return null;
+    if (!template.showWatermark || !displayLogo) return null;
+    const opacity = Number.isFinite(Number(template.watermarkOpacity)) ? Math.min(0.2, Math.max(0.02, Number(template.watermarkOpacity))) : 0.07;
     return (
-      <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center opacity-[0.07]">
+      <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center" style={{ opacity }}>
         {isImageLogo ? (
           <img src={displayLogo} alt="" className="h-72 w-72 object-contain" />
         ) : (
@@ -722,7 +732,7 @@ export default function ReportCard() {
           </div>
 
           <div className="mt-8 rounded-md px-3 py-2 text-center text-[10px] font-bold uppercase text-white" style={{ backgroundColor: style.header }}>
-            <LiveEditable value={template.footerText || 'This report card is generated from Schofy school records.'} onSave={v => updateTemplate({ footerText: v })} isLiveEditing={isLiveEditing} />
+            <LiveEditable value={template.footerText || 'Official school report card'} onSave={v => updateTemplate({ footerText: v })} isLiveEditing={isLiveEditing} />
           </div>
         </div>
       </div>
@@ -968,18 +978,23 @@ export default function ReportCard() {
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-500">Logo</label>
                 <div className="flex gap-2">
-                  <input value={template.schoolLogo || ''} onChange={e => updateTemplate({ schoolLogo: e.target.value })} className="form-input h-9 min-h-0 flex-1 px-2 py-1 text-xs" placeholder="S or image URL" />
+                  <input value={template.schoolLogo || settingsMap.schoolLogo || ''} onChange={e => updateTemplate({ schoolLogo: e.target.value })} className="form-input h-9 min-h-0 flex-1 px-2 py-1 text-xs" placeholder="Use Settings logo or image URL" />
                   <button type="button" onClick={() => logoInputRef.current?.click()} className="rounded-lg border border-slate-200 px-2 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700" title="Upload logo">
                     <Upload size={15} />
                   </button>
                 </div>
                 <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
               </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <input type="checkbox" checked={template.showWatermark !== false} onChange={e => updateTemplate({ showWatermark: e.target.checked })} />
+                Logo watermark
+              </label>
             </div>
           </aside>
         )}
 
-      <div id="report-card-print" className="bg-white mx-auto max-w-2xl shadow-xl print:shadow-none print:max-w-full overflow-hidden" style={{ fontFamily: 'Arial, sans-serif', color: reportTextColor, '--report-template-text-color': reportTextColor } as React.CSSProperties}>
+      <div id="report-card-print" className="relative bg-white mx-auto max-w-2xl shadow-xl print:shadow-none print:max-w-full overflow-hidden" style={{ fontFamily: 'Arial, sans-serif', color: reportTextColor, '--report-template-text-color': reportTextColor } as React.CSSProperties}>
+        {!isNamedTemplate && renderWatermark()}
         {isNamedTemplate ? (
           renderNamedTemplate()
         ) : template.type === 'modern' ? (
@@ -1593,6 +1608,10 @@ export default function ReportCard() {
                       <label className="form-label">Logo (emoji or URL)</label>
                       <input value={draft.schoolLogo} onChange={e => setDraft(p => ({ ...p, schoolLogo: e.target.value }))} className="form-input" placeholder="S or https://..." />
                     </div>
+                    <label className="sm:col-span-2 flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                      <input type="checkbox" checked={draft.showWatermark !== false} onChange={e => setDraft(p => ({ ...p, showWatermark: e.target.checked }))} className="w-4 h-4 rounded" />
+                      <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Use school logo as watermark</span>
+                    </label>
                   </div>
                 </>
               )}
@@ -1642,6 +1661,10 @@ export default function ReportCard() {
                     <input type="checkbox" checked={draft.blackAndWhite} onChange={e => setDraft(p => ({ ...p, blackAndWhite: e.target.checked }))} className="w-4 h-4 rounded" />
                     <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Black and white view</span>
                   </label>
+                  <div>
+                    <label className="form-label">Watermark Opacity</label>
+                    <input type="range" min="0.02" max="0.2" step="0.01" value={draft.watermarkOpacity || 0.07} onChange={e => setDraft(p => ({ ...p, watermarkOpacity: Number(e.target.value) }))} className="w-full" />
+                  </div>
                   {/* Color presets */}
                   <div>
                     <label className="form-label">Color Presets</label>
@@ -1674,7 +1697,7 @@ export default function ReportCard() {
                   </div>
                   <div>
                     <label className="form-label">Footer Text</label>
-                    <input value={draft.footerText} onChange={e => setDraft(p => ({ ...p, footerText: e.target.value }))} className="form-input" placeholder="e.g. This report is computer generated and valid without a stamp" />
+                    <input value={draft.footerText} onChange={e => setDraft(p => ({ ...p, footerText: e.target.value }))} className="form-input" placeholder="e.g. Official school report card" />
                   </div>
                 </>
               )}

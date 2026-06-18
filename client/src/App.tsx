@@ -1,4 +1,5 @@
 import { lazy, useEffect, useState, Suspense, useMemo, useRef, useLayoutEffect } from 'react';
+import type { ReactNode } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { StudentsProvider } from './contexts/StudentsContext';
@@ -7,6 +8,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import UpdateBanner from './components/UpdateBanner';
 import DesktopUpdatePrompt from './components/DesktopUpdatePrompt';
+import { LearnerTerminologyAdapter } from './components/LearnerTerminologyAdapter';
 import StorageWarning from './components/StorageWarning';
 import SubscriptionGate from './components/SubscriptionGate';
 import { StaffRoleGate } from './components/StaffRoleGate';
@@ -16,6 +18,10 @@ import { useSync } from './contexts/SyncContext';
 import { initErrorInterceptor } from './lib/errorInterceptor';
 import { supabaseAnonKey, supabaseUrl } from './lib/supabase';
 import { useConfirm } from './components/ConfirmModal';
+import { isDesktopApp } from './utils/desktopSyncPreference';
+import { TopLoadingProgressBar } from './components/TopLoadingProgressBar';
+import { PageTransition } from './components/PageTransition';
+import { usePageMetadata } from './hooks/usePageMetadata';
 
 // Lazy load pages for performance
 const Login = lazy(() => import('./pages/Login'));
@@ -37,7 +43,12 @@ const Subjects = lazy(() => import('./pages/Subjects'));
 const HomeworkTests = lazy(() => import('./pages/HomeworkTests'));
 const Attendance = lazy(() => import('./pages/Attendance'));
 const DayBoarding = lazy(() => import('./pages/DayBoarding'));
+const LiveMonitor = lazy(() => import('./pages/LiveMonitor'));
+const SchoolRecords = lazy(() => import('./pages/SchoolRecords'));
 const Finance = lazy(() => import('./pages/Finance'));
+const SchoolBudget = lazy(() => import('./pages/SchoolBudget'));
+const SchoolLibrary = lazy(() => import('./pages/SchoolLibrary'));
+const ExamClearance = lazy(() => import('./pages/ExamClearance'));
 const PaymentAccounts = lazy(() => import('./pages/PaymentAccounts'));
 const Expenses = lazy(() => import('./pages/Expenses'));
 const Transport = lazy(() => import('./pages/Transport'));
@@ -75,7 +86,12 @@ const offlinePageWarmers = [
   () => import('./pages/HomeworkTests'),
   () => import('./pages/Attendance'),
   () => import('./pages/DayBoarding'),
+  () => import('./pages/LiveMonitor'),
+  () => import('./pages/SchoolRecords'),
   () => import('./pages/Finance'),
+  () => import('./pages/SchoolBudget'),
+  () => import('./pages/SchoolLibrary'),
+  () => import('./pages/ExamClearance'),
   () => import('./pages/PaymentAccounts'),
   () => import('./pages/Expenses'),
   () => import('./pages/Invoices'),
@@ -95,6 +111,10 @@ const offlinePageWarmers = [
   () => import('./pages/NotFound'),
 ];
 
+const OFFLINE_WARM_DELAY_MS = 10000;
+const OFFLINE_WARM_CHUNK_SIZE = 3;
+const OFFLINE_WARM_CHUNK_DELAY_MS = 600;
+
 const STAFF_ADMIN_ONLY_PATHS = ['/plans', '/subscribe'];
 const ROUTE_LABELS: Array<[string, string]> = [
   ['/plans', 'Plans & Billing'],
@@ -111,7 +131,12 @@ const ROUTE_LABELS: Array<[string, string]> = [
   ['/homework-tests', 'Assignments & Tests'],
   ['/attendance', 'Attendance'],
   ['/day-boarding', 'Day & Boarding'],
+  ['/live-monitor', 'Live Monitor'],
+  ['/school-records', 'School Records'],
   ['/finance', 'Fees & Finance'],
+  ['/school-budget', 'School Budget'],
+  ['/school-library', 'School Library'],
+  ['/exam-clearance', 'Exam Clearance'],
   ['/payment-accounts', 'Payment Accounts'],
   ['/expenses', 'Expenses'],
   ['/invoices', 'Invoices'],
@@ -168,8 +193,12 @@ function PageLoadingSpinner({ label = 'Loading page...' }: { label?: string }) {
   );
 }
 
+function WithStudents({ children }: { children: ReactNode }) {
+  return <StudentsProvider>{children}</StudentsProvider>;
+}
+
 function MainApp() {
-  const { user, loading } = useAuth();
+  const { user, loading, schoolId } = useAuth();
   const { canAccessPage, isStaffMode } = useStaffAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -179,6 +208,9 @@ function MainApp() {
   const restrictedPageNameRef = useRef('this page');
   const lastAllowedPathRef = useRef('/');
   const pendingRestrictedNoticeRef = useRef(false);
+
+  // Use our new metadata hook for page titles
+  usePageMetadata();
 
   // Wire global error interceptor
   useEffect(() => {
@@ -206,14 +238,26 @@ function MainApp() {
   }, [location.pathname, location.search, location.hash]);
 
   useEffect(() => {
-    if (!user?.id || typeof navigator === 'undefined' || !navigator.onLine) return;
+    if (!user?.id || isDesktopApp() || typeof navigator === 'undefined' || !navigator.onLine) return;
+    const connection = (navigator as any).connection;
+    if (connection?.saveData) return;
     let cancelled = false;
     let timeoutId = 0;
     let idleId: number | null = null;
 
-    const warmOfflinePages = () => {
+    const warmOfflinePages = async () => {
       if (cancelled || !navigator.onLine) return;
-      void Promise.allSettled(offlinePageWarmers.map(load => load())).then(() => {
+      if (!navigator.serviceWorker?.controller) return;
+      // Load pages in small chunks with a short delay between chunks
+      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+      try {
+        for (let i = 0; i < offlinePageWarmers.length; i += OFFLINE_WARM_CHUNK_SIZE) {
+          if (cancelled || !navigator.onLine) return;
+          const chunk = offlinePageWarmers.slice(i, i + OFFLINE_WARM_CHUNK_SIZE).map(load => load());
+          await Promise.allSettled(chunk);
+          await delay(OFFLINE_WARM_CHUNK_DELAY_MS);
+        }
+
         if (cancelled || !navigator.serviceWorker?.controller) return;
         const sameOriginResources = performance.getEntriesByType('resource')
           .map(entry => entry.name)
@@ -228,7 +272,9 @@ function MainApp() {
           type: 'CACHE_URLS',
           urls: sameOriginResources,
         });
-      });
+      } catch {
+        // best-effort warming — ignore errors
+      }
     };
 
     timeoutId = window.setTimeout(() => {
@@ -237,7 +283,7 @@ function MainApp() {
       } else {
         warmOfflinePages();
       }
-    }, 3500);
+    }, OFFLINE_WARM_DELAY_MS);
 
     return () => {
       cancelled = true;
@@ -295,70 +341,76 @@ function MainApp() {
 
   return (
     <ErrorBoundary>
-      <StudentsProvider>
         <RealtimeSyncProvider>
+          <TopLoadingProgressBar />
           {/* SubscriptionGate wraps all content — shows blocking modal if expired/incomplete */}
           <StaffRoleGate>
             <SubscriptionGate>
-            <Layout>
-              <Suspense fallback={<PageLoadingSpinner />}>
-                <div key={location.pathname} className="page-shell page-shell-enter">
-                  <Routes location={location}>
-                    <Route path="/" element={<ErrorBoundary inline><Dashboard /></ErrorBoundary>} />
-                    <Route path="/dashboard" element={<Navigate to="/" replace />} />
-                    <Route path="/students" element={<ErrorBoundary inline><Students /></ErrorBoundary>} />
-                    <Route path="/parents" element={<ErrorBoundary inline><Parents /></ErrorBoundary>} />
-                    <Route path="/parent-emails" element={<ErrorBoundary inline><ParentEmails /></ErrorBoundary>} />
-                    <Route path="/students/new" element={<ErrorBoundary inline><StudentForm /></ErrorBoundary>} />
-                    <Route path="/admission" element={<ErrorBoundary inline><Admission /></ErrorBoundary>} />
-                    <Route path="/students/:id" element={<ErrorBoundary inline><StudentProfile /></ErrorBoundary>} />
-                    <Route path="/students/:id/edit" element={<ErrorBoundary inline><StudentForm /></ErrorBoundary>} />
-                    <Route path="/staff" element={<ErrorBoundary inline><Staff /></ErrorBoundary>} />
-                    <Route path="/teachers" element={<Navigate to="/staff" replace />} />
-                    <Route path="/staff/new" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
-                    <Route path="/staff/:id" element={<ErrorBoundary inline><StaffProfile /></ErrorBoundary>} />
-                    <Route path="/teachers/:id" element={<ErrorBoundary inline><StaffProfile /></ErrorBoundary>} />
-                    <Route path="/staff/:id/edit" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
-                    <Route path="/payroll" element={<ErrorBoundary inline><Payroll /></ErrorBoundary>} />
-                    <Route path="/classes" element={<ErrorBoundary inline><Classes /></ErrorBoundary>} />
-                    <Route path="/classes/timetable" element={<ErrorBoundary inline><Timetable /></ErrorBoundary>} />
-                    <Route path="/classes/:id" element={<ErrorBoundary inline><ClassDetail /></ErrorBoundary>} />
-                    <Route path="/subjects" element={<ErrorBoundary inline><Subjects /></ErrorBoundary>} />
-                    <Route path="/homework-tests" element={<ErrorBoundary inline><HomeworkTests /></ErrorBoundary>} />
-                    <Route path="/attendance" element={<ErrorBoundary inline><Attendance /></ErrorBoundary>} />
-                    <Route path="/day-boarding" element={<ErrorBoundary inline><DayBoarding /></ErrorBoundary>} />
-                    <Route path="/day-boarding/:boardingType/:gender" element={<ErrorBoundary inline><DayBoarding /></ErrorBoundary>} />
-                    <Route path="/finance" element={<ErrorBoundary inline><Finance /></ErrorBoundary>} />
-                    <Route path="/payment-accounts" element={<ErrorBoundary inline><PaymentAccounts /></ErrorBoundary>} />
-                    <Route path="/expenses" element={<ErrorBoundary inline><Expenses /></ErrorBoundary>} />
-                    <Route path="/invoices" element={<ErrorBoundary inline><Invoices /></ErrorBoundary>} />
-                    <Route path="/grades" element={<ErrorBoundary inline><Grades /></ErrorBoundary>} />
-                    <Route path="/grades/custom-grading" element={<ErrorBoundary inline><CustomGrading /></ErrorBoundary>} />
-                    <Route path="/exam-marks" element={<ErrorBoundary inline><ExamMarks /></ErrorBoundary>} />
-                    <Route path="/report-card/:id" element={<ErrorBoundary inline><ReportCard /></ErrorBoundary>} />
-                    <Route path="/transport" element={<ErrorBoundary inline><Transport /></ErrorBoundary>} />
-                    <Route path="/announcements" element={<ErrorBoundary inline><Announcements /></ErrorBoundary>} />
-                    <Route path="/notifications" element={<ErrorBoundary inline><Notifications /></ErrorBoundary>} />
-                    <Route path="/settings" element={<ErrorBoundary inline><Settings /></ErrorBoundary>} />
-                    <Route path="/recycle-bin" element={<ErrorBoundary inline><RecycleBin /></ErrorBoundary>} />
-                    <Route path="/reports" element={<ErrorBoundary inline><Reports /></ErrorBoundary>} />
-                    <Route path="/plans" element={<ErrorBoundary inline><Plans /></ErrorBoundary>} />
-                    <Route path="/subscribe" element={<Navigate to="/plans" replace />} />
-                    <Route path="/about" element={<ErrorBoundary inline><About /></ErrorBoundary>} />
-                    <Route path="/roles" element={<ErrorBoundary inline><Roles /></ErrorBoundary>} />
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </div>
-              </Suspense>
-            </Layout>
+              <Layout>
+                <Suspense key={`${location.pathname}${location.search}${location.hash}`} fallback={<FullScreenLoader label="Reloading..." />}>
+                  <PageTransition key={`${location.pathname}${location.search}${location.hash}`}>
+                    <div className="page-shell">
+                      <Routes location={location}>
+                      <Route path="/" element={<ErrorBoundary inline><WithStudents><Dashboard /></WithStudents></ErrorBoundary>} />
+                      <Route path="/dashboard" element={<Navigate to="/" replace />} />
+                      <Route path="/students" element={<ErrorBoundary inline><WithStudents><Students /></WithStudents></ErrorBoundary>} />
+                      <Route path="/parents" element={<ErrorBoundary inline><Parents /></ErrorBoundary>} />
+                      <Route path="/parent-emails" element={<ErrorBoundary inline><ParentEmails /></ErrorBoundary>} />
+                      <Route path="/students/new" element={<ErrorBoundary inline><StudentForm /></ErrorBoundary>} />
+                      <Route path="/admission" element={<ErrorBoundary inline><Admission /></ErrorBoundary>} />
+                      <Route path="/students/:id" element={<ErrorBoundary inline><StudentProfile /></ErrorBoundary>} />
+                      <Route path="/students/:id/edit" element={<ErrorBoundary inline><StudentForm /></ErrorBoundary>} />
+                      <Route path="/staff" element={<ErrorBoundary inline><Staff /></ErrorBoundary>} />
+                      <Route path="/teachers" element={<Navigate to="/staff" replace />} />
+                      <Route path="/staff/new" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
+                      <Route path="/staff/:id" element={<ErrorBoundary inline><StaffProfile /></ErrorBoundary>} />
+                      <Route path="/teachers/:id" element={<ErrorBoundary inline><StaffProfile /></ErrorBoundary>} />
+                      <Route path="/staff/:id/edit" element={<ErrorBoundary inline><StaffForm /></ErrorBoundary>} />
+                      <Route path="/payroll" element={<ErrorBoundary inline><Payroll /></ErrorBoundary>} />
+                      <Route path="/classes" element={<ErrorBoundary inline><Classes /></ErrorBoundary>} />
+                      <Route path="/classes/timetable" element={<ErrorBoundary inline><Timetable /></ErrorBoundary>} />
+                      <Route path="/classes/:id" element={<ErrorBoundary inline><ClassDetail /></ErrorBoundary>} />
+                      <Route path="/subjects" element={<ErrorBoundary inline><Subjects /></ErrorBoundary>} />
+                      <Route path="/homework-tests" element={<ErrorBoundary inline><HomeworkTests /></ErrorBoundary>} />
+                      <Route path="/attendance" element={<ErrorBoundary inline><Attendance /></ErrorBoundary>} />
+                      <Route path="/day-boarding" element={<ErrorBoundary inline><WithStudents><DayBoarding /></WithStudents></ErrorBoundary>} />
+                      <Route path="/day-boarding/:boardingType/:gender" element={<ErrorBoundary inline><WithStudents><DayBoarding /></WithStudents></ErrorBoundary>} />
+                      <Route path="/live-monitor" element={<ErrorBoundary inline><WithStudents><LiveMonitor /></WithStudents></ErrorBoundary>} />
+                      <Route path="/school-records" element={<ErrorBoundary inline><SchoolRecords /></ErrorBoundary>} />
+                      <Route path="/finance" element={<ErrorBoundary inline><WithStudents><Finance /></WithStudents></ErrorBoundary>} />
+                      <Route path="/school-budget" element={<ErrorBoundary inline><SchoolBudget /></ErrorBoundary>} />
+                      <Route path="/school-library" element={<ErrorBoundary inline><WithStudents><SchoolLibrary /></WithStudents></ErrorBoundary>} />
+                      <Route path="/exam-clearance" element={<ErrorBoundary inline><ExamClearance /></ErrorBoundary>} />
+                      <Route path="/payment-accounts" element={<ErrorBoundary inline><PaymentAccounts /></ErrorBoundary>} />
+                      <Route path="/expenses" element={<ErrorBoundary inline><Expenses /></ErrorBoundary>} />
+                      <Route path="/invoices" element={<ErrorBoundary inline><WithStudents><Invoices /></WithStudents></ErrorBoundary>} />
+                      <Route path="/grades" element={<ErrorBoundary inline><WithStudents><Grades /></WithStudents></ErrorBoundary>} />
+                      <Route path="/grades/custom-grading" element={<ErrorBoundary inline><CustomGrading /></ErrorBoundary>} />
+                      <Route path="/exam-marks" element={<ErrorBoundary inline><WithStudents><ExamMarks /></WithStudents></ErrorBoundary>} />
+                      <Route path="/report-card/:id" element={<ErrorBoundary inline><WithStudents><ReportCard /></WithStudents></ErrorBoundary>} />
+                      <Route path="/transport" element={<ErrorBoundary inline><WithStudents><Transport /></WithStudents></ErrorBoundary>} />
+                      <Route path="/announcements" element={<ErrorBoundary inline><Announcements /></ErrorBoundary>} />
+                      <Route path="/notifications" element={<ErrorBoundary inline><Notifications /></ErrorBoundary>} />
+                      <Route path="/settings" element={<ErrorBoundary inline><Settings /></ErrorBoundary>} />
+                      <Route path="/recycle-bin" element={<ErrorBoundary inline><RecycleBin /></ErrorBoundary>} />
+                      <Route path="/reports" element={<ErrorBoundary inline><Reports /></ErrorBoundary>} />
+                      <Route path="/plans" element={<ErrorBoundary inline><Plans /></ErrorBoundary>} />
+                      <Route path="/subscribe" element={<Navigate to="/plans" replace />} />
+                      <Route path="/about" element={<ErrorBoundary inline><About /></ErrorBoundary>} />
+                      <Route path="/roles" element={<ErrorBoundary inline><Roles /></ErrorBoundary>} />
+                      <Route path="*" element={<NotFound />} />
+                    </Routes>
+                    </div>
+                  </PageTransition>
+                </Suspense>
+              </Layout>
             </SubscriptionGate>
-          <UpdateBanner />
-          <StorageWarning />
-          <LocalMergePrompt />
-          <CloudProblemPrompt />
+            <UpdateBanner />
+            <StorageWarning />
+            <LocalMergePrompt />
+            <CloudProblemPrompt />
           </StaffRoleGate>
         </RealtimeSyncProvider>
-      </StudentsProvider>
     </ErrorBoundary>
   );
 }
@@ -377,7 +429,8 @@ function App() {
     if (loading) return <FullScreenLoader label="Loading..." />;
     return (
       <>
-        <Suspense fallback={<PageLoadingSpinner />}>
+        <LearnerTerminologyAdapter />
+        <Suspense fallback={<FullScreenLoader label="Reloading..." />}>
           <div className="page-shell">
             <Routes location={location}>
               <Route path="/login" element={<Login />} />
@@ -393,7 +446,8 @@ function App() {
   // Has session or user — render app
   return (
     <>
-      <Suspense fallback={<PageLoadingSpinner />}>
+      <LearnerTerminologyAdapter />
+      <Suspense fallback={<FullScreenLoader label="Reloading..." />}>
         <Routes>
           <Route path="/login" element={user ? <Navigate to={restoredRoute} replace /> : <Login />} />
           <Route path="/*" element={<MainApp />} />

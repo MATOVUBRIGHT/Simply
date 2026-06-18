@@ -137,6 +137,7 @@ export default function Login() {
     message: string;
     progress: number;
   }>({ step: 'creating', message: 'Creating your account...', progress: 0 });
+  const [loggingOutSplash, setLoggingOutSplash] = useState(sessionStorage.getItem('schofy_logging_out') === '1');
 
   const { login, register, loginOffline, registerOffline, continueLocally, sendPasswordReset, user, isOnline } = useAuth();
   const confirm = useConfirm();
@@ -171,9 +172,15 @@ export default function Login() {
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setShowSplash(false), 1200);
+    const timer = window.setTimeout(() => {
+      if (sessionStorage.getItem('schofy_logging_out') === '1') {
+        sessionStorage.removeItem('schofy_logging_out');
+        setLoggingOutSplash(false);
+      }
+      setShowSplash(false);
+    }, loggingOutSplash ? 850 : 1200);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [loggingOutSplash]);
 
   useEffect(() => {
     if (user) navigate('/');
@@ -245,14 +252,14 @@ export default function Login() {
         }
 
         if (offlineAuthMode) {
-          setSyncStatus({ step: 'complete', message: 'Local desktop account ready. Sync is off.', progress: 100 });
+          setSyncStatus({ step: 'complete', message: 'Local desktop account ready. Activate with a Schofy code while online.', progress: 100 });
           await new Promise((resolve) => setTimeout(resolve, 700));
           setSecuringAccount(false);
           setShowSuccess(true);
           await new Promise((resolve) => setTimeout(resolve, 700));
           setPassword('');
           setConfirmPassword('');
-          navigate('/');
+          navigate('/plans');
           return;
         }
 
@@ -416,7 +423,7 @@ export default function Login() {
   const enterOfflineMode = () => {
     setOfflineAuthMode(true);
     setShowOfflinePrompt(false);
-    setIsRegister(false);
+    setIsRegister(true);
     setResetMode(false);
     setResetFromLink(false);
     setLocalFallback(null);
@@ -495,8 +502,8 @@ export default function Login() {
           <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-lg bg-white p-3 shadow-xl ring-1 ring-slate-100">
             <img src={APP_LOGO} alt="Schofy" className="h-full w-full object-contain" />
           </div>
-          <h1 className="mt-5 text-2xl font-bold text-slate-950">Welcome to Schofy</h1>
-          <p className="mt-2 text-sm text-slate-500">Preparing your school workspace...</p>
+          <h1 className="mt-5 text-2xl font-bold text-slate-950">{loggingOutSplash ? 'Logging out...' : 'Welcome to Schofy'}</h1>
+          <p className="mt-2 text-sm text-slate-500">{loggingOutSplash ? 'Closing your workspace safely.' : 'Preparing your school workspace...'}</p>
           <Loader2 className="mx-auto mt-5 animate-spin text-primary-600" size={24} />
         </div>
       </div>
@@ -717,7 +724,7 @@ export default function Login() {
 
               {offlineAuthMode && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-                  Offline desktop accounts can be created locally. The app will ask for a Schofy verification code to activate the plan on this device.
+                  Local desktop accounts stay on this device and are not created in Supabase. Create the account offline, then connect to internet and enter a one-time Schofy verification code on Plans. Codes cannot be shared or reused.
                 </div>
               )}
 
@@ -921,10 +928,10 @@ export default function Login() {
             </div>
             <h2 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-white">You're offline</h2>
             <p className="mt-2 text-center text-sm leading-6 text-slate-500 dark:text-slate-400">
-              You can create a local desktop account offline. A Schofy verification code is required to activate the plan on this device.
+              You can create a local desktop account offline. It is saved only on this computer, and a one-time Schofy verification code is required online before the plan unlocks.
             </p>
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-              Enter offline mode, create or sign in to a local account, then use the one-time Schofy verification code when the plan screen appears.
+              Enter offline mode, create the local account, then connect to internet and use the code on the Plans screen. Shared or already-used codes will be rejected.
             </div>
             <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
@@ -981,7 +988,7 @@ export default function Login() {
       {showSuccess && (
         <SuccessPopup
           message={passwordResetComplete ? 'Password updated' : isRegister ? 'Account created' : 'Welcome back'}
-          subMessage={passwordResetComplete ? 'Password updated. Sign in again with your new password.' : offlineAuthMode ? 'Verified plan found. Opening workspace.' : 'Taking you to your dashboard...'}
+          subMessage={passwordResetComplete ? 'Password updated. Sign in again with your new password.' : offlineAuthMode && isRegister ? 'Opening Plans for online code activation.' : offlineAuthMode ? 'Verified plan found. Opening workspace.' : 'Taking you to your dashboard...'}
         />
       )}
     </div>

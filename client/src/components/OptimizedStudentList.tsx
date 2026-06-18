@@ -1,7 +1,7 @@
 // client/src/components/OptimizedStudentList.tsx
 // Example: Optimized student list with virtualization and memoization
 
-import { useMemo, useCallback, memo } from 'react';
+import { useMemo, useCallback, memo, useState } from 'react';
 import { VirtualizedList } from './VirtualizedList';
 import { usePagination } from '../hooks/usePagination';
 import { useDebounce } from '../hooks/useDebounce';
@@ -77,7 +77,7 @@ export const OptimizedStudentList = memo(function OptimizedStudentList({
   onDelete,
   loading,
 }: StudentListProps) {
-  const [searchQuery, setSearchQuery] = '' as any;
+  const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery] = useDebounce(searchQuery, 300);
 
   // Filter students based on search
@@ -91,7 +91,9 @@ export const OptimizedStudentList = memo(function OptimizedStudentList({
           student =>
             student.firstName.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
             student.lastName.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
-            student.admissionNo.toLowerCase().includes(debouncedQuery.toLowerCase())
+            student.admissionNo.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+            (student.studentId || '').toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+            (student.guardianPhone || '').toLowerCase().includes(debouncedQuery.toLowerCase())
         ),
       'data'
     );

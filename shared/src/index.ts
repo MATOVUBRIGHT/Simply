@@ -179,7 +179,7 @@ export interface Class {
   name: string;
   level: number;
   stream?: string;
-  capacity: number;
+  capacity?: number;
   classTeacherId?: string;
   createdAt: string;
   syncedAt?: string;

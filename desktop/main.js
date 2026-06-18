@@ -3,12 +3,25 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const http = require('http');
 const fs = require('fs');
+const { Worker } = require('worker_threads');
+const { TASKS } = require('./workers');
 
 let mainWindow;
 let tray;
 let zoomFactor = 1;
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+// Performance: enable GPU acceleration and reduce IPC overhead
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('enable-accelerated-video-decode');
+app.commandLine.appendSwitch('disable-features', 'UseChromeOSDirectVideoDecoder');
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --optimize-for-size');
+// Reduce disk I/O during startup
+app.commandLine.appendSwitch('disk-cache-size', String(256 * 1024 * 1024)); // 256MB disk cache
 
 const ZOOM_FILE = 'schofy-zoom.json';
 const ZOOM_STEP = 0.1;
@@ -236,6 +249,8 @@ function createWindow() {
       allowRunningInsecureContent: false,
       backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.js'),
+      // Performance: V8 cache speeds up JS parse on subsequent loads
+      v8CacheOptions: 'bypassHeatCheck',
     },
     icon: getDesktopIcon(),
     show: false,
@@ -515,4 +530,151 @@ ipcMain.handle('read-backup', async (event, key) => {
     console.error('[backup] Read failed:', error);
     return null;
   }
+});
+
+// ── Worker thread handlers for heavy operations ────────────────────────────────
+
+let activeWorkers = new Map();
+
+function createWorker(taskId) {
+  const worker = new Worker(path.join(__dirname, 'workers.js'));
+  activeWorkers.set(taskId, worker);
+  return worker;
+}
+
+function cleanupWorker(taskId) {
+  const worker = activeWorkers.get(taskId);
+  if (worker) {
+    worker.terminate();
+    activeWorkers.delete(taskId);
+  }
+}
+
+ipcMain.handle('worker-generate-invoice', async (event, payload) => {
+  const taskId = require('crypto').randomUUID();
+  return new Promise((resolve, reject) => {
+    try {
+      const worker = createWorker(taskId);
+
+      worker.on('message', (message) => {
+        if (message.type === 'result') {
+          cleanupWorker(taskId);
+          resolve(message.result);
+        } else if (message.type === 'progress') {
+          // Forward progress to renderer
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('worker-progress', message);
+          }
+        } else if (message.type === 'error') {
+          cleanupWorker(taskId);
+          reject(message.error);
+        }
+      });
+
+      worker.postMessage({
+        type: TASKS.GENERATE_INVOICE,
+        payload,
+      });
+    } catch (error) {
+      console.error('[worker] Invoice generation failed:', error);
+      cleanupWorker(taskId);
+      reject(error);
+    }
+  });
+});
+
+ipcMain.handle('worker-generate-pdf', async (event, payload) => {
+  const taskId = require('crypto').randomUUID();
+  return new Promise((resolve, reject) => {
+    try {
+      const worker = createWorker(taskId);
+
+      worker.on('message', (message) => {
+        if (message.type === 'result') {
+          cleanupWorker(taskId);
+          resolve(message.result);
+        } else if (message.type === 'progress') {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('worker-progress', message);
+          }
+        } else if (message.type === 'error') {
+          cleanupWorker(taskId);
+          reject(message.error);
+        }
+      });
+
+      worker.postMessage({
+        type: TASKS.GENERATE_PDF,
+        payload,
+      });
+    } catch (error) {
+      console.error('[worker] PDF generation failed:', error);
+      cleanupWorker(taskId);
+      reject(error);
+    }
+  });
+});
+
+ipcMain.handle('worker-bulk-student', async (event, payload) => {
+  const taskId = require('crypto').randomUUID();
+  return new Promise((resolve, reject) => {
+    try {
+      const worker = createWorker(taskId);
+
+      worker.on('message', (message) => {
+        if (message.type === 'result') {
+          cleanupWorker(taskId);
+          resolve(message.result);
+        } else if (message.type === 'progress') {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('worker-progress', message);
+          }
+        } else if (message.type === 'error') {
+          cleanupWorker(taskId);
+          reject(message.error);
+        }
+      });
+
+      worker.postMessage({
+        type: TASKS.BULK_STUDENT_OPERATION,
+        payload,
+      });
+    } catch (error) {
+      console.error('[worker] Bulk student operation failed:', error);
+      cleanupWorker(taskId);
+      reject(error);
+    }
+  });
+});
+
+ipcMain.handle('worker-process-export', async (event, payload) => {
+  const taskId = require('crypto').randomUUID();
+  return new Promise((resolve, reject) => {
+    try {
+      const worker = createWorker(taskId);
+
+      worker.on('message', (message) => {
+        if (message.type === 'result') {
+          cleanupWorker(taskId);
+          resolve(message.result);
+        } else if (message.type === 'progress') {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('worker-progress', message);
+          }
+        } else if (message.type === 'error') {
+          cleanupWorker(taskId);
+          reject(message.error);
+        }
+      });
+
+      worker.postMessage({
+        type: TASKS.PROCESS_EXPORT,
+        payload,
+      });
+    } catch (error) {
+      console.error('[worker] Export failed:', error);
+      cleanupWorker(taskId);
+      reject(error);
+    }
+  });
 });

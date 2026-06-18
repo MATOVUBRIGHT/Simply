@@ -1,5 +1,9 @@
 import { dataService } from '../lib/database/SupabaseDataService';
 
+export function yieldToBrowser(ms = 0) {
+  return new Promise<void>(resolve => window.setTimeout(resolve, ms));
+}
+
 export type BatchTask<T = unknown> = () => Promise<T>;
 
 export function chunkThirtyPercent<T>(items: T[]) {

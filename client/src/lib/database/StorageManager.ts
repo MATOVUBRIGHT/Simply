@@ -158,6 +158,7 @@ export interface QueueItem {
 const QUEUE_LS_KEY = 'schofy_offline_queue'; // legacy localStorage key
 const QUEUE_BACKUP_KEY = 'schofy_offline_queue';
 const DELETED_BACKUP_KEY = 'schofy_deleted_ids';
+let queueBackupTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Load all queue items — IDB primary, localStorage fallback */
 export async function loadQueue(): Promise<QueueItem[]> {
@@ -256,7 +257,7 @@ export async function enqueueItem(item: Omit<QueueItem, 'id' | 'ts'> | QueueItem
     q.push(full);
     try { localStorage.setItem(QUEUE_LS_KEY, JSON.stringify(q)); } catch {}
   }
-  void loadQueue().then(backupQueue);
+  scheduleQueueBackup();
 }
 
 export async function enqueueItems(items: Array<Omit<QueueItem, 'id' | 'ts'> | QueueItem>): Promise<void> {
@@ -290,7 +291,7 @@ export async function enqueueItems(items: Array<Omit<QueueItem, 'id' | 'ts'> | Q
     q.push(...fullItems);
     try { localStorage.setItem(QUEUE_LS_KEY, JSON.stringify(q)); } catch {}
   }
-  void loadQueue().then(backupQueue);
+  scheduleQueueBackup();
 }
 
 /** Remove item from queue by id */
@@ -305,11 +306,38 @@ export async function dequeueItem(id: string): Promise<void> {
       localStorage.setItem(QUEUE_LS_KEY, JSON.stringify(q));
     } catch {}
   }
-  void loadQueue().then(backupQueue);
+  scheduleQueueBackup();
+}
+
+/** Remove multiple queue items in one transaction. */
+export async function dequeueItems(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  try {
+    const db = await getStorageDB();
+    const tx = db.transaction(QUEUE_STORE, 'readwrite');
+    const store = tx.objectStore(QUEUE_STORE);
+    ids.forEach(id => store.delete(id));
+  } catch {
+    try {
+      const remove = new Set(ids);
+      const q = _loadQueueLS().filter(i => !remove.has(i.id));
+      localStorage.setItem(QUEUE_LS_KEY, JSON.stringify(q));
+    } catch {}
+  }
+  scheduleQueueBackup();
 }
 
 async function backupQueue(queue: QueueItem[]): Promise<void> {
   await writeElectronBackup(QUEUE_BACKUP_KEY, queue);
+}
+
+function scheduleQueueBackup(): void {
+  if (!isElectron) return;
+  if (queueBackupTimer) clearTimeout(queueBackupTimer);
+  queueBackupTimer = setTimeout(() => {
+    queueBackupTimer = null;
+    void loadQueue().then(backupQueue);
+  }, 1500);
 }
 
 // ── Deleted IDs registry (IndexedDB-backed) ───────────────────────────────────

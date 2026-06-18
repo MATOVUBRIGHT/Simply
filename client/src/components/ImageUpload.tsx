@@ -1,16 +1,17 @@
 import { useState, useRef } from 'react';
 import { Upload, X, Camera } from 'lucide-react';
-import { compressImageFile } from '../utils/imageCompression';
+import { createImageVariants, type ImageVariantSet } from '../utils/imageCompression';
 
 interface ImageUploadProps {
   value?: string;
   onChange: (base64: string | null) => void;
+  onVariantsChange?: (variants: ImageVariantSet | null) => void;
   label?: string;
   className?: string;
   square?: boolean;
 }
 
-export default function ImageUpload({ value, onChange, label = 'Photo', className = '', square = false }: ImageUploadProps) {
+export default function ImageUpload({ value, onChange, onVariantsChange, label = 'Photo', className = '', square = false }: ImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(value || null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState('');
@@ -19,9 +20,10 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
   async function handleFile(file: File) {
     try {
       setError('');
-      const compressed = await compressImageFile(file);
-      setPreview(compressed);
-      onChange(compressed);
+      const variants = await createImageVariants(file);
+      setPreview(variants.medium);
+      onChange(variants.medium);
+      onVariantsChange?.(variants);
     } catch (err: any) {
       setError(err?.message || 'Could not upload this image');
     }
@@ -46,6 +48,7 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
   function handleRemove() {
     setPreview(null);
     onChange(null);
+    onVariantsChange?.(null);
     if (inputRef.current) {
       inputRef.current.value = '';
     }
@@ -71,6 +74,8 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
             <img
               src={preview}
               alt="Preview"
+              loading="lazy"
+              decoding="async"
               className={`${square ? 'h-full' : 'h-40'} w-full rounded-lg object-cover`}
             />
             <div className="absolute inset-1.5 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
@@ -102,7 +107,7 @@ export default function ImageUpload({ value, onChange, label = 'Photo', classNam
               Click or drag to upload
             </p>
             <p className="text-xs text-slate-400 mt-1">
-      JPG, PNG or GIF, compressed for fast loading
+              JPG, PNG, WebP or AVIF, optimized for fast loading
             </p>
           </div>
         )}

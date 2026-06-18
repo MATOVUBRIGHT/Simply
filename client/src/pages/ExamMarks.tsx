@@ -46,7 +46,10 @@ export default function ExamMarks() {
   const { students: allStudents } = useStudents();
 
   const [filterClass, setFilterClass] = useState('');
-  const [filterTerm, setFilterTerm] = useState('');
+  const [filterTerm, setFilterTerm] = useState(() => {
+    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
+    return '1';
+  });
   const [filterExam, setFilterExam] = useState('');
   const [searchStudent, setSearchStudent] = useState('');
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
@@ -55,6 +58,11 @@ export default function ExamMarks() {
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const gradingScale = useMemo(() => getSavedGradingScale(settingsData as any[]), [settingsData]);
   const getGrade = useCallback((score: number) => getGradeFromScale(score, gradingScale).grade, [gradingScale]);
+  const currentTerm = useMemo(() => String((settingsData as any[]).find((row: any) => row.key === 'currentTerm')?.value || '1'), [settingsData]);
+
+  useEffect(() => {
+    if (currentTerm && !filterTerm) setFilterTerm(currentTerm);
+  }, [currentTerm, filterTerm]);
 
   const sortedClasses = useMemo(() =>
     sortClassesBySectionThenLevel([...classes]),

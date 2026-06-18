@@ -63,6 +63,7 @@ const SUBSCRIPTION_SESSION_KEYS = [
   'schofy_sub_pending',
   'schofy_sub_tid',
 ];
+const LOGGING_OUT_KEY = 'schofy_logging_out';
 
 async function backupVerifiedPlan(tenantId: string | null | undefined) {
   if (!tenantId) return;
@@ -216,6 +217,7 @@ async function getBackedUpSession(): Promise<LocalUser | null> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(sessionStorage.getItem(LOGGING_OUT_KEY) === '1');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
@@ -374,6 +376,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // If the browser still has a cached session but the network check fails,
           // keep the app usable from IndexedDB and let sync retry when online.
         }
+      }
+
+      // Offline/reload path: trust the saved account immediately and let local
+      // cache hydration continue in the background.
+      if (!online && !stale()) {
+        setUser(savedUser);
+        setSchoolId(savedUser.schoolId);
+        setLoading(false);
+        initializeSyncForUser(savedUser);
+        void userDBManager.openDatabase(savedUser.schoolId).catch(() => {});
+        return;
       }
 
       // Background initialization
@@ -994,6 +1007,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
+    sessionStorage.setItem(LOGGING_OUT_KEY, '1');
+    setLoggingOut(true);
     clearStorageEncryption();
     clearSession();
     setUser(null);
@@ -1010,8 +1025,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       <div className="flex items-center justify-center h-screen bg-gray-900 text-white font-sans">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <h2 className="text-xl font-semibold">Initializing workspace...</h2>
-          <p className="text-gray-400 mt-2">Connecting to cloud space and restoring session</p>
+          <h2 className="text-xl font-semibold">{loggingOut ? 'Logging out...' : 'Initializing workspace...'}</h2>
+          <p className="text-gray-400 mt-2">{loggingOut ? 'Closing your workspace safely' : 'Restoring your saved workspace'}</p>
         </div>
       </div>
     );

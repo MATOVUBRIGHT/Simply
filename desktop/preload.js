@@ -40,4 +40,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   /** Check if the backend is reachable */
   checkOnline: () => ipcRenderer.invoke('check-online'),
+
+  /** Worker thread operations for heavy tasks */
+  workerGenerateInvoice: (payload) => ipcRenderer.invoke('worker-generate-invoice', payload),
+  workerGeneratePDF: (payload) => ipcRenderer.invoke('worker-generate-pdf', payload),
+  workerBulkStudent: (payload) => ipcRenderer.invoke('worker-bulk-student', payload),
+  workerProcessExport: (payload) => ipcRenderer.invoke('worker-process-export', payload),
+
+  /** Listen to worker progress updates */
+  onWorkerProgress: (callback) => {
+    ipcRenderer.on('worker-progress', (_event, message) => callback(message));
+  },
+  /** Remove worker progress listener */
+  removeWorkerProgressListener: (callback) => {
+    ipcRenderer.removeListener('worker-progress', callback);
+  },
 });

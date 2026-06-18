@@ -8,6 +8,7 @@ interface OperationProgressPopupProps {
   progress: number;
   processed?: number;
   total?: number;
+  onCancel?: () => void;
 }
 
 export function OperationProgressPopup({
@@ -17,6 +18,7 @@ export function OperationProgressPopup({
   progress,
   processed,
   total,
+  onCancel,
 }: OperationProgressPopupProps) {
   if (!open) return null;
 
@@ -70,6 +72,17 @@ export function OperationProgressPopup({
                 {hasCount && <span>{processed} / {total}</span>}
               </div>
             </div>
+            {onCancel && (
+              <div className="mt-5 flex justify-end">
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

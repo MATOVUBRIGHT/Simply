@@ -4,11 +4,11 @@
  * Flow:
  * 1. On module load: store is empty
  * 2. bootstrapSession: synchronously pushes all memCache data into store (instant)
- * 3. useTableData subscribe: if store has data → return immediately (no network)
- *                            if store empty → fetch from Supabase
+ * 3. useTableData subscribe: if store has data -> return immediately (no network)
+ *                            if store empty -> fetch from Supabase once
  * 4. Background: _seedFromSupabase merges remote data without overriding pending writes
  */
-import { useSyncExternalStore, useCallback } from 'react';
+import { useSyncExternalStore, useCallback, useMemo } from 'react';
 import { dataService } from './database/SupabaseDataService';
 import { decryptJson } from './database/StorageCrypto';
 import { sortClassesBySectionThenLevel } from '../utils/classroom';
@@ -23,9 +23,9 @@ interface TableState {
   lastFetch: number;
 }
 
-const STALE_MS = 4 * 60 * 60_000; // 4 hours — data loaded once stays loaded; realtime + manual refresh keeps it fresh
-const FALLBACK_REFRESH_MS = 15 * 60_000; // Safety net only; realtime handles normal updates
-const ACTIVE_CATCHUP_MS = 5 * 60_000; // Keep focus/online refreshes within the low-call sync protocol
+const STALE_MS = 7 * 24 * 60 * 60_000; // 7 days; local data is preferred between explicit refreshes
+const FALLBACK_REFRESH_MS = 7 * 24 * 60 * 60_000;
+const ACTIVE_CATCHUP_MS = 7 * 24 * 60 * 60_000;
 const MAX_SYNC_BOOTSTRAP_CACHE_BYTES = 1_500_000;
 
 class DataStore {
@@ -73,7 +73,7 @@ class DataStore {
     const k = this.key(sid, table);
     const s = this.get(sid, table);
 
-    // Has fresh data — skip entirely (most common path after bootstrap)
+    // Has fresh data: skip entirely (most common path after bootstrap)
     if (!force && s.data.length > 0 && s.lastFetch > 0 && Date.now() - s.lastFetch < STALE_MS) return;
 
     // Deduplicate concurrent fetches
@@ -117,8 +117,7 @@ class DataStore {
   seed(sid: string, table: string, data: any[]) {
     const s = this.get(sid, table);
     if (s.data.length === 0 && data.length > 0) {
-      // Seed with slightly stale timestamp so background fetch runs soon
-      this.set(sid, table, { data, loading: false, lastFetch: Date.now() - (STALE_MS - 30_000) });
+      this.set(sid, table, { data, loading: false, lastFetch: Date.now() });
     }
   }
 
@@ -143,7 +142,7 @@ class DataStore {
     if (!sid) return;
     for (const table of this.getActiveTables(sid, tables)) {
       const s = this.get(sid, table);
-      if (Date.now() - s.lastFetch > FALLBACK_REFRESH_MS) {
+      if (s.data.length === 0 && Date.now() - s.lastFetch > FALLBACK_REFRESH_MS) {
         void this.fetch(sid, table, true);
       }
     }
@@ -153,7 +152,7 @@ class DataStore {
     if (!sid) return;
     for (const table of this.getActiveTables(sid, tables)) {
       const s = this.get(sid, table);
-      if (Date.now() - s.lastFetch > ACTIVE_CATCHUP_MS) {
+      if (s.data.length === 0 && Date.now() - s.lastFetch > ACTIVE_CATCHUP_MS) {
         this.set(sid, table, { lastFetch: 0 });
         void this.fetch(sid, table, true);
       }
@@ -268,7 +267,7 @@ export const store = new DataStore();
 // Prefetch critical tables as soon as the store is ready
 export function prefetchCriticalTables(sid: string) {
   if (!sid) return;
-  const CRITICAL = ['students', 'classes', 'subjects', 'fees', 'payments', 'exams', 'examResults'];
+  const CRITICAL = ['settings', 'classes', 'subjects'];
   for (const table of CRITICAL) {
     const snap = store.getSnapshot(sid, table);
     if (snap.data.length === 0) void store.fetch(sid, table);
@@ -304,5 +303,8 @@ export function useTableData(sid: string | null | undefined, table: string) {
     if (safeSid) store.invalidate(safeSid, table);
   }, [safeSid, table]);
 
-  return { data: state.data, loading: state.loading, error: state.error, refresh };
+  // Memoize return value to prevent unnecessary re-renders
+  return useMemo(() => {
+    return { data: state.data, loading: state.loading, error: state.error, refresh };
+  }, [state.data, state.loading, state.error, refresh]);
 }

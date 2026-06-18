@@ -108,10 +108,16 @@ function paymentMethodLabel(value: unknown) {
 export default function Invoices() {
   const { user, schoolId } = useAuth();
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [bulkInvoiceTerm, setBulkInvoiceTerm] = useState('1');
+  const [bulkInvoiceTerm, setBulkInvoiceTerm] = useState<string>(() => {
+    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
+    return '1';
+  });
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [filterTerm, setFilterTerm] = useState<string>('all');
+  const [filterTerm, setFilterTerm] = useState<string>(() => {
+    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
+    return '1';
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [showStatusFilter, setShowStatusFilter] = useState(false);
@@ -150,7 +156,10 @@ export default function Invoices() {
   
   const [showStructureModal, setShowStructureModal] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
-  const [selectedTerm, setSelectedTerm] = useState<string>('1');
+  const [selectedTerm, setSelectedTerm] = useState<string>(() => {
+    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
+    return '1';
+  });
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
   const [feeStructures, setFeeStructures] = useState<FeeStructure[]>([]);
   const [selectedStructureIds, setSelectedStructureIds] = useState<string[]>([]);
@@ -711,6 +720,9 @@ export default function Invoices() {
       setTermSettings(obj);
       // Check if current term has ended → prompt class promotion
       const currentTerm = obj.currentTerm || '1';
+      setFilterTerm(prev => (!prev || prev === 'all' ? currentTerm : prev));
+      setSelectedTerm(prev => prev || currentTerm);
+      setBulkInvoiceTerm(prev => prev || currentTerm);
       const endKey = `term${currentTerm}End`;
       const endDate = obj[endKey];
       if (endDate && new Date(endDate) < new Date()) {
