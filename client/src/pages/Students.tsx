@@ -1,11 +1,11 @@
-﻿﻿import { useEffect, useState, useRef, useCallback } from 'react';
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useEffect, useState, useRef, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, UserX, Users, Download, Upload, FileText, ChevronDown, X, ArrowRight, Check, Square, CheckSquare, UserCheck, UserMinus, GraduationCap, Filter, Mail, Award, AlertTriangle, Settings, Edit, ImagePlus, Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import type { Class, Student } from '@schofy/shared';
-import { exportToCSV, exportToPDF, exportToExcel } from '../utils/export';
+import { exportToCSV, exportToPDF, exportToExcel, exportStudentAlbumToPDF } from '../utils/export';
 import { Gender } from '@schofy/shared';
 import ImageModal from '../components/ImageModal';
 import { useStudents } from '../contexts/StudentsContext';
@@ -22,7 +22,7 @@ import { PortalDropdown } from '../components/PortalDropdown';
 import { BulkEditClassModal } from '../components/BulkEditClassModal';
 import { FullscreenButton } from '../components/FullscreenButton';
 import { countsTowardPlan, getSubscriptionAccessState } from '../utils/plans';
-import { deleteInFortyPercentBatches } from '../utils/bulkDelete';
+import { yieldToBrowser } from '../utils/bulkDelete';
 import { FitStatValue } from '../components/FitStatValue';
 import { LargeDataSpinner } from '../components/LargeDataSpinner';
 import { sortStudentsForList } from '../utils/studentOrdering';
@@ -30,6 +30,7 @@ import { useMinimumLoading } from '../hooks/useMinimumLoading';
 import { BulkImageUpdateModal, type BulkImageRecord } from '../components/BulkImageUpdateModal';
 import { OperationProgressPopup } from '../components/OperationProgressPopup';
 import { getImportCellText, parseImportFile } from '../utils/importParser';
+
 
 const avatarColors = [
   'bg-rose-500',
@@ -41,9 +42,9 @@ const avatarColors = [
   'bg-amber-500',
 ];
 
-const DEFAULT_STUDENTS_PAGE_SIZE = 10;
+const DEFAULT_STUDENTS_PAGE_SIZE = 100;
 const LARGE_SHOW_ALL_THRESHOLD = 500;
-const LARGE_SHOW_ALL_PAGE_FRACTION = 0.2;
+const LARGE_SHOW_ALL_PAGE_FRACTION = 0.25;
 const SHOW_ALL_TRANSITION_MS = 1500;
 const SHOW_ALL_SWAP_DELAY_MS = 260;
 const IMPORT_PREVIEW_RENDER_LIMIT = 300;
@@ -100,7 +101,14 @@ function normalizeImportHeader(value: unknown): string {
   return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
-function StudentActions({
+function getSettingsMap(rows: any[]) {
+  return (rows || []).reduce((acc, row) => {
+    if (row?.key) acc[row.key] = row.value;
+    return acc;
+  }, {} as Record<string, any>);
+}
+
+const StudentActions = memo(function StudentActions({
   student,
   onMarkCompleted,
   onEdit,
@@ -158,7 +166,161 @@ function StudentActions({
       </PortalDropdown>
     </>
   );
-}
+});
+
+const StudentRow = memo(function StudentRow({
+  student,
+  index,
+  currentPage,
+  itemsPerPage,
+  selectMode,
+  isStudentSelected,
+  getClassDisplayName,
+  classes,
+  getAvatarColor,
+  getStudentFinance,
+  formatMoney,
+  handleRowSingleClick,
+  handleRowDoubleClick,
+  onMarkCompleted,
+  onEdit,
+  onToggleStatus,
+  onSendEmail,
+  onDelete,
+  setPreviewImage,
+}: {
+  student: Student;
+  index: number;
+  currentPage: number;
+  itemsPerPage: number;
+  selectMode: boolean;
+  isStudentSelected: (id: string) => boolean;
+  getClassDisplayName: (id: string, classes: Class[]) => string;
+  classes: Class[];
+  getAvatarColor: (name: string) => string;
+  getStudentFinance: (id: string) => { status: string; balance: number; invoiced: number; paid: number };
+  formatMoney: (amount: number) => string;
+  handleRowSingleClick: (id: string) => void;
+  handleRowDoubleClick: (id: string) => void;
+  onMarkCompleted: (id: string) => void;
+  onEdit: (id: string) => void;
+  onToggleStatus: (student: Student) => void;
+  onSendEmail: (id: string) => void;
+  onDelete: (id: string) => void;
+  setPreviewImage: (img: { src: string; alt: string } | null) => void;
+}) {
+  return (
+    <tr 
+      key={student.id} 
+      className={`group animate-slide-down cursor-pointer transition-colors ${isStudentSelected(student.id) ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
+      style={{ animationDelay: `${Math.min(index, 18) * 18}ms` }}
+      onClick={() => handleRowSingleClick(student.id)}
+      onDoubleClick={() => handleRowDoubleClick(student.id)}
+    >
+      <td className="text-center text-xs text-slate-400 dark:text-slate-500">
+        {(currentPage - 1) * itemsPerPage + index + 1}
+      </td>
+      {selectMode && (
+        <td className="text-center">
+          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+            isStudentSelected(student.id)
+              ? 'bg-primary-600 border-primary-600' 
+              : 'border-slate-300 dark:border-slate-600'
+          }`}>
+            {isStudentSelected(student.id) && (
+              <Check size={12} className="text-white" />
+            )}
+          </div>
+        </td>
+      )}
+      <td>
+        <div className="flex items-center gap-3">
+          {student.photoUrl ? (
+            <button 
+              onClick={(e) => { e.stopPropagation(); setPreviewImage({ src: student.photoUrl!, alt: `${student.firstName} ${student.lastName}` }); }}
+              className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
+            >
+              <img 
+                src={student.photoUrl} 
+                alt={`${student.firstName} ${student.lastName}`}
+                loading="lazy"
+                decoding="async"
+                className="w-full h-full object-cover object-top"
+              />
+            </button>
+          ) : (
+            <div className={`w-9 h-9 rounded-lg ${getAvatarColor(student.firstName)} flex items-center justify-center`}>
+              <span className="text-xs font-bold text-white">
+                {student.firstName[0]}
+                {student.lastName[0]}
+              </span>
+            </div>
+          )}
+          <div>
+            <p className="font-medium text-slate-800 dark:text-white">
+              {student.firstName} {student.lastName}
+            </p>
+            <p className="text-xs text-slate-400">{student.guardianEmail || 'No guardian email'}</p>
+          </div>
+        </div>
+      </td>
+      <td className="font-mono text-xs text-slate-700 dark:text-slate-300">
+        {student.studentId || student.admissionNo}
+      </td>
+      <td>
+        <span className="badge badge-info">{getClassDisplayName(student.classId, classes)}</span>
+      </td>
+      <td className="capitalize">
+        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${
+          student.gender === 'male' 
+            ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' 
+            : 'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300'
+        }`}>
+          {student.gender}
+        </span>
+      </td>
+      <td>
+        <div>
+          <p className="text-sm font-medium">{student.guardianName}</p>
+          <p className="text-xs text-slate-400">{student.guardianPhone}</p>
+        </div>
+      </td>
+      <td>
+        {(() => {
+          const { status } = getStudentFinance(student.id);
+          return (
+            <span className={`badge text-xs ${
+              status === 'paid'    ? 'badge-success' :
+              status === 'partial' ? 'badge-warning' :
+              status === 'pending' ? 'badge-danger'  :
+              'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
+            }`}>
+              {status === 'none' ? 'No invoice' : status}
+            </span>
+          );
+        })()}
+      </td>
+      <td onClick={(e) => e.stopPropagation()}>
+        {(() => {
+          const { status, balance } = getStudentFinance(student.id);
+          if (status === 'none') return <span className="text-xs text-slate-400">—</span>;
+          if (balance <= 0) return <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>;
+          return <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(balance)}</span>;
+        })()}
+      </td>
+      <td onClick={(e) => e.stopPropagation()}>
+        <StudentActions
+          student={student}
+          onMarkCompleted={onMarkCompleted}
+          onEdit={onEdit}
+          onToggleStatus={onToggleStatus}
+          onSendEmail={onSendEmail}
+          onDelete={onDelete}
+        />
+      </td>
+    </tr>
+  );
+});
 
 export default function Students() {
   const { user, schoolId } = useAuth();
@@ -170,35 +332,12 @@ export default function Students() {
   const { data: classesStoreData } = useTableData(sid, 'classes');
   const { data: feesData } = useTableData(sid, 'fees');
   const { data: paymentsData } = useTableData(sid, 'payments');
+  const { data: settingsData } = useTableData(sid, 'settings');
   const { formatMoney } = useCurrency();
-
-  const financeByStudent = useMemo(() => {
-    const paidByFee = new Map<string, number>();
-    (paymentsData as any[]).forEach((payment) => {
-      if (!payment.feeId) return;
-      paidByFee.set(payment.feeId, (paidByFee.get(payment.feeId) || 0) + Number(payment.amount || 0));
-    });
-    const next = new Map<string, { status: string; balance: number; invoiced: number; paid: number }>();
-    (feesData as any[]).forEach((fee) => {
-      if (!fee.studentId) return;
-      const current = next.get(fee.studentId) || { status: 'none', balance: 0, invoiced: 0, paid: 0 };
-      current.invoiced += Number(fee.amount || 0);
-      current.paid += paidByFee.get(fee.id) || 0;
-      current.balance = current.invoiced - current.paid;
-      current.status = current.balance <= 0 ? 'paid' : current.paid > 0 ? 'partial' : 'pending';
-      next.set(fee.studentId, current);
-    });
-    return next;
-  }, [feesData, paymentsData]);
-
-  // Compute invoice status and balance per student
-  function getStudentFinance(studentId: string) {
-    return financeByStudent.get(studentId) || { status: 'none', balance: 0, invoiced: 0 };
-  }
+  const settings = useMemo(() => getSettingsMap(settingsData as any[]), [settingsData]);
 
   const { loadPage, searchStudents, refresh: refreshStudents } = useStudents();
   const [students, setStudents] = useState<Student[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
   const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -207,18 +346,18 @@ export default function Students() {
   const [showAll, setShowAll] = useState(false);
   const [showAllTransitioning, setShowAllTransitioning] = useState(false);
   const [selectedClass, setSelectedClass] = useState('');
-  const effectiveListSize = totalCount || allStudents.length;
-  const isLargeShowAllList = showAll && effectiveListSize > LARGE_SHOW_ALL_THRESHOLD;
-  const itemsPerPage = showAll
-    ? isLargeShowAllList
-      ? Math.max(DEFAULT_STUDENTS_PAGE_SIZE, Math.ceil(effectiveListSize * LARGE_SHOW_ALL_PAGE_FRACTION))
-      : Math.max(effectiveListSize, DEFAULT_STUDENTS_PAGE_SIZE)
-    : DEFAULT_STUDENTS_PAGE_SIZE;
   const { addToast } = useToast();
   // ... rest of state stays same
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showPdfExportModal, setShowPdfExportModal] = useState(false);
+  const [pdfExportScope, setPdfExportScope] = useState<'visible' | 'filtered' | 'selected' | 'all'>('filtered');
+  const [pdfExportSections, setPdfExportSections] = useState<Record<string, boolean>>({
+    identity: true,
+    class: true,
+    guardian: true,
+  });
   const [exportDropdownPos, setExportDropdownPos] = useState({ top: 0, right: 0 });
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
@@ -232,14 +371,16 @@ export default function Students() {
   const [isPreviewingImport, setIsPreviewingImport] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
-  const [operationProgress, setOperationProgress] = useState<{ open: boolean; title: string; detail: string; progress: number; processed?: number; total?: number }>({
+  const [operationProgress, setOperationProgress] = useState<{ open: boolean; title: string; detail: string; progress: number; processed?: number; total?: number; cancelable?: boolean }>({
     open: false,
     title: '',
     detail: '',
     progress: 0,
   });
+  const cancelBulkOperationRef = useRef(false);
   const [flaggedItems, setFlaggedItems] = useState<Record<number, { action: 'skip' | 'duplicate' | 'replace'; existingId?: string; existingStudent?: Partial<Student> }>>({});
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
+  const [selectedAllMatching, setSelectedAllMatching] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [showSelectionBar, setShowSelectionBar] = useState(false);
   const [viewFilter, setViewFilter] = useState<'all' | 'active' | 'deactivated' | 'completed'>('active');
@@ -251,6 +392,7 @@ export default function Students() {
   const [planLimitMessage, setPlanLimitMessage] = useState<string | null>(null);
   const [importRemaining, setImportRemaining] = useState<number | null>(null);
   const [importPlanName, setImportPlanName] = useState<string>('your current plan');
+  const [showLargeDataModal, setShowLargeDataModal] = useState(false);
   const navigate = useNavigate();
   const statusFilterRef = useRef<HTMLDivElement>(null);
   const classFilterRef = useRef<HTMLDivElement>(null);
@@ -259,6 +401,31 @@ export default function Students() {
   const [statusDropdownPos, setStatusDropdownPos] = useState({ top: 0, left: 0 });
   const [classDropdownPos, setClassDropdownPos] = useState({ top: 0, left: 0 });
   const listLoading = useMinimumLoading(loading || studentsStoreLoading, 1600);
+
+  const allFilteredStudents = useMemo(() => {
+    const filtered = (allStudents || []).filter((student: Student) => {
+      const matchesSearch = studentMatchesTextSearch(student, debouncedSearch, classes);
+      const matchesClass = !selectedClass || student.classId === selectedClass;
+      const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
+      const matchesCompletedYear = viewFilter !== 'completed' || !completedYearFilter || (student as any).completedYear?.toString() === completedYearFilter;
+      return matchesSearch && matchesClass && matchesView && matchesCompletedYear;
+    });
+    return sortStudentsForList(filtered);
+  }, [allStudents, classes, debouncedSearch, selectedClass, viewFilter, completedYearFilter]);
+  const totalPages = Math.ceil(allFilteredStudents.length / DEFAULT_STUDENTS_PAGE_SIZE);
+  const paginatedStudents = useMemo(() => {
+    const start = (currentPage - 1) * DEFAULT_STUDENTS_PAGE_SIZE;
+    const end = start + DEFAULT_STUDENTS_PAGE_SIZE;
+    return allFilteredStudents.slice(start, end);
+  }, [allFilteredStudents, currentPage]);
+
+  const effectiveListSize = allFilteredStudents.length;
+  const isLargeShowAllList = showAll && effectiveListSize > LARGE_SHOW_ALL_THRESHOLD;
+  const itemsPerPage = showAll
+    ? isLargeShowAllList
+      ? Math.max(DEFAULT_STUDENTS_PAGE_SIZE, Math.ceil(effectiveListSize * LARGE_SHOW_ALL_PAGE_FRACTION))
+      : Math.max(effectiveListSize, DEFAULT_STUDENTS_PAGE_SIZE)
+    : DEFAULT_STUDENTS_PAGE_SIZE;
 
   const getImportStatus = () => {
     switch (viewFilter) {
@@ -339,16 +506,14 @@ export default function Students() {
         });
         const ordered = sortStudentsForList(filtered);
         setStudents(ordered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
-        setTotalCount(filtered.length);
       } else {
         const filter = (student: Student) => {
           const matchesClass = !selectedClass || student.classId === selectedClass;
           const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
           return matchesClass && matchesView;
         };
-        const { items, total } = await loadPage(currentPage, itemsPerPage, filter);
+        const { items } = await loadPage(currentPage, itemsPerPage, filter);
         setStudents(items);
-        setTotalCount(total);
       }
     } catch (error) {
       console.error('Failed to load students:', error);
@@ -402,11 +567,11 @@ export default function Students() {
     });
     const ordered = sortStudentsForList(filtered);
     setStudents(ordered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage));
-    setTotalCount(filtered.length);
   }, [allStudents, debouncedSearch, selectedClass, viewFilter, currentPage, itemsPerPage]);
 
   const getCompletedStudents = () => {
-    return students.filter(s => s.status === 'completed').sort((a, b) => {
+    const completedSource = viewFilter === 'completed' ? allFilteredStudents : allStudents;
+    return completedSource.filter(s => s.status === 'completed').sort((a, b) => {
       const completedA = (a as any).completedYear || currentYear;
       const completedB = (b as any).completedYear || currentYear;
       return completedB - completedA;
@@ -508,30 +673,55 @@ export default function Students() {
     };
   }, [loadClasses, loadData]);
 
-  const totalPages = Math.ceil(totalCount / itemsPerPage);
-  const paginatedStudents = students;
-  const allFilteredStudents = useMemo(() => {
-    const filtered = (allStudents || []).filter((student: Student) => {
-      const matchesSearch = studentMatchesTextSearch(student, debouncedSearch, classes);
-      const matchesClass = !selectedClass || student.classId === selectedClass;
-      const matchesView = viewFilter === 'all' || student.status === viewFilter || (viewFilter === 'deactivated' && student.status === 'inactive');
-      const matchesCompletedYear = viewFilter !== 'completed' || !completedYearFilter || (student as any).completedYear?.toString() === completedYearFilter;
-      return matchesSearch && matchesClass && matchesView && matchesCompletedYear;
+  // Precompute all student finance data once (for all students)
+  const allFinanceData = useMemo(() => {
+    if ((feesData as any[]).length === 0) {
+      return new Map();
+    }
+
+    // Precompute paidByFee for ALL fees first
+    const paidByFee = new Map<string, number>();
+    (paymentsData as any[]).forEach((payment) => {
+      if (!payment.feeId) return;
+      paidByFee.set(payment.feeId, (paidByFee.get(payment.feeId) || 0) + Number(payment.amount || 0));
     });
-    return sortStudentsForList(filtered);
-  }, [allStudents, classes, debouncedSearch, selectedClass, viewFilter, completedYearFilter]);
-  const filteredStudentIds = useMemo(() => allFilteredStudents.map(student => student.id), [allFilteredStudents]);
-  const selectedFilteredCount = useMemo(
-    () => filteredStudentIds.reduce((count, id) => count + (selectedStudents.has(id) ? 1 : 0), 0),
-    [filteredStudentIds, selectedStudents]
-  );
-  const allFilteredStudentsSelected = filteredStudentIds.length > 0 && selectedFilteredCount === filteredStudentIds.length;
+
+    // Compute finance for all students
+    const financeByStudentId = new Map<string, { status: string; balance: number; invoiced: number; paid: number }>();
+    (feesData as any[]).forEach((fee) => {
+      if (!fee.studentId) return;
+      const current = financeByStudentId.get(fee.studentId) || { status: 'none', balance: 0, invoiced: 0, paid: 0 };
+      current.invoiced += Number(fee.amount || 0);
+      current.paid += paidByFee.get(fee.id) || 0;
+      current.balance = current.invoiced - current.paid;
+      current.status = current.balance <= 0 ? 'paid' : current.paid > 0 ? 'partial' : 'pending';
+      financeByStudentId.set(fee.studentId, current);
+    });
+
+    return financeByStudentId;
+  }, [feesData, paymentsData]);
+
+  const financeByStudent = useMemo(() => {
+    // Only pick data for visible students from precomputed map
+    const visibleFinance = new Map<string, { status: string; balance: number; invoiced: number; paid: number }>();
+    paginatedStudents.forEach((student) => {
+      const finance = allFinanceData.get(student.id);
+      if (finance) {
+        visibleFinance.set(student.id, finance);
+      }
+    });
+    return visibleFinance;
+  }, [allFinanceData, paginatedStudents]);
+  const getStudentFinance = useCallback((studentId: string) => (
+    financeByStudent.get(studentId) || { status: 'none', balance: 0, invoiced: 0, paid: 0 }
+  ), [financeByStudent]);
+  const allFilteredStudentsSelected = selectedAllMatching && allFilteredStudents.length > 0;
+  const selectedCount = selectedAllMatching ? allFilteredStudents.length : selectedStudents.size;
   const selectedStudentRecords = useMemo(
-    () => (allStudents || []).filter((student: Student) => selectedStudents.has(student.id)),
-    [allStudents, selectedStudents]
+    () => selectedAllMatching ? allFilteredStudents : (allStudents || []).filter((student: Student) => selectedStudents.has(student.id)),
+    [allFilteredStudents, allStudents, selectedAllMatching, selectedStudents]
   );
   const selectedStudentImageRecords = useMemo<BulkImageRecord[]>(() => selectedStudentRecords
-    .filter(student => selectedStudents.has(student.id))
     .map(student => ({
       id: student.id,
       firstName: student.firstName,
@@ -539,7 +729,79 @@ export default function Students() {
       primaryId: student.studentId || student.admissionNo,
       secondaryId: student.admissionNo,
       label: `${student.firstName} ${student.lastName}`,
-    })), [selectedStudentRecords, selectedStudents]);
+    })), [selectedStudentRecords]);
+
+  const isStudentSelected = useCallback(
+    (studentId: string) => selectedAllMatching || selectedStudents.has(studentId),
+    [selectedAllMatching, selectedStudents],
+  );
+
+  const clearStudentSelection = useCallback(() => {
+    setSelectedAllMatching(false);
+    setSelectedStudents(new Set());
+    setSelectMode(false);
+  }, []);
+
+  const getSelectedStudentsForBulk = useCallback(
+    () => selectedAllMatching ? allFilteredStudents : selectedStudentRecords,
+    [allFilteredStudents, selectedAllMatching, selectedStudentRecords],
+  );
+
+  async function runCancellableStudentBulk(
+    title: string,
+    baseDetail: string,
+    records: Student[],
+    processBatch: (batch: Student[]) => Promise<void>,
+  ) {
+    cancelBulkOperationRef.current = false;
+    const total = records.length;
+    const batchSize = 75;
+    let processed = 0;
+
+    setOperationProgress({
+      open: true,
+      title,
+      detail: baseDetail,
+      progress: 5,
+      processed: 0,
+      total,
+      cancelable: true,
+    });
+
+    // Yield immediately to let the UI show the progress indicator
+    await yieldToBrowser();
+
+    for (let start = 0; start < total; start += batchSize) {
+      if (cancelBulkOperationRef.current) {
+        throw new Error('Operation cancelled');
+      }
+      const batch = records.slice(start, start + batchSize);
+      await processBatch(batch);
+      processed += batch.length;
+      setOperationProgress({
+        open: true,
+        title,
+        detail: `Current batch: ${start + 1}-${processed}`,
+        progress: Math.round((processed / total) * 100),
+        processed,
+        total,
+        cancelable: true,
+      });
+      await yieldToBrowser();
+    }
+
+    setOperationProgress({
+      open: true,
+      title,
+      detail: 'Complete.',
+      progress: 100,
+      processed,
+      total,
+      cancelable: false,
+    });
+
+    return processed;
+  }
 
   async function ensureAvailableStudentCapacity(countToAdd: number) {
     const id = schoolId || user?.id;
@@ -701,7 +963,7 @@ export default function Students() {
     }
   }
 
-  async function handleDelete(id: string) {
+  const handleDelete = useCallback(async function handleDelete(id: string) {
     const authId = schoolId || user?.id;
     if (!authId) return;
     const student = students.find(s => s.id === id);
@@ -717,7 +979,6 @@ export default function Students() {
       const result = await dataService.delete(authId, 'students', id);
       if (!result.success) throw new Error(result.error || 'Failed to delete');
       setStudents(prev => prev.filter(s => s.id !== id));
-      setTotalCount(prev => prev - 1);
       if (student) {
         addToRecycleBin(authId, {
           id: `student-${Date.now()}`,
@@ -731,9 +992,13 @@ export default function Students() {
     } catch (error) {
       addToast('Failed to delete student', 'error');
     }
-  }
+  }, [schoolId, user?.id, students, confirm, addToast]);
 
-  async function handleToggleStatus(student: Student) {
+  const handleEdit = useCallback((studentId: string) => {
+    navigate(`/students/${studentId}/edit`);
+  }, [navigate]);
+
+  const handleToggleStatus = useCallback(async function handleToggleStatus(student: Student) {
     const id = schoolId || user?.id;
     if (!id) return;
     const newStatus = student.status === 'active' ? 'inactive' : 'active';
@@ -751,10 +1016,11 @@ export default function Students() {
     } catch {
       addToast('Failed to update status', 'error');
     }
-  }
+  }, [schoolId, user?.id, confirm, addToast]);
 
-  function handleRowSingleClick(studentId: string) {
+  const handleRowSingleClick = useCallback(function handleRowSingleClick(studentId: string) {
     if (selectMode) {
+      if (selectedAllMatching) setSelectedAllMatching(false);
       setSelectedStudents(prev => {
         const newSet = new Set(prev);
         if (newSet.has(studentId)) {
@@ -767,10 +1033,11 @@ export default function Students() {
     } else {
       navigate(`/students/${studentId}`);
     }
-  }
+  }, [selectMode, selectedAllMatching, navigate]);
 
-  function handleRowDoubleClick(studentId: string) {
+  const handleRowDoubleClick = useCallback(function handleRowDoubleClick(studentId: string) {
     setSelectMode(true);
+    if (selectedAllMatching) setSelectedAllMatching(false);
     setSelectedStudents(prev => {
       const newSet = new Set(prev);
       if (newSet.has(studentId)) {
@@ -780,9 +1047,9 @@ export default function Students() {
       }
       return newSet;
     });
-  }
+  }, [selectedAllMatching]);
 
-  async function handleMarkCompleted(studentId: string) {
+  const handleMarkCompleted = useCallback(async function handleMarkCompleted(studentId: string) {
     const id = schoolId || user?.id;
     if (!id) return;
     const student = students.find(s => s.id === studentId);
@@ -805,9 +1072,9 @@ export default function Students() {
     } catch {
       addToast('Failed to update status', 'error');
     }
-  }
+  }, [schoolId, user?.id, students, confirm, addToast]);
 
-  async function handleMarkActive(studentId: string) {
+  const handleMarkActive = useCallback(async function handleMarkActive(studentId: string) {
     const id = schoolId || user?.id;
     if (!id) return;
     const student = allStudents.find(s => s.id === studentId) || students.find(s => s.id === studentId);
@@ -820,9 +1087,9 @@ export default function Students() {
     } catch (error) {
       addToast('Failed to update status', 'error');
     }
-  }
+  }, [schoolId, user?.id, allStudents, students, addToast]);
 
-  async function handleSendEmail(studentId: string) {
+  const handleSendEmail = useCallback(async function handleSendEmail(studentId: string) {
     const student = students.find(s => s.id === studentId);
     if (!student?.guardianEmail) {
       addToast('No guardian email available', 'warning');
@@ -835,29 +1102,38 @@ export default function Students() {
       variant: 'info',
     });
     if (ok) window.open(`mailto:${student.guardianEmail}`, '_blank');
-  }
+  }, [students, confirm, addToast]);
+
+  const onEdit = useCallback(function onEdit(studentId: string) {
+    navigate(`/students/${studentId}/edit`);
+  }, [navigate]);
 
   function handleSelectAll() {
-    if (filteredStudentIds.length === 0) {
-      setSelectedStudents(new Set());
+    if (allFilteredStudents.length === 0) {
+      clearStudentSelection();
       return;
     }
     if (allFilteredStudentsSelected) {
-      setSelectedStudents(new Set());
+      clearStudentSelection();
     } else {
-      setSelectMode(true);
-      setSelectedStudents(new Set(filteredStudentIds));
-      setShowSelectionBar(true);
-      addToast(`${filteredStudentIds.length} student${filteredStudentIds.length === 1 ? '' : 's'} selected`, 'success');
+      if (allFilteredStudents.length > LARGE_SHOW_ALL_THRESHOLD) {
+        setShowLargeDataModal(true);
+      } else {
+        setSelectMode(true);
+        setSelectedAllMatching(true);
+        setSelectedStudents(new Set());
+        setShowSelectionBar(true);
+        addToast(`${allFilteredStudents.length} student${allFilteredStudents.length === 1 ? '' : 's'} selected by current filters`, 'success');
+      }
     }
   }
 
   async function handleBulkDelete() {
     const id = schoolId || user?.id;
-    if (!id || selectedStudents.size === 0) return;
+    if (!id || selectedCount === 0) return;
     const ok = await confirm({
-      title: `Delete ${selectedStudents.size} Student${selectedStudents.size > 1 ? 's' : ''}`,
-      description: `Permanently delete ${selectedStudents.size} student${selectedStudents.size > 1 ? 's' : ''} and move them to the recycle bin? This cannot be undone.`,
+      title: `Delete ${selectedCount} Student${selectedCount > 1 ? 's' : ''}`,
+      description: `Permanently delete ${selectedCount} student${selectedCount > 1 ? 's' : ''} and move them to the recycle bin? This cannot be undone.`,
       confirmLabel: 'Delete All',
       variant: 'danger',
     });
@@ -865,49 +1141,72 @@ export default function Students() {
     
     try {
       const now = new Date().toISOString();
-      const idsToDelete = Array.from(selectedStudents);
-      const recycleItems = idsToDelete
-        .map(studentId => selectedStudentRecords.find(s => s.id === studentId) || allStudents.find(s => s.id === studentId))
-        .filter(Boolean) as Student[];
+      const studentsToDelete = getSelectedStudentsForBulk();
 
-      recycleItems.forEach(student => {
-        addToRecycleBin(id, {
-          id: `student-${Date.now()}-${Math.random()}`,
-          type: 'student',
-          name: `${student.firstName} ${student.lastName}`,
-          data: student,
-          deletedAt: now
-        });
-      });
+      // Show operation progress immediately
+      cancelBulkOperationRef.current = false;
+      let processed = 0;
+      const batchSize = 75;
       setOperationProgress({
         open: true,
         title: 'Deleting students',
-        detail: 'Removing selected records in 40% batches.',
+        detail: 'Preparing records...',
         progress: 5,
         processed: 0,
-        total: idsToDelete.length,
+        total: studentsToDelete.length,
+        cancelable: true,
       });
-      const deletedCount = await deleteInFortyPercentBatches(id, 'students', idsToDelete, (_deletedIds, deletedTotal, total) => {
+
+      // Yield to browser to let the UI update
+      await yieldToBrowser();
+
+      // Add to recycle bin in batches with yields to prevent freezing
+      for (let start = 0; start < studentsToDelete.length; start += batchSize) {
+        if (cancelBulkOperationRef.current) {
+          throw new Error('Operation cancelled');
+        }
+        const batch = studentsToDelete.slice(start, start + batchSize);
+        batch.forEach(student => {
+          addToRecycleBin(id, {
+            id: `student-${Date.now()}-${Math.random()}`,
+            type: 'student',
+            name: `${student.firstName} ${student.lastName}`,
+            data: student,
+            deletedAt: now
+          });
+        });
+        processed += batch.length;
         setOperationProgress({
           open: true,
           title: 'Deleting students',
-          detail: 'Removing selected records in 40% batches.',
-          progress: Math.round((deletedTotal / total) * 100),
-          processed: deletedTotal,
-          total,
+          detail: 'Preparing records...',
+          progress: Math.round((processed / studentsToDelete.length) * 40),
+          processed,
+          total: studentsToDelete.length,
+          cancelable: true,
         });
-      });
+        await yieldToBrowser();
+      }
+
+      const deletedCount = await runCancellableStudentBulk(
+        'Deleting students',
+        selectedAllMatching ? 'Removing records selected by current filters in batches.' : 'Removing selected records in batches.',
+        studentsToDelete,
+        async batch => {
+          const result = await dataService.batchDelete(id, 'students', batch.map(student => student.id));
+          if (!result.success) throw new Error(result.error || 'Failed to delete students');
+        },
+      );
 
       if (deletedCount > 0) {
         window.dispatchEvent(new Event('studentsUpdated'));
       }
       
-      setSelectedStudents(new Set());
-      setSelectMode(false);
+      clearStudentSelection();
       addToast(`${deletedCount} students deleted`, 'success');
     } catch (error) {
       console.error('Bulk delete error:', error);
-      addToast('Failed to delete students', 'error');
+      addToast(error instanceof Error && error.message === 'Operation cancelled' ? 'Delete cancelled' : 'Failed to delete students', error instanceof Error && error.message === 'Operation cancelled' ? 'info' : 'error');
     } finally {
       window.setTimeout(() => {
         setOperationProgress(prev => prev.title === 'Deleting students' ? { ...prev, open: false } : prev);
@@ -918,7 +1217,7 @@ export default function Students() {
   async function handleBulkMarkCompleted() {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (selectedStudents.size === 0) return;
+    if (selectedCount === 0) return;
     
     try {
       const now = new Date().toISOString();
@@ -928,62 +1227,77 @@ export default function Students() {
         completedYear: new Date().getFullYear(),
         completedTerm: 'Final'
       };
+      const records = getSelectedStudentsForBulk();
+      const updated = await runCancellableStudentBulk(
+        'Completing students',
+        'Updating records in responsive batches.',
+        records,
+        batch => Promise.all(batch.map(student => dataService.update(id, 'students', student.id, completedData as any))).then(() => undefined),
+      );
       
-      for (const studentId of selectedStudents) {
-        await dataService.update(id, 'students', studentId, completedData as any);
-      }
-      
-      setSelectedStudents(new Set());
-      setSelectMode(false);
-      addToast(`${selectedStudents.size} students marked as completed`, 'success');
+      clearStudentSelection();
+      addToast(`${updated} students marked as completed`, 'success');
     } catch (error) {
-      addToast('Failed to update status', 'error');
+      addToast(error instanceof Error && error.message === 'Operation cancelled' ? 'Update cancelled' : 'Failed to update status', error instanceof Error && error.message === 'Operation cancelled' ? 'info' : 'error');
+    } finally {
+      window.setTimeout(() => {
+        setOperationProgress(prev => prev.title === 'Completing students' ? { ...prev, open: false } : prev);
+      }, 350);
     }
   }
 
   async function handleBulkDeactivate() {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (selectedStudents.size === 0) return;
+    if (selectedCount === 0) return;
     
     try {
       const now = new Date().toISOString();
+      const records = getSelectedStudentsForBulk();
+      const updated = await runCancellableStudentBulk(
+        'Deactivating students',
+        'Updating records in responsive batches.',
+        records,
+        batch => Promise.all(batch.map(student => dataService.update(id, 'students', student.id, { status: 'inactive', updatedAt: now } as any))).then(() => undefined),
+      );
       
-      for (const studentId of selectedStudents) {
-        await dataService.update(id, 'students', studentId, { status: 'inactive', updatedAt: now } as any);
-      }
-      
-      setSelectedStudents(new Set());
-      setSelectMode(false);
-      addToast(`${selectedStudents.size} students deactivated`, 'success');
+      clearStudentSelection();
+      addToast(`${updated} students deactivated`, 'success');
     } catch (error) {
-      addToast('Failed to update status', 'error');
+      addToast(error instanceof Error && error.message === 'Operation cancelled' ? 'Update cancelled' : 'Failed to update status', error instanceof Error && error.message === 'Operation cancelled' ? 'info' : 'error');
+    } finally {
+      window.setTimeout(() => {
+        setOperationProgress(prev => prev.title === 'Deactivating students' ? { ...prev, open: false } : prev);
+      }, 350);
     }
   }
 
   async function handleBulkMarkActive() {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (selectedStudents.size === 0) return;
-    const selectedRecords = Array.from(selectedStudents)
-      .map(studentId => selectedStudentRecords.find(s => s.id === studentId) || allStudents.find(s => s.id === studentId))
-      .filter(Boolean) as Student[];
-    const missingRecords = selectedStudents.size - selectedRecords.length;
+    if (selectedCount === 0) return;
+    const selectedRecords = selectedAllMatching ? allFilteredStudents : selectedStudentRecords;
+    const missingRecords = selectedCount - selectedRecords.length;
     const countToRestore = selectedRecords.filter(student => !countsTowardPlan(student)).length + missingRecords;
     if (!(await ensureAvailableStudentCapacity(countToRestore))) return;
     
     try {
       const now = new Date().toISOString();
+      const updated = await runCancellableStudentBulk(
+        'Activating students',
+        'Updating records in responsive batches.',
+        selectedRecords,
+        batch => Promise.all(batch.map(student => dataService.update(id, 'students', student.id, { status: 'active', updatedAt: now } as any))).then(() => undefined),
+      );
       
-      for (const studentId of selectedStudents) {
-        await dataService.update(id, 'students', studentId, { status: 'active', updatedAt: now } as any);
-      }
-      
-      setSelectedStudents(new Set());
-      setSelectMode(false);
-      addToast(`${selectedStudents.size} students reactivated`, 'success');
+      clearStudentSelection();
+      addToast(`${updated} students reactivated`, 'success');
     } catch (error) {
-      addToast('Failed to update status', 'error');
+      addToast(error instanceof Error && error.message === 'Operation cancelled' ? 'Update cancelled' : 'Failed to update status', error instanceof Error && error.message === 'Operation cancelled' ? 'info' : 'error');
+    } finally {
+      window.setTimeout(() => {
+        setOperationProgress(prev => prev.title === 'Activating students' ? { ...prev, open: false } : prev);
+      }, 350);
     }
   }
 
@@ -992,25 +1306,31 @@ export default function Students() {
   async function handleBulkEditClass(classId: string) {
     const id = schoolId || user?.id;
     if (!id) return;
-    if (selectedStudents.size === 0) return;
+    if (selectedCount === 0) return;
     
     try {
       const now = new Date().toISOString();
+      const records = getSelectedStudentsForBulk();
+      const updated = await runCancellableStudentBulk(
+        'Moving students',
+        `Moving records to ${getClassDisplayName(classId, classes)} in responsive batches.`,
+        records,
+        batch => Promise.all(batch.map(student => dataService.update(id, 'students', student.id, { classId, updatedAt: now } as any))).then(() => undefined),
+      );
       
-      for (const studentId of selectedStudents) {
-        await dataService.update(id, 'students', studentId, { classId, updatedAt: now } as any);
-      }
-      
-      setSelectedStudents(new Set());
-      setSelectMode(false);
-      addToast(`${selectedStudents.size} students moved to ${getClassDisplayName(classId, classes)}`, 'success');
+      clearStudentSelection();
+      addToast(`${updated} students moved to ${getClassDisplayName(classId, classes)}`, 'success');
     } catch (error) {
-      addToast('Failed to update classes', 'error');
+      addToast(error instanceof Error && error.message === 'Operation cancelled' ? 'Move cancelled' : 'Failed to update classes', error instanceof Error && error.message === 'Operation cancelled' ? 'info' : 'error');
+    } finally {
+      window.setTimeout(() => {
+        setOperationProgress(prev => prev.title === 'Moving students' ? { ...prev, open: false } : prev);
+      }, 350);
     }
   }
 
   function handleBulkSendEmail() {
-    const selectedList = selectedStudentRecords.filter(s => selectedStudents.has(s.id) && s.guardianEmail);
+    const selectedList = selectedStudentRecords.filter(s => s.guardianEmail);
     if (selectedList.length === 0) {
       addToast('No students with guardian email selected', 'warning');
       return;
@@ -1044,17 +1364,64 @@ export default function Students() {
     { key: 'status', label: 'Status' },
   ];
 
+  const studentPDFColumnSections = {
+    identity: {
+      label: 'Student details',
+      columns: [
+        { key: 'studentId', label: 'Student ID' },
+        { key: 'firstName', label: 'First Name' },
+        { key: 'lastName', label: 'Last Name' },
+        { key: 'gender', label: 'Gender' },
+      ],
+    },
+    class: {
+      label: 'Class and status',
+      columns: [
+        { key: 'classId', label: 'Class' },
+        { key: 'status', label: 'Status' },
+      ],
+    },
+    guardian: {
+      label: 'Guardian contacts',
+      columns: [
+        { key: 'guardianName', label: 'Guardian' },
+        { key: 'guardianPhone', label: 'Phone' },
+        { key: 'guardianEmail', label: 'Email' },
+      ],
+    },
+  };
+
   function getStudentsByFilter() {
     switch (viewFilter) {
       case 'active':
-        return students.filter(s => s.status === 'active');
+        return allFilteredStudents.filter(s => s.status === 'active');
       case 'deactivated':
-        return students.filter(s => s.status === 'inactive');
+        return allFilteredStudents.filter(s => s.status === 'inactive');
       case 'completed':
-        return students.filter(s => s.status === 'completed');
+        return allFilteredStudents.filter(s => s.status === 'completed');
       default:
-        return students.filter(s => s.status !== 'completed');
+        return allFilteredStudents.filter(s => s.status !== 'completed');
     }
+  }
+
+  function getPdfExportRows() {
+    switch (pdfExportScope) {
+      case 'visible':
+        return paginatedStudents;
+      case 'selected':
+        return selectedStudentRecords;
+      case 'all':
+        return allStudents.filter(s => viewFilter === 'completed' ? s.status === 'completed' : s.status !== 'completed');
+      default:
+        return getStudentsByFilter();
+    }
+  }
+
+  function getPdfExportColumns() {
+    const selectedColumns = Object.entries(studentPDFColumnSections)
+      .filter(([key]) => pdfExportSections[key])
+      .flatMap(([, section]) => section.columns);
+    return selectedColumns.length > 0 ? selectedColumns : studentPDFColumns;
   }
 
   function getExportLabel() {
@@ -1073,10 +1440,56 @@ export default function Students() {
     setShowExportMenu(false);
   }
 
-  function handleExportPDF() {
-    const data = getStudentsByFilter();
-    exportToPDF(`${getExportLabel()} Report`, data, studentPDFColumns, 'students');
-    addToast(`${getExportLabel()} exported to PDF`, 'success');
+  async function handleExportPDF() {
+    const data = getPdfExportRows();
+    if (data.length === 0) {
+      addToast('No students to export for that selection', 'warning');
+      return;
+    }
+    try {
+      await exportToPDF(`${getExportLabel()} Report`, data, getPdfExportColumns(), 'students');
+      addToast(`${getExportLabel()} exported to PDF`, 'success');
+      setShowPdfExportModal(false);
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      addToast('Failed to export PDF', 'error');
+    }
+    setShowExportMenu(false);
+  }
+
+  async function handleExportAlbumPDF() {
+    const data = getPdfExportRows();
+    if (data.length === 0) {
+      addToast('No students to export for that selection', 'warning');
+      return;
+    }
+    try {
+      await exportStudentAlbumToPDF(
+        `${getExportLabel()} School Album`,
+        data.map(student => ({
+          firstName: student.firstName,
+          lastName: student.lastName,
+          studentId: student.studentId,
+          admissionNo: student.admissionNo,
+          className: getClassDisplayName(student.classId, classes),
+          classId: student.classId,
+          photoUrl: student.photoUrl,
+        })),
+        `${getExportLabel().toLowerCase().replace(/\s+/g, '-')}-school-album`,
+        {
+          schoolName: settings.schoolName || 'School',
+          schoolLogo: settings.schoolLogo,
+          headerColor: settings.reportHeaderColor || settings.primaryColor || '#2563eb',
+          accentColor: settings.reportAccentColor || settings.primaryColor || '#2563eb',
+          textColor: settings.reportTextColor || '#0f172a',
+        }
+      );
+      addToast(`${getExportLabel()} school album exported to PDF`, 'success');
+      setShowPdfExportModal(false);
+    } catch (error) {
+      console.error('School album PDF export failed:', error);
+      addToast('Failed to export school album PDF', 'error');
+    }
     setShowExportMenu(false);
   }
 
@@ -1771,6 +2184,7 @@ export default function Students() {
   const deactivatedCount = allStudents.filter(s => s.status === 'inactive').length;
   const completedCount = allStudents.filter(s => s.status === 'completed').length;
   const totalEnrolled = allStudents.filter(s => s.status !== 'completed').length;
+  const groupedCompletedStudents = useMemo(() => getGroupedCompletedStudents(), [allFilteredStudents, allStudents, completedYearFilter, viewFilter, currentYear]);
 
   const updateExportDropdownPosition = useCallback(() => {
     const rect = exportButtonRef.current?.getBoundingClientRect();
@@ -2124,19 +2538,19 @@ export default function Students() {
         </div>
 
         <div className="table-container">
-          {showSelectionBar && selectedStudents.size > 0 && viewFilter !== 'completed' && (
+          {showSelectionBar && selectedCount > 0 && viewFilter !== 'completed' && (
             <div className="px-4 py-3 bg-indigo-50 dark:bg-indigo-900/20 border-b border-indigo-200 dark:border-indigo-800 flex items-center justify-between overflow-hidden transition-all duration-300 ease-out" style={{ maxHeight: selectMode ? '200px' : '0', opacity: selectMode ? 1 : 0 }}>
               <span className="text-sm text-indigo-700 dark:text-indigo-300 font-medium animate-selection-content-in">
-                {selectedStudents.size} selected{selectedStudents.size > paginatedStudents.length ? ` across ${filteredStudentIds.length.toLocaleString()} shown by filters` : ''}
+                {selectedCount} selected{selectedCount > paginatedStudents.length ? ` across ${allFilteredStudents.length.toLocaleString()} shown by filters` : ''}
               </span>
               <div className="flex items-center gap-2 flex-wrap animate-selection-content-in">
                 <button
                   onClick={handleSelectAll}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
                 >
-                  {allFilteredStudentsSelected ? 'Deselect All' : `Select All (${filteredStudentIds.length.toLocaleString()})`}
+                  {allFilteredStudentsSelected ? 'Deselect All' : `Select All (${allFilteredStudents.length.toLocaleString()})`}
                 </button>
-                {selectedStudents.size > 0 && (
+                {selectedCount > 0 && (
                   <button
                     onClick={() => setShowBulkImageModal(true)}
                     className="px-3 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
@@ -2197,7 +2611,7 @@ export default function Students() {
                   Delete
                 </button>
                 <button
-                  onClick={() => { setSelectedStudents(new Set()); setSelectMode(false); }}
+                  onClick={clearStudentSelection}
                   className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                 >
                   Cancel
@@ -2205,19 +2619,19 @@ export default function Students() {
               </div>
             </div>
           )}
-          {showSelectionBar && selectedStudents.size > 0 && viewFilter === 'completed' && (
+          {showSelectionBar && selectedCount > 0 && viewFilter === 'completed' && (
             <div className="px-4 py-3 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-800 flex items-center justify-between overflow-hidden transition-all duration-300 ease-out" style={{ maxHeight: selectMode ? '200px' : '0', opacity: selectMode ? 1 : 0 }}>
               <span className="text-sm text-violet-700 dark:text-violet-300 font-medium animate-selection-content-in">
-                {selectedStudents.size} selected (School Records){selectedStudents.size > paginatedStudents.length ? ` across ${filteredStudentIds.length.toLocaleString()} shown by filters` : ''}
+                {selectedCount} selected (School Records){selectedCount > paginatedStudents.length ? ` across ${allFilteredStudents.length.toLocaleString()} shown by filters` : ''}
               </span>
               <div className="flex items-center gap-2 flex-wrap animate-selection-content-in">
                 <button
                   onClick={handleSelectAll}
                   className="text-xs text-violet-600 dark:text-violet-400 hover:underline"
                 >
-                  {allFilteredStudentsSelected ? 'Deselect All' : `Select All (${filteredStudentIds.length.toLocaleString()})`}
+                  {allFilteredStudentsSelected ? 'Deselect All' : `Select All (${allFilteredStudents.length.toLocaleString()})`}
                 </button>
-                {selectedStudents.size > 0 && (
+                {selectedCount > 0 && (
                   <button
                     onClick={() => setShowBulkImageModal(true)}
                     className="px-3 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-all duration-200 flex items-center gap-1 hover:scale-105 active:scale-95"
@@ -2241,7 +2655,7 @@ export default function Students() {
                   Delete
                 </button>
                 <button
-                  onClick={() => { setSelectedStudents(new Set()); setSelectMode(false); }}
+                  onClick={clearStudentSelection}
                   className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                 >
                   Cancel
@@ -2289,7 +2703,8 @@ export default function Students() {
               </div>
             )}
           {viewFilter !== 'completed' ? (
-            <table>
+            <>
+              <table>
               <thead>
                 <tr>
                   <th className="w-10">#</th>
@@ -2339,122 +2754,38 @@ export default function Students() {
                   </tr>
                 ) : (
                   paginatedStudents.map((student, index) => (
-                    <tr 
-                      key={student.id} 
-                      className={`group animate-slide-down cursor-pointer transition-colors ${selectedStudents.has(student.id) ? 'bg-indigo-50 dark:bg-indigo-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}
-                      style={{ animationDelay: `${Math.min(index, 18) * 18}ms` }}
-                      onClick={() => handleRowSingleClick(student.id)}
-                      onDoubleClick={() => handleRowDoubleClick(student.id)}
-                    >
-                      <td className="text-center text-xs text-slate-400 dark:text-slate-500">
-                        {(currentPage - 1) * itemsPerPage + index + 1}
-                      </td>
-                      {selectMode && (
-                        <td className="text-center">
-                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                            selectedStudents.has(student.id) 
-                              ? 'bg-primary-600 border-primary-600' 
-                              : 'border-slate-300 dark:border-slate-600'
-                          }`}>
-                            {selectedStudents.has(student.id) && (
-                              <Check size={12} className="text-white" />
-                            )}
-                          </div>
-                        </td>
-                      )}
-                      <td>
-                        <div className="flex items-center gap-3">
-                          {student.photoUrl ? (
-                            <button 
-                              onClick={() => setPreviewImage({ src: student.photoUrl!, alt: `${student.firstName} ${student.lastName}` })}
-                              className="w-9 h-9 rounded-lg overflow-hidden hover:ring-2 hover:ring-primary-500 transition-all"
-                            >
-                              <img 
-                                src={student.photoUrl} 
-                                alt={`${student.firstName} ${student.lastName}`}
-                                className="w-full h-full object-cover object-top"
-                              />
-                            </button>
-                          ) : (
-                            <div className={`w-9 h-9 rounded-lg ${getAvatarColor(student.firstName)} flex items-center justify-center`}>
-                              <span className="text-xs font-bold text-white">
-                                {student.firstName[0]}
-                                {student.lastName[0]}
-                              </span>
-                            </div>
-                          )}
-                          <div>
-                            <p className="font-medium text-slate-800 dark:text-white">
-                              {student.firstName} {student.lastName}
-                            </p>
-                            <p className="text-xs text-slate-400">{student.guardianEmail || 'No guardian email'}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="font-mono text-xs text-slate-700 dark:text-slate-300">
-                        {student.studentId || student.admissionNo}
-                      </td>
-                      <td>
-                        <span className="badge badge-info">{getClassDisplayName(student.classId, classes)}</span>
-                      </td>
-                      <td className="capitalize">
-                        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${
-                          student.gender === 'male' 
-                            ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' 
-                            : 'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300'
-                        }`}>
-                          {student.gender}
-                        </span>
-                      </td>
-                      <td>
-                        <div>
-                          <p className="text-sm font-medium">{student.guardianName}</p>
-                          <p className="text-xs text-slate-400">{student.guardianPhone}</p>
-                        </div>
-                      </td>
-                      <td>
-                        {(() => {
-                          const { status } = getStudentFinance(student.id);
-                          return (
-                            <span className={`badge text-xs ${
-                              status === 'paid'    ? 'badge-success' :
-                              status === 'partial' ? 'badge-warning' :
-                              status === 'pending' ? 'badge-danger'  :
-                              'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
-                            }`}>
-                              {status === 'none' ? 'No invoice' : status}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        {(() => {
-                          const { status, balance } = getStudentFinance(student.id);
-                          if (status === 'none') return <span className="text-xs text-slate-400">—</span>;
-                          if (balance <= 0) return <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Cleared</span>;
-                          return <span className="text-xs font-semibold text-red-600 dark:text-red-400">{formatMoney(balance)}</span>;
-                        })()}
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <StudentActions
-                          student={student}
-                          onMarkCompleted={handleMarkCompleted}
-                          onEdit={(studentId) => navigate(`/students/${studentId}/edit`)}
-                          onToggleStatus={handleToggleStatus}
-                          onSendEmail={handleSendEmail}
-                          onDelete={handleDelete}
-                        />
-                      </td>
-                    </tr>
+                    <StudentRow
+                      key={student.id}
+                      student={student}
+                      index={index}
+                      currentPage={currentPage}
+                      itemsPerPage={itemsPerPage}
+                      selectMode={selectMode}
+                      isStudentSelected={isStudentSelected}
+                      getClassDisplayName={getClassDisplayName}
+                      classes={classes}
+                      getAvatarColor={getAvatarColor}
+                      getStudentFinance={getStudentFinance}
+                      formatMoney={formatMoney}
+                      handleRowSingleClick={handleRowSingleClick}
+                      handleRowDoubleClick={handleRowDoubleClick}
+                      onMarkCompleted={handleMarkCompleted}
+                      onEdit={handleEdit}
+                      onToggleStatus={handleToggleStatus}
+                      onSendEmail={handleSendEmail}
+                      onDelete={handleDelete}
+                      setPreviewImage={setPreviewImage}
+                    />
                   ))
                 )}
               </tbody>
             </table>
-          ) : (
+          </>
+        ) : (
             <div className="p-4">
               {listLoading ? (
                 <LargeDataSpinner label="Loading school records..." detail="Preparing archived students for browsing." />
-              ) : getGroupedCompletedStudents().length === 0 ? (
+              ) : groupedCompletedStudents.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-12">
                   <div className="w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
                     <GraduationCap size={32} className="text-violet-400" />
@@ -2464,7 +2795,7 @@ export default function Students() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {getGroupedCompletedStudents().map((group, groupIndex) => (
+                  {groupedCompletedStudents.map((group, groupIndex) => (
                     <div key={groupIndex} className="animate-slide-down border border-violet-200 dark:border-violet-800 rounded-xl overflow-hidden" style={{ animationDelay: `${Math.min(groupIndex, 10) * 35}ms` }}>
                       <div className="bg-violet-100 dark:bg-violet-900/30 px-4 py-3 flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -2484,7 +2815,7 @@ export default function Students() {
                         {group.students.map((student, studentIndex) => (
                           <div 
                             key={student.id}
-                            className={`flex items-center gap-4 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 cursor-pointer transition-colors ${selectedStudents.has(student.id) ? 'bg-violet-50 dark:bg-violet-900/20' : ''}`}
+                            className={`flex items-center gap-4 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 cursor-pointer transition-colors ${isStudentSelected(student.id) ? 'bg-violet-50 dark:bg-violet-900/20' : ''}`}
                             onClick={() => handleRowSingleClick(student.id)}
                             onDoubleClick={() => handleRowDoubleClick(student.id)}
                           >
@@ -2492,12 +2823,12 @@ export default function Students() {
                               <div 
                                 onClick={(e) => { e.stopPropagation(); handleRowSingleClick(student.id); }}
                                 className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors cursor-pointer ${
-                                  selectedStudents.has(student.id) 
+                                  isStudentSelected(student.id)
                                     ? 'bg-violet-600 border-violet-600' 
                                     : 'border-slate-300 dark:border-slate-600'
                                 }`}
                               >
-                                {selectedStudents.has(student.id) && (
+                                {isStudentSelected(student.id) && (
                                   <Check size={12} className="text-white" />
                                 )}
                               </div>
@@ -2558,12 +2889,12 @@ export default function Students() {
           <div className={`px-4 py-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 students-show-all-footer ${showAllTransitioning ? 'students-show-all-footer-transitioning' : ''}`}>
             <p className="text-sm text-slate-500">
               {showAll && !isLargeShowAllList ? (
-                <><span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students shown</>
+                <><span className="font-medium text-slate-700 dark:text-slate-300">{allFilteredStudents.length}</span> students shown</>
               ) : (
-                <><span className="font-medium text-slate-700 dark:text-slate-300">{Math.min((currentPage - 1) * itemsPerPage + 1, totalCount)}</span>{' - '}<span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span>{' of '}<span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span></>
+                <><span className="font-medium text-slate-700 dark:text-slate-300">{Math.min((currentPage - 1) * itemsPerPage + 1, allFilteredStudents.length)}</span>{' - '}<span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, allFilteredStudents.length)}</span>{' of '}<span className="font-medium text-slate-700 dark:text-slate-300">{allFilteredStudents.length}</span></>
               )}
               {isLargeShowAllList && (
-                <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">20% per page</span>
+                <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">25% per page</span>
               )}
             </p>
             <button
@@ -2580,8 +2911,8 @@ export default function Students() {
           <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
             <p className="text-sm text-slate-500">
               Showing <span className="font-medium text-slate-700 dark:text-slate-300">{(currentPage - 1) * itemsPerPage + 1}</span>-
-              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, totalCount)}</span> of{' '}
-              <span className="font-medium text-slate-700 dark:text-slate-300">{totalCount}</span> students
+              <span className="font-medium text-slate-700 dark:text-slate-300">{Math.min(currentPage * itemsPerPage, allFilteredStudents.length)}</span> of{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-300">{allFilteredStudents.length}</span> students
             </p>
             <div className="flex items-center gap-1">
               <button
@@ -2971,11 +3302,24 @@ export default function Students() {
             Exporting: {getExportLabel()}
           </div>
           <button
-            onClick={handleExportPDF}
+            onClick={() => {
+              setShowExportMenu(false);
+              setShowPdfExportModal(true);
+            }}
             className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
           >
             <FileText size={14} />
             Export PDF
+          </button>
+          <button
+            onClick={() => {
+              setShowExportMenu(false);
+              setShowPdfExportModal(true);
+            }}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            <ImagePlus size={14} />
+            School Album PDF
           </button>
           <button
             onClick={handleExportCSV}
@@ -2991,6 +3335,89 @@ export default function Students() {
             <FileText size={14} />
             Export Excel
           </button>
+        </div>,
+        document.body
+      )}
+
+      {showPdfExportModal && createPortal(
+        <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Export PDF</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose what part of Students to include.</p>
+            </div>
+            <div className="space-y-5 p-5">
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Rows</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {[
+                    { value: 'visible', label: 'Current page', detail: `${paginatedStudents.length.toLocaleString()} rows` },
+                    { value: 'filtered', label: 'Filtered results', detail: `${getStudentsByFilter().length.toLocaleString()} rows` },
+                    { value: 'selected', label: 'Selected rows', detail: `${selectedStudentRecords.length.toLocaleString()} rows`, disabled: selectedStudentRecords.length === 0 },
+                    { value: 'all', label: viewFilter === 'completed' ? 'All records' : 'All enrolled', detail: `${(viewFilter === 'completed' ? allStudents.filter(s => s.status === 'completed') : allStudents.filter(s => s.status !== 'completed')).length.toLocaleString()} rows` },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      disabled={(option as any).disabled}
+                      onClick={() => setPdfExportScope(option.value as any)}
+                      className={`rounded-lg border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                        pdfExportScope === option.value
+                          ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-200'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <span className="block text-sm font-bold">{option.label}</span>
+                      <span className="text-xs opacity-75">{option.detail}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Columns</p>
+                <div className="space-y-2">
+                  {Object.entries(studentPDFColumnSections).map(([key, section]) => (
+                    <label
+                      key={key}
+                      className="flex cursor-pointer items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    >
+                      <span>{section.label}</span>
+                      <input
+                        type="checkbox"
+                        checked={pdfExportSections[key]}
+                        onChange={(event) => setPdfExportSections(prev => ({ ...prev, [key]: event.target.checked }))}
+                        className="h-4 w-4 accent-primary-600"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 border-t border-slate-200 px-5 py-4 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setShowPdfExportModal(false)}
+                className="min-w-[120px] flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleExportAlbumPDF()}
+                className="min-w-[160px] flex-1 rounded-lg border border-primary-200 bg-primary-50 px-4 py-2 text-sm font-bold text-primary-700 hover:bg-primary-100 dark:border-primary-800 dark:bg-primary-900/20 dark:text-primary-200"
+              >
+                Export Album PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleExportPDF()}
+                className="min-w-[120px] flex-1 rounded-lg bg-primary-600 px-4 py-2 text-sm font-bold text-white hover:bg-primary-700"
+              >
+                Export PDF
+              </button>
+            </div>
+          </div>
         </div>,
         document.body
       )}
@@ -3012,9 +3439,9 @@ export default function Students() {
           onSave={async (classId: string) => {
             await handleBulkEditClass(classId);
           }}
-          studentCount={selectedStudents.size}
+          studentCount={selectedCount}
           classes={classes}
-          currentClassId={selectedStudents.size === 1 ? students.find(s => selectedStudents.has(s.id))?.classId : undefined}
+          currentClassId={!selectedAllMatching && selectedStudents.size === 1 ? students.find(s => selectedStudents.has(s.id))?.classId : undefined}
         />
       )}
       <OperationProgressPopup
@@ -3024,17 +3451,56 @@ export default function Students() {
         progress={operationProgress.progress}
         processed={operationProgress.processed}
         total={operationProgress.total}
+        onCancel={operationProgress.cancelable ? () => {
+          cancelBulkOperationRef.current = true;
+          setOperationProgress(prev => ({ ...prev, detail: 'Cancelling after the current batch...', cancelable: false }));
+        } : undefined}
       />
+
+      {showLargeDataModal && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999999]">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden animate-selection-content-in">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-4">
+              <AlertTriangle size={24} className="text-amber-600 dark:text-amber-400" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Large Dataset Detected</h2>
+            <p className="text-slate-600 dark:text-slate-300 mb-4">
+              You are about to select <strong>{allFilteredStudents.length.toLocaleString()}</strong> students. Performing bulk operations on large datasets may take some time.
+            </p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+              Don't worry — we'll handle operations in chunks to keep the app responsive.
+            </p>
+            </div>
+            <div className="px-6 py-4 bg-slate-50 dark:bg-slate-700/50 flex items-center justify-between gap-4">
+            <button
+                onClick={() => setShowLargeDataModal(false)}
+                className="px-4 py-2 rounded-lg bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-500 font-medium transition-colors"
+              >
+              Cancel
+            </button>
+            <button
+                onClick={() => {
+                  setShowLargeDataModal(false);
+                  setSelectMode(true);
+                  setSelectedAllMatching(true);
+                  setSelectedStudents(new Set());
+                  setShowSelectionBar(true);
+                  addToast(`${allFilteredStudents.length} student${allFilteredStudents.length === 1 ? '' : 's'} selected by current filters`, 'success');
+                }}
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium flex items-center gap-2 transition-colors"
+              >
+              <Check size={16} />
+              Continue Anyway
+            </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
-
-
-
-
-
-
-
 
 
 
