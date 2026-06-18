@@ -11,6 +11,9 @@
     "installer.nsh",
     "package.json"
   ],
+  "asarUnpack": [
+    "workers.js"
+  ],
   "extraResources": [
     {
       "from": "../client/dist",

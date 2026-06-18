@@ -1,6 +1,6 @@
 {
   "name": "@schofy/desktop",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Schofy desktop app",
   "author": "Schofy",
   "main": "main.js",
@@ -24,6 +24,9 @@
       "workers.js",
       "installer.nsh",
       "package.json"
+    ],
+    "asarUnpack": [
+      "workers.js"
     ],
     "extraResources": [
       {

@@ -4,7 +4,15 @@ const { pathToFileURL } = require('url');
 const http = require('http');
 const fs = require('fs');
 const { Worker } = require('worker_threads');
-const { TASKS } = require('./workers.js');
+
+function getWorkerScriptPath() {
+  const unpackedPath = path.join(process.resourcesPath || __dirname, 'app.asar.unpacked', 'workers.js');
+  if (app.isPackaged && fs.existsSync(unpackedPath)) return unpackedPath;
+  return path.join(__dirname, 'workers.js');
+}
+
+const WORKER_SCRIPT_PATH = getWorkerScriptPath();
+const { TASKS } = require(WORKER_SCRIPT_PATH);
 
 let mainWindow;
 let tray;
@@ -537,7 +545,7 @@ ipcMain.handle('read-backup', async (event, key) => {
 let activeWorkers = new Map();
 
 function createWorker(taskId) {
-  const worker = new Worker(path.join(__dirname, 'workers.js'));
+  const worker = new Worker(WORKER_SCRIPT_PATH);
   activeWorkers.set(taskId, worker);
   return worker;
 }
