@@ -1005,7 +1005,7 @@ export default function StudentProfile() {
                 <div className="text-center py-6">
                   <FileText size={32} className="mx-auto text-slate-300 mb-2" />
                   <p className="text-sm text-slate-400">No exam results found for this student.</p>
-                  <Link to="/exam-marks" className="btn btn-secondary mt-3 inline-flex text-sm">Go to Exam Marks</Link>
+                  <Link to="/exam-marks" className="btn btn-secondary mt-3 inline-flex text-sm">Go to Results</Link>
                 </div>
               ) : (
                 <div className="space-y-2">

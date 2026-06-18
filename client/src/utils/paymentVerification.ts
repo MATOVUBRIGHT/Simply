@@ -48,6 +48,7 @@ function addMonths(date: Date, months: number) {
 function cycleMonths(cycle: BillingCycle) {
   if (cycle === 'monthly') return 1;
   if (cycle === 'yearly') return 12;
+  if (cycle === 'one_time') return 12;
   return 3;
 }
 

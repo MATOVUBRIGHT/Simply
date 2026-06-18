@@ -28,13 +28,13 @@ export function useOptimisticAction() {
     try {
       const result = await opts.action();
       if (result && !result.success) {
-        addToast(opts.errorMsg || result.error || 'Something went wrong', 'error');
+        addToast(opts.errorMsg || result.error || 'That action could not finish. Please try again.', 'error');
         opts.rollback?.();
         return false;
       }
       return true;
     } catch (err: any) {
-      addToast(opts.errorMsg || err?.message || 'Something went wrong', 'error');
+      addToast(opts.errorMsg || err?.message || 'That action could not finish. Please try again.', 'error');
       opts.rollback?.();
       return false;
     } finally {

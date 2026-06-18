@@ -73,7 +73,7 @@ export default function CustomGrading() {
           </Link>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Custom Grading</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Set the grade boundaries used when saving grades and viewing exam marks.
+            Set the grade boundaries used when saving grades and viewing results.
           </p>
         </div>
         <div className="action-row">

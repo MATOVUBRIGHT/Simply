@@ -49,7 +49,7 @@ function friendlyMessage(raw: string): string {
   if (/timeout/i.test(raw)) return 'Request timed out. Will retry when online.';
   if (/permission|unauthorized|403/i.test(raw)) return 'Permission denied. Please check your access.';
   if (/storage|quota/i.test(raw)) return 'Storage is full. Some data may not be saved.';
-  return 'Something went wrong. Please try again.';
+  return 'That action could not finish. Please try again.';
 }
 
 let _addToast: AddToast | null = null;

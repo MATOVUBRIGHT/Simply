@@ -141,7 +141,7 @@ const ROUTE_LABELS: Array<[string, string]> = [
   ['/expenses', 'Expenses'],
   ['/invoices', 'Invoices'],
   ['/grades', 'Exams & Grades'],
-  ['/exam-marks', 'Exam Marks'],
+  ['/exam-marks', 'Results'],
   ['/report-card', 'Report Card'],
   ['/transport', 'Transport'],
   ['/announcements', 'Announcements'],

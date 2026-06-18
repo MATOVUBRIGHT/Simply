@@ -1377,10 +1377,10 @@ function Layout({ children }: LayoutProps) {
           {/* Profile dropdown */}
           <>
             <div
-              className={`fixed inset-0 z-40 ${profileOpen ? 'transition-opacity duration-2000 ease-out' : 'transition-opacity duration-300 ease-out'} ${profileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+              className={`fixed inset-0 z-[999980] ${profileOpen ? 'transition-opacity duration-2000 ease-out' : 'transition-opacity duration-300 ease-out'} ${profileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
               onClick={() => setProfileOpen(false)}
             />
-            <div className={`absolute top-16 right-2 sm:right-6 w-72 z-50 ${profileOpen ? 'transition-all duration-2000 ease-out' : 'transition-all duration-300 ease-out'} ${profileOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'}`}>
+            <div className={`fixed top-16 right-2 sm:right-6 w-72 z-[999990] ${profileOpen ? 'transition-all duration-2000 ease-out' : 'transition-all duration-300 ease-out'} ${profileOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'}`}>
               <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden max-h-[80vh] overflow-y-auto">
                 <div className="p-5 text-center border-b border-slate-100 dark:border-slate-700">
                   <div className="relative w-16 h-16 mx-auto mb-2">
@@ -1401,10 +1401,10 @@ function Layout({ children }: LayoutProps) {
                 </div>
                 <div className="p-2">
                   {[
+                    { label: 'Recycle Bin', description: '', icon: Trash2, path: '/recycle-bin' },
                     { label: 'Plans & Billing', description: '', icon: CreditCard, path: '/plans' },
                     { label: 'Settings', description: '', icon: Settings, path: '/settings' },
                     { label: 'Notifications', description: '', icon: Bell, path: '/notifications' },
-                    { label: 'Recycle Bin', description: '', icon: Trash2, path: '/recycle-bin' },
                   ].filter(item => !isStaffMode || item.path !== '/plans').map(({ label, description, icon: Icon, path }) => (
                     <button key={path} onClick={() => { setProfileOpen(false); navigate(path); }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left">

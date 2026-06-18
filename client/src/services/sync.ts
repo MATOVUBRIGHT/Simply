@@ -88,7 +88,6 @@ class SyncService {
     this.intervalSchoolId = schoolId;
 
     dataService.startRealtimeSync(schoolId);
-    void this.runFullSyncCycle('automatic');
 
     // Adaptive scheduler: use setTimeout so we can apply exponential backoff on failures.
     this.backoffMs = null; // reset any previous backoff
@@ -136,7 +135,7 @@ class SyncService {
     }
 
     if (this.syncInProgress) {
-      return { success: false, pushed: 0, pulled: 0, failed: 0, error: 'Sync already in progress.' };
+      return { success: true, pushed: 0, pulled: 0, failed: 0 };
     }
     this.syncInProgress = true;
 

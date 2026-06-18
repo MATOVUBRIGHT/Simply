@@ -7,6 +7,8 @@ export interface PlanDefinition {
   monthlyPrice: number;
   termPrice: number;
   yearlyPrice: number;
+  oneTimePrice?: number;
+  annualCloudUpdatesFee?: number;
   period: string;
   features: string[];
   notIncluded: string[];
@@ -18,7 +20,7 @@ export interface PlanDefinition {
   limitLabel?: string;
 }
 
-export type BillingCycle = 'monthly' | 'term' | 'yearly';
+export type BillingCycle = 'monthly' | 'term' | 'yearly' | 'one_time';
 export type SubscriptionStatus = 'incomplete' | 'active' | 'expiring' | 'expired';
 export const UNLIMITED_PLAN_LABEL = 'Unlimited';
 
@@ -41,6 +43,8 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     monthlyPrice: 5,
     termPrice: 12,
     yearlyPrice: 30,
+    oneTimePrice: 200000,
+    annualCloudUpdatesFee: 20000,
     period: 'month',
     features: [
       'Up to 100 students',
@@ -60,6 +64,8 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     monthlyPrice: 10,
     termPrice: 25,
     yearlyPrice: 65,
+    oneTimePrice: 350000,
+    annualCloudUpdatesFee: 35000,
     period: 'month',
     features: [
       'Up to 300 students',
@@ -80,6 +86,8 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     monthlyPrice: 15,
     termPrice: 35,
     yearlyPrice: 95,
+    oneTimePrice: 450000,
+    annualCloudUpdatesFee: 45000,
     period: 'month',
     features: [
       'Up to 500 students',
@@ -101,6 +109,8 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     monthlyPrice: 0,
     termPrice: 0,
     yearlyPrice: 0,
+    oneTimePrice: 0,
+    annualCloudUpdatesFee: 0,
     period: 'one-time desktop',
     features: [
       'Unlimited students',
@@ -120,7 +130,7 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
   },
 ];
 
-const DEFAULT_BILLING_CYCLE: BillingCycle = 'term';
+const DEFAULT_BILLING_CYCLE: BillingCycle = 'one_time';
 const PLAN_CACHE_PREFIX = 'schofy_plan_cache_';
 const PENDING_PLAN_CACHE_PREFIX = 'schofy_pending_plan_';
 const SETTINGS_KEYS = {
@@ -150,6 +160,7 @@ function cycleDurationMonths(cycle: BillingCycle) {
     case 'term':
       return 3;
     case 'yearly':
+    case 'one_time':
       return 12;
     default:
       return 3;

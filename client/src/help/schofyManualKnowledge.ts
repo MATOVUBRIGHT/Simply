@@ -132,11 +132,11 @@ export const schofyManualEntries: SchofyManualEntry[] = [
   },
   {
     route: '/exam-marks',
-    title: 'Exam Marks Ledger Processing',
+    title: 'Results Ledger Processing',
     section: 'Academics & Grading Infrastructure',
     keywords: ['exam marks', 'marks entry', 'class filter', 'exam filter', 'print results', 'save marks'],
     primaryButtons: ['Class filter', 'Exam filter', 'Save', 'Print'],
-    summary: 'Exam Marks is the spreadsheet-style screen for manually entering or reviewing student scores by class, exam, and subject.',
+    summary: 'Results is the spreadsheet-style screen for manually entering or reviewing student scores by class, exam, and subject.',
   },
   {
     route: '/report-card/:id',

@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Check, CreditCard, Crown, Zap, Star, HelpCircle, Phone, X, MessageCircle, ChevronDown, ChevronUp, LogOut, RefreshCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { PLAN_DEFINITIONS, PlanDefinition, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen, saveCurrentPlan } from '../utils/plans';
+import { PLAN_DEFINITIONS, PlanDefinition, BillingCycle, getCurrentBillingCycle, getLatestReceipt, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen, saveCurrentPlan } from '../utils/plans';
 import { useConfirm } from '../components/ConfirmModal';
 
 const faqs = [
@@ -19,7 +19,7 @@ export default function Subscription() {
   const { user, schoolId, logout } = useAuth();
   const confirm = useConfirm();
   const tenantId = schoolId || user?.id;
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'term' | 'yearly'>('term');
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('one_time');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanDefinition | null>(null);
   const [expandedFAQ, setExpandedFAQ] = useState<number | null>(null);
@@ -76,7 +76,22 @@ export default function Subscription() {
     setTransactionId('');
   };
 
-  const getPrice = (plan: PlanDefinition) => plan.priceLabel || (billingCycle === 'yearly' ? 'Contact' : `$${billingCycle === 'monthly' ? plan.monthlyPrice : plan.termPrice}`);
+  const formatUGX = (amount: number) => `UGX ${Math.round(amount).toLocaleString()}`;
+  const getPlanAmount = (plan: PlanDefinition) => {
+    if (billingCycle === 'one_time') return plan.oneTimePrice || 0;
+    if (billingCycle === 'monthly') return plan.monthlyPrice;
+    if (billingCycle === 'yearly') return plan.yearlyPrice;
+    return plan.termPrice;
+  };
+  const getPrice = (plan: PlanDefinition) => {
+    if (plan.priceLabel) return plan.priceLabel;
+    if (billingCycle === 'one_time') return formatUGX(getPlanAmount(plan));
+    if (billingCycle === 'yearly') return 'Contact';
+    return `$${getPlanAmount(plan)}`;
+  };
+  const getCycleLabel = (cycle: BillingCycle) => (
+    cycle === 'one_time' ? 'One-time' : cycle === 'yearly' ? 'Yearly' : cycle === 'term' ? 'Per Term' : 'Monthly'
+  );
 
   if (loading) {
     return (
@@ -120,7 +135,7 @@ export default function Subscription() {
         {/* Billing Cycle Toggle */}
         <div className="flex justify-center mb-10">
           <div className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
-            {(['monthly', 'term', 'yearly'] as const).map((cycle) => (
+            {(['one_time', 'monthly', 'term', 'yearly'] as const).map((cycle) => (
               <button
                 key={cycle}
                 onClick={() => setBillingCycle(cycle)}
@@ -131,7 +146,7 @@ export default function Subscription() {
                 }`}
                 style={billingCycle === cycle ? { backgroundColor: 'var(--primary-color)' } : undefined}
               >
-                {cycle === 'yearly' ? 'Yearly' : cycle === 'term' ? 'Per Term' : 'Monthly'}
+                {getCycleLabel(cycle)}
               </button>
             ))}
           </div>
@@ -168,8 +183,11 @@ export default function Subscription() {
 
                   <div className="mb-3">
                     <span className="text-4xl font-extrabold text-slate-900">{getPrice(plan)}</span>
-                    {billingCycle !== 'yearly' && <span className="text-slate-500 ml-1">/{billingCycle === 'monthly' ? 'mo' : 'term'}</span>}
+                    {billingCycle !== 'yearly' && billingCycle !== 'one_time' && <span className="text-slate-500 ml-1">/{billingCycle === 'monthly' ? 'mo' : 'term'}</span>}
                   </div>
+                  {billingCycle === 'one_time' && plan.annualCloudUpdatesFee ? (
+                    <p className="mb-4 text-xs font-medium text-slate-500">Then {formatUGX(plan.annualCloudUpdatesFee)}/year for cloud & updates</p>
+                  ) : null}
                   <p className="mb-6 font-semibold" style={{ color: 'var(--primary-color)' }}>{plan.limitLabel || `Up to ${plan.studentLimit} students`}</p>
 
                   <div className="space-y-3 flex-grow">
@@ -205,7 +223,7 @@ export default function Subscription() {
                         }`}
                         style={plan.popular ? { backgroundColor: 'var(--primary-color)', boxShadow: '0 10px 22px var(--primary-color-shadow)' } : undefined}
                       >
-                        {billingCycle === 'yearly' || plan.contactOnly ? <><MessageCircle size={18} /> Contact Us</> : <><CreditCard size={18} /> Subscribe</>}
+                        {billingCycle === 'yearly' || plan.contactOnly ? <><MessageCircle size={18} /> Contact Us</> : <><CreditCard size={18} /> {billingCycle === 'one_time' ? 'Buy Once' : 'Subscribe'}</>}
                       </button>
                     )}
                     {isCurrentPlan && (
@@ -278,7 +296,7 @@ export default function Subscription() {
               <div className="p-5 space-y-4">
                 <div className="rounded-xl p-4 theme-note">
                   <div className="flex justify-between text-sm"><span className="text-slate-600">Plan</span><span className="font-bold text-slate-900">{selectedPlan.name}</span></div>
-                  <div className="mt-2 flex justify-between"><span className="text-slate-600">Amount</span><span className="text-2xl font-extrabold" style={{ color: 'var(--primary-color)' }}>${billingCycle === 'monthly' ? selectedPlan.monthlyPrice : selectedPlan.termPrice}</span></div>
+                  <div className="mt-2 flex justify-between"><span className="text-slate-600">Amount</span><span className="text-2xl font-extrabold" style={{ color: 'var(--primary-color)' }}>{billingCycle === 'one_time' ? formatUGX(getPlanAmount(selectedPlan)) : `$${getPlanAmount(selectedPlan)}`}</span></div>
                 </div>
 
                 <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">

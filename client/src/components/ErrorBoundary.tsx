@@ -41,9 +41,9 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-3">
             <AlertTriangle size={22} className="text-red-500" />
           </div>
-          <p className="text-slate-700 dark:text-slate-200 font-medium mb-1">Something went wrong</p>
+          <p className="text-slate-700 dark:text-slate-200 font-medium mb-1">This page needs a quick refresh</p>
           <p className="text-sm text-slate-400 mb-4">
-            {import.meta.env.DEV ? this.state.error?.message : 'An unexpected error occurred'}
+            {import.meta.env.DEV ? this.state.error?.message : 'Your work is still saved locally. Try reopening this section.'}
           </p>
           <button onClick={this.reset} className="btn btn-secondary flex items-center gap-2 text-sm">
             <RefreshCw size={14} /> Try again
@@ -59,11 +59,11 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto mb-4">
             <AlertTriangle size={26} className="text-red-500" />
           </div>
-          <h2 className="text-lg font-bold text-slate-800 dark:text-white mb-1">Something went wrong</h2>
+          <h2 className="text-lg font-bold text-slate-800 dark:text-white mb-1">Schofy needs a quick refresh</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
             {import.meta.env.DEV
               ? this.state.error?.message
-              : 'The app ran into a problem. Reload to continue.'}
+              : 'Your local data is safe. Reload to continue where you left off.'}
           </p>
           <div className="flex gap-2">
             <button

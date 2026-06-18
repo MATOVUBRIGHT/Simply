@@ -32,6 +32,25 @@ function ordSuffix(n: number) {
 // Threshold: if more than this many columns, show "View Full" button
 const COMPACT_COL_LIMIT = 8;
 
+function readStoredCurrentTerm(schoolId?: string | null) {
+  const keys = [
+    schoolId ? `schofy_settings_${schoolId}` : '',
+    'schofy_current_school_id',
+  ].filter(Boolean);
+
+  for (const key of keys) {
+    try {
+      const raw = key === 'schofy_current_school_id'
+        ? localStorage.getItem(`schofy_settings_${localStorage.getItem(key) || ''}`)
+        : localStorage.getItem(key);
+      if (!raw) continue;
+      const value = JSON.parse(raw).currentTerm;
+      if (value) return String(value);
+    } catch { /* ignore */ }
+  }
+  return '';
+}
+
 export default function ExamMarks() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
@@ -46,10 +65,8 @@ export default function ExamMarks() {
   const { students: allStudents } = useStudents();
 
   const [filterClass, setFilterClass] = useState('');
-  const [filterTerm, setFilterTerm] = useState(() => {
-    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
-    return '1';
-  });
+  const [filterTerm, setFilterTerm] = useState(() => readStoredCurrentTerm(schoolId));
+  const termInitializedRef = useRef(Boolean(filterTerm));
   const [filterExam, setFilterExam] = useState('');
   const [searchStudent, setSearchStudent] = useState('');
   const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
@@ -61,8 +78,10 @@ export default function ExamMarks() {
   const currentTerm = useMemo(() => String((settingsData as any[]).find((row: any) => row.key === 'currentTerm')?.value || '1'), [settingsData]);
 
   useEffect(() => {
-    if (currentTerm && !filterTerm) setFilterTerm(currentTerm);
-  }, [currentTerm, filterTerm]);
+    if (!currentTerm || termInitializedRef.current) return;
+    setFilterTerm(currentTerm);
+    termInitializedRef.current = true;
+  }, [currentTerm]);
 
   const sortedClasses = useMemo(() =>
     sortClassesBySectionThenLevel([...classes]),
@@ -295,7 +314,7 @@ export default function ExamMarks() {
     return (
       <div className="min-h-[55vh] flex items-center justify-center">
         <LargeDataSpinner
-          label="Preparing exam marks..."
+          label="Preparing results..."
           detail="Loading class, subject, exam, and mark records."
         />
       </div>
@@ -447,7 +466,7 @@ export default function ExamMarks() {
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Exam Marks & Reports</h1>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Results & Reports</h1>
           <p className="text-sm text-slate-500 mt-1">All exams per class - one row per student</p>
         </div>
         <button onClick={() => navigate('/grades/custom-grading')} className="btn btn-secondary flex items-center gap-2">
@@ -462,7 +481,7 @@ export default function ExamMarks() {
               <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden">
                 <button onClick={handleExportCSV} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><FileText size={14} /> Export CSV</button>
                 <button onClick={handleExportExcel} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><FileText size={14} /> Export Excel</button>
-                <button onClick={() => { openPrintPreview('Exam Marks', '#exam-marks-print'); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><Download size={14} /> Print / PDF</button>
+                <button onClick={() => { openPrintPreview('Results', '#exam-marks-print'); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700"><Download size={14} /> Print / PDF</button>
               </div>
             )}
           </div>

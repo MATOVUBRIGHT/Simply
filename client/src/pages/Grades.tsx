@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, Filter, BookOpen, Pencil, SlidersHorizontal, Loader2 } from 'lucide-react';
+import { Plus, Download, Trash2, Users, GraduationCap, Award, FileText, Search, BarChart3, ChevronDown, ChevronRight, Upload, X, ArrowRight, Check, BookOpen, Pencil, SlidersHorizontal, Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { dataService } from '../lib/database/SupabaseDataService';
@@ -42,6 +42,25 @@ function getSubjectIdentity(subject: any, fallbackName?: string, fallbackId?: st
 
 const MIN_GRADE_LOADING_MS = 1000;
 
+function readStoredCurrentTerm(schoolId?: string | null) {
+  const keys = [
+    schoolId ? `schofy_settings_${schoolId}` : '',
+    'schofy_current_school_id',
+  ].filter(Boolean);
+
+  for (const key of keys) {
+    try {
+      const raw = key === 'schofy_current_school_id'
+        ? localStorage.getItem(`schofy_settings_${localStorage.getItem(key) || ''}`)
+        : localStorage.getItem(key);
+      if (!raw) continue;
+      const value = JSON.parse(raw).currentTerm;
+      if (value) return String(value);
+    } catch { /* ignore */ }
+  }
+  return '';
+}
+
 function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -65,18 +84,12 @@ export default function Grades() {
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('all');
-  const [filterTerm, setFilterTerm] = useState(() => {
-    try { const r = localStorage.getItem(`schofy_settings_${schoolId || ''}`); if (r) return JSON.parse(r).currentTerm || '1'; } catch {}
-    return '1';
-  });
-  const [showClassFilter, setShowClassFilter] = useState(false);
-  const [showTermFilter, setShowTermFilter] = useState(false);
+  const [filterTerm, setFilterTerm] = useState(() => readStoredCurrentTerm(schoolId));
+  const termInitializedRef = useRef(Boolean(filterTerm));
   const { addToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
-  const classFilterRef = useRef<HTMLDivElement>(null);
-  const termFilterRef = useRef<HTMLDivElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStep, setImportStep] = useState<'upload' | 'map' | 'preview'>('upload');
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -110,8 +123,10 @@ export default function Grades() {
   const getGrade = useCallback((score: number) => getGradeFromScale(score, gradingScale), [gradingScale]);
 
   useEffect(() => {
-    if (currentTerm && (!filterTerm || filterTerm === 'all')) setFilterTerm(currentTerm);
-  }, [currentTerm, filterTerm]);
+    if (!currentTerm || termInitializedRef.current) return;
+    setFilterTerm(currentTerm);
+    termInitializedRef.current = true;
+  }, [currentTerm]);
 
   const grades = useMemo(() => {
     const deduped = new Map<string, StudentGrade>();
@@ -409,12 +424,6 @@ export default function Grades() {
     function handleClickOutside(event: MouseEvent) {
       if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
         setShowExportMenu(false);
-      }
-      if (classFilterRef.current && !classFilterRef.current.contains(event.target as Node)) {
-        setShowClassFilter(false);
-      }
-      if (termFilterRef.current && !termFilterRef.current.contains(event.target as Node)) {
-        setShowTermFilter(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -869,7 +878,7 @@ export default function Grades() {
             <span className="hidden sm:inline">Invoice ({studentsWithGrades.length})</span>
           </button>
           <button onClick={() => navigate('/exam-marks')} className="btn btn-secondary flex items-center gap-2">
-            <BarChart3 size={16} /> Exam Marks
+            <BarChart3 size={16} /> Results
           </button>
           <button onClick={() => navigate('/grades/custom-grading')} className="btn btn-secondary flex items-center gap-2">
             <SlidersHorizontal size={16} /> Custom Grading
@@ -949,97 +958,30 @@ export default function Grades() {
               />
             </div>
             <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
-              {/* Class Filter Dropdown */}
-              <div className="relative w-[132px] sm:w-[148px]" ref={classFilterRef}>
-                <button
-                  onClick={() => { setShowClassFilter(!showClassFilter); setShowTermFilter(false); }}
-                  className={`btn btn-secondary flex w-full items-center gap-2 px-3 ${filterClass !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
-                >
-                  <Filter size={16} className="shrink-0" />
-                  <span className="hidden min-w-0 flex-1 truncate text-left sm:inline">
-                    {filterClass === 'all' ? 'All Classes' : (allClassesData.find((c: any) => c.id === filterClass) as any)?.name || filterClass}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-left sm:hidden">Class</span>
-                  <ChevronDown size={14} className={`shrink-0 transition-transform duration-300 ${showClassFilter ? 'rotate-180' : ''}`} />
-                </button>
-                {showClassFilter && (
-                  <div className="absolute right-0 mt-2 w-44 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden animate-dropdown-in max-h-64 overflow-y-auto">
-                    <div className="py-1">
-                      <button
-                        onClick={() => { setFilterClass('all'); setShowClassFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${filterClass === 'all' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-                      >
-                        All Classes
-                        {filterClass === 'all' && <Check size={14} className="ml-auto" />}
-                      </button>
-                      {sortClassesBySectionThenLevel([...allClassesData]).map((cls: any) => (
-                        <button key={cls.id}
-                          onClick={() => { setFilterClass(cls.id); setShowClassFilter(false); }}
-                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${filterClass === cls.id ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-                        >
-                          {cls.name}
-                          {filterClass === cls.id && <Check size={14} className="ml-auto" />}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              <div className="w-[148px]">
+                <PortalSelect
+                  value={filterClass}
+                  onChange={setFilterClass}
+                  options={[
+                    { value: 'all', label: 'All Classes' },
+                    ...sortClassesBySectionThenLevel([...allClassesData]).map((cls: any) => ({ value: cls.id, label: cls.name })),
+                  ]}
+                  className="btn btn-secondary h-11 px-3"
+                />
               </div>
 
-              {/* Term Filter Dropdown */}
-              <div className="relative w-[112px] sm:w-[120px]" ref={termFilterRef}>
-                <button
-                  onClick={() => { setShowTermFilter(!showTermFilter); setShowClassFilter(false); }}
-                  className={`btn btn-secondary flex w-full items-center gap-2 px-3 ${filterTerm !== 'all' ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}`}
-                >
-                  <span className="hidden min-w-0 flex-1 truncate text-left sm:inline">
-                    {filterTerm === 'all' ? 'All Terms' : `Term ${filterTerm}`}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-left sm:hidden">Terms</span>
-                  <ChevronDown size={14} className={`shrink-0 transition-transform duration-300 ${showTermFilter ? 'rotate-180' : ''}`} />
-                </button>
-                {showTermFilter && (
-                  <div className="absolute right-0 mt-2 w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-[9999] overflow-hidden animate-dropdown-in">
-                    <div className="py-1">
-                      <button
-                        onClick={() => { setFilterTerm('all'); setShowTermFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterTerm === 'all' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        All Terms
-                        {filterTerm === 'all' && <Check size={14} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterTerm('1'); setShowTermFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterTerm === '1' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        Term 1
-                        {filterTerm === '1' && <Check size={14} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterTerm('2'); setShowTermFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterTerm === '2' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        Term 2
-                        {filterTerm === '2' && <Check size={14} className="ml-auto" />}
-                      </button>
-                      <button
-                        onClick={() => { setFilterTerm('3'); setShowTermFilter(false); }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                          filterTerm === '3' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
-                      >
-                        Term 3
-                        {filterTerm === '3' && <Check size={14} className="ml-auto" />}
-                      </button>
-                    </div>
-                  </div>
-                )}
+              <div className="w-[120px]">
+                <PortalSelect
+                  value={filterTerm}
+                  onChange={setFilterTerm}
+                  options={[
+                    { value: 'all', label: 'All Terms' },
+                    { value: '1', label: 'Term 1' },
+                    { value: '2', label: 'Term 2' },
+                    { value: '3', label: 'Term 3' },
+                  ]}
+                  className="btn btn-secondary h-11 px-3"
+                />
               </div>
             </div>
           </div>

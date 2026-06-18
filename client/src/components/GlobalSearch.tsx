@@ -40,7 +40,7 @@ const pages = [
   { path: '/homework-tests', title: 'Assignments & Tests', subtitle: 'Issued assignments, tests, completion and results', icon: ClipboardList, keywords: ['assignment', 'assignments', 'homework', 'tests', 'completed assignment', 'test results'] },
   { path: '/grades', title: 'Exams & Grades', subtitle: 'Manage exams and grades', icon: Award, keywords: ['exams', 'grades', 'results', 'marks', 'scores'] },
   { path: '/grades/custom-grading', title: 'Custom Grading', subtitle: 'Set grade boundaries and remarks', icon: Award, keywords: ['custom grading', 'grading scale', 'grade boundaries', 'marks scale'] },
-  { path: '/exam-marks', title: 'Exam Marks', subtitle: 'Enter and manage exam marks', icon: Award, keywords: ['exam marks', 'marks entry', 'scores', 'results', 'academic marks'] },
+  { path: '/exam-marks', title: 'Results', subtitle: 'Enter and manage exam results', icon: Award, keywords: ['exam marks', 'marks entry', 'scores', 'results', 'academic marks'] },
   { path: '/report-card/new', title: 'Report Card Template', subtitle: 'Design and print report cards', icon: Award, keywords: ['report card', 'academic document', 'student report card', 'report template'] },
   { path: '/finance', title: 'Fees & Finance', subtitle: 'Financial management', icon: Receipt, keywords: ['finance', 'fees', 'payments', 'money', 'ledger', 'opening balance', 'closing balance'] },
   { path: '/finance', title: 'Finance Students', subtitle: 'Finance student tags and balances', icon: Users, keywords: ['finance students', 'student finance', 'bursary tags', 'discount tags', 'full bursary'] },

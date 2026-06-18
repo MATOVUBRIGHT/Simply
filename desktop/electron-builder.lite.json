@@ -12,6 +12,7 @@
   "files": [
     "main.js",
     "preload.js",
+    "workers.js",
     "installer.nsh",
     "package.json"
   ],

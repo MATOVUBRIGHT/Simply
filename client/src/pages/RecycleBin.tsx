@@ -31,6 +31,14 @@ function isDuplicateDeletedItem(item: DeletedItem, record: any): boolean {
   return record.name === item.data?.name;
 }
 
+function sortDeletedItems(items: DeletedItem[]): DeletedItem[] {
+  return [...items].sort((a, b) => {
+    const bTime = new Date(b.deletedAt || 0).getTime();
+    const aTime = new Date(a.deletedAt || 0).getTime();
+    return bTime - aTime;
+  });
+}
+
 export default function RecycleBin() {
   const { user, schoolId } = useAuth();
   const navigate = useNavigate();
@@ -46,7 +54,7 @@ export default function RecycleBin() {
     const id = schoolId || user?.id;
     if (id) {
       const items = getRecycleBin(id);
-      setDeletedItems(items);
+      setDeletedItems(sortDeletedItems(items));
     }
   }, [user?.id, schoolId]);
 
@@ -54,7 +62,7 @@ export default function RecycleBin() {
     const id = schoolId || user?.id;
     if (id) {
       const items = getRecycleBin(id);
-      setDeletedItems(items);
+      setDeletedItems(sortDeletedItems(items));
     }
   };
 

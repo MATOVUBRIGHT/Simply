@@ -106,7 +106,7 @@ export function PortalSelect({
       {isOpen && createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[999999] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-2xl animate-dropdown-in dark:border-slate-700 dark:bg-slate-800"
+          className="fixed z-[1000000] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-2xl animate-dropdown-in dark:border-slate-700 dark:bg-slate-800"
           style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
         >
           {options.map(option => {

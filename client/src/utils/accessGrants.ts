@@ -9914,5 +9914,275 @@ export const EMBEDDED_ACCESS_GRANTS: EmbeddedAccessGrant[] = [
     "planName": "Unlimited",
     "billingCycle": "yearly",
     "amount": 0
+  },
+  {
+    "label": "VC-1131",
+    "codeHash": "23401dc93b1e8769165474c1b2e9fcfef0d9d072c9c58e957c60492f3ae961f2",
+    "tokenHash": "c6295194ac6ab699fc1f0a3c7009b55bdf8346b7a8f720ed623d1c2c54a96a94",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1132",
+    "codeHash": "7fa7d9894a796ed6cf1f191d22339a564954e0e9be59f54d869cb379f007db47",
+    "tokenHash": "903b96af2d73973ea99eef848e9ba1fdfc00ac0493443ab298a3f78a4bc53299",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1133",
+    "codeHash": "c47e16e5d3f236d6253bca6afe80033d0bc94518b03e013e5d6b768434aa2cf8",
+    "tokenHash": "50e9220e572729df6aad7558c5da95ab6fc061fa6e03dcf48c0cc72a10dca2ac",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1134",
+    "codeHash": "f50452dbf886d11d448d4079264586279b15fcff92ba8b384be161d64e841719",
+    "tokenHash": "15caa1d706e1e0f18fffe72f56e4f4f1c97f326c2a1a7df7f2ea3b518b2e0c4d",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1135",
+    "codeHash": "343bf4ed723a5036bb67736622c704cd461a6e8b1da08182e97567c89a5c6a70",
+    "tokenHash": "0471d875c1bd2ca92c0d5c45a53c0e8da1b7dc8079290dd2e6a4fbee40981525",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1136",
+    "codeHash": "491524db87bc42aae60b7dd9aa5e7440f21252c9163c512bcc5792909e6f3934",
+    "tokenHash": "693c53eb0d4b0e7d77f439073c52036cc929e8127567ca7fd603d8a01742b987",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1137",
+    "codeHash": "930114cfdec58b438f53c1f3c51e10f79daa7bb9bea2dd45386e215e59dd1246",
+    "tokenHash": "d11c02a3e6f798c72f26a6434d30c8817e170ce5d51a6d2ab95a47018d56be54",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1138",
+    "codeHash": "cf7169566c9f00d1a262b7d75cfacd6d861205952ef78b4e26aa65d1b893ce1f",
+    "tokenHash": "7c4b74ebe717cf2ba56c27060ea9927a556f5d3586a9215ca3ce89410569c7de",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1139",
+    "codeHash": "68067ff23071ccf2862766716eab8cfaf42cddae88f55678f1fdcb028771f0a4",
+    "tokenHash": "5f1baf1cc84fa33c1bada8b9ca2c6ec6372272ed105d67478b24dc5dc79030d8",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1140",
+    "codeHash": "c241e754b3a9498a93951f085a1afd063631ae68170b407ef7a31aeecfb0a27f",
+    "tokenHash": "015c30eda11c928a550209b7725e6acbd3e537cf4616ad3d62ff512cd7d0d2b0",
+    "planId": "starter",
+    "planName": "Starter",
+    "billingCycle": "one_time",
+    "amount": 200000
+  },
+  {
+    "label": "VC-1141",
+    "codeHash": "f899ad14c071eeaf38ffdf723ab6f95e0eb5a8ac1753f798edaf09089989e9b5",
+    "tokenHash": "f314070fc330c5956d31cb39ce044396045020c25e929de8981795fa6d6fc24a",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1142",
+    "codeHash": "a6afb427f17e38d7ba12c5ba4114b2b40b54770fd43d2baa894c526fe8870658",
+    "tokenHash": "8418ad2b522156f2baa25ba64e191cf9f01e2f3c2361d0a95e905b7a3d46c8a7",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1143",
+    "codeHash": "f1f2a931570965ef9a130e67f5cb0204d6cf8fa414c3182b2c150235e3b17b46",
+    "tokenHash": "0f031103074394b8c28f4c146d8550a20a6b1c1207b91b6f50c05fb86e2fec5d",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1144",
+    "codeHash": "dd1882bb322308bdb4e7a2850569a10d283a4058a6b969377e2194dee967e1de",
+    "tokenHash": "f6eb861c866d061e45c3505abc8533ee2870752d51517658603e324d56f865be",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1145",
+    "codeHash": "f4ec0fcee4efb8c14edac46a76375efcd917266628f0b5f464c7ad6909cb3775",
+    "tokenHash": "02be6b3adc171d59b4920704a313aebeb4cad2124c039b69dac61ee2a395a2b5",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1146",
+    "codeHash": "94f7cc4d0e24146ae7dcef1d1d5a320049751dc57bade1f5384c0dcc6de0e311",
+    "tokenHash": "02a21ffefa5d2f33f880a611c17d69a9ccef1c16c2f0c001d552e6d0138159ad",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1147",
+    "codeHash": "44bb19c2b4fca9b0f81ec62fee464ee59bf032c4470a119aeb1916712dcf55fd",
+    "tokenHash": "2d5a33e9e5792dfa0f904a8348f73542367bf32299b9f826fdb49f380ee559f9",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1148",
+    "codeHash": "ea9e902015eef70bf5e7a393f48a804a2eb23b170b5423406a7746059ca05cac",
+    "tokenHash": "32fe309e97dd7500beb167527810b9d6903a56063f14540ef81deb32b5ab6790",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1149",
+    "codeHash": "711a67edd7808ddacbde6138ed8d64b85de7792b4dce26893abc71e57c7e4351",
+    "tokenHash": "a7e8e7212bd6c50b4d53f7feafbace0c22447c2cb837b4936462dc1accda64eb",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1150",
+    "codeHash": "8aa7870ae6e1532967bcc250ca1a973899d3e2b55f2b72b92f5b866f0a62f68c",
+    "tokenHash": "42a478d760f9af9f7994087a87f892ab00183b630864338b20ae02b39cb7cfa5",
+    "planId": "professional",
+    "planName": "Professional",
+    "billingCycle": "one_time",
+    "amount": 350000
+  },
+  {
+    "label": "VC-1151",
+    "codeHash": "30b02e56d70100a841514269319389dc9c254bf2b9c8810a04d434248e484a9a",
+    "tokenHash": "40a90995d808ecf596785b1c313f7c6cf229d6f249154cd3c47d155f86c10b3c",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
+  },
+  {
+    "label": "VC-1152",
+    "codeHash": "b9cba6f4ef80d32d20a88b7f4061ece5cd8857c9fa0011903db576a52bc668c8",
+    "tokenHash": "527f826302fdb170a5561357eb0a02e67e4eaef53e32f610432b956390164ead",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
+  },
+  {
+    "label": "VC-1153",
+    "codeHash": "c433ffbf89a8e261eeaf5d175740c3550b5e912aa83db4b9ac45c63648f2bfd6",
+    "tokenHash": "bba4859264c96e075e7acc6d3a5b3ebc8a78015579da2d38c45a99dd41c301d5",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
+  },
+  {
+    "label": "VC-1154",
+    "codeHash": "567f218002d3833213a6d19ce970af1befbe576fafc04ade9d26ef44693180c3",
+    "tokenHash": "9ccb7205c348c2a577172bdb4d0874c6c867b513f390d87407bfda7be72477b2",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
+  },
+  {
+    "label": "VC-1155",
+    "codeHash": "49177707c19f331f4253b40dded799d0adf17d897dd55c609c7231177fbdbeda",
+    "tokenHash": "5b9ec6e15a785ab077ce377a0a43817600144b88eecbf4428e756ed2c6f0513c",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
+  },
+  {
+    "label": "VC-1156",
+    "codeHash": "79c6b648c2af5d2656deeceef74ec250e15987e8c828267a4a51ff37129e3132",
+    "tokenHash": "9200d454506fb20bbb93ce018c7c655e2768facf47ef2a5cc7ce3846056d1e8b",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
+  },
+  {
+    "label": "VC-1157",
+    "codeHash": "1d396a3926de084dedf70f5ecf0022c974a994e2ddbff992882b294f72e17e29",
+    "tokenHash": "c70a3edfc2f4857588aae96f622d403be78e8abc48fd5df06aa69ce452818922",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
+  },
+  {
+    "label": "VC-1158",
+    "codeHash": "baa5fd1231df1efab936a8f939f0b733fc6d236721a4da0167cb936886159ed9",
+    "tokenHash": "29482389fd4cffeae2f8bcec037535d0f7c38eeaa8ffb24678b1417a923ee9c1",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
+  },
+  {
+    "label": "VC-1159",
+    "codeHash": "4902d8763ea891486aa438b2cbfc98fb509dee653893ae3cf5fd0f500250740b",
+    "tokenHash": "e8fb54ff3fbe6690f08ba49dbfebbd29be8c5aef853fba5026d4bd3dfbe729f8",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
+  },
+  {
+    "label": "VC-1160",
+    "codeHash": "ac28d5bd5c2db8500ddb8a14578c8b8510e23ecda36321ef449049de7069abde",
+    "tokenHash": "ef8ca52956b6ed82449c4969c7f95f79eb60afaa3d2d4c3cb07df3ec9a1e86d6",
+    "planId": "enterprise",
+    "planName": "Enterprise",
+    "billingCycle": "one_time",
+    "amount": 450000
   }
 ];

@@ -4,7 +4,7 @@ const { pathToFileURL } = require('url');
 const http = require('http');
 const fs = require('fs');
 const { Worker } = require('worker_threads');
-const { TASKS } = require('./workers');
+const { TASKS } = require('./workers.js');
 
 let mainWindow;
 let tray;

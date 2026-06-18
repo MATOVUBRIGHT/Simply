@@ -709,6 +709,38 @@ interface QueueItem {
   ts: number;
 }
 
+interface IncomingConflict {
+  sid: string;
+  tableName: string;
+  recordId: string;
+  localRecord?: any;
+  remoteRecord?: any;
+  remoteDeleted?: boolean;
+}
+
+const incomingConflictKeys = new Set<string>();
+
+function emitIncomingConflicts(conflicts: IncomingConflict[]) {
+  if (typeof window === 'undefined' || conflicts.length === 0) return;
+
+  const fresh = conflicts.filter(conflict => {
+    const key = `${conflict.sid}:${conflict.tableName}:${conflict.recordId}:${conflict.remoteRecord?.updatedAt || conflict.remoteDeleted || ''}`;
+    if (incomingConflictKeys.has(key)) return false;
+    incomingConflictKeys.add(key);
+    setTimeout(() => incomingConflictKeys.delete(key), 2 * 60_000);
+    return true;
+  });
+
+  if (fresh.length === 0) return;
+  window.dispatchEvent(new CustomEvent('schofyIncomingChanges', {
+    detail: {
+      sid: fresh[0].sid,
+      tableName: fresh[0].tableName,
+      conflicts: fresh,
+    },
+  }));
+}
+
 function loadQueueSync(): QueueItem[] {
   try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; }
 }
@@ -1388,9 +1420,14 @@ class SupabaseDataService {
 
       const localMap = new Map(local.map(r => [r.id, r]));
       let changed = false;
+      const conflicts: IncomingConflict[] = [];
 
       for (const remote of remoteRecords) {
-        if (pendingIds.has(remote.id)) continue;
+        if (pendingIds.has(remote.id)) {
+          const localRecord = localMap.get(remote.id);
+          if (localRecord) conflicts.push({ sid, tableName, recordId: remote.id, localRecord, remoteRecord: remote });
+          continue;
+        }
         const localRec = localMap.get(remote.id);
         if (!localRec) {
           localMap.set(remote.id, remote);
@@ -1404,6 +1441,7 @@ class SupabaseDataService {
           }
         }
       }
+      emitIncomingConflicts(conflicts);
 
       if (changed) {
         cacheSet(sid, tableName, Array.from(localMap.values()));
@@ -1482,7 +1520,17 @@ class SupabaseDataService {
                 .filter(Boolean)
             );
 
-            if (pendingIds.has(localRecord.id)) return;
+            if (pendingIds.has(localRecord.id)) {
+              const existing = cacheGet(sid, tableName)?.find(item => item.id === localRecord.id);
+              emitIncomingConflicts([{
+                sid,
+                tableName,
+                recordId: localRecord.id,
+                localRecord: existing,
+                remoteRecord: localRecord,
+              }]);
+              return;
+            }
 
             if (eventType === 'INSERT') {
               cacheApplyCreate(sid, tableName, localRecord);
@@ -1642,9 +1690,9 @@ class SupabaseDataService {
           throw error;
         }
 
+        const queued = loadQueueSync().filter(q => q.tableName === tableName);
         const pendingIds = new Set(
-          loadQueueSync()
-            .filter(q => q.tableName === tableName)
+          queued
             .map(q => q.recordId || q.data?.id)
             .filter(Boolean)
         );
@@ -1667,22 +1715,26 @@ class SupabaseDataService {
         let changed = false;
 
         if (fullRefresh) {
+          const remoteIds = new Set(remoteRecords.map(record => record.id));
+          const pendingQueueById = new Map<string, QueueItem>();
+          queued.forEach(item => {
+            const id = item.recordId || item.data?.id;
+            if (id) pendingQueueById.set(String(id), item);
+          });
           const pendingLocalById = new Map(
             local
               .filter(record => !deletedIds.has(record.id))
               .filter(record => pendingIds.has(record.id))
               .map(record => [record.id, record])
           );
-          const mergedById = new Map(
-            local
-              .filter(record => !deletedIds.has(record.id))
-              .map(record => [record.id, record])
-          );
+          const mergedById = new Map<string, any>();
+          const conflicts: IncomingConflict[] = [];
 
           for (const remote of remoteRecords) {
             const pendingLocal = pendingLocalById.get(remote.id);
             if (pendingLocal) {
               mergedById.set(remote.id, pendingLocal);
+              conflicts.push({ sid, tableName, recordId: remote.id, localRecord: pendingLocal, remoteRecord: remote });
               continue;
             }
 
@@ -1697,6 +1749,15 @@ class SupabaseDataService {
             if (remoteTs > localTs) mergedById.set(remote.id, remote);
           }
 
+          for (const [id, pendingLocal] of pendingLocalById) {
+            if (mergedById.has(id)) continue;
+            const queuedItem = pendingQueueById.get(String(id));
+            mergedById.set(id, pendingLocal);
+            if (queuedItem?.op !== 'create' && !remoteIds.has(id)) {
+              conflicts.push({ sid, tableName, recordId: id, localRecord: pendingLocal, remoteDeleted: true });
+            }
+          }
+
           const final = Array.from(mergedById.values());
           const beforeIds = local.map(record => record.id).sort().join('|');
           const afterIds = final.map(record => record.id).sort().join('|');
@@ -1706,12 +1767,18 @@ class SupabaseDataService {
             cacheSet(sid, tableName, final);
             notifyUI(tableName);
           }
+          emitIncomingConflicts(conflicts);
           return final;
         }
 
+        const conflicts: IncomingConflict[] = [];
         for (const remote of remoteRecords) {
           // Never overwrite pending local changes
-          if (pendingIds.has(remote.id)) continue;
+          if (pendingIds.has(remote.id)) {
+            const localRecord = localMap.get(remote.id);
+            if (localRecord) conflicts.push({ sid, tableName, recordId: remote.id, localRecord, remoteRecord: remote });
+            continue;
+          }
 
           const existing = localMap.get(remote.id);
           if (!existing) {
@@ -2363,6 +2430,10 @@ class SupabaseDataService {
     try {
       const sid = schoolId;
       console.log(`[Sync] Starting automatic push sync for ${sid}...`);
+      if (this._syncInProgress) {
+        console.log('[Sync] Queue flush already running; automatic sync will use that result');
+        return { success: true, pushed: 0, pulled: 0, failed: 0 };
+      }
 
       // 1. Flush Queue
       const initialQueue = await loadQueue();
@@ -2459,6 +2530,40 @@ class SupabaseDataService {
     return { success: failed === 0, pulled, failed };
   }
 
+  async acceptIncomingChanges(sid: string, conflicts: IncomingConflict[]): Promise<void> {
+    if (!sid || conflicts.length === 0) return;
+    const queue = await loadQueue();
+    const queueIdsToRemove: string[] = [];
+
+    for (const conflict of conflicts) {
+      const recordId = String(conflict.recordId || '');
+      if (!recordId) continue;
+      queue
+        .filter(item => item.tableName === conflict.tableName)
+        .filter(item => String(item.recordId || item.data?.id || '') === recordId)
+        .forEach(item => queueIdsToRemove.push(item.id));
+
+      if (conflict.remoteDeleted) {
+        markDeleted(sid, conflict.tableName, recordId);
+        cacheApplyDelete(sid, conflict.tableName, recordId);
+      } else if (conflict.remoteRecord) {
+        unmarkDeleted(sid, conflict.tableName, recordId);
+        cacheApplyCreate(sid, conflict.tableName, { ...conflict.remoteRecord, syncStatus: 'synced' });
+      }
+      notifyUI(conflict.tableName);
+    }
+
+    if (queueIdsToRemove.length > 0) {
+      await dequeueItems([...new Set(queueIdsToRemove)]);
+    }
+  }
+
+  async keepLocalChanges(sid: string): Promise<void> {
+    if (!sid) return;
+    await this.forcePush(sid);
+    this.scheduleBackgroundSync(sid);
+  }
+
   async getSyncStatus(schoolId: string): Promise<SyncHealthStatus> {
     const queue = await loadQueue();
     const entry = memCache.get(cacheKey(schoolId, 'students')); // Use students as a proxy for last sync
@@ -2543,10 +2648,12 @@ class SupabaseDataService {
       }
       return;
     }
+    this._syncInProgress = true;
 
     // Rate limiting: prevent flushing too frequently
     const now = Date.now();
     if (now - this._lastSyncAttempt < this._backoffDelay) {
+      this._syncInProgress = false;
       return;
     }
     this._lastSyncAttempt = now;
@@ -2555,6 +2662,7 @@ class SupabaseDataService {
     const session = await this.waitForSession();
     if (!session) {
       console.warn('[offline] Skipping flush: No authenticated session');
+      this._syncInProgress = false;
       return;
     }
 
@@ -2562,10 +2670,10 @@ class SupabaseDataService {
     const queue = await loadQueue() as QueueItem[];
     if (queue.length === 0) {
       this._backoffDelay = 1000; // Reset backoff on empty queue
+      this._syncInProgress = false;
       return;
     }
 
-    this._syncInProgress = true;
     console.log(`[offline] Flushing up to ${MAX_QUEUE_ITEMS_PER_FLUSH} of ${queue.length} queued operations`);
 
     const MAX_RETRIES = 3;
@@ -2686,10 +2794,16 @@ class SupabaseDataService {
       const tableName = first.tableName;
       const rt = getSupabaseTable(tableName);
 
-      const creates = items.filter(item => item.op === 'create' && item.data);
-      const updates = items.filter(item => item.op === 'update' && item.recordId && item.data);
+      const genericSettings = tableName === 'settings'
+        ? items.filter(item => item.data?.key)
+        : [];
+      const creates = tableName === 'settings' ? [] : items.filter(item => item.op === 'create' && item.data);
+      const updates = tableName === 'settings' ? [] : items.filter(item => item.op === 'update' && item.recordId && item.data);
       const deletes = items.filter(item => (item.op === 'delete' && item.recordId) || (item.op === 'batchDelete' && item.ids?.length));
-      const settings = items.filter(item => item.op === 'saveSettings' && item.settings);
+      const settings = [
+        ...items.filter(item => item.op === 'saveSettings' && item.settings),
+        ...genericSettings,
+      ];
       const unsupported = items.filter(item => !creates.includes(item) && !updates.includes(item) && !deletes.includes(item) && !settings.includes(item));
 
       unsupported.forEach(markProcessed);
@@ -2705,9 +2819,10 @@ class SupabaseDataService {
         }
       }
 
-      const writeGroups: Array<{ op: 'upsert' | 'delete' | 'settings'; items: QueueItem[] }> = [];
+      const writeGroups: Array<{ op: 'upsert' | 'update' | 'delete' | 'settings'; items: QueueItem[] }> = [];
       const allowedCreates = creates.filter(item => item.data?.id && allowedCreateIds.has(item.data.id));
-      if (allowedCreates.length || updates.length) writeGroups.push({ op: 'upsert', items: [...allowedCreates, ...updates] });
+      if (allowedCreates.length) writeGroups.push({ op: 'upsert', items: allowedCreates });
+      if (updates.length) writeGroups.push({ op: 'update', items: updates });
       if (deletes.length) writeGroups.push({ op: 'delete', items: deletes });
       if (settings.length) writeGroups.push({ op: 'settings', items: settings });
 
@@ -2725,16 +2840,24 @@ class SupabaseDataService {
             try {
               if (group.op === 'upsert') {
                 const payloads = chunk.map(item => {
-                  const record = item.op === 'update'
-                    ? { ...item.data, id: item.recordId, schoolId: item.data?.schoolId || sid }
-                    : item.data;
-                  return toRemote(record, rt, sid);
+                  return toRemote(item.data, rt, sid);
                 });
                 const { error } = await this.db.from(rt).upsert(payloads, { onConflict: 'id' });
                 if (error) throw error;
                 for (const item of chunk) {
                   const recordId = item.recordId || item.data?.id;
                   if (recordId) cacheApplyUpdate(sid, item.tableName, recordId, { syncStatus: 'synced' });
+                }
+              } else if (group.op === 'update') {
+                for (const item of chunk) {
+                  const recordId = item.recordId || item.data?.id;
+                  if (!recordId) continue;
+                  const payload = toRemote({ ...item.data, id: recordId, schoolId: item.data?.schoolId || sid }, rt, sid);
+                  delete payload.id;
+                  delete payload.created_at;
+                  const { error } = await applyScope(this.db.from(rt).update(payload).eq('id', recordId), rt, sid);
+                  if (error) throw error;
+                  cacheApplyUpdate(sid, item.tableName, recordId, { syncStatus: 'synced' });
                 }
               } else if (group.op === 'delete') {
                 const ids = [...new Set(chunk.flatMap(item => item.op === 'batchDelete' ? (item.ids || []) : (item.recordId ? [item.recordId] : [])))];
@@ -2745,6 +2868,14 @@ class SupabaseDataService {
                 for (const item of chunk) {
                   for (const [key, value] of Object.entries(item.settings || {})) {
                     rowByKey.set(key, { school_id: sid, key, value, updated_at: new Date().toISOString() });
+                  }
+                  if (item.data?.key) {
+                    rowByKey.set(String(item.data.key), {
+                      school_id: item.data.schoolId || item.data.school_id || sid,
+                      key: String(item.data.key),
+                      value: item.data.value,
+                      updated_at: item.data.updatedAt || item.data.updated_at || new Date().toISOString(),
+                    });
                   }
                 }
                 const rows = Array.from(rowByKey.values());

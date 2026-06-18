@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { Check, CreditCard, Crown, Zap, Shield, Star, Download, HelpCircle, Phone, X, AlertTriangle, MessageCircle, ChevronDown, ChevronUp, Loader2, Clock, ArrowLeft, KeyRound, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, UNLIMITED_PLAN_LABEL, cachePlanStateLocally, getCurrentBillingCycle, getLatestReceipt, getPlanStaffLimit, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen } from '../utils/plans';
+import { PLAN_DEFINITIONS, PlanDefinition, SubscriptionAccessState, UNLIMITED_PLAN_LABEL, BillingCycle, cachePlanStateLocally, getCurrentBillingCycle, getLatestReceipt, getPlanStaffLimit, getSubscriptionAccessState, hasSeenPlanIntro, markPlanIntroSeen } from '../utils/plans';
 import { SuccessPopup } from '../components/SuccessPopup';
 import { supabase } from '../lib/supabase';
 import { isDesktopApp } from '../utils/desktopSyncPreference';
@@ -26,10 +26,11 @@ const faqs = [
 const UGX_RATE = 3800;
 const MIN_PLANS_LOADING_MS = 2000;
 type PlanCurrency = 'USD' | 'UGX';
-const billingCycleActiveStyles: Record<'monthly' | 'term' | 'yearly', CSSProperties> = {
+const billingCycleActiveStyles: Record<BillingCycle, CSSProperties> = {
   monthly: { backgroundColor: '#2563eb', boxShadow: '0 8px 18px rgba(37, 99, 235, 0.24)' },
   term: { backgroundColor: '#16a34a', boxShadow: '0 8px 18px rgba(22, 163, 74, 0.24)' },
   yearly: { backgroundColor: '#7c3aed', boxShadow: '0 8px 18px rgba(124, 58, 237, 0.24)' },
+  one_time: { backgroundColor: '#0d9488', boxShadow: '0 8px 18px rgba(13, 148, 136, 0.24)' },
 };
 const currencyActiveStyles: Record<PlanCurrency, CSSProperties> = {
   USD: { backgroundColor: '#0891b2', boxShadow: '0 8px 18px rgba(8, 145, 178, 0.24)' },
@@ -65,7 +66,7 @@ export default function Plans() {
   const { user, schoolId, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const authId = schoolId || user?.id || '';
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'term' | 'yearly'>('term');
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('one_time');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanDefinition | null>(null);
   const [showFAQModal, setShowFAQModal] = useState(false);
@@ -420,14 +421,36 @@ export default function Plans() {
   }
 
   function getPlanAmount(plan: PlanDefinition) {
+    if (billingCycle === 'one_time') return plan.oneTimePrice || 0;
     if (billingCycle === 'monthly') return plan.monthlyPrice;
     if (billingCycle === 'yearly') return plan.yearlyPrice;
     return plan.termPrice;
   }
 
-  function formatAmount(amount: number) {
+  function formatAmount(amount: number, cycle: BillingCycle = billingCycle) {
+    if (cycle === 'one_time') return `UGX ${Math.round(amount).toLocaleString()}`;
     if (planCurrency === 'UGX') return `UGX ${Math.round(amount * UGX_RATE).toLocaleString()}`;
     return `$${amount}`;
+  }
+
+  function getCycleLabel(cycle: BillingCycle | string | null | undefined) {
+    if (cycle === 'one_time') return 'One-time';
+    if (cycle === 'yearly') return 'Yearly';
+    if (cycle === 'term') return 'Per Term';
+    if (cycle === 'monthly') return 'Monthly';
+    return 'Current';
+  }
+
+  function getPriceSuffix() {
+    if (billingCycle === 'one_time') return '';
+    if (billingCycle === 'monthly') return '/mo';
+    if (billingCycle === 'yearly') return '/yr';
+    return '/term';
+  }
+
+  function getOneTimeFeeNote(plan: PlanDefinition) {
+    if (billingCycle !== 'one_time' || !plan.annualCloudUpdatesFee) return null;
+    return `Then UGX ${plan.annualCloudUpdatesFee.toLocaleString()}/year for cloud & updates`;
   }
 
   async function handleVerifyCode() {
@@ -527,7 +550,7 @@ export default function Plans() {
   );
 
   const handleDownloadInvoice = () => {
-    const receiptAmount = latestReceipt ? formatAmount(Number(latestReceipt.amount || 0)) : 'N/A';
+    const receiptAmount = latestReceipt ? formatAmount(Number(latestReceipt.amount || 0), latestReceipt.billingCycle) : 'N/A';
     const invoice = `SCHOFY RECEIPT
 ================
 Receipt: RCP-${Date.now()}
@@ -555,7 +578,7 @@ Powered by Schofy`;
 
   const checkPlanLimit = (planId: string) => studentCount <= (PLAN_DEFINITIONS.find(p => p.id === planId)?.studentLimit || 0);
   const currentCycle = latestReceipt?.billingCycle || null;
-  const currentCycleLabel = currentCycle === 'monthly' ? 'Current Monthly' : currentCycle === 'yearly' ? 'Current Yearly' : currentCycle === 'term' ? 'Current Term' : 'Current';
+  const currentCycleLabel = currentCycle ? `Current ${getCycleLabel(currentCycle)}` : 'Current';
   const canProceedToApp = accessState?.status === 'active' || accessState?.status === 'expiring';
   const receiptPlan = PLAN_DEFINITIONS.find(p => p.id === latestReceipt?.planId);
   const cachedRealPlan = accessState?.plan || PLAN_DEFINITIONS.find(p => p.id === currentPlanId) || receiptPlan || null;
@@ -660,7 +683,7 @@ Powered by Schofy`;
             </button>
           )}
           <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-700 dark:bg-slate-800/90">
-            {(['monthly', 'term', 'yearly'] as const).map((cycle) => (
+            {(['one_time', 'monthly', 'term', 'yearly'] as const).map((cycle) => (
               <button
                 key={cycle}
                 onClick={() => setBillingCycle(cycle)}
@@ -671,7 +694,7 @@ Powered by Schofy`;
                 }`}
                 style={billingCycle === cycle ? billingCycleActiveStyles[cycle] : undefined}
               >
-                {cycle === 'yearly' ? 'Yearly' : cycle === 'term' ? 'Per Term' : 'Monthly'}
+                {getCycleLabel(cycle)}
               </button>
             ))}
           </div>
@@ -974,8 +997,11 @@ Powered by Schofy`;
 
                 <div className="mb-2">
                   <span className={plan.contactOnly ? 'text-xl font-bold text-slate-900 dark:text-white' : 'text-3xl font-bold text-slate-900 dark:text-white'}>{getPrice(plan)}</span>
-                  {!plan.contactOnly && <span className="text-sm text-slate-500 dark:text-slate-400">/{billingCycle === 'monthly' ? 'mo' : billingCycle === 'yearly' ? 'yr' : 'term'}</span>}
+                  {!plan.contactOnly && getPriceSuffix() && <span className="text-sm text-slate-500 dark:text-slate-400">{getPriceSuffix()}</span>}
                 </div>
+                {getOneTimeFeeNote(plan) && (
+                  <p className="mb-3 text-xs font-medium text-slate-500 dark:text-slate-400">{getOneTimeFeeNote(plan)}</p>
+                )}
                 <p className="mb-4 text-sm font-medium" style={{ color: 'var(--primary-color)' }}>
                   {limitLabel} / {staffLimitLabel}
                 </p>
@@ -1031,7 +1057,7 @@ Powered by Schofy`;
                       } disabled:cursor-not-allowed disabled:opacity-60`}
                       style={plan.popular ? { backgroundColor: planAccentStyles.recommended.backgroundColor, boxShadow: planAccentStyles.recommended.buttonShadow } : undefined}
                     >
-                      <CreditCard size={16} /> {isOnline ? 'Subscribe' : 'Online required'}
+                      <CreditCard size={16} /> {isOnline ? (billingCycle === 'one_time' ? 'Buy Once' : 'Subscribe') : 'Online required'}
                     </button>
                   )}
                 </div>
@@ -1058,7 +1084,7 @@ Powered by Schofy`;
             </div>
             <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg text-center">
               <p className="text-[10px] text-slate-500 dark:text-slate-400">Billing</p>
-              <p className="text-sm font-bold text-slate-900 dark:text-white capitalize">{billingCycle}</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-white">{getCycleLabel(billingCycle)}</p>
             </div>
             <div className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg text-center">
               <p className="text-[10px] text-slate-500 dark:text-slate-400">Amount</p>
@@ -1079,7 +1105,7 @@ Powered by Schofy`;
             <div className="mt-4 rounded-lg p-3 theme-note">
               <p className="text-sm font-semibold text-slate-900 dark:text-white">Last paid receipt</p>
               <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Plan: {latestReceipt.planName}</p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">Amount: {formatAmount(Number(latestReceipt.amount || 0))}</p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">Amount: {formatAmount(Number(latestReceipt.amount || 0), latestReceipt.billingCycle)}</p>
               <p className="text-xs text-slate-600 dark:text-slate-300">Paid: {new Date(latestReceipt.paidAt).toLocaleString()}</p>
               <p className="text-xs text-slate-600 dark:text-slate-300">Expires: {new Date(latestReceipt.expiresAt).toLocaleDateString()}</p>
             </div>
@@ -1113,7 +1139,7 @@ Powered by Schofy`;
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={e => { if (e.target === e.currentTarget) setShowPaymentModal(false); }}>
           <div className="animate-modal-in max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Subscribe to {selectedPlan.name}</h2>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">{billingCycle === 'one_time' ? 'Buy' : 'Subscribe to'} {selectedPlan.name}</h2>
               <button onClick={() => setShowPaymentModal(false)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"><X size={18} /></button>
             </div>
 
@@ -1122,6 +1148,9 @@ Powered by Schofy`;
                 <div className="rounded-lg p-3 theme-note">
                   <div className="flex justify-between text-sm"><span className="text-slate-600 dark:text-slate-300">Plan</span><span className="font-bold text-slate-900 dark:text-white">{selectedPlan.name}</span></div>
                   <div className="mt-1 flex justify-between text-sm"><span className="text-slate-600 dark:text-slate-300">Amount</span><span className="text-xl font-bold" style={{ color: 'var(--primary-color)' }}>{formatAmount(getPlanAmount(selectedPlan))}</span></div>
+                  {getOneTimeFeeNote(selectedPlan) && (
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{getOneTimeFeeNote(selectedPlan)}</p>
+                  )}
                 </div>
 
                 <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 border border-amber-200 dark:border-amber-800">
@@ -1199,7 +1228,7 @@ Powered by Schofy`;
                             submittedAt: now,
                             planId: selectedPlan.id,
                             amount: getPlanAmount(selectedPlan),
-                            displayCurrency: planCurrency,
+                            displayCurrency: billingCycle === 'one_time' ? 'UGX' : planCurrency,
                             displayAmount: formatAmount(getPlanAmount(selectedPlan)),
                           };
 

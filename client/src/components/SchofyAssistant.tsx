@@ -81,7 +81,7 @@ const assistantPages: Array<{ label: string; path: string; keywords: string[]; n
   { label: 'Day & Boarding', path: '/day-boarding', keywords: ['boarding', 'day', 'hostel', 'dormitory'], note: 'day and boarding students' },
   { label: 'Subjects', path: '/subjects', keywords: ['subject', 'subjects', 'courses'], note: 'subject setup and imports' },
   { label: 'Exams & Grades', path: '/grades', keywords: ['grades', 'exams', 'results'], note: 'exam setup and academic grades' },
-  { label: 'Exam Marks', path: '/exam-marks', keywords: ['exam marks', 'marks', 'mark entry', 'scores'], note: 'enter exam marks' },
+  { label: 'Results', path: '/exam-marks', keywords: ['exam marks', 'marks', 'mark entry', 'scores', 'results'], note: 'enter exam results' },
   { label: 'Finance', path: '/finance', keywords: ['finance', 'fees', 'bursary', 'discount', 'requirements', 'fees structure'], note: 'finance overview and student tags' },
   { label: 'Ledger', path: '/finance?tab=ledger', keywords: ['ledger', 'student ledger', 'opening balance', 'closing balance'], note: 'student fee ledger and balances' },
   { label: 'Payments', path: '/finance?tab=payments', keywords: ['payment', 'payments', 'record payment'], note: 'payment records and imports' },
@@ -232,7 +232,7 @@ function answerFor(input: string, path: string): { text: string; actions?: ChatA
     return { text: 'Reports can be printed or exported. Ledger and invoice prints use school information, not the app name, so they are ready for school records.', actions: [{ label: 'Open Reports', path: '/reports' }, { label: 'Open Ledger', path: '/finance?tab=ledger' }] };
   }
   if (includesAny(text, ['exam', 'exam marks', 'marks', 'grade', 'grades', 'result', 'report card'])) {
-    return { text: 'Use Exams & Grades for academic structure and Exam Marks for mark entry. Report cards are generated from exam results, subjects, students, and the selected report template.', actions: [{ label: 'Exam Marks', path: '/exam-marks' }, { label: 'Exams & Grades', path: '/grades' }] };
+    return { text: 'Use Exams & Grades for academic structure and Results for mark entry. Report cards are generated from exam results, subjects, students, and the selected report template.', actions: [{ label: 'Results', path: '/exam-marks' }, { label: 'Exams & Grades', path: '/grades' }] };
   }
   if (includesAny(text, ['attendance', 'present', 'absent', 'late'])) {
     return { text: 'Attendance tracks student or staff presence by date. Pick the date, mark statuses, save, then use Reports for term or date-range summaries.', actions: [{ label: 'Open Attendance', path: '/attendance' }, { label: 'Attendance Reports', path: '/reports' }] };
@@ -256,7 +256,7 @@ function answerFor(input: string, path: string): { text: string; actions?: ChatA
     return { text: 'Desktop releases are built as installers. Users install the .exe; update prompts can download a new release and reinstall while keeping local app data safe.' };
   }
   if (includesAny(text, ['search', 'find', 'global search', 'ctrl+k'])) {
-    return { text: 'Use the main search bar or Ctrl+K to find pages, subpages like Ledger or Exam Marks, students, staff, subjects, and classes.', actions: [{ label: 'Ledger', path: '/finance?tab=ledger' }, { label: 'Exam Marks', path: '/exam-marks' }] };
+    return { text: 'Use the main search bar or Ctrl+K to find pages, subpages like Ledger or Results, students, staff, subjects, and classes.', actions: [{ label: 'Ledger', path: '/finance?tab=ledger' }, { label: 'Results', path: '/exam-marks' }] };
   }
   if (includesAny(text, ['where', 'page', 'open', 'find'])) {
     if (path.includes('students')) return { text: 'You are already around student tools. Use the page actions at the top for import, export, filters, and adding students.', actions: [{ label: 'Add Student', path: '/students/new' }] };
